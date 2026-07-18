@@ -48,7 +48,7 @@ Decision recorded: fault proofs deferred (Q4 = A). On a solo devnet with one tru
 - [ ] Recorded for each launched service: image architecture (arm64 native vs. amd64 under Rosetta) — this predicts Phase 1 stability and performance *(N/A — enclave never became stable; networking stop)*
 - [x] Verdict written in `tasks/spike-notes.md`: **Kurtosis** or **manual builds**, with one paragraph of reasoning and the exact versions tested
 - [x] Everything from the spike is torn down afterward (`kurtosis clean -a`); Phase 1 starts from a clean machine *(OrbStack quit + Kurtosis killed; daemon down so final `kurtosis clean -a` N/A)*
-- [ ] If Kurtosis fails: a 30-minute secondary check that op-geth and op-node build from source on ARM before committing to the manual path *(deferred — no Docker; do before Phase 1 without starting OrbStack)*
+- [x] If Kurtosis fails: a 30-minute secondary check that op-geth and op-node build from source on ARM before committing to the manual path *(PASS — native arm64 binaries; see `tasks/spike-notes.md`)*
 
 ## User Stories — Phase 1
 
