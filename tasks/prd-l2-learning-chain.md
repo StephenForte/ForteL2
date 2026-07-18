@@ -24,7 +24,7 @@ This is not a production chain. No real funds, no external users, no uptime comm
 
 | Phase | Scope | Status |
 |---|---|---|
-| **0** | Deployment-path spike: timeboxed test of Kurtosis `optimism-package` on Apple Silicon; decide Kurtosis vs. manual builds | This PRD |
+| **0** | Deployment-path spike: timeboxed test of Kurtosis `optimism-package` on Apple Silicon; decide Kurtosis vs. manual builds | **Done — verdict: manual builds** (OrbStack/Docker disrupted host networking; see `tasks/spike-notes.md`) |
 | **1** | OP Stack devnet on Mac mini: local L1, sequencer, batcher, proposer, explorer, demo dApp (genesis-funded accounts, no bridge) | This PRD |
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config) | This PRD (stories included) |
 | **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
@@ -43,12 +43,12 @@ Decision recorded: fault proofs deferred (Q4 = A). On a solo devnet with one tru
 **Description:** As the operator, I want a short, disposable test of the Kurtosis `optimism-package` on the Mac mini so Phase 1 starts on a known-working path instead of discovering ARM issues mid-build.
 
 **Acceptance Criteria:**
-- [ ] Timebox set at 2 hours; if Kurtosis path is not producing L2 blocks by then, record where it failed and stop
-- [ ] Attempted: Kurtosis CLI install + `optimism-package` launch with default config on Apple Silicon
-- [ ] Recorded for each launched service: image architecture (arm64 native vs. amd64 under Rosetta) — this predicts Phase 1 stability and performance
-- [ ] Verdict written in `tasks/spike-notes.md`: **Kurtosis** or **manual builds**, with one paragraph of reasoning and the exact versions tested
-- [ ] Everything from the spike is torn down afterward (`kurtosis clean -a`); Phase 1 starts from a clean machine
-- [ ] If Kurtosis fails: a 30-minute secondary check that op-geth and op-node build from source on ARM before committing to the manual path
+- [x] Timebox set at 2 hours; if Kurtosis path is not producing L2 blocks by then, record where it failed and stop
+- [x] Attempted: Kurtosis CLI install + `optimism-package` launch with default config on Apple Silicon
+- [ ] Recorded for each launched service: image architecture (arm64 native vs. amd64 under Rosetta) — this predicts Phase 1 stability and performance *(N/A — enclave never became stable; networking stop)*
+- [x] Verdict written in `tasks/spike-notes.md`: **Kurtosis** or **manual builds**, with one paragraph of reasoning and the exact versions tested
+- [x] Everything from the spike is torn down afterward (`kurtosis clean -a`); Phase 1 starts from a clean machine *(OrbStack quit + Kurtosis killed; daemon down so final `kurtosis clean -a` N/A)*
+- [ ] If Kurtosis fails: a 30-minute secondary check that op-geth and op-node build from source on ARM before committing to the manual path *(deferred — no Docker; do before Phase 1 without starting OrbStack)*
 
 ## User Stories — Phase 1
 
