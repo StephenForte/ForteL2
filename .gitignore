@@ -1,0 +1,13 @@
+.env
+data/
+bin/
+deployments/.deployer/state.json
+deployments/.deployer/genesis.json
+deployments/.deployer/rollup.json
+deployments/.deployer/intent.toml.bak
+*.log
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+.DS_Store
+dapp/node_modules/
