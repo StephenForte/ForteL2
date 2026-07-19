@@ -1,0 +1,10 @@
+{
+  "name": "fortel2-bridge",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Phase 1b withdrawal prove/finalize helpers (viem op-stack)",
+  "dependencies": {
+    "viem": "2.31.7"
+  }
+}

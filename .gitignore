@@ -12,3 +12,4 @@ contracts/broadcast/
 contracts/lib/forge-std/.git/
 .DS_Store
 dapp/node_modules/
+scripts/bridge/node_modules/

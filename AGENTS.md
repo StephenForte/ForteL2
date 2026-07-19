@@ -37,10 +37,12 @@ cp .env.example .env          # once
 ./scripts/start-all.sh
 ./scripts/status.sh
 ./scripts/smoke-transfer.sh
+./scripts/deposit-eth.sh      # Phase 1b L1→L2 (ADMIN)
+./scripts/withdraw-initiate.sh && ./scripts/withdraw-prove.sh && ./scripts/withdraw-finalize.sh
 ./scripts/deploy-guestbook.sh # after Guestbook ABI changes
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ./scripts/stop-all.sh
-./scripts/reset.sh            # wipe datadir + redeploy next start
+./scripts/reset.sh            # wipe datadir + redeploy next start (needed after portal delay overrides)
 ```
 
 ## Tests (run before claiming done)
