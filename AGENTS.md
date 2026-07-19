@@ -81,3 +81,14 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Operator-facing behavior → `README.md`
 - Roadmap / acceptance criteria → `tasks/prd-l2-learning-chain.md`
 - Agent workflow / guardrails → this file
+
+## Cursor Cloud specific instructions
+
+This repo was authored for macOS/`darwin-arm64`, but the Cursor Cloud VM is **Linux `x86_64`**. The toolchain and built OP Stack binaries are installed into the VM snapshot during environment setup, so a fresh session already has them — the startup update script does not rebuild anything.
+
+- **Do NOT `cp .env.example .env` here.** `.env.example` hard-codes `/Users/steveforte/...` paths that fail on Linux (`mkdir: cannot create directory '/Users'`). A Linux `.env` already exists (gitignored) pointing at `FORTEL2_ROOT=/workspace`, `BIN_DIR=/workspace/bin`, `DATA_DIR=/home/ubuntu/src/fortel2/data`, `DEPLOY_DIR=/workspace/deployments/.deployer`. If it is ever missing, recreate it from `.env.example` with those four path overrides (keys are the public Foundry test keys).
+- **Toolchain locations** (all on PATH via `~/.bashrc`): Foundry `~/.foundry/bin`, Go 1.26.5 `~/go1.26/bin`, `just` + mikefarah `yq` `~/.local/bin`. Note `/usr/bin/yq` is the unrelated Python `yq`; the mikefarah `yq` (needed by `just build-superchain-go`) must precede it on PATH.
+- **OP Stack binaries** are built from source under `~/src/fortel2/{optimism,op-geth}` and symlinked into `/workspace/bin` (`op-geth`, `op-node`, `op-batcher`, `op-proposer`, plus the `op-deployer` release binary). `scripts/lib.sh` prepends `$BIN_DIR` and `$HOME/.foundry/bin` to PATH, so the scripts find them. To rebuild after a version bump: `just build-superchain-go && just op-node op-batcher op-proposer` in the optimism tree, `make geth` in op-geth.
+- **Running the stack:** `./scripts/start-all.sh` (see README/AGENTS everyday commands). Processes are daemonized via a Python double-fork in `start_bg`, so they survive shell/agent teardown; check `./scripts/status.sh` and `data/logs/*.log`. `./scripts/stop-all.sh` / `./scripts/reset.sh` to stop / wipe.
+- **dApp reads without a wallet:** `dapp/app.js` calls `refresh()` on load through a read-only `JsonRpcProvider`, so `./scripts/serve-dapp.sh` (http://127.0.0.1:8080) shows on-chain guestbook entries even with no MetaMask. It imports `ethers` from the jsDelivr CDN, so the browser needs outbound network.
+- **Tests / lint:** Solidity `cd contracts && forge test`; shell helpers `./scripts/test-helpers.sh`; L2 end-to-end `./scripts/smoke-transfer.sh`. There is no dedicated linter wired up (`forge fmt --check` is the closest option).
