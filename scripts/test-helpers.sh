@@ -96,6 +96,85 @@ else
   echo "PASS refuse Foundry default when L2_CHAIN_ID != 901"
 fi
 
+# HTTP port validation (serve_static_loopback)
+if (require_http_port "8081" "t" >/dev/null); then
+  echo "PASS require_http_port valid"
+else
+  echo "FAIL require_http_port valid" >&2
+  fail=1
+fi
+if (require_http_port "0" "t" >/dev/null 2>&1); then
+  echo "FAIL should reject port 0" >&2
+  fail=1
+else
+  echo "PASS reject port 0"
+fi
+if (require_http_port "65536" "t" >/dev/null 2>&1); then
+  echo "FAIL should reject port 65536" >&2
+  fail=1
+else
+  echo "PASS reject port 65536"
+fi
+
+# serve_static_loopback: missing dir (does not start a server)
+if (serve_static_loopback "/no/such/dir-$$" "8081" "t" >/dev/null 2>&1); then
+  echo "FAIL serve_static_loopback should reject missing dir" >&2
+  fail=1
+else
+  echo "PASS serve_static_loopback reject missing dir"
+fi
+if (serve_static_loopback "$SCRIPT_DIR" "notaport" "t" >/dev/null 2>&1); then
+  echo "FAIL serve_static_loopback should reject bad port" >&2
+  fail=1
+else
+  echo "PASS serve_static_loopback reject bad port"
+fi
+
+# gen-viewer-config.sh against a fixture tree (no live chain)
+FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-viewer-XXXXXX")"
+cleanup_fixture() { rm -rf "$FIXTURE"; }
+trap cleanup_fixture EXIT
+mkdir -p "$FIXTURE/deployments/.deployer" "$FIXTURE/viewer" "$FIXTURE/data"
+cat > "$FIXTURE/.env" <<EOF
+FORTEL2_ROOT=$FIXTURE
+DATA_DIR=$FIXTURE/data
+DEPLOY_DIR=$FIXTURE/deployments/.deployer
+L1_CHAIN_ID=900
+L2_CHAIN_ID=901
+L1_RPC_URL=http://127.0.0.1:8545
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+BATCHER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+PROPOSER_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+EOF
+echo '{"DisputeGameFactoryProxy":"0xb3cc73ce8efac81f5c1ee1943b9f1ffeed98c4d2"}' \
+  > "$FIXTURE/deployments/deployments.json"
+echo '{"batch_inbox_address":"0x00289c189bee4e70334629f04cd5ed602b6600eb"}' \
+  > "$FIXTURE/deployments/.deployer/rollup.json"
+
+if FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null; then
+  if grep -q 'BATCH_INBOX_ADDRESS = "0x00289c189bee4e70334629f04cd5ed602b6600eb"' "$FIXTURE/viewer/config.js" \
+    && grep -q 'DISPUTE_GAME_FACTORY = "0xb3cc73ce8efac81f5c1ee1943b9f1ffeed98c4d2"' "$FIXTURE/viewer/config.js" \
+    && grep -q 'L2_NODE_RPC_URL = "http://127.0.0.1:9547"' "$FIXTURE/viewer/config.js"; then
+    echo "PASS gen-viewer-config fixture"
+  else
+    echo "FAIL gen-viewer-config missing expected exports" >&2
+    fail=1
+  fi
+else
+  echo "FAIL gen-viewer-config fixture run" >&2
+  fail=1
+fi
+
+# Bad batcher address must fail closed
+sed -i.bak 's/BATCHER_ADDRESS=.*/BATCHER_ADDRESS=not-an-address/' "$FIXTURE/.env"
+if FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null 2>&1; then
+  echo "FAIL gen-viewer-config should reject bad BATCHER_ADDRESS" >&2
+  fail=1
+else
+  echo "PASS gen-viewer-config reject bad address"
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

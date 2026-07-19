@@ -7,10 +7,10 @@ alwaysApply: true
 
 - Phase 1 is **native binaries only** — do not introduce Docker/OrbStack/Kurtosis workflows.
 - Never commit `.env`, keys, JWTs, or `data/` contents. Keys in `.env.example` are throwaway Foundry defaults only (local chain 901).
-- Keep local RPCs and `serve-dapp.sh` on **loopback**; use `assert_local_rpc_urls` / `assert_loopback_url`.
+- Keep local RPCs, `serve-dapp.sh`, and `serve-viewer.sh` on **loopback**; use `assert_local_rpc_urls` / `assert_loopback_url` / `serve_static_loopback`.
 - Enforce `L1_BLOCK_TIME >= L2_BLOCK_TIME` via `assert_block_times` on start scripts.
 - After Solidity/ABI changes: update `contracts/test`, run `forge test`, and regenerate `dapp/config.js` via `scripts/deploy-guestbook.sh`.
-- dApp: use `textContent` for on-chain strings; keep CSP `script-src 'self'`; ethers stays vendored under `dapp/vendor/`; enforce message length in **UTF-8 bytes**.
+- dApp / viewer: use `textContent` for on-chain strings; keep CSP `script-src 'self'`; ethers stays vendored under `dapp/vendor/` (viewer symlinks it); guestbook message length is **UTF-8 bytes**.
 - Prefer extending `scripts/lib.sh` helpers over duplicating start/stop/RPC logic.
-- Treat `start_bg` / `stop_bg` in `scripts/lib.sh` as privileged — flag for human review.
-- Do not widen scope into bridging/Sepolia/replicas unless the user asks (Phase 1b+).
+- Treat `start_bg` / `stop_bg` in `scripts/lib.sh` as privileged — flag for human review. (`serve_static_loopback` is not privileged process control.)
+- Do not widen scope into Sepolia/replicas unless the user asks (Phase 2+).

@@ -240,3 +240,30 @@ assert_local_rpc_urls() {
     assert_loopback_url "$L2_NODE_RPC_URL" "L2_NODE_RPC_URL"
   fi
 }
+
+# Validate a TCP port number (1–65535).
+require_http_port() {
+  local port="$1"
+  local label="${2:-PORT}"
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+    echo "ERROR: invalid $label: $port" >&2
+    exit 1
+  fi
+}
+
+# Serve a static directory on loopback only (guestbook / pipeline viewer).
+# Not privileged process control — does not use start_bg / stop_bg.
+serve_static_loopback() {
+  local dir="$1"
+  local port="$2"
+  local label="${3:-static HTTP}"
+  if [[ -z "$dir" || ! -d "$dir" ]]; then
+    echo "ERROR: $label directory missing: ${dir:-<empty>}" >&2
+    exit 1
+  fi
+  require_http_port "$port" "$label"
+  assert_loopback_url "http://127.0.0.1:${port}" "$label"
+  echo "Serving $label at http://127.0.0.1:${port}/ (loopback only)"
+  cd "$dir"
+  exec python3 -m http.server "${port}" --bind 127.0.0.1
+}

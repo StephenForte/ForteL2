@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:8545 http://localhost:8545 http://127.0.0.1:9545 http://localhost:9545 http://127.0.0.1:9547 http://localhost:9547; img-src 'self' data:;"
+  />
+  <title>ForteL2 Pipeline viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600&family=Syne:wght@600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="hero">
+      <p class="brand">ForteL2</p>
+      <h1 class="headline">Pipeline viewer</h1>
+      <p class="lede">
+        Watch the local OP Stack: sequencer heads, batcher posts to L1, proposer
+        dispute games, and L2 tx throughput. Deposits show up as L2 inclusion /
+        sync heads; withdrawals need a proposer output before prove/finalize.
+        Not a block explorer.
+      </p>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <p id="refresh-meta" class="refresh-meta" aria-live="polite"></p>
+    </header>
+
+    <section class="pipeline" aria-label="Pipeline panels">
+      <article class="panel" id="panel-sequencer" data-panel="sequencer">
+        <h2 class="panel-title">Sequencer</h2>
+        <p class="panel-err" id="seq-err" hidden></p>
+        <dl class="metrics" id="seq-metrics">
+          <div><dt>Unsafe</dt><dd id="seq-unsafe">—</dd></div>
+          <div><dt>Safe</dt><dd id="seq-safe">—</dd></div>
+          <div><dt>Finalized</dt><dd id="seq-finalized">—</dd></div>
+          <div><dt>Unsafe−safe lag</dt><dd id="seq-lag">—</dd></div>
+          <div><dt>Block interval</dt><dd id="seq-interval">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="panel" id="panel-batcher" data-panel="batcher">
+        <h2 class="panel-title">Batcher</h2>
+        <p class="panel-err" id="bat-err" hidden></p>
+        <dl class="metrics" id="bat-metrics">
+          <div><dt>Recent posts</dt><dd id="bat-count">—</dd></div>
+          <div><dt>Last tx</dt><dd id="bat-hash">—</dd></div>
+          <div><dt>Last age</dt><dd id="bat-age">—</dd></div>
+          <div><dt>Cadence</dt><dd id="bat-cadence">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="panel" id="panel-proposer" data-panel="proposer">
+        <h2 class="panel-title">Proposer</h2>
+        <p class="panel-err" id="prop-err" hidden></p>
+        <dl class="metrics" id="prop-metrics">
+          <div><dt>Game count</dt><dd id="prop-count">—</dd></div>
+          <div><dt>Last game</dt><dd id="prop-proxy">—</dd></div>
+          <div><dt>Last age</dt><dd id="prop-age">—</dd></div>
+          <div><dt>Game type</dt><dd id="prop-type">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="panel" id="panel-aggregate" data-panel="aggregate">
+        <h2 class="panel-title">Aggregate transactions</h2>
+        <p class="panel-err" id="agg-err" hidden></p>
+        <dl class="metrics" id="agg-metrics">
+          <div><dt>Window</dt><dd id="agg-window">—</dd></div>
+          <div><dt>Non-empty / empty</dt><dd id="agg-fill">—</dd></div>
+          <div><dt>Tx count</dt><dd id="agg-txs">—</dd></div>
+          <div><dt>Tx / min</dt><dd id="agg-rate">—</dd></div>
+        </dl>
+      </article>
+    </section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

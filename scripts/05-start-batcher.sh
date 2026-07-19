@@ -18,9 +18,6 @@ fi
 
 # BatchInbox from rollup.json
 BATCH_INBOX=$(jq -r '.batch_inbox_address // .batch_inbox // empty' "$DEPLOY_DIR/rollup.json")
-if [[ -z "$BATCH_INBOX" || "$BATCH_INBOX" == "null" ]]; then
-  BATCH_INBOX=$(jq -r '.batch_inbox_address // empty' "$DEPLOY_DIR/rollup.json")
-fi
 
 wait_for_rpc "$L1_RPC_URL" "L1"
 wait_for_rpc "$L2_RPC_URL" "L2"
