@@ -27,7 +27,7 @@ This is not a production chain. No real funds, no external users, no uptime comm
 | Phase | Scope | Status |
 |---|---|---|
 | **0** | Deployment-path spike: timeboxed test of Kurtosis `optimism-package` on Apple Silicon; decide Kurtosis vs. manual builds | **Done — verdict: manual builds** (OrbStack/Docker disrupted host networking; see `tasks/spike-notes.md`) |
-| **1** | OP Stack devnet on Mac mini via **native binaries**: local L1 (Anvil), op-deployer, sequencer, batcher, proposer, demo dApp (genesis-funded accounts, no bridge); no Docker/Kurtosis on this host | **Mostly done** — stack running; remaining: batcher 5‑min stop note, browser MetaMask verify |
+| **1** | OP Stack devnet on Mac mini via **native binaries**: local L1 (Anvil), op-deployer, sequencer, batcher, proposer, demo dApp (genesis-funded accounts, no bridge); no Docker/Kurtosis on this host | **Done** — stack running; MetaMask guestbook verified; batcher 5‑min stop/restart observed |
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config) | This PRD (stories included) |
 | **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) | Future |
@@ -104,7 +104,7 @@ Phase 1 runs entirely as **native host processes** (launchd, shell scripts, or a
 - [x] Native `op-batcher` process running and submitting batch transactions to L1
 - [x] At least one batch transaction located on L1 by inspecting the batcher address's transactions (`cast` query documented in README)
 - [x] Written in README (own words, ~1 paragraph): what is inside a batch, and what "the L2 is derivable from L1" means
-- [ ] Observed and noted: what happens to batch submission when the batcher is stopped for 5 minutes, then restarted
+- [x] Observed and noted: what happens to batch submission when the batcher is stopped for 5 minutes, then restarted
 
 ### US-006: Run the proposer and verify output roots on L1
 **Description:** As the operator, I want op-proposer posting state roots to L1 so withdrawals become possible later (Phase 1b) and I understand the trust model.
@@ -128,9 +128,9 @@ Phase 1 runs entirely as **native host processes** (launchd, shell scripts, or a
 **Acceptance Criteria:**
 - [x] A simple Solidity contract (e.g., guestbook or counter) deployed to the L2 via Foundry (`forge create` or `forge script`)
 - [x] Deployment tx hash and contract address recorded; readable via `cast` (Blockscout not required)
-- [x] Minimal frontend (single static page, ethers.js/viem + injected wallet) can read state and send a write transaction to the L2 — served by a trivial native static server (e.g. `python -m http.server`) or opened as a local file *(read path verified; write needs MetaMask in operator browser)*
+- [x] Minimal frontend (single static page, ethers.js/viem + injected wallet) can read state and send a write transaction to the L2 — served by a trivial native static server (e.g. `python -m http.server`) or opened as a local file
 - [x] MetaMask (or equivalent) configured with the custom L2 network; config steps documented
-- [ ] Verify write path in MetaMask (Cursor browser has no wallet extension — operator Chrome/Firefox)
+- [x] Verify write path in MetaMask (operator browser; guestbook messages confirmed on-chain)
 
 ### US-009: Operator's runbook
 **Description:** As the operator, I want start/stop/reset procedures documented so the devnet is reproducible after weeks away from it.

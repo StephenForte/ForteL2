@@ -171,7 +171,10 @@
       const text = document.getElementById("text").value.trim();
       if (!text) return;
       setStatus("Sending…");
-      const tx = await contract.sign(text);
+      // Quiet local L2 base fees are tiny; pin a floor so MetaMask doesn't submit
+      // tips below op-geth's miner price and leave the tx pending forever.
+      const fee = { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n };
+      const tx = await contract.sign(text, fee);
       setStatus(`Tx ${tx.hash} — waiting…`);
       await tx.wait();
       document.getElementById("text").value = "";

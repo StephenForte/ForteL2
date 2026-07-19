@@ -11,7 +11,7 @@ Personal OP Stack L2 on a single Apple Silicon Mac, for learning only. **Native 
 | Deploy | native `op-deployer` → live Anvil |
 | DA | **calldata** batches (`--data-availability-type=calldata`) — Anvil has no beacon/blobs |
 | EL | **op-geth** (`--l2.enginekind=geth`) — verified arm64 in Phase 0 |
-| L2 block time | 2s |
+| L1 / L2 block time | **both 2s** (`L1_BLOCK_TIME` must be ≥ `L2_BLOCK_TIME`) |
 | Explorer | `cast` / RPC only — Blockscout deferred |
 
 ## Toolchain versions
@@ -138,14 +138,38 @@ After deploy, `deployments/.deployer/rollup.json` tells op-node how this L2 rela
 
 The batcher watches L2 blocks, packs their transactions into **channels** of compressed **frames**, and submits those frames to L1 (here as ordinary calldata txs to the batch inbox). Anyone with the L1 history can re-run the **derivation pipeline** (what op-node does in verifier mode) and rebuild the same L2 chain. That is what “the L2 is derivable from L1” means: L1 data availability, not L2 peer sync, is the source of truth for reconstructing state.
 
-If you stop the batcher for a few minutes, L2 keeps producing unsafe blocks, but nothing new lands on L1. When the batcher restarts it catches up and posts the backlog. Safe/finalized L2 heads lag until batches (and later proposals) land.
+### Observed: stop batcher 5 minutes, then restart (US-005)
 
-Inspect batcher activity:
+Ran on this chain (2026-07-18): kill `op-batcher` only, leave sequencer + Anvil running, sample every 30s, then `./scripts/05-start-batcher.sh`.
+
+| Phase | What happened |
+|---|---|
+| During stop (~5 min) | **Batcher L1 nonce frozen** at 49 (no new batch txs). **Unsafe L2 kept advancing** (~308 → 459). **Safe L2 stuck** at 296 — derivation cannot promote new unsafe blocks without fresh L1 data. |
+| On restart | Batcher immediately closed a **catch-up channel** covering the backlog (~164 L2 blocks, ~12KB compressed calldata, gas ~498k vs normal ~41k). Nonce resumed climbing (49 → 57 in ~90s). **Safe L2 climbed** toward the tip (296 → 496) as frames landed and op-node derived them. |
+
+Takeaway: stopping the batcher does **not** stop the sequencer; it only pauses L1 data availability. Restart recovers by posting a larger backlog batch, then resumes steady-state cadence.
+
+Reproduce:
+
+```bash
+# baseline
+cast nonce "$BATCHER_ADDRESS" --rpc-url "$L1_RPC_URL"
+cast rpc optimism_syncStatus --rpc-url "$L2_NODE_RPC_URL" | jq '{unsafe:.unsafe_l2.number, safe:.safe_l2.number}'
+
+# stop only the batcher
+kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
+# wait ~5 minutes; watch nonce stay flat while unsafe L2 rises and safe L2 stalls
+
+# restart
+./scripts/05-start-batcher.sh
+# watch nonce rise again and safe head catch up; log: "Publishing transaction" / "Channel closed"
+```
+
+Inspect batcher activity anytime:
 
 ```bash
 cast nonce 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 --rpc-url http://127.0.0.1:8545
 # rising nonce ⇒ batch txs submitted
-cast txs 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 --rpc-url http://127.0.0.1:8545   # if supported
 ```
 
 ## Proposer trust model (US-006)
@@ -198,6 +222,12 @@ Guestbook contract (current deploy): see `deployments/guestbook.txt` / `dapp/con
 ```bash
 ./scripts/serve-dapp.sh   # http://127.0.0.1:8080
 ```
+
+If MetaMask shows a stuck/failed tx after a chain reset: **Settings → Developer tools → Delete activity and nonce data** (clears local nonce history; older UIs called this Advanced → Reset account), hard-refresh the dapp, then Sign again with `DEMO_A`.
+
+### Why L1 block time must match L2
+
+With Fjord active from genesis, op-node caps sequencer drift at a **constant 1800s** (not `max_sequencer_drift` in rollup.json). Origin advances at most one L1 block per L2 block. If L1 is faster than L2 (e.g. Anvil 1s vs L2 2s), drift grows ~1s/block; past 1800s the sequencer sets `NoTxPool` and only deposit txs land — MetaMask/user txs hang forever. Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` (both `2` here). If drift is already past the cap, `./scripts/reset.sh` then `./scripts/start-all.sh`.
 
 ## Logs & health lines
 
