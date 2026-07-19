@@ -20,6 +20,8 @@ export const disputeGameAbi = parseAbi([
   'function resolveClaim(uint256 challengeIndex, uint256 numToResolve)',
   'function claimDataLen() view returns (uint256)',
   'function l2BlockNumber() view returns (uint256)',
+  // Duration is a uint64 wrapper; ABI surface is uint64 seconds.
+  'function maxClockDuration() view returns (uint64)',
 ])
 
 export function loadEnvFromShell() {

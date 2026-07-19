@@ -75,10 +75,35 @@ let status = await readContract(publicL1, {
 console.log('game status before resolve:', status)
 
 if (status === 0) {
-  // Chess clock / max duration — warp, then resolveClaim + resolve.
-  const clockWarp = Number(process.env.FAULT_GAME_MAX_CLOCK_DURATION || 10) + 5
-  console.log(`game IN_PROGRESS — Anvil +${clockWarp}s then resolveClaim/resolve`)
+  // Chess clock / max duration — warp using the game's on-chain immutable,
+  // not FAULT_GAME_MAX_CLOCK_DURATION from env (deploy overrides may have been ignored).
+  let maxClock
+  try {
+    maxClock = await readContract(publicL1, {
+      address: gameProxy,
+      abi: disputeGameAbi,
+      functionName: 'maxClockDuration',
+    })
+  } catch (e) {
+    const fallback = BigInt(process.env.FAULT_GAME_MAX_CLOCK_DURATION || 10)
+    console.log(
+      'maxClockDuration() unavailable — falling back to env FAULT_GAME_MAX_CLOCK_DURATION=',
+      fallback.toString(),
+      '(',
+      e?.shortMessage || e?.message || e,
+      ')',
+    )
+    maxClock = fallback
+  }
+  const clockBuffer = Number(process.env.FAULT_GAME_CLOCK_WARP_BUFFER || 30)
+  const clockWarp = Number(maxClock) + clockBuffer
+  console.log(
+    `game IN_PROGRESS — on-chain maxClockDuration=${maxClock.toString()}s; Anvil +${clockWarp}s then resolveClaim/resolve`,
+  )
   await increaseTime(publicL1, clockWarp)
+  for (let i = 0; i < 2; i++) {
+    await publicL1.request({ method: 'evm_mine', params: [] })
+  }
   try {
     const rcHash = await writeContract(walletL1, {
       address: gameProxy,
@@ -115,6 +140,12 @@ if (status === 0) {
     functionName: 'status',
   })
   console.log('game status after resolve:', status)
+  if (status === 0) {
+    console.error(
+      'ERROR: dispute game still IN_PROGRESS after maxClockDuration warp — cannot finalize',
+    )
+    process.exit(1)
+  }
 }
 
 // Warp past proof maturity + dispute-game finality air-gap (+ buffer).

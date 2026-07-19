@@ -14,9 +14,12 @@ function utf8ByteLength(text) {
   return new TextEncoder().encode(text).length;
 }
 
-/** Trim to MAX_TEXT_BYTES and refresh the counter/color. Skip while IME is composing. */
-function syncMessageByteBudget(ev) {
-  if (ev?.isComposing || imeComposing) return;
+/**
+ * Trim to MAX_TEXT_BYTES and refresh the counter/color.
+ * Skip while IME is composing unless force=true (post-sign reset / recovery).
+ */
+function syncMessageByteBudget(ev, { force = false } = {}) {
+  if (!force && (ev?.isComposing || imeComposing)) return;
   let value = els.text.value;
   while (utf8ByteLength(value) > MAX_TEXT_BYTES) {
     value = value.slice(0, -1);
@@ -203,7 +206,9 @@ async function signMessage() {
     setStatus(`Tx ${tx.hash} — waiting…`);
     await tx.wait();
     els.text.value = "";
-    syncMessageByteBudget();
+    // Force-reset counter even if compositionend never fired (stuck imeComposing).
+    imeComposing = false;
+    syncMessageByteBudget(undefined, { force: true });
     setStatus(`Confirmed ${tx.hash}`);
     await refresh();
   } catch (e) {
@@ -244,7 +249,13 @@ els.text.addEventListener("compositionend", () => {
   imeComposing = false;
   syncMessageByteBudget();
 });
-els.text.addEventListener("input", (ev) => syncMessageByteBudget(ev));
+els.text.addEventListener("input", (ev) => {
+  // Recover if compositionend was dropped (dead-key layouts / some browsers).
+  if (imeComposing && !ev.isComposing) {
+    imeComposing = false;
+  }
+  syncMessageByteBudget(ev);
+});
 els.text.addEventListener("keydown", (ev) => {
   // keyCode 229 = IME processing (Safari/Chrome during composition).
   if (ev.isComposing || ev.keyCode === 229) return;

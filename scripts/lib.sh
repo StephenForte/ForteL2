@@ -131,6 +131,12 @@ is_running() {
   [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null
 }
 
+# Unsigned decimal integer comparison (wei-safe; bash (( )) overflows).
+# Returns 0 if $1 > $2.
+uint_gt() {
+  python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) > int(sys.argv[2]) else 1)' "${1:-}" "${2:-}"
+}
+
 # Accepts 0x-prefixed 40-hex-char addresses (case-insensitive).
 is_eth_address() {
   [[ "${1:-}" =~ ^0x[0-9a-fA-F]{40}$ ]]
