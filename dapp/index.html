@@ -3,186 +3,59 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:9545 http://localhost:9545; img-src 'self' data:;"
+  />
   <title>ForteL2 Guestbook</title>
-  <style>
-    :root {
-      --ink: #1a1f1c;
-      --paper: #e8efe6;
-      --accent: #2f6f4e;
-      --muted: #5a6b60;
-      --line: #c5d4c8;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(ellipse 80% 50% at 20% 0%, #d4e8da 0%, transparent 55%),
-        radial-gradient(ellipse 60% 40% at 100% 100%, #cfe0d4 0%, transparent 50%),
-        linear-gradient(165deg, #f2f7f1 0%, #dde8df 100%);
-    }
-    main {
-      max-width: 40rem;
-      margin: 0 auto;
-      padding: 3rem 1.25rem 4rem;
-    }
-    h1 {
-      font-family: "IBM Plex Serif", Georgia, serif;
-      font-weight: 600;
-      font-size: clamp(2rem, 5vw, 2.75rem);
-      letter-spacing: -0.02em;
-      margin: 0 0 0.35rem;
-    }
-    .sub { color: var(--muted); margin: 0 0 2rem; line-height: 1.5; }
-    .row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem; }
-    button, input {
-      font: inherit;
-      border-radius: 6px;
-      border: 1px solid var(--line);
-      padding: 0.65rem 1rem;
-    }
-    button {
-      background: var(--accent);
-      color: #fff;
-      border-color: transparent;
-      cursor: pointer;
-    }
-    button.secondary { background: transparent; color: var(--ink); border-color: var(--line); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    input { flex: 1; min-width: 12rem; background: #fff; }
-    #status { font-size: 0.9rem; color: var(--muted); margin-bottom: 1.5rem; min-height: 1.25rem; }
-    #messages {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      border-top: 1px solid var(--line);
-    }
-    #messages li {
-      padding: 0.9rem 0;
-      border-bottom: 1px solid var(--line);
-      line-height: 1.45;
-    }
-    #messages .meta { font-size: 0.8rem; color: var(--muted); }
-  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Serif:wght@600&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600&family=Syne:wght@600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <main>
-    <h1>ForteL2</h1>
-    <p class="sub">Guestbook on your local OP Stack rollup. Connect MetaMask to chain 901, then read or sign a message.</p>
-    <div class="row">
-      <button type="button" id="connect">Connect wallet</button>
-      <button type="button" class="secondary" id="refresh">Refresh</button>
-    </div>
-    <div class="row">
-      <input id="text" maxlength="280" placeholder="Write a short message…" />
-      <button type="button" id="sign" disabled>Sign</button>
-    </div>
-    <p id="status"></p>
-    <ul id="messages"></ul>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="hero">
+      <p class="brand">ForteL2</p>
+      <h1 class="headline">Sign the chain.</h1>
+      <p class="lede">
+        A guestbook on your local OP Stack rollup — connect MetaMask on chain&nbsp;901, then leave a message.
+      </p>
+      <div class="actions" role="group" aria-label="Wallet">
+        <button type="button" id="connect" class="btn btn-primary">Connect wallet</button>
+        <button type="button" id="refresh" class="btn btn-ghost">Refresh</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </header>
+
+    <section class="compose" aria-label="Write a message">
+      <label class="sr-only" for="text">Message</label>
+      <div class="compose-row">
+        <input
+          id="text"
+          type="text"
+          maxlength="280"
+          autocomplete="off"
+          spellcheck="true"
+          placeholder="Write a short message…"
+          disabled
+        />
+        <button type="button" id="sign" class="btn btn-primary" disabled>Sign</button>
+      </div>
+      <p class="hint"><span id="char-count">0</span>/280 bytes</p>
+    </section>
+
+    <section class="feed" aria-label="On-chain messages">
+      <h2 class="feed-title">Messages</h2>
+      <ul id="messages" class="messages"></ul>
+      <p id="empty" class="empty hidden">No messages yet — be the first to sign.</p>
+    </section>
   </main>
-  <script type="module">
-    // Minimal viem-free frontend using ethers v6 CDN for a single static page.
-    import { BrowserProvider, Contract } from "https://cdn.jsdelivr.net/npm/ethers@6.13.5/+esm";
-
-    const L2_CHAIN_ID = 901;
-    const L2_CHAIN_HEX = "0x385";
-    const RPC = "http://127.0.0.1:9545";
-    // Filled by scripts/deploy-guestbook.sh into config.js
-    const { GUESTBOOK_ADDRESS, GUESTBOOK_ABI } = await import("./config.js");
-
-    const statusEl = document.getElementById("status");
-    const listEl = document.getElementById("messages");
-    let provider, signer, contract;
-
-    function setStatus(msg) { statusEl.textContent = msg; }
-
-    async function ensureNetwork() {
-      const eth = window.ethereum;
-      if (!eth) throw new Error("No injected wallet — install MetaMask");
-      const chainId = await eth.request({ method: "eth_chainId" });
-      if (parseInt(chainId, 16) === L2_CHAIN_ID) return;
-      try {
-        await eth.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: L2_CHAIN_HEX }],
-        });
-      } catch (err) {
-        if (err.code === 4902) {
-          await eth.request({
-            method: "wallet_addEthereumChain",
-            params: [{
-              chainId: L2_CHAIN_HEX,
-              chainName: "ForteL2",
-              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-              rpcUrls: [RPC],
-            }],
-          });
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    async function connect() {
-      await ensureNetwork();
-      provider = new BrowserProvider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-      signer = await provider.getSigner();
-      contract = new Contract(GUESTBOOK_ADDRESS, GUESTBOOK_ABI, signer);
-      document.getElementById("sign").disabled = false;
-      setStatus(`Connected ${await signer.getAddress()} on ForteL2`);
-      await refresh();
-    }
-
-    async function refresh() {
-      if (!GUESTBOOK_ADDRESS) {
-        setStatus("Deploy Guestbook first: scripts/deploy-guestbook.sh");
-        return;
-      }
-      const { JsonRpcProvider } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.5/+esm");
-      const c = contract ?? new Contract(GUESTBOOK_ADDRESS, GUESTBOOK_ABI, new JsonRpcProvider(RPC));
-      const n = Number(await c.count());
-      listEl.innerHTML = "";
-      for (let i = n - 1; i >= 0 && i >= n - 50; i--) {
-        const text = await c.getMessage(i);
-        const li = document.createElement("li");
-        li.innerHTML = `<div>${escapeHtml(text)}</div><div class="meta">#${i}</div>`;
-        listEl.appendChild(li);
-      }
-      if (!statusEl.textContent.includes("Connected")) {
-        setStatus(`${n} message(s) on-chain`);
-      }
-    }
-
-    function escapeHtml(s) {
-      return s.replace(/[&<>"']/g, (ch) =>
-        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])
-      );
-    }
-
-    document.getElementById("connect").onclick = () => connect().catch((e) => setStatus(e.message));
-    document.getElementById("refresh").onclick = () => refresh().catch((e) => setStatus(e.message));
-    document.getElementById("sign").onclick = async () => {
-      const text = document.getElementById("text").value.trim();
-      if (!text) return;
-      setStatus("Sending…");
-      // Quiet local L2 base fees are tiny; pin a floor so MetaMask doesn't submit
-      // tips below op-geth's miner price and leave the tx pending forever.
-      const fee = { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n };
-      const tx = await contract.sign(text, fee);
-      setStatus(`Tx ${tx.hash} — waiting…`);
-      await tx.wait();
-      document.getElementById("text").value = "";
-      setStatus(`Confirmed ${tx.hash}`);
-      await refresh();
-    };
-
-    refresh().catch(() => setStatus("L2 RPC not reachable yet — start the stack first"));
-  </script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
