@@ -1,5 +1,5 @@
 /**
- * ForteL2 pipeline viewer — Phase 1c ops UI (chain 901).
+ * ForteL2 pipeline viewer — Phase 1c/1d ops UI (chain 901).
  * Client-side RPC polls only; ethers vendored under ./vendor/.
  */
 import { Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.5.min.js";
@@ -22,6 +22,7 @@ import {
   shortHex,
   summarizeBatcherActivity,
   summarizeSyncStatus,
+  summarizeTxpoolStatus,
 } from "./lib.js";
 
 const L1_SCAN_BLOCKS = 40;
@@ -51,6 +52,7 @@ const els = {
   aggFill: document.getElementById("agg-fill"),
   aggTxs: document.getElementById("agg-txs"),
   aggRate: document.getElementById("agg-rate"),
+  aggMempool: document.getElementById("agg-mempool"),
   panelSequencer: document.getElementById("panel-sequencer"),
   panelBatcher: document.getElementById("panel-batcher"),
   panelProposer: document.getElementById("panel-proposer"),
@@ -196,6 +198,15 @@ async function refreshAggregate(l2) {
   els.aggTxs.textContent = String(agg.txCount);
   els.aggRate.textContent =
     agg.txPerMin == null ? "—" : formatRate(agg.txPerMin, 1);
+
+  // Mempool is best-effort inside Aggregate so inclusion metrics still update
+  // if txpool_* is disabled or errors.
+  try {
+    const pool = await rpcJson(L2_RPC_URL, "txpool_status", []);
+    els.aggMempool.textContent = summarizeTxpoolStatus(pool).label;
+  } catch (err) {
+    els.aggMempool.textContent = `unavailable (${err?.message || err})`;
+  }
 }
 
 async function tick() {

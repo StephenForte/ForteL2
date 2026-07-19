@@ -79,24 +79,25 @@ print_checklist() {
   [ ] ./scripts/withdraw-finalize.sh — resolve/time-warp/finalize; L1 balance rises
   [ ] ./scripts/verify-portal-delays.sh — short local delays (not 7-day mainnet)
 
-── F. Pipeline viewer (Phase 1c / US-013 / US-014) ────────────────
+── F. Pipeline viewer (Phase 1c / 1d) ─────────────────────────────
   [ ] ./scripts/serve-viewer.sh → http://127.0.0.1:8081
   [ ] Page title / brand: “ForteL2” + “Pipeline viewer” (not “explorer”)
   [ ] Status line shows live polling; refresh cadence visible (~5s)
   [ ] Sequencer panel: unsafe / safe / finalized (or ages) update
   [ ] Batcher panel: recent posts / last tx hash / cadence (after batches land)
   [ ] Proposer panel: game count ≥ 1; last game age/proxy
-  [ ] Aggregate panel: empty vs non-empty blocks + tx/min over window
+  [ ] Aggregate panel: empty vs non-empty + tx/min + **mempool** pending/queued
   [ ] Kill viewer (Ctrl-C) — chain keeps running (status.sh still green)
   [ ] With stack stopped: panels show plain error text (not silent stale data)
   [ ] After deposit: relate L2 inclusion / sync heads on Sequencer panel
   [ ] After withdraw initiate: note prover needs proposer output (Proposer panel)
 
-── G. Guardrails / docs (US-012 + runbook) ───────────────────────
+── G. Guardrails / docs (US-012 + 1d funding + runbook) ───────────
   [ ] [auto] ./scripts/test-helpers.sh passes
   [ ] [auto] node --test viewer/lib.test.js passes
   [ ] RPCs and HTTP servers stay on 127.0.0.1 / localhost only
-  [ ] README “Pipeline viewer” section matches what you see
+  [ ] README “Pipeline viewer” + “Phase 2 funding gate” match what you see
+  [ ] Sepolia harvest progressing toward ~1.0 ETH (Base Sepolia does not count)
   [ ] Hosted/Blockscout explorers still out of scope (by design)
 
 ── Suggested full demo order ─────────────────────────────────────

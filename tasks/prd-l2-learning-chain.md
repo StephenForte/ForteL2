@@ -30,7 +30,7 @@ This is not a production chain. No real funds, no external users, no uptime comm
 | **1** | OP Stack devnet on Mac mini via **native binaries**: local L1 (Anvil), op-deployer, sequencer, batcher, proposer, demo dApp (genesis-funded accounts, no bridge); no Docker/Kurtosis on this host | **Done** — stack running; MetaMask guestbook verified; batcher 5‑min stop/restart observed |
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config); **Phase 2 readiness gate** (new keys, separate deploy config, non-loopback review, sandbox/dry-run) | **Done** — deposit/withdraw scripts + US-012 docs/tripwires (operator runs against live stack) |
 | **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014) |
-| **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | Future (stories included) |
+| **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | **Done** — Aggregate mempool + README US-016 faucet/key gate |
 | **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
@@ -210,21 +210,21 @@ Phase 1d sits **between** the closed pipeline viewer (1c) and Sepolia cutover (2
 **Description:** As the operator, I want a small **L2 mempool** readout on the pipeline viewer so I can see pending local txs (e.g. after MetaMask submit, before inclusion) without turning the viewer into a block explorer.
 
 **Acceptance Criteria:**
-- [ ] Pipeline viewer shows L2 mempool summary from existing loopback EL RPC (e.g. `txpool_status` pending/queued counts; optional short pending-tx sample — **not** full mempool dump / search)
-- [ ] Signal lives in the existing composition (extend Aggregate or a slim fifth strip) — still one ops surface, not a multi-widget dashboard
-- [ ] RPC failure for mempool is isolated (same plain-status pattern as other panels); refresh cadence unchanged or documented
-- [ ] README notes what the mempool signal means vs Sequencer heads / Aggregate inclusion
-- [ ] Explicit non-goal remains: no Blockchair-like block list, tx detail pages, address search, or “latest transactions” explorer UI in 1d (deferred; see open questions / future explorer story)
+- [x] Pipeline viewer shows L2 mempool summary from existing loopback EL RPC (e.g. `txpool_status` pending/queued counts; optional short pending-tx sample — **not** full mempool dump / search)
+- [x] Signal lives in the existing composition (extend Aggregate or a slim fifth strip) — still one ops surface, not a multi-widget dashboard
+- [x] RPC failure for mempool is isolated (same plain-status pattern as other panels); refresh cadence unchanged or documented
+- [x] README notes what the mempool signal means vs Sequencer heads / Aggregate inclusion
+- [x] Explicit non-goal remains: no Blockchair-like block list, tx detail pages, address search, or “latest transactions” explorer UI in 1d (deferred; see open questions / future explorer story)
 
 ### US-016: Sepolia funding + key harvest gate (before Phase 2)
 **Description:** As the operator, I want a written funding and key checklist so I accumulate enough **Ethereum Sepolia** ETH on **fresh** keys that never touch this repo’s Foundry defaults or agent-visible `.env`, before Phase 2 deploy burns gas.
 
 **Acceptance Criteria:**
-- [ ] README (or linked runbook section) states: **Base Sepolia ≠ Ethereum Sepolia** — L2 testnet balances cannot pay L1 Sepolia deploy/batcher gas
-- [ ] Documented target balances before Phase 2 start: **≥ ~0.5 ETH** Sepolia to attempt L1 contract deploy; **~1.0 ETH** recommended before running batcher+proposer for any sustained period (buffer for retries / gas spikes)
-- [ ] Operator generates **new** Sepolia keys **outside** this project tree (e.g. `cast wallet new` locally; private keys in a password manager or encrypted store — **never** committed, never pasted into agent chat, never written to `.env.example`)
-- [ ] Funding path documented: faucet(s) → operator-controlled harvest address → transfer only to the Sepolia deployer/batcher/proposer addresses when ready; project scripts continue to refuse Foundry defaults when `L2_CHAIN_ID != 901`
-- [ ] Phase 2 remains blocked until US-012 items + this funding floor are met; 1d does not run `op-deployer` against Sepolia
+- [x] README (or linked runbook section) states: **Base Sepolia ≠ Ethereum Sepolia** — L2 testnet balances cannot pay L1 Sepolia deploy/batcher gas
+- [x] Documented target balances before Phase 2 start: **≥ ~0.5 ETH** Sepolia to attempt L1 contract deploy; **~1.0 ETH** recommended before running batcher+proposer for any sustained period (buffer for retries / gas spikes)
+- [x] Operator generates **new** Sepolia keys **outside** this project tree (e.g. `cast wallet new` locally; private keys in a password manager or encrypted store — **never** committed, never pasted into agent chat, never written to `.env.example`)
+- [x] Funding path documented: faucet(s) → operator-controlled harvest address → transfer only to the Sepolia deployer/batcher/proposer addresses when ready; project scripts continue to refuse Foundry defaults when `L2_CHAIN_ID != 901`
+- [x] Phase 2 remains blocked until US-012 items + this funding floor are met; 1d does not run `op-deployer` against Sepolia
 
 ## User Stories — Phase 6 (Derivation / minimal sequencer — scaffold)
 

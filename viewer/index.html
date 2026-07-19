@@ -25,9 +25,9 @@
       <h1 class="headline">Pipeline viewer</h1>
       <p class="lede">
         Watch the local OP Stack: sequencer heads, batcher posts to L1, proposer
-        dispute games, and L2 tx throughput. Deposits show up as L2 inclusion /
-        sync heads; withdrawals need a proposer output before prove/finalize.
-        Not a block explorer.
+        dispute games, L2 tx throughput, and mempool pending. Deposits show up as
+        L2 inclusion / sync heads; withdrawals need a proposer output before
+        prove/finalize. Not a block explorer.
       </p>
       <p id="status" class="status" role="status" aria-live="polite"></p>
       <p id="refresh-meta" class="refresh-meta" aria-live="polite"></p>
@@ -76,6 +76,7 @@
           <div><dt>Non-empty / empty</dt><dd id="agg-fill">—</dd></div>
           <div><dt>Tx count</dt><dd id="agg-txs">—</dd></div>
           <div><dt>Tx / min</dt><dd id="agg-rate">—</dd></div>
+          <div><dt>Mempool</dt><dd id="agg-mempool">—</dd></div>
         </dl>
       </article>
     </section>

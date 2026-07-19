@@ -74,7 +74,7 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Pin wallet fee floors for quiet local base fees (see `dapp/app.js`).
 - Message length is **UTF-8 bytes** (contract `MAX_TEXT_BYTES=280`), not HTML `maxlength` characters.
 - After contract changes: redeploy, then MetaMask **Delete activity and nonce data** if txs stick post-reset.
-- Pipeline viewer: four panels only; CSP `connect-src` allows L1 `:8545`, L2 `:9545`, op-node `:9547`.
+- Pipeline viewer: four panels (Aggregate includes mempool pending/queued); CSP `connect-src` allows L1 `:8545`, L2 `:9545`, op-node `:9547`.
 
 ## Security expectations (learning stack)
 

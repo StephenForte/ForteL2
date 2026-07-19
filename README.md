@@ -266,7 +266,7 @@ cast balance 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc --rpc-url http://127.0.0
 
 Blockscout / other containerized explorers, and hosted SaaS explorers (e.g. Ethernal), are **explicitly deferred** on this host until the Phase 1b non-loopback policy review allows a reachable RPC (or a container-capable host is used). Phase 1c’s **pipeline viewer** is the intentional learning UI — not a full explorer.
 
-## Pipeline viewer (Phase 1c / US-013 / US-014)
+## Pipeline viewer (Phase 1c / 1d)
 
 Ops dashboard for the sequencer → batcher → proposer path. Client-side polls only (no indexer).
 
@@ -282,11 +282,42 @@ Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from `
 | **Sequencer** | op-node `optimism_syncStatus`, L2 blocks | Unsafe / safe / finalized heads, lag, recent block interval |
 | **Batcher** | L1 recent blocks | Posts from `BATCHER_ADDRESS` → batch inbox (last hash, age, cadence) |
 | **Proposer** | L1 DisputeGameFactory | `gameCount`, latest game proxy / age / type |
-| **Aggregate** | L2 recent blocks | Empty vs non-empty blocks, tx count, rough tx/min |
+| **Aggregate** | L2 recent blocks + `txpool_status` | Empty vs non-empty, tx/min, **mempool** pending/queued |
+
+**Mempool vs heads:** Sequencer unsafe/safe is what already landed (or is safe via L1). Aggregate mempool is txs still waiting in op-geth — useful right after MetaMask submit, before the next L2 block. Not a full mempool dump or tx search.
 
 Refresh cadence defaults to **5s** (shown in the UI). Panel RPC failures surface as plain status text — panels do not silently go stale. After a deposit, watch L2 inclusion and sync heads; after a withdrawal initiate, you need proposer output before prove/finalize.
 
-Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer.
+Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer (Blockchair-style UIs stay deferred).
+
+## Phase 2 funding gate (Phase 1d / US-016)
+
+Do **not** start Sepolia cutover until keys and balances are ready. **Base Sepolia ≠ Ethereum Sepolia** — L2 testnet balances cannot pay L1 Sepolia deploy or batcher gas.
+
+| Floor | Meaning |
+|---|---|
+| **≥ ~0.5 ETH** Sepolia | Enough to attempt a disposable L1 contract deploy |
+| **~1.0 ETH** Sepolia | Recommended before running batcher + proposer for any sustained period |
+
+**Keys (never Foundry defaults, never in this repo):**
+
+```bash
+# Outside the ForteL2 tree — private key goes in a password manager only
+cast wallet new
+```
+
+Fund **Ethereum Sepolia** (chain **11155111**) on a personal harvest wallet, then transfer to the Phase 2 deployer/batcher/proposer addresses when cutover starts. Never paste private keys into agent chats or commit them.
+
+**Faucets (Ethereum Sepolia only — amounts and gates change):**
+
+| Faucet | Notes |
+|---|---|
+| [Alchemy](https://www.alchemy.com/faucets/ethereum-sepolia) | Often ~0.5/day; free account; may require ~0.001 mainnet ETH |
+| [Google Cloud Web3](https://cloud.google.com/application/web3/faucet) | Google login; good second source |
+| [QuickNode](https://faucet.quicknode.com/ethereum/sepolia) | Backup; Infura’s UI may redirect here |
+| Sepolia PoW faucet | Browser mining; slower; useful if mainnet-ETH gates block you |
+
+Operator tip: keep harvesting toward **~1.0 ETH** before Phase 2; **~0.5 ETH** is only enough to attempt a disposable deploy.
 
 ## MetaMask (US-008)
 
@@ -327,7 +358,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 ## Phase roadmap status
 
-See `tasks/prd-l2-learning-chain.md`. Phase 0–1c done; **Phase 1d** next (viewer mempool polish + Sepolia funding/key gate). Phase 2 = Sepolia cutover; Phase 3 = Render replica with **stock** op-geth/op-reth + op-node; Phase 6 = custom derivation (optional separate PRD). Hosted explorers stay deferred until non-loopback is allowed.
+See `tasks/prd-l2-learning-chain.md`. Phase 0–1c done; **Phase 1d done** (mempool on viewer + Sepolia funding/key gate docs). Phase 2 = Sepolia cutover (after ~1.0 ETH floor); Phase 3 = Render replica with **stock** op-geth/op-reth + op-node; Phase 6 = custom derivation (optional separate PRD). Hosted explorers stay deferred until non-loopback is allowed.
 
 ### Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
