@@ -80,7 +80,7 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Keys in `.env.example` are **public Foundry test keys** — fine for local Anvil chain **901**; never fund them on public nets. Broadcast scripts refuse those keys when `L2_CHAIN_ID != 901`.
 - Treat guestbook storage as unbounded demo state (DoS/growth is acceptable locally; do not ship as production).
 - Do not expose Anvil / op-geth / dApp / viewer beyond loopback without an explicit hardening task (Phase 1b US-012).
-- `ethers` is **vendored** under `dapp/vendor/` (CSP `script-src 'self'`); viewer symlinks the same file. Bump via `dapp/vendor/README.md` — do not reintroduce CDN script tags.
+- `ethers` is **vendored** under `dapp/vendor/` and copied into `viewer/vendor/` (CSP `script-src 'self'`). Do not use a symlink for the viewer copy — static serve roots at `viewer/` and symlink-as-text checkouts break the import. Bump both files via `dapp/vendor/README.md` — do not reintroduce CDN script tags.
 
 ## When editing scripts
 
