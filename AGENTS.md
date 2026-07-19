@@ -43,6 +43,7 @@ cp .env.example .env          # once
 ./scripts/deploy-guestbook.sh # after Guestbook ABI changes
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ./scripts/serve-viewer.sh     # http://127.0.0.1:8081 pipeline viewer
+./scripts/demo-checklist.sh   # auto smokes + Phase 1→1c verification checklist
 ./scripts/stop-all.sh
 ./scripts/reset.sh            # wipe datadir + redeploy next start (needed after portal delay overrides)
 ```
@@ -73,7 +74,7 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Pin wallet fee floors for quiet local base fees (see `dapp/app.js`).
 - Message length is **UTF-8 bytes** (contract `MAX_TEXT_BYTES=280`), not HTML `maxlength` characters.
 - After contract changes: redeploy, then MetaMask **Delete activity and nonce data** if txs stick post-reset.
-- Pipeline viewer: four panels only; CSP `connect-src` allows L1 `:8545`, L2 `:9545`, op-node `:9547`.
+- Pipeline viewer: four panels (Aggregate includes mempool pending/queued); CSP `connect-src` allows L1 `:8545`, L2 `:9545`, op-node `:9547`.
 
 ## Security expectations (learning stack)
 

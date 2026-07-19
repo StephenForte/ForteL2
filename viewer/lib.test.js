@@ -5,10 +5,12 @@ import {
   filterBatchTxs,
   formatAge,
   formatRate,
+  parseHexQuantity,
   scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
   summarizeSyncStatus,
+  summarizeTxpoolStatus,
 } from "./lib.js";
 
 describe("formatAge", () => {
@@ -121,6 +123,27 @@ describe("formatRate", () => {
   it("formats finite numbers", () => {
     assert.equal(formatRate(1.234, 1), "1.2");
     assert.equal(formatRate(null), "—");
+  });
+});
+
+describe("summarizeTxpoolStatus", () => {
+  it("parses hex pending/queued", () => {
+    const s = summarizeTxpoolStatus({ pending: "0x2", queued: "0x1" });
+    assert.equal(s.pending, 2);
+    assert.equal(s.queued, 1);
+    assert.equal(s.total, 3);
+    assert.equal(s.label, "2 pending / 1 queued");
+  });
+  it("handles empty", () => {
+    assert.equal(summarizeTxpoolStatus(null).label, "—");
+  });
+});
+
+describe("parseHexQuantity", () => {
+  it("parses hex and decimal", () => {
+    assert.equal(parseHexQuantity("0xa"), 10);
+    assert.equal(parseHexQuantity("3"), 3);
+    assert.equal(parseHexQuantity(null), null);
   });
 });
 

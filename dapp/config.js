@@ -2,7 +2,7 @@
 export const L2_CHAIN_ID = 901;
 export const L2_RPC_URL = "http://127.0.0.1:9545";
 
-export const GUESTBOOK_ADDRESS = "";
+export const GUESTBOOK_ADDRESS = "0x2706A171ECb68E0038378D40Dd1d136361d0cB7d";
 
 export const GUESTBOOK_ABI = [
   "function sign(string calldata text)",

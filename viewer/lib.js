@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the Phase 1c pipeline viewer (unit-tested; no RPC I/O).
+ * Pure helpers for the Phase 1c/1d pipeline viewer (unit-tested; no RPC I/O).
  */
 
 /** @param {number|bigint|string|null|undefined} tsSeconds unix seconds */
@@ -170,6 +170,46 @@ export function aggregateTxWindow(blocks, nowMs = Date.now()) {
 export function formatRate(n, digits = 1) {
   if (n == null || !Number.isFinite(n)) return "—";
   return n.toFixed(digits);
+}
+
+/** Parse eth_ hex quantity or decimal string to a non-negative integer. */
+export function parseHexQuantity(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  const s = String(value).trim();
+  if (!s) return null;
+  try {
+    const n = s.startsWith("0x") || s.startsWith("0X") ? Number.parseInt(s, 16) : Number(s);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return Math.floor(n);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Summarize L2 `txpool_status` for the Aggregate panel (Phase 1d).
+ * @param {object|null|undefined} status e.g. `{ pending: "0x1", queued: "0x0" }`
+ */
+export function summarizeTxpoolStatus(status) {
+  if (!status || typeof status !== "object") {
+    return { pending: null, queued: null, total: null, label: "—" };
+  }
+  const pending = parseHexQuantity(status.pending);
+  const queued = parseHexQuantity(status.queued);
+  if (pending == null && queued == null) {
+    return { pending: null, queued: null, total: null, label: "—" };
+  }
+  const p = pending ?? 0;
+  const q = queued ?? 0;
+  return {
+    pending: p,
+    queued: q,
+    total: p + q,
+    label: `${p} pending / ${q} queued`,
+  };
 }
 
 /**

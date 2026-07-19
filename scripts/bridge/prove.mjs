@@ -13,6 +13,7 @@ import {
   readJson,
   writeJson,
   sleep,
+  resolveGameProxy,
 } from './lib.mjs'
 import {
   buildProveWithdrawal,
@@ -74,7 +75,16 @@ if (!game) {
   process.exit(1)
 }
 
-console.log('game index', game.index.toString(), 'l2Block', game.l2BlockNumber.toString(), 'proxy', game.proxy)
+// viem Game type has no proxy; resolve via DisputeGameFactory.gameAtIndex.
+const gameProxy = await resolveGameProxy(publicL1, factory, game.index)
+console.log(
+  'game index',
+  game.index.toString(),
+  'l2Block',
+  game.l2BlockNumber.toString(),
+  'proxy',
+  gameProxy,
+)
 
 const proveArgs = await buildProveWithdrawal(publicL2, {
   account,
@@ -113,7 +123,7 @@ artifact.withdrawal = {
 }
 artifact.l2BlockNumber = receipt.blockNumber.toString()
 artifact.gameIndex = game.index.toString()
-artifact.gameProxy = game.proxy
+artifact.gameProxy = gameProxy
 artifact.proveTxHash = proveHash
 artifact.provenAt = Math.floor(Date.now() / 1000)
 writeJson(artifactPath, artifact)

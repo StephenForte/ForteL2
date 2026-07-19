@@ -18,9 +18,9 @@ This is not a production chain. No real funds, no external users, no uptime comm
 
 - Stand up a fully functioning OP Stack devnet (L1 + L2) on a single Mac mini using **native processes** (no containers on this host)
 - Observe the full data pipeline: L2 block production → batch submission to L1 → state root proposal to L1
-- Inspect the chain with `cast` / RPC tooling in Phase 1; add a DIY **pipeline viewer** in Phase 1c; defer hosted/container explorers until a non-loopback RPC is deliberately allowed
+- Inspect the chain with `cast` / RPC tooling in Phase 1; DIY **pipeline viewer** in Phase 1c (+ mempool polish in 1d); defer hosted/container explorers until a non-loopback RPC is deliberately allowed
 - Deploy and interact with a simple demo dApp on the L2
-- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Sepolia migration, Render replica, per-component reimplementation, fault proofs, decentralized sequencer
+- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Phase 2 funding gate, Sepolia migration, Render replica (stock clients), per-component reimplementation (batcher → proposer → derivation), fault proofs, decentralized sequencer
 
 ## Phase Roadmap
 
@@ -29,12 +29,13 @@ This is not a production chain. No real funds, no external users, no uptime comm
 | **0** | Deployment-path spike: timeboxed test of Kurtosis `optimism-package` on Apple Silicon; decide Kurtosis vs. manual builds | **Done — verdict: manual builds** (OrbStack/Docker disrupted host networking; see `tasks/spike-notes.md`) |
 | **1** | OP Stack devnet on Mac mini via **native binaries**: local L1 (Anvil), op-deployer, sequencer, batcher, proposer, demo dApp (genesis-funded accounts, no bridge); no Docker/Kurtosis on this host | **Done** — stack running; MetaMask guestbook verified; batcher 5‑min stop/restart observed |
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config); **Phase 2 readiness gate** (new keys, separate deploy config, non-loopback review, sandbox/dry-run) | **Done** — deposit/withdraw scripts + US-012 docs/tripwires (operator runs against live stack) |
-| **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014) |
+| **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014); operator-verified on live stack |
+| **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | **Done** — Aggregate mempool + README US-016 faucet/key gate |
 | **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
-| **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) | Future |
+| **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) | Future |
-| **6** | **Reimplement the derivation pipeline / minimal sequencer** (read batches from L1, derive L2 blocks; the deepest rebuild) | Future |
+| **6** | **Reimplement the derivation pipeline / minimal sequencer** (read batches from L1, derive L2 blocks; deepest rebuild — **separate detailed PRD** may split EL vs rollup-node work) | Future (stories scaffolded; expand or spin out PRD before start) |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
 
@@ -198,6 +199,68 @@ Phase 1c comes **after** Phase 1b so the viewer can show bridge-related activity
 - [x] RPC / process-down failures surface as plain status text (no silent stale panels); refresh cadence is visible or documented
 - [x] Start path is a documented script or extension of existing serve helpers (loopback assert); stop does not require tearing down the chain
 - [x] Topology / roadmap docs mention Phase 1c and the viewer’s place relative to guestbook vs deferred explorers
+- [x] Visual hierarchy is deliberate (brand-first hero, live status, stage flow, readable metric panels) — still named **pipeline viewer**, not explorer
+
+## User Stories — Phase 1d (Viewer polish + Phase 2 funding gate)
+
+Phase 1d sits **between** the closed pipeline viewer (1c) and Sepolia cutover (2). It does **not** deploy to Sepolia. It hardens the local ops UI slightly and makes Sepolia funding / key hygiene an explicit gate so Phase 2 does not start underfunded or with project-exposed keys.
+
+**Out of scope for 1d:** Blockchair/Etherscan-style latest-blocks + tx detail pages, hosted explorers, non-loopback RPCs, custom execution clients.
+
+### US-015: Pipeline viewer mempool signal
+**Description:** As the operator, I want a small **L2 mempool** readout on the pipeline viewer so I can see pending local txs (e.g. after MetaMask submit, before inclusion) without turning the viewer into a block explorer.
+
+**Acceptance Criteria:**
+- [x] Pipeline viewer shows L2 mempool summary from existing loopback EL RPC (e.g. `txpool_status` pending/queued counts; optional short pending-tx sample — **not** full mempool dump / search)
+- [x] Signal lives in the existing composition (extend Aggregate or a slim fifth strip) — still one ops surface, not a multi-widget dashboard
+- [x] RPC failure for mempool is isolated (same plain-status pattern as other panels); refresh cadence unchanged or documented
+- [x] README notes what the mempool signal means vs Sequencer heads / Aggregate inclusion
+- [x] Explicit non-goal remains: no Blockchair-like block list, tx detail pages, address search, or “latest transactions” explorer UI in 1d (deferred; see open questions / future explorer story)
+
+### US-016: Sepolia funding + key harvest gate (before Phase 2)
+**Description:** As the operator, I want a written funding and key checklist so I accumulate enough **Ethereum Sepolia** ETH on **fresh** keys that never touch this repo’s Foundry defaults or agent-visible `.env`, before Phase 2 deploy burns gas.
+
+**Acceptance Criteria:**
+- [x] README (or linked runbook section) states: **Base Sepolia ≠ Ethereum Sepolia** — L2 testnet balances cannot pay L1 Sepolia deploy/batcher gas
+- [x] Documented target balances before Phase 2 start: **≥ ~0.5 ETH** Sepolia to attempt L1 contract deploy; **~1.0 ETH** recommended before running batcher+proposer for any sustained period (buffer for retries / gas spikes)
+- [x] Operator generates **new** Sepolia keys **outside** this project tree (e.g. `cast wallet new` locally; private keys in a password manager or encrypted store — **never** committed, never pasted into agent chat, never written to `.env.example`)
+- [x] Funding path documented: faucet(s) → operator-controlled harvest address → transfer only to the Sepolia deployer/batcher/proposer addresses when ready; project scripts continue to refuse Foundry defaults when `L2_CHAIN_ID != 901`
+- [x] Phase 2 remains blocked until US-012 items + this funding floor are met; 1d does not run `op-deployer` against Sepolia
+
+## User Stories — Phase 6 (Derivation / minimal sequencer — scaffold)
+
+Phase 6 is the deepest rebuild: replace (parts of) the rollup derivation path and/or a minimal sequencer using the **OP Stack specs** and the running reference stack as the oracle. **Phase 3 does not require this** — a Render replica uses stock `op-geth`/`op-reth` + `op-node` in verifier mode.
+
+Before implementation starts, either expand these stories in-place **or** spin out a dedicated PRD (recommended if splitting EL vs `op-node`-shaped work).
+
+### US-060: Spec-aligned derivation spike
+**Description:** As the operator, I want a timeboxed spike that reads L1 batches for this learning chain and derives a short L2 span offline, so Phase 6 scope is grounded in the real frame/channel format—not guesswork.
+
+**Acceptance Criteria:**
+- [ ] Spike notes cite ethereum-optimism/specs sections used (batch/frame/channel, derivation pipeline stages)
+- [ ] Tooling can decode at least one real batch from the Phase 1/2 L1 history and relate it to known L2 blocks from the reference `op-node`
+- [ ] Explicit decision: implement a **verifier-only** derivation tool first vs a **block-building sequencer** stub; recorded in spike notes
+- [ ] Non-goal for the spike: production performance, P2P, full EVM reimplementation
+
+### US-061: Minimal derivation verifier (replace op-node verifier path for a demo window)
+**Description:** As the operator, I want a from-scratch (or substantially custom) derivation verifier that can advance a safe/unsafe head over a bounded window by reading L1, comparable to `optimism_syncStatus` from reference `op-node`.
+
+**Acceptance Criteria:**
+- [ ] Separate binary/crate/module with its own README; does not patch upstream `op-node` in place for the learning demo
+- [ ] Inputs: L1 RPC + rollup config / batch inbox / deposit contract addresses from the active deploy tree
+- [ ] Outputs: derived L2 block numbers / hashes for a documented window; mismatch vs reference `op-node` is detectable and logged
+- [ ] Runbook: how to start reference stack, run custom verifier, interpret diffs
+- [ ] Safe to run alongside Phase 1/2 stack on loopback without replacing sequencer until US-062
+
+### US-062: Optional minimal sequencer stub (after verifier)
+**Description:** As the operator, I want an optional next step that builds L2 blocks (sequencer path) only after the verifier path is trustworthy, so sequencing complexity does not block derivation learning.
+
+**Acceptance Criteria:**
+- [ ] Sequencer stub is explicitly gated on US-061 acceptance
+- [ ] Engine API integration target named (`op-geth` or `op-reth`) with `--l2.enginekind` equivalent documented
+- [ ] Can produce at least N consecutive L2 blocks that the reference verifier (or US-061 tool) can follow
+- [ ] Clear kill switch: revert to stock `op-node` sequencer without re-genesis if possible; else documented reset procedure
+- [ ] Out of scope unless separately approved: full tx-pool policy parity, P2P block gossip, decentralized sequencing (Phase 8)
 
 ## Functional Requirements
 
@@ -207,22 +270,24 @@ Phase 1c comes **after** Phase 1b so the viewer can show bridge-related activity
 - FR-4: The L2 must use a distinct chain ID not colliding with any public chain
 - FR-5: L2 accounts must be funded via genesis allocation in Phase 1; the bridge is not used until Phase 1b
 - FR-6: Batch data and output roots must be independently verifiable on L1 using `cast` commands documented in the runbook
-- FR-7: Chain inspection for Phase 1 is via documented `cast`/RPC recipes. Phase 1c adds a DIY loopback **pipeline viewer**. Full explorers (hosted SaaS such as Ethernal, or containerized such as Blockscout) are not required on this host and stay deferred until non-loopback RPC exposure is approved
+- FR-7: Chain inspection for Phase 1 is via documented `cast`/RPC recipes. Phase 1c adds a DIY loopback **pipeline viewer**; Phase 1d may add a small L2 mempool signal. Full explorers (hosted SaaS such as Ethernal, or containerized such as Blockscout) and Blockchair-style block/tx pages are not required on this host and stay deferred until non-loopback RPC exposure is approved (or a dedicated explorer story)
 - FR-8: The demo dApp must perform at least one read and one write against the L2 through a browser wallet
-- FR-9: All keys used are throwaway devnet keys; nothing in the repo may ever hold value
+- FR-9: All keys used are throwaway learning keys; nothing in the repo may ever hold value. Phase 2+ keys are generated outside the project and never committed
 - FR-10: Every phase boundary in the roadmap table must be preserved in this document as phases complete (edit status column, don't delete rows)
 - FR-11: L1 contract deployment and L2 genesis generation must use native tooling (`op-deployer` or documented equivalent), not Kurtosis-generated artifacts
-- FR-12: Before Phase 2, Foundry/Anvil default keys must be rejected for any `L2_CHAIN_ID` other than the local learning ID (901); Phase 2 must use a separate deploy/env tree and an explicit non-loopback policy review (US-012)
+- FR-12: Before Phase 2, Foundry/Anvil default keys must be rejected for any `L2_CHAIN_ID` other than the local learning ID (901); Phase 2 must use a separate deploy/env tree and an explicit non-loopback policy review (US-012); Phase 1d adds the Sepolia ETH funding floor checklist (US-016)
+- FR-13: Phase 3 replica uses unmodified OP Stack EL + `op-node` (verifier). Custom derivation/sequencer work is Phase 6 (US-060–062), optionally a separate PRD
 
-## Non-Goals (Out of Scope for Phase 1 / 1b / 1c)
+## Non-Goals (Out of Scope for Phase 1 / 1b / 1c / 1d)
 
 - No Docker Desktop, OrbStack, Kurtosis, docker-compose, or other container runtime on this workstation (Phase 0 verdict)
-- No Blockscout (or other containerized explorer) on this host in Phase 1 / 1b / 1c
+- No Blockscout (or other containerized explorer) on this host in Phase 1 / 1b / 1c / 1d
 - No hosted / SaaS block explorers (e.g. Ethernal) against this stack until the US-012 non-loopback policy review allows a reachable RPC (hosted explorers cannot see `127.0.0.1`)
-- No full address/tx search explorer in Phase 1c — the deliverable is a **pipeline viewer**, not Etherscan/Blockscout feature parity
-- No Sepolia or any public L1 (Phase 2)
+- No full address/tx search explorer and no Blockchair-style “latest blocks / latest transactions” pages in Phase 1c / 1d — the deliverable is a **pipeline viewer** (+ optional mempool signal), not Etherscan/Blockscout feature parity
+- No Sepolia cutover in Phase 1d (funding/key prep only; deploy is Phase 2)
 - No node on Render or any remote infrastructure (Phase 3)
-- No custom/reimplemented components — batcher, proposer, derivation rebuilds are Phases 4–6
+- No custom/reimplemented batcher, proposer, or derivation — Phases 4–6
+- No custom execution client required for Phase 3 (stock op-geth/op-reth)
 - No fault proofs, op-challenger, or dispute games (Phase 7)
 - No decentralized or shared sequencing (Phase 8)
 - No ERC-20 bridging (ETH only in Phase 1b)
@@ -237,12 +302,12 @@ Phase 1c comes **after** Phase 1b so the viewer can show bridge-related activity
 - **Execution client choice:** Phase 0 verified **op-geth** on arm64. Upstream is moving public networks to **op-reth** (op-geth end-of-support for Karst-era mainnets). For a private learning L1/L2, op-geth is acceptable in Phase 1; prefer op-reth if/when Rust tooling is installed, and set `--l2.enginekind` accordingly.
 - **Apple Silicon:** native `darwin/arm64` binaries only — no Rosetta container emulation path.
 - **Resources:** without Blockscout/Postgres, RAM needs are modest (Anvil + op-node + EL + batcher + proposer + optional static pipeline viewer). Keep logs on disk with rotation so long runs stay manageable.
-- **Pipeline viewer (Phase 1c):** prefer client-side RPC polls against existing loopback L1/L2 endpoints (same pattern as the guestbook). Do not introduce an indexer DB or container stack for 1c.
-- **Explorer deferral (locked for now):** hosted explorers (Ethernal, etc.) need a non-loopback RPC; self-hosted Blockscout/Ethernal need containers. Both wait until after the US-012 non-loopback review (or a different host). Optional native single-binary explorers remain an open later choice, not a 1c requirement.
+- **Pipeline viewer (Phase 1c / 1d):** prefer client-side RPC polls against existing loopback L1/L2 endpoints (same pattern as the guestbook). Do not introduce an indexer DB or container stack. Phase 1d may add `txpool_*` mempool signals; Blockchair-style UIs stay deferred.
+- **Explorer deferral (locked for now):** hosted explorers (Ethernal, etc.) need a non-loopback RPC; self-hosted Blockscout/Ethernal need containers. Both wait until after the US-012 non-loopback review (or a different host). Optional native single-binary explorers remain an open later choice, not a 1c/1d requirement.
 - **L1 / blobs open question:** Anvil may or may not cover every batcher DA mode (calldata vs 4844 blobs). If blobs are required and Anvil cannot provide them, fall back to native geth/reth as L1 — still no containers.
-- **Phase 2 dependency:** the local-L1 contract deployment in Phase 1 does not carry to Sepolia; Phase 2 is a fresh contract deployment and fresh L2 genesis. The Phase 1 chain will not "migrate" — it gets replaced. Structure the runbook so redeployment is cheap.
-- **Phase 3 note:** a Render replica may use containers *on Render*; that does not reintroduce Docker on this Mac mini for Phase 1.
-- **Phase 4–6 dependency:** the OP Stack's rollup node exposes RPCs (`optimism_syncStatus`, etc.) and the spec repo (ethereum-optimism/specs) defines batch/frame formats — reimplementation phases should target the spec, using the running stack as the reference implementation to diff against.
+- **Phase 2 dependency:** the local-L1 contract deployment in Phase 1 does not carry to Sepolia; Phase 2 is a fresh contract deployment and fresh L2 genesis. The Phase 1 chain will not "migrate" — it gets replaced. Structure the runbook so redeployment is cheap. Phase 1d US-016 funding floor applies before cutover.
+- **Phase 3 note:** a Render replica may use containers *on Render*; that does not reintroduce Docker on this Mac mini for Phase 1. Replica = stock EL + `op-node` verifier. Custom client/derivation is Phase 6.
+- **Phase 4–6 dependency:** the OP Stack's rollup node exposes RPCs (`optimism_syncStatus`, etc.) and the spec repo (ethereum-optimism/specs) defines batch/frame formats — reimplementation phases should target the spec, using the running stack as the reference implementation to diff against. Phase 6 may be split into a separate PRD before coding starts.
 
 ## Success Metrics
 
@@ -251,6 +316,8 @@ Phase 1c comes **after** Phase 1b so the viewer can show bridge-related activity
 - Operator can explain, without notes, what each of the four OP Stack components does and what breaks when each one stops
 - Phase 1b: one deposit and one full withdrawal completed with all tx hashes recorded
 - Phase 1c: pipeline viewer shows live sequencer / batcher / proposer / aggregate tx panels on loopback; operator can narrate a deposit→batch→propose path from the screen
+- Phase 1d: mempool signal visible on the viewer; operator has ≥ ~1.0 Sepolia ETH (or documented floor) on fresh keys before Phase 2
+- Phase 6 (when started): custom verifier derives a bounded window that matches reference `op-node` within documented tolerance
 
 ## Open Questions
 
@@ -259,7 +326,11 @@ Phase 1c comes **after** Phase 1b so the viewer can show bridge-related activity
 - op-geth vs op-reth for Phase 1 EL — stick with verified op-geth, or invest in Rust tooling for op-reth now?
 - After non-loopback is allowed: hosted explorer (e.g. Ethernal) vs native single-binary (e.g. Otterscan) vs staying on `cast` + pipeline viewer only?
 - For Phase 3 (Render): tunnel (Tailscale/cloudflared) vs. port forwarding for sequencer→replica peering — defer decision, but note Render's egress/ingress constraints may force the tunnel option
+- Phase 6: keep stories in this PRD vs spin out `tasks/prd-derivation-client.md` before US-061 coding?
 
 ### Resolved decisions
 
-- **Explorer path (Phase 1c):** DIY **pipeline viewer** on loopback after bridging (US-013 / US-014). Hosted/SaaS and containerized explorers deferred until non-loopback (or another host).
+- **Explorer path (Phase 1c):** DIY **pipeline viewer** on loopback after bridging (US-013 / US-014). Operator-verified on live stack. Hosted/SaaS and containerized explorers deferred until non-loopback (or another host).
+- **Phase 1d scope:** mempool signal + Sepolia funding/key gate only. Blockchair-style latest blocks/txs **deferred** (not 1d).
+- **Phase 3 vs Phase 6:** Render replica uses **stock** OP Stack EL + `op-node` verifier. Custom derivation/sequencer is **Phase 6** (optional separate PRD).
+- **Sepolia funding:** Base Sepolia balances do not count; target ~**1.0 ETH** on Ethereum Sepolia before sustained Phase 2 batcher/proposer; ~**0.5 ETH** minimum to attempt deploy. Keys generated **outside** this repo; never Foundry defaults; never paste private keys into agent chats.
