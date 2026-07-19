@@ -37,6 +37,8 @@ start_bg op-geth op-geth \
   --syncmode=full \
   --gcmode=archive \
   --rollup.disabletxpoolgossip=true \
+  --miner.gasprice=1 \
+  --txpool.pricelimit=1 \
   --nodiscover \
   --maxpeers=0
 

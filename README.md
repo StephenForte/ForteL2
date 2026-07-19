@@ -11,7 +11,7 @@ Personal OP Stack L2 on a single Apple Silicon Mac, for learning only. **Native 
 | Deploy | native `op-deployer` → live Anvil |
 | DA | **calldata** batches (`--data-availability-type=calldata`) — Anvil has no beacon/blobs |
 | EL | **op-geth** (`--l2.enginekind=geth`) — verified arm64 in Phase 0 |
-| L2 block time | 2s |
+| L1 / L2 block time | **both 2s** (`L1_BLOCK_TIME` must be ≥ `L2_BLOCK_TIME`) |
 | Explorer | `cast` / RPC only — Blockscout deferred |
 
 ## Toolchain versions
@@ -198,6 +198,12 @@ Guestbook contract (current deploy): see `deployments/guestbook.txt` / `dapp/con
 ```bash
 ./scripts/serve-dapp.sh   # http://127.0.0.1:8080
 ```
+
+If MetaMask shows a stuck/failed tx after a chain reset: **Settings → Developer tools → Delete activity and nonce data** (clears local nonce history; older UIs called this Advanced → Reset account), hard-refresh the dapp, then Sign again with `DEMO_A`.
+
+### Why L1 block time must match L2
+
+With Fjord active from genesis, op-node caps sequencer drift at a **constant 1800s** (not `max_sequencer_drift` in rollup.json). Origin advances at most one L1 block per L2 block. If L1 is faster than L2 (e.g. Anvil 1s vs L2 2s), drift grows ~1s/block; past 1800s the sequencer sets `NoTxPool` and only deposit txs land — MetaMask/user txs hang forever. Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` (both `2` here). If drift is already past the cap, `./scripts/reset.sh` then `./scripts/start-all.sh`.
 
 ## Logs & health lines
 
