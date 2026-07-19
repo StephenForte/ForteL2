@@ -29,9 +29,25 @@
         L2 inclusion / sync heads; withdrawals need a proposer output before
         prove/finalize. Not a block explorer.
       </p>
-      <p id="status" class="status" role="status" aria-live="polite"></p>
-      <p id="refresh-meta" class="refresh-meta" aria-live="polite"></p>
+      <div class="livebar" aria-live="polite">
+        <span id="live-pill" class="live-pill" data-state="idle">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="live-label">Idle</span>
+        </span>
+        <p id="status" class="status" role="status"></p>
+        <p id="refresh-meta" class="refresh-meta"></p>
+      </div>
     </header>
+
+    <nav class="flow" aria-label="Pipeline stages">
+      <span>Sequencer</span>
+      <span class="flow-arrow" aria-hidden="true"></span>
+      <span>Batcher</span>
+      <span class="flow-arrow" aria-hidden="true"></span>
+      <span>Proposer</span>
+      <span class="flow-arrow" aria-hidden="true"></span>
+      <span>Aggregate</span>
+    </nav>
 
     <section class="pipeline" aria-label="Pipeline panels">
       <article class="panel" id="panel-sequencer" data-panel="sequencer">

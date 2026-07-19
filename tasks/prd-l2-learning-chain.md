@@ -29,7 +29,7 @@ This is not a production chain. No real funds, no external users, no uptime comm
 | **0** | Deployment-path spike: timeboxed test of Kurtosis `optimism-package` on Apple Silicon; decide Kurtosis vs. manual builds | **Done — verdict: manual builds** (OrbStack/Docker disrupted host networking; see `tasks/spike-notes.md`) |
 | **1** | OP Stack devnet on Mac mini via **native binaries**: local L1 (Anvil), op-deployer, sequencer, batcher, proposer, demo dApp (genesis-funded accounts, no bridge); no Docker/Kurtosis on this host | **Done** — stack running; MetaMask guestbook verified; batcher 5‑min stop/restart observed |
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config); **Phase 2 readiness gate** (new keys, separate deploy config, non-loopback review, sandbox/dry-run) | **Done** — deposit/withdraw scripts + US-012 docs/tripwires (operator runs against live stack) |
-| **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014) |
+| **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014); operator-verified on live stack |
 | **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | **Done** — Aggregate mempool + README US-016 faucet/key gate |
 | **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
@@ -199,6 +199,7 @@ Phase 1c comes **after** Phase 1b so the viewer can show bridge-related activity
 - [x] RPC / process-down failures surface as plain status text (no silent stale panels); refresh cadence is visible or documented
 - [x] Start path is a documented script or extension of existing serve helpers (loopback assert); stop does not require tearing down the chain
 - [x] Topology / roadmap docs mention Phase 1c and the viewer’s place relative to guestbook vs deferred explorers
+- [x] Visual hierarchy is deliberate (brand-first hero, live status, stage flow, readable metric panels) — still named **pipeline viewer**, not explorer
 
 ## User Stories — Phase 1d (Viewer polish + Phase 2 funding gate)
 
@@ -329,7 +330,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 
 ### Resolved decisions
 
-- **Explorer path (Phase 1c):** DIY **pipeline viewer** on loopback after bridging (US-013 / US-014). Hosted/SaaS and containerized explorers deferred until non-loopback (or another host).
+- **Explorer path (Phase 1c):** DIY **pipeline viewer** on loopback after bridging (US-013 / US-014). Operator-verified on live stack. Hosted/SaaS and containerized explorers deferred until non-loopback (or another host).
 - **Phase 1d scope:** mempool signal + Sepolia funding/key gate only. Blockchair-style latest blocks/txs **deferred** (not 1d).
 - **Phase 3 vs Phase 6:** Render replica uses **stock** OP Stack EL + `op-node` verifier. Custom derivation/sequencer is **Phase 6** (optional separate PRD).
 - **Sepolia funding:** Base Sepolia balances do not count; target ~**1.0 ETH** on Ethereum Sepolia before sustained Phase 2 batcher/proposer; ~**0.5 ETH** minimum to attempt deploy. Keys generated **outside** this repo; never Foundry defaults; never paste private keys into agent chats.

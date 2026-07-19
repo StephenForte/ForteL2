@@ -31,6 +31,8 @@ const L2_WINDOW_BLOCKS = 30;
 const els = {
   status: document.getElementById("status"),
   refreshMeta: document.getElementById("refresh-meta"),
+  livePill: document.getElementById("live-pill"),
+  liveLabel: document.getElementById("live-label"),
   seqErr: document.getElementById("seq-err"),
   batErr: document.getElementById("bat-err"),
   propErr: document.getElementById("prop-err"),
@@ -66,6 +68,18 @@ let inFlight = false;
 function setStatus(msg, isError = false) {
   els.status.textContent = msg;
   els.status.classList.toggle("is-error", Boolean(isError));
+  if (els.livePill && els.liveLabel) {
+    if (isError) {
+      els.livePill.dataset.state = "error";
+      els.liveLabel.textContent = "Issues";
+    } else if (msg) {
+      els.livePill.dataset.state = "live";
+      els.liveLabel.textContent = "Live";
+    } else {
+      els.livePill.dataset.state = "idle";
+      els.liveLabel.textContent = "Idle";
+    }
+  }
 }
 
 function setPanelError(errEl, panelEl, message) {
