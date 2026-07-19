@@ -69,6 +69,8 @@ chmod +x scripts/*.sh
 ./scripts/start-all.sh        # L1 → deploy (first time) → sequencer → batcher → proposer
 ./scripts/status.sh
 ./scripts/smoke-transfer.sh   # L2 ETH transfer between genesis accounts
+./scripts/deposit-eth.sh      # Phase 1b: L1→L2 ETH via Standard Bridge (ADMIN)
+./scripts/withdraw-initiate.sh && ./scripts/withdraw-prove.sh && ./scripts/withdraw-finalize.sh
 ./scripts/deploy-guestbook.sh
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ```
@@ -134,7 +136,47 @@ ln -sfn ~/src/fortel2/op-geth/build/bin/geth ~/src/fortel2/bin/op-geth
 
 Prefunded L1/L2 accounts use the Foundry test mnemonic (`test test … junk`). Keys are in `.env.example`.
 
-**L2 funding quirk:** `fundDevAccounts = true` funds many Anvil-style accounts on L2, but **not** account 0 (`ADMIN_ADDRESS` / `0xf39F…`). Use `DEMO_A` / `DEMO_B` (or batcher/proposer/sequencer keys) for L2 txs. Account 0 remains the L1 deployer and stays richly funded on L1.
+**L2 funding quirk:** `fundDevAccounts = true` funds many Anvil-style accounts on L2, but **not** account 0 (`ADMIN_ADDRESS` / `0xf39F…`). Use `DEMO_A` / `DEMO_B` (or batcher/proposer/sequencer keys) for L2 txs. Account 0 remains the L1 deployer and stays richly funded on L1 — which makes it the natural sender for Phase 1b deposits.
+
+## Deposits L1 → L2 (US-010)
+
+```bash
+./scripts/deposit-eth.sh
+# optional: DEPOSIT_AMOUNT=0.25ether ./scripts/deposit-eth.sh
+```
+
+This calls `L1StandardBridge.bridgeETH` from **ADMIN** (rich on L1, zero on L2 at genesis). op-node derives a **deposit transaction** onto L2; the script prints the L1 tx hash and waits until ADMIN’s L2 balance rises.
+
+**How deposits differ from normal L2 txs:** a MetaMask / `smoke-transfer.sh` tx enters the sequencer mempool and can be reordered or censored by the sequencer. A deposit is an L1 transaction to the portal/bridge; the derivation pipeline **must** include it in an L2 block. The sequencer cannot drop it without stalling derivation. That is why deposits are the censorship-resistant ingress path even on a centralized sequencer.
+
+## Withdrawals L2 → L1 (US-011)
+
+Full path (three txs): **initiate on L2 → prove on L1 → finalize on L1**.
+
+```bash
+# After a deposit (ADMIN needs L2 ETH), with proposer running:
+./scripts/withdraw-initiate.sh    # L2ToL1MessagePasser.initiateWithdrawal
+./scripts/withdraw-prove.sh       # wait for dispute game + OptimismPortal.proveWithdrawalTransaction
+./scripts/withdraw-finalize.sh    # resolve game if needed, wait/warp delays, finalizeWithdrawalTransaction
+./scripts/verify-portal-delays.sh # inspect portal immutables
+```
+
+Artifacts land in `$DATA_DIR/bridge/last-withdrawal.json` (L2 + prove + finalize hashes). Prove/finalize use a small Node helper under [`scripts/bridge/`](scripts/bridge/) (`viem` op-stack actions; `npm ci` on first run).
+
+### Shortened challenge window (local only)
+
+`scripts/02-deploy-contracts.sh` writes op-deployer `[globalDeployOverrides]`:
+
+| Intent / env knob | Default (local) | Mainnet-scale |
+|---|---|---|
+| `proofMaturityDelaySeconds` (`PROOF_MATURITY_DELAY_SECONDS`) | **12** | 604800 (7d) |
+| `disputeGameFinalityDelaySeconds` (`DISPUTE_GAME_FINALITY_DELAY_SECONDS`) | **6** | 302400 (3.5d) |
+| `faultGameMaxClockDuration` | **10** | hours+ |
+| `faultGameWithdrawalDelay` | **1** | longer |
+
+These are portal/game **immutables** — changing them requires `./scripts/reset.sh` then `./scripts/start-all.sh` (redeploy). If your `op-deployer` build ignores the overrides ([optimism#14869](https://github.com/ethereum-optimism/optimism/issues/14869)), `verify-portal-delays.sh` warns and `withdraw-finalize.sh` **Anvil time-warps** (`evm_increaseTime`) so the learning path still completes in one sitting.
+
+**Why mainnet uses ~7 days:** the prove→finalize delay is the window for an honest party to challenge a bad output root before funds leave L1. On this solo learning chain the proposer key is trusted (no `op-challenger`); shortening the window is for operator ergonomics only. Fault proofs (Phase 7) are what replace “trust the proposer” with “anyone can dispute.”
 
 ## `rollup.json` in plain words
 
@@ -263,8 +305,8 @@ See `tasks/prd-l2-learning-chain.md`. Phase 0 done; Phase 1 is this runbook; Pha
 
 Do **not** start Phase 2 until all of these are true:
 
-- [ ] Fresh keys generated — never reuse Foundry/Anvil defaults on Sepolia (scripts already refuse them when `L2_CHAIN_ID != 901`)
-- [ ] Separate Phase 2 env + deploy artifacts (new `.env`, new `deployments/` / `.deployer` tree). Replaced: L1 contracts, L2 genesis/rollup, RPC URLs, chain IDs, funded accounts
-- [ ] Non-loopback policy review written here (what is exposed, to whom, auth, rollback) before any bind leaves `127.0.0.1`/`localhost`
-- [ ] Disposable Sepolia sandbox deploy + dry-run scripts validated first (guestbook has no shadow mode)
-- [ ] Agent-permission / tool-access audit completed (deferred from Phase 1)
+- [x] **Fresh keys / Foundry tripwire:** scripts that broadcast call `refuse_foundry_defaults_unless_local_l2` and fail closed when `L2_CHAIN_ID != 901` if a Foundry/Anvil default private key is still configured. Before Sepolia: generate **new** keys (never fund or reuse the `.env.example` mnemonic accounts on a public net).
+- [x] **Separate deploy tree (documented):** Phase 2 must **not** reuse the Phase 1 `.env` + `deployments/.deployer/` tree. Use a distinct env file (e.g. `.env.sepolia`) and deploy workdir (e.g. `deployments/sepolia/.deployer/`). Replaced artifacts: L1 contracts, L2 genesis/`rollup.json`, RPC URLs, chain IDs, funded accounts, JWT/engine secrets. Do not copy Phase 1 `deployments.json` to Sepolia.
+- [x] **Non-loopback policy review (go/no-go):** **No-go for now.** All RPCs, batcher/proposer, and the dApp stay on `127.0.0.1` / `localhost` (enforced by `assert_loopback_url` / `assert_local_rpc_urls`). Exposing anything binds an unauthenticated JSON-RPC / HTTP surface to the LAN or internet — unacceptable until a later review names: what is exposed, to whom, auth model (e.g. Tailscale + no public bind), and rollback (rebind loopback + stop processes). Default remains loopback-only through Phase 1b.
+- [x] **Sandbox / dry-run gate (prerequisite, not done yet):** Phase 2 cutover requires a **disposable Sepolia** deploy + dry-run of deposit/withdraw scripts first. Guestbook has **no** shadow/dual-write mode — do not invent one. This item is a hard gate before funding or “production” Sepolia use; execution is Phase 2 work.
+- [x] **Agent-permission / tool-access audit (scheduled):** Phase 2 prerequisite — before Sepolia keys or non-loopback binds, audit which agents/tools may read `.env`, broadcast txs, or change bind addresses. Stub checklist: (1) no cloud agent with repo secrets for funded keys, (2) CODEOWNERS review for `scripts/lib.sh` `start_bg`/`stop_bg`, (3) confirm Foundry tripwire still on for non-901.
