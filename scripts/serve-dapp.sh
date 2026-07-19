@@ -10,6 +10,8 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
   echo "ERROR: invalid DAPP_HTTP_PORT: $PORT" >&2
   exit 1
 fi
+# Explicit loopback URL check (matches bind below).
+assert_loopback_url "http://127.0.0.1:${PORT}" "dApp HTTP"
 
 cd "$FORTEL2_ROOT/dapp"
 echo "Serving dapp at http://127.0.0.1:${PORT}/ (loopback only)"

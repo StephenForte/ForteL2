@@ -16,6 +16,7 @@ if [[ -z "${DEMO_A_PRIVATE_KEY:-}" || ! "$DEMO_A_PRIVATE_KEY" =~ ^0x[0-9a-fA-F]{
   echo "ERROR: DEMO_A_PRIVATE_KEY missing or malformed" >&2
   exit 1
 fi
+refuse_foundry_defaults_unless_local_l2 "$DEMO_A_PRIVATE_KEY" "DEMO_A_PRIVATE_KEY"
 
 wait_for_rpc "$L2_RPC_URL" "L2"
 

@@ -8,6 +8,8 @@ source "$SCRIPT_DIR/lib.sh"
 require_bin op-geth
 require_bin op-node
 require_bin cast
+assert_block_times
+assert_local_rpc_urls
 
 "$SCRIPT_DIR/03-init-l2.sh"
 

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:9545 http://localhost:9545; img-src 'self' data:;"
+    content="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:9545 http://localhost:9545; img-src 'self' data:;"
   />
   <title>ForteL2 Guestbook</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -39,15 +39,15 @@
         <input
           id="text"
           type="text"
-          maxlength="280"
           autocomplete="off"
           spellcheck="true"
           placeholder="Write a short message…"
           disabled
+          aria-describedby="byte-hint"
         />
         <button type="button" id="sign" class="btn btn-primary" disabled>Sign</button>
       </div>
-      <p class="hint"><span id="char-count">0</span>/280 bytes</p>
+      <p id="byte-hint" class="hint"><span id="char-count">0</span>/280 bytes (UTF-8; not characters)</p>
     </section>
 
     <section class="feed" aria-label="On-chain messages">

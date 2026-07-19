@@ -28,7 +28,7 @@ This is not a production chain. No real funds, no external users, no uptime comm
 |---|---|---|
 | **0** | Deployment-path spike: timeboxed test of Kurtosis `optimism-package` on Apple Silicon; decide Kurtosis vs. manual builds | **Done — verdict: manual builds** (OrbStack/Docker disrupted host networking; see `tasks/spike-notes.md`) |
 | **1** | OP Stack devnet on Mac mini via **native binaries**: local L1 (Anvil), op-deployer, sequencer, batcher, proposer, demo dApp (genesis-funded accounts, no bridge); no Docker/Kurtosis on this host | **Done** — stack running; MetaMask guestbook verified; batcher 5‑min stop/restart observed |
-| **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config) | This PRD (stories included) |
+| **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config); **Phase 2 readiness gate** (new keys, separate deploy config, non-loopback review, sandbox/dry-run) | This PRD (stories included) |
 | **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) | Future |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
@@ -159,6 +159,16 @@ Phase 1 runs entirely as **native host processes** (launchd, shell scripts, or a
 - [ ] Full withdrawal executed: initiate on L2 → prove on L1 → finalize on L1 (three distinct transactions, hashes recorded)
 - [ ] Written in README: why mainnet uses 7 days, and what the honest-proposer assumption means without fault proofs
 
+### US-012: Phase 2 readiness gate (before Sepolia)
+**Description:** As the operator, I want Phase 1b to leave a hard gate before Phase 2 so local throwaway keys, loopback assumptions, and deploy config cannot accidentally follow the stack onto Sepolia.
+
+**Acceptance Criteria:**
+- [ ] **New keys for any non-local chain:** document and enforce that Foundry/Anvil default mnemonic keys must never be funded or reused on Sepolia (or any public net). Scripts that broadcast fail closed when `L2_CHAIN_ID != 901` (local learning ID) if a known Foundry default private key is still configured
+- [ ] **Separate deploy config:** Phase 2 uses a distinct env/deploy artifact set (not a reused Phase 1 `.env` + `deployments/.deployer` tree). README names what is replaced: L1 contracts, L2 genesis/rollup, RPC URLs, chain IDs, funded accounts
+- [ ] **Non-loopback policy review:** before any RPC, batcher, proposer, or dApp bind/advertise moves off `127.0.0.1`/`localhost`, record an explicit go/no-go in README (what is exposed, to whom, auth model, and rollback). Default remains loopback-only until that review is written
+- [ ] **Sandbox / dry-run gate (not shadow mode):** Phase 2 cutover is validated on a disposable Sepolia deployment + dry-run scripts first; guestbook has no meaningful shadow mode — do not invent dual-write production shadowing
+- [ ] Agent-permission / tool-access audit (deferred from Phase 1) is scheduled as a Phase 2 prerequisite checklist item in README, not skipped
+
 ## Functional Requirements
 
 - FR-1: The system must run the unmodified OP Stack (`op-node`, `op-batcher`, `op-proposer`, plus a supported execution client — `op-geth` and/or `op-reth`) — no forks or custom patches in Phase 1
@@ -172,6 +182,7 @@ Phase 1 runs entirely as **native host processes** (launchd, shell scripts, or a
 - FR-9: All keys used are throwaway devnet keys; nothing in the repo may ever hold value
 - FR-10: Every phase boundary in the roadmap table must be preserved in this document as phases complete (edit status column, don't delete rows)
 - FR-11: L1 contract deployment and L2 genesis generation must use native tooling (`op-deployer` or documented equivalent), not Kurtosis-generated artifacts
+- FR-12: Before Phase 2, Foundry/Anvil default keys must be rejected for any `L2_CHAIN_ID` other than the local learning ID (901); Phase 2 must use a separate deploy/env tree and an explicit non-loopback policy review (US-012)
 
 ## Non-Goals (Out of Scope for Phase 1/1b)
 

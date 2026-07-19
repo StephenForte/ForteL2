@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
+assert_block_times
+assert_local_rpc_urls
+warn_if_missing_env_file
+
 "$SCRIPT_DIR/01-start-l1.sh"
 
 if [[ ! -f "$DEPLOY_DIR/genesis.json" || ! -f "$FORTEL2_ROOT/deployments/deployments.json" ]]; then

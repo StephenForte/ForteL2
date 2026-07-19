@@ -73,15 +73,17 @@ chmod +x scripts/*.sh
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ```
 
-### Tests
+### Tests / merge guardrails
 
 ```bash
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
-./scripts/test-helpers.sh          # address / loopback helper checks
+./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire checks
 ```
 
-Agent workflow notes live in `AGENTS.md`.
+GitHub Actions runs the same pair on every PR (`.github/workflows/ci.yml`). Startup scripts hard-fail if `L1_BLOCK_TIME < L2_BLOCK_TIME` or RPCs leave loopback. Broadcast scripts refuse Foundry default keys when `L2_CHAIN_ID != 901`.
+
+Agent workflow notes live in `AGENTS.md`. `scripts/lib.sh` process helpers (`start_bg` / `stop_bg`) are privileged — see `.github/CODEOWNERS`.
 
 Stop / reset:
 
@@ -255,4 +257,14 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 ## Phase roadmap status
 
-See `tasks/prd-l2-learning-chain.md`. Phase 0 done; Phase 1 is this runbook; Phase 1b adds bridging.
+See `tasks/prd-l2-learning-chain.md`. Phase 0 done; Phase 1 is this runbook; Phase 1b adds bridging **and** the Phase 2 readiness gate (US-012).
+
+### Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
+
+Do **not** start Phase 2 until all of these are true:
+
+- [ ] Fresh keys generated — never reuse Foundry/Anvil defaults on Sepolia (scripts already refuse them when `L2_CHAIN_ID != 901`)
+- [ ] Separate Phase 2 env + deploy artifacts (new `.env`, new `deployments/` / `.deployer` tree). Replaced: L1 contracts, L2 genesis/rollup, RPC URLs, chain IDs, funded accounts
+- [ ] Non-loopback policy review written here (what is exposed, to whom, auth, rollback) before any bind leaves `127.0.0.1`/`localhost`
+- [ ] Disposable Sepolia sandbox deploy + dry-run scripts validated first (guestbook has no shadow mode)
+- [ ] Agent-permission / tool-access audit completed (deferred from Phase 1)

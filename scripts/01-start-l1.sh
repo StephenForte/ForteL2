@@ -7,6 +7,8 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_bin anvil
 require_bin cast
+assert_block_times
+assert_loopback_url "$L1_RPC_URL" "L1_RPC_URL"
 
 L1_STATE="$DATA_DIR/l1/anvil-state.json"
 mkdir -p "$DATA_DIR/l1"
