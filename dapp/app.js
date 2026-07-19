@@ -14,6 +14,19 @@ function utf8ByteLength(text) {
   return new TextEncoder().encode(text).length;
 }
 
+/** Trim to MAX_TEXT_BYTES and refresh the counter/color. Skip while IME is composing. */
+function syncMessageByteBudget(ev) {
+  if (ev?.isComposing || imeComposing) return;
+  let value = els.text.value;
+  while (utf8ByteLength(value) > MAX_TEXT_BYTES) {
+    value = value.slice(0, -1);
+  }
+  if (value !== els.text.value) els.text.value = value;
+  const bytes = utf8ByteLength(els.text.value);
+  els.charCount.textContent = String(bytes);
+  els.charCount.style.color = bytes >= MAX_TEXT_BYTES ? "var(--warn)" : "";
+}
+
 const els = {
   connect: document.getElementById("connect"),
   refresh: document.getElementById("refresh"),
@@ -29,6 +42,7 @@ let provider = null;
 let signer = null;
 let writeContract = null;
 let busy = false;
+let imeComposing = false;
 
 function setStatus(msg, isError = false) {
   els.status.textContent = msg;
@@ -189,7 +203,7 @@ async function signMessage() {
     setStatus(`Tx ${tx.hash} — waiting…`);
     await tx.wait();
     els.text.value = "";
-    els.charCount.textContent = "0";
+    syncMessageByteBudget();
     setStatus(`Confirmed ${tx.hash}`);
     await refresh();
   } catch (e) {
@@ -220,19 +234,20 @@ function wireWalletEvents() {
 els.connect.addEventListener("click", () => connect());
 els.refresh.addEventListener("click", () => refresh());
 els.sign.addEventListener("click", () => signMessage());
-els.text.addEventListener("input", () => {
-  // Enforce UTF-8 byte budget (contract MAX_TEXT_BYTES), not JS string length /
-  // HTML maxlength characters — multibyte glyphs must not slip past the UI.
-  let value = els.text.value;
-  while (utf8ByteLength(value) > MAX_TEXT_BYTES) {
-    value = value.slice(0, -1);
-  }
-  if (value !== els.text.value) els.text.value = value;
-  const bytes = utf8ByteLength(els.text.value);
-  els.charCount.textContent = String(bytes);
-  els.charCount.style.color = bytes >= MAX_TEXT_BYTES ? "var(--warn)" : "";
+// Enforce UTF-8 byte budget (contract MAX_TEXT_BYTES), not JS string length /
+// HTML maxlength characters — multibyte glyphs must not slip past the UI.
+// Skip while IME is composing so CJK composition is not corrupted mid-input.
+els.text.addEventListener("compositionstart", () => {
+  imeComposing = true;
 });
+els.text.addEventListener("compositionend", () => {
+  imeComposing = false;
+  syncMessageByteBudget();
+});
+els.text.addEventListener("input", (ev) => syncMessageByteBudget(ev));
 els.text.addEventListener("keydown", (ev) => {
+  // keyCode 229 = IME processing (Safari/Chrome during composition).
+  if (ev.isComposing || ev.keyCode === 229) return;
   if (ev.key === "Enter" && !els.sign.disabled) {
     ev.preventDefault();
     signMessage();
@@ -240,7 +255,7 @@ els.text.addEventListener("keydown", (ev) => {
 });
 els.text.addEventListener("paste", () => {
   // Re-run byte trim after paste populates the input.
-  queueMicrotask(() => els.text.dispatchEvent(new Event("input")));
+  queueMicrotask(() => syncMessageByteBudget());
 });
 
 wireWalletEvents();
