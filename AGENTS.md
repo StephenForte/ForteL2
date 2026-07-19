@@ -43,6 +43,7 @@ cp .env.example .env          # once
 ./scripts/deploy-guestbook.sh # after Guestbook ABI changes
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ./scripts/serve-viewer.sh     # http://127.0.0.1:8081 pipeline viewer
+./scripts/demo-checklist.sh   # auto smokes + Phase 1→1c verification checklist
 ./scripts/stop-all.sh
 ./scripts/reset.sh            # wipe datadir + redeploy next start (needed after portal delay overrides)
 ```

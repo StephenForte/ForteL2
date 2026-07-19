@@ -77,6 +77,7 @@ chmod +x scripts/*.sh
 ./scripts/deploy-guestbook.sh
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ./scripts/serve-viewer.sh     # http://127.0.0.1:8081 pipeline viewer (Phase 1c)
+./scripts/demo-checklist.sh   # operator demo: auto smokes + human checklist
 ```
 
 ### Tests / merge guardrails
