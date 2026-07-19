@@ -11,6 +11,7 @@ import {
   parseAbi,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
+import { readContract } from 'viem/actions'
 
 export const MESSAGE_PASSER = '0x4200000000000000000000000000000000000016'
 
@@ -22,6 +23,11 @@ export const disputeGameAbi = parseAbi([
   'function l2BlockNumber() view returns (uint256)',
   // Duration is a uint64 wrapper; ABI surface is uint64 seconds.
   'function maxClockDuration() view returns (uint64)',
+])
+
+/** DisputeGameFactory — used to resolve game proxy (viem getGame does not return it). */
+export const disputeGameFactoryAbi = parseAbi([
+  'function gameAtIndex(uint256 index) view returns (uint32 gameType_, uint64 timestamp_, address proxy_)',
 ])
 
 export function loadEnvFromShell() {
@@ -112,4 +118,23 @@ export async function increaseTime(publicClient, seconds) {
 
 export async function sleep(ms) {
   await new Promise((r) => setTimeout(r, ms))
+}
+
+/**
+ * Resolve dispute-game proxy address from factory index.
+ * viem getGame()/findLatestGames do not include `proxy` — only gameAtIndex does.
+ */
+export async function resolveGameProxy(publicClient, factoryAddress, gameIndex) {
+  const result = await readContract(publicClient, {
+    address: factoryAddress,
+    abi: disputeGameFactoryAbi,
+    functionName: 'gameAtIndex',
+    args: [BigInt(gameIndex)],
+  })
+  // viem may return a tuple array or named object depending on version.
+  const proxy = result?.proxy_ ?? result?.[2]
+  if (!proxy || proxy === '0x0000000000000000000000000000000000000000') {
+    throw new Error(`gameAtIndex(${gameIndex}) returned empty proxy`)
+  }
+  return proxy
 }

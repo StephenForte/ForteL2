@@ -15,6 +15,7 @@ import {
   increaseTime,
   disputeGameAbi,
   sleep,
+  resolveGameProxy,
 } from './lib.mjs'
 import { finalizeWithdrawal } from 'viem/op-stack'
 import { readContract, writeContract } from 'viem/actions'
@@ -34,7 +35,7 @@ const deploymentsPath =
   path.resolve(here, '../../deployments/deployments.json')
 
 const artifact = readJson(artifactPath)
-if (!artifact.proveTxHash || !artifact.withdrawal || !artifact.gameProxy) {
+if (!artifact.proveTxHash || !artifact.withdrawal) {
   console.error('ERROR: artifact incomplete — run withdraw-prove.sh first')
   process.exit(1)
 }
@@ -42,6 +43,17 @@ if (!artifact.proveTxHash || !artifact.withdrawal || !artifact.gameProxy) {
 const { portal, factory } = loadDeployments(deploymentsPath)
 const chains = makeChains({ portal, factory })
 const { account, publicL1, walletL1 } = makeClients(chains)
+
+// Older proves omitted gameProxy (viem getGame has no proxy field) — recover from index.
+if (!artifact.gameProxy) {
+  if (artifact.gameIndex == null) {
+    console.error('ERROR: artifact missing gameProxy and gameIndex — re-run withdraw-prove.sh')
+    process.exit(1)
+  }
+  artifact.gameProxy = await resolveGameProxy(publicL1, factory, artifact.gameIndex)
+  writeJson(artifactPath, artifact)
+  console.log('recovered gameProxy from gameAtIndex:', artifact.gameProxy)
+}
 
 const portalAbi = parseAbi([
   'function proofMaturityDelaySeconds() view returns (uint64)',
