@@ -216,7 +216,7 @@ cast call <ADDR> "count()(uint256)" --rpc-url http://127.0.0.1:9545
 cast balance 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc --rpc-url http://127.0.0.1:9545
 ```
 
-Blockscout (and any docker-compose explorer) is **explicitly deferred** on this host.
+Blockscout / other containerized explorers, and hosted SaaS explorers (e.g. Ethernal), are **explicitly deferred** on this host until the Phase 1b non-loopback policy review allows a reachable RPC (or a container-capable host is used). Phase 1c’s **pipeline viewer** is the intentional learning UI — not a full explorer.
 
 ## MetaMask (US-008)
 
@@ -257,7 +257,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 ## Phase roadmap status
 
-See `tasks/prd-l2-learning-chain.md`. Phase 0 done; Phase 1 is this runbook; Phase 1b adds bridging **and** the Phase 2 readiness gate (US-012).
+See `tasks/prd-l2-learning-chain.md`. Phase 0 done; Phase 1 is this runbook; Phase 1b adds bridging **and** the Phase 2 readiness gate (US-012); Phase 1c adds a loopback **pipeline viewer** (sequencer / batcher / proposer / tx aggregate). Hosted explorers (e.g. Ethernal) stay deferred until a non-loopback RPC is deliberately allowed.
 
 ### Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
