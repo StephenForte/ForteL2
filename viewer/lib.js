@@ -171,3 +171,18 @@ export function formatRate(n, digits = 1) {
   if (n == null || !Number.isFinite(n)) return "—";
   return n.toFixed(digits);
 }
+
+/**
+ * Inclusive start block for scanning `windowSize` blocks ending at `tip`.
+ * ethers v6 `Provider.getBlockNumber()` returns a number — keep arithmetic in
+ * Number space (mixing with BigInt throws TypeError).
+ * @param {number|bigint|string} tip
+ * @param {number} windowSize
+ * @returns {number}
+ */
+export function scanFromBlock(tip, windowSize) {
+  const t = Number(tip);
+  const w = Math.max(1, Number(windowSize) || 1);
+  if (!Number.isFinite(t) || t <= 0) return 0;
+  return t > w - 1 ? t - (w - 1) : 0;
+}

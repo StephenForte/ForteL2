@@ -5,6 +5,7 @@ import {
   filterBatchTxs,
   formatAge,
   formatRate,
+  scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
   summarizeSyncStatus,
@@ -120,5 +121,17 @@ describe("formatRate", () => {
   it("formats finite numbers", () => {
     assert.equal(formatRate(1.234, 1), "1.2");
     assert.equal(formatRate(null), "—");
+  });
+});
+
+describe("scanFromBlock", () => {
+  it("uses Number arithmetic for ethers v6 tip values", () => {
+    assert.equal(scanFromBlock(100, 5), 96);
+    assert.equal(scanFromBlock(100, 40), 61);
+    assert.equal(scanFromBlock(3, 5), 0);
+    assert.equal(scanFromBlock(0, 40), 0);
+  });
+  it("accepts bigint tip without mixing types in callers", () => {
+    assert.equal(scanFromBlock(100n, 30), 71);
   });
 });

@@ -18,6 +18,7 @@ import {
   filterBatchTxs,
   formatAge,
   formatRate,
+  scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
   summarizeSyncStatus,
@@ -118,7 +119,7 @@ async function refreshSequencer(l2, nodeUrl) {
     summary.lagUnsafeSafe == null ? "—" : String(summary.lagUnsafeSafe);
 
   const tip = await l2.getBlockNumber();
-  const from = tip > 4n ? tip - 4n : 0n;
+  const from = scanFromBlock(tip, 5);
   const blocks = [];
   for (let n = from; n <= tip; n++) {
     const b = await l2.getBlock(n);
@@ -131,7 +132,7 @@ async function refreshSequencer(l2, nodeUrl) {
 
 async function refreshBatcher(l1) {
   const tip = await l1.getBlockNumber();
-  const from = tip > BigInt(L1_SCAN_BLOCKS - 1) ? tip - BigInt(L1_SCAN_BLOCKS - 1) : 0n;
+  const from = scanFromBlock(tip, L1_SCAN_BLOCKS);
   const collected = [];
   for (let n = from; n <= tip; n++) {
     const block = await l1.getBlock(n, true);
@@ -178,7 +179,7 @@ async function refreshProposer(l1) {
 
 async function refreshAggregate(l2) {
   const tip = await l2.getBlockNumber();
-  const from = tip > BigInt(L2_WINDOW_BLOCKS - 1) ? tip - BigInt(L2_WINDOW_BLOCKS - 1) : 0n;
+  const from = scanFromBlock(tip, L2_WINDOW_BLOCKS);
   const blocks = [];
   for (let n = from; n <= tip; n++) {
     const b = await l2.getBlock(n, false);
