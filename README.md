@@ -327,7 +327,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 ## Phase roadmap status
 
-See `tasks/prd-l2-learning-chain.md`. Phase 0–1b done; **Phase 1c pipeline viewer is done** (loopback US-013 / US-014). Hosted explorers (e.g. Ethernal) stay deferred until a non-loopback RPC is deliberately allowed.
+See `tasks/prd-l2-learning-chain.md`. Phase 0–1c done; **Phase 1d** next (viewer mempool polish + Sepolia funding/key gate). Phase 2 = Sepolia cutover; Phase 3 = Render replica with **stock** op-geth/op-reth + op-node; Phase 6 = custom derivation (optional separate PRD). Hosted explorers stay deferred until non-loopback is allowed.
 
 ### Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
