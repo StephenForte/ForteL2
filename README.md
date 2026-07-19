@@ -138,14 +138,38 @@ After deploy, `deployments/.deployer/rollup.json` tells op-node how this L2 rela
 
 The batcher watches L2 blocks, packs their transactions into **channels** of compressed **frames**, and submits those frames to L1 (here as ordinary calldata txs to the batch inbox). Anyone with the L1 history can re-run the **derivation pipeline** (what op-node does in verifier mode) and rebuild the same L2 chain. That is what “the L2 is derivable from L1” means: L1 data availability, not L2 peer sync, is the source of truth for reconstructing state.
 
-If you stop the batcher for a few minutes, L2 keeps producing unsafe blocks, but nothing new lands on L1. When the batcher restarts it catches up and posts the backlog. Safe/finalized L2 heads lag until batches (and later proposals) land.
+### Observed: stop batcher 5 minutes, then restart (US-005)
 
-Inspect batcher activity:
+Ran on this chain (2026-07-18): kill `op-batcher` only, leave sequencer + Anvil running, sample every 30s, then `./scripts/05-start-batcher.sh`.
+
+| Phase | What happened |
+|---|---|
+| During stop (~5 min) | **Batcher L1 nonce frozen** at 49 (no new batch txs). **Unsafe L2 kept advancing** (~308 → 459). **Safe L2 stuck** at 296 — derivation cannot promote new unsafe blocks without fresh L1 data. |
+| On restart | Batcher immediately closed a **catch-up channel** covering the backlog (~164 L2 blocks, ~12KB compressed calldata, gas ~498k vs normal ~41k). Nonce resumed climbing (49 → 57 in ~90s). **Safe L2 climbed** toward the tip (296 → 496) as frames landed and op-node derived them. |
+
+Takeaway: stopping the batcher does **not** stop the sequencer; it only pauses L1 data availability. Restart recovers by posting a larger backlog batch, then resumes steady-state cadence.
+
+Reproduce:
+
+```bash
+# baseline
+cast nonce "$BATCHER_ADDRESS" --rpc-url "$L1_RPC_URL"
+cast rpc optimism_syncStatus --rpc-url "$L2_NODE_RPC_URL" | jq '{unsafe:.unsafe_l2.number, safe:.safe_l2.number}'
+
+# stop only the batcher
+kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
+# wait ~5 minutes; watch nonce stay flat while unsafe L2 rises and safe L2 stalls
+
+# restart
+./scripts/05-start-batcher.sh
+# watch nonce rise again and safe head catch up; log: "Publishing transaction" / "Channel closed"
+```
+
+Inspect batcher activity anytime:
 
 ```bash
 cast nonce 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 --rpc-url http://127.0.0.1:8545
 # rising nonce ⇒ batch txs submitted
-cast txs 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 --rpc-url http://127.0.0.1:8545   # if supported
 ```
 
 ## Proposer trust model (US-006)
