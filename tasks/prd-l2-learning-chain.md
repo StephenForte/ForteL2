@@ -29,7 +29,7 @@ This is not a production chain. No real funds, no external users, no uptime comm
 | **0** | Deployment-path spike: timeboxed test of Kurtosis `optimism-package` on Apple Silicon; decide Kurtosis vs. manual builds | **Done — verdict: manual builds** (OrbStack/Docker disrupted host networking; see `tasks/spike-notes.md`) |
 | **1** | OP Stack devnet on Mac mini via **native binaries**: local L1 (Anvil), op-deployer, sequencer, batcher, proposer, demo dApp (genesis-funded accounts, no bridge); no Docker/Kurtosis on this host | **Done** — stack running; MetaMask guestbook verified; batcher 5‑min stop/restart observed |
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config); **Phase 2 readiness gate** (new keys, separate deploy config, non-loopback review, sandbox/dry-run) | **Done** — deposit/withdraw scripts + US-012 docs/tripwires (operator runs against live stack) |
-| **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | This PRD (stories included) |
+| **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014) |
 | **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) | Future |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
@@ -179,25 +179,25 @@ Phase 1c comes **after** Phase 1b so the viewer can show bridge-related activity
 **Description:** As the operator, I want a polished, loopback-only **pipeline viewer** screen so I can watch sequencer block building, batcher L1 posts, proposer output activity, and aggregate L2 transaction throughput without standing up a full block explorer.
 
 **Acceptance Criteria:**
-- [ ] A static frontend (same class as the guestbook: ESM, vendored ethers or equivalent, no bundler) is served on loopback only (e.g. `127.0.0.1`, assert via existing serve helpers)
-- [ ] The UI is named and documented as the **pipeline viewer** (not “explorer”)
-- [ ] Four live panels, each fed by L1/L2 RPC polls (no Docker indexer, no log-tail daemon required):
+- [x] A static frontend (same class as the guestbook: ESM, vendored ethers or equivalent, no bundler) is served on loopback only (e.g. `127.0.0.1`, assert via existing serve helpers)
+- [x] The UI is named and documented as the **pipeline viewer** (not “explorer”)
+- [x] Four live panels, each fed by L1/L2 RPC polls (no Docker indexer, no log-tail daemon required):
   1. **Sequencer** — L2 head / recent blocks, block interval, unsafe vs safe (and finalized if available) from `optimism_syncStatus` or equivalent
   2. **Batcher** — recent L1 submissions from the batcher address to the batch inbox (cadence + last tx hash / age)
   3. **Proposer** — recent output-root / dispute-game activity on L1 (last proposal age + pointer into DisputeGameFactory or equivalent)
   4. **Aggregate transactions** — L2 tx rate / empty vs non-empty blocks over a short rolling window
-- [ ] After a Phase 1b deposit and withdrawal, the operator can point at the viewer and relate: deposit → L2 inclusion / sync heads; withdrawal → need for proposer output before prove/finalize
-- [ ] README documents how to start the viewer, which RPCs it uses, and what each panel means in one short paragraph
-- [ ] Hosted / SaaS explorers (e.g. Ethernal) and containerized explorers (e.g. Blockscout) remain **out of scope** for Phase 1c — deferred until a non-loopback RPC is deliberately allowed (US-012 review) or a container-capable host is used; optional native single-binary explorers (e.g. Otterscan) may be noted but are not required to close 1c
+- [x] After a Phase 1b deposit and withdrawal, the operator can point at the viewer and relate: deposit → L2 inclusion / sync heads; withdrawal → need for proposer output before prove/finalize
+- [x] README documents how to start the viewer, which RPCs it uses, and what each panel means in one short paragraph
+- [x] Hosted / SaaS explorers (e.g. Ethernal) and containerized explorers (e.g. Blockscout) remain **out of scope** for Phase 1c — deferred until a non-loopback RPC is deliberately allowed (US-012 review) or a container-capable host is used; optional native single-binary explorers (e.g. Otterscan) may be noted but are not required to close 1c
 
 ### US-014: Pipeline viewer polish and runbook fit
 **Description:** As the operator, I want the pipeline viewer to feel intentional (clear hierarchy, readable refresh, failure states) and to sit cleanly next to `status.sh` / the guestbook in the everyday runbook.
 
 **Acceptance Criteria:**
-- [ ] Layout is a single composition with the four panels above — not a generic multi-widget “dashboard” cluttered with unrelated stats
-- [ ] RPC / process-down failures surface as plain status text (no silent stale panels); refresh cadence is visible or documented
-- [ ] Start path is a documented script or extension of existing serve helpers (loopback assert); stop does not require tearing down the chain
-- [ ] Topology / roadmap docs mention Phase 1c and the viewer’s place relative to guestbook vs deferred explorers
+- [x] Layout is a single composition with the four panels above — not a generic multi-widget “dashboard” cluttered with unrelated stats
+- [x] RPC / process-down failures surface as plain status text (no silent stale panels); refresh cadence is visible or documented
+- [x] Start path is a documented script or extension of existing serve helpers (loopback assert); stop does not require tearing down the chain
+- [x] Topology / roadmap docs mention Phase 1c and the viewer’s place relative to guestbook vs deferred explorers
 
 ## Functional Requirements
 

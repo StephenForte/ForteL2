@@ -1,6 +1,6 @@
 /**
  * ForteL2 Guestbook — local learning dApp (chain 901).
- * Uses ethers v6 from jsDelivr; wallet + RPC stay on loopback.
+ * Uses vendored ethers v6; wallet + RPC stay on loopback.
  */
 import { BrowserProvider, Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.5.min.js";
 import { GUESTBOOK_ADDRESS, GUESTBOOK_ABI, L2_CHAIN_ID, L2_RPC_URL } from "./config.js";

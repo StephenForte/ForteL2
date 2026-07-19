@@ -12,7 +12,7 @@ Personal OP Stack L2 on a single Apple Silicon Mac, for learning only. **Native 
 | DA | **calldata** batches (`--data-availability-type=calldata`) — Anvil has no beacon/blobs |
 | EL | **op-geth** (`--l2.enginekind=geth`) — verified arm64 in Phase 0 |
 | L1 / L2 block time | **both 2s** (`L1_BLOCK_TIME` must be ≥ `L2_BLOCK_TIME`) |
-| Explorer | `cast` / RPC only — Blockscout deferred |
+| Explorer | `cast` / RPC + Phase 1c **pipeline viewer** — Blockscout / hosted explorers deferred |
 
 ## Toolchain versions
 
@@ -52,6 +52,9 @@ flowchart LR
   Batcher -->|sync status| Node
   Proposer -->|rollup RPC| Node
   Dapp[Guestbook dApp] -->|eth_send / eth_call| Geth
+  Viewer[Pipeline viewer] -->|syncStatus + polls| Node
+  Viewer -->|batcher txs + DGF| L1
+  Viewer -->|L2 blocks| Geth
 ```
 
 ## Roles (who does what)
@@ -73,6 +76,7 @@ chmod +x scripts/*.sh
 ./scripts/withdraw-initiate.sh && ./scripts/withdraw-prove.sh && ./scripts/withdraw-finalize.sh
 ./scripts/deploy-guestbook.sh
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
+./scripts/serve-viewer.sh     # http://127.0.0.1:8081 pipeline viewer (Phase 1c)
 ```
 
 ### Tests / merge guardrails
@@ -80,13 +84,13 @@ chmod +x scripts/*.sh
 ```bash
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
-./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire checks
+./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config
+node --test viewer/lib.test.js     # pipeline viewer pure helpers
 ```
 
-GitHub Actions runs the same pair on every PR (`.github/workflows/ci.yml`). Startup scripts hard-fail if `L1_BLOCK_TIME < L2_BLOCK_TIME` or RPCs leave loopback. Broadcast scripts refuse Foundry default keys when `L2_CHAIN_ID != 901`.
+GitHub Actions runs the same trio on every PR (`.github/workflows/ci.yml`). Startup scripts hard-fail if `L1_BLOCK_TIME < L2_BLOCK_TIME` or RPCs leave loopback. Broadcast scripts refuse Foundry default keys when `L2_CHAIN_ID != 901`.
 
-Agent workflow notes live in `AGENTS.md`. `scripts/lib.sh` process helpers (`start_bg` / `stop_bg`) are privileged — see `.github/CODEOWNERS`.
-
+Agent workflow notes live in `AGENTS.md`. `scripts/lib.sh` process helpers (`start_bg` / `stop_bg`) are privileged — see `.github/CODEOWNERS`. `serve_static_loopback` is not privileged process control.
 Stop / reset:
 
 ```bash
@@ -133,6 +137,7 @@ ln -sfn ~/src/fortel2/op-geth/build/bin/geth ~/src/fortel2/bin/op-geth
 | L2 RPC | `http://127.0.0.1:9545` (chain 901) |
 | op-node RPC | `http://127.0.0.1:9547` |
 | dApp | `http://127.0.0.1:8080` |
+| Pipeline viewer | `http://127.0.0.1:8081` |
 
 Prefunded L1/L2 accounts use the Foundry test mnemonic (`test test … junk`). Keys are in `.env.example`.
 
@@ -260,6 +265,28 @@ cast balance 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc --rpc-url http://127.0.0
 
 Blockscout / other containerized explorers, and hosted SaaS explorers (e.g. Ethernal), are **explicitly deferred** on this host until the Phase 1b non-loopback policy review allows a reachable RPC (or a container-capable host is used). Phase 1c’s **pipeline viewer** is the intentional learning UI — not a full explorer.
 
+## Pipeline viewer (Phase 1c / US-013 / US-014)
+
+Ops dashboard for the sequencer → batcher → proposer path. Client-side polls only (no indexer).
+
+```bash
+./scripts/serve-viewer.sh   # regenerates viewer/config.js, then http://127.0.0.1:8081/
+# or: ./scripts/gen-viewer-config.sh && open the viewer after deploy
+```
+
+Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from `.env` + `deployments/deployments.json` + `deployments/.deployer/rollup.json`.
+
+| Panel | RPCs | What it shows |
+|---|---|---|
+| **Sequencer** | op-node `optimism_syncStatus`, L2 blocks | Unsafe / safe / finalized heads, lag, recent block interval |
+| **Batcher** | L1 recent blocks | Posts from `BATCHER_ADDRESS` → batch inbox (last hash, age, cadence) |
+| **Proposer** | L1 DisputeGameFactory | `gameCount`, latest game proxy / age / type |
+| **Aggregate** | L2 recent blocks | Empty vs non-empty blocks, tx count, rough tx/min |
+
+Refresh cadence defaults to **5s** (shown in the UI). Panel RPC failures surface as plain status text — panels do not silently go stale. After a deposit, watch L2 inclusion and sync heads; after a withdrawal initiate, you need proposer output before prove/finalize.
+
+Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer.
+
 ## MetaMask (US-008)
 
 Add network:
@@ -299,7 +326,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 ## Phase roadmap status
 
-See `tasks/prd-l2-learning-chain.md`. Phase 0 done; Phase 1 is this runbook; Phase 1b adds bridging **and** the Phase 2 readiness gate (US-012); Phase 1c adds a loopback **pipeline viewer** (sequencer / batcher / proposer / tx aggregate). Hosted explorers (e.g. Ethernal) stay deferred until a non-loopback RPC is deliberately allowed.
+See `tasks/prd-l2-learning-chain.md`. Phase 0–1b done; **Phase 1c pipeline viewer is done** (loopback US-013 / US-014). Hosted explorers (e.g. Ethernal) stay deferred until a non-loopback RPC is deliberately allowed.
 
 ### Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 

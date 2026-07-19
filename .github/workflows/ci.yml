@@ -7,7 +7,7 @@ on:
 
 jobs:
   guardrails:
-    name: forge test + script helpers
+    name: forge test + script helpers + viewer unit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,3 +37,6 @@ jobs:
 
       - name: Script helper tests
         run: ./scripts/test-helpers.sh
+
+      - name: Pipeline viewer unit tests
+        run: node --test viewer/lib.test.js

@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "ESM marker so node --test can import viewer/lib.js"
+}
