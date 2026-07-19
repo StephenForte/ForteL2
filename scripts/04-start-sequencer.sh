@@ -10,6 +10,7 @@ require_bin op-node
 require_bin cast
 assert_block_times
 assert_local_rpc_urls
+refuse_foundry_defaults_unless_local_l2 "${SEQUENCER_PRIVATE_KEY:-}" "SEQUENCER_PRIVATE_KEY"
 
 "$SCRIPT_DIR/03-init-l2.sh"
 
