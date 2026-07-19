@@ -61,15 +61,17 @@ echo "Waiting for L2 balance to increase (derivation; up to ${POLL_TRIES}s) ..."
 AFTER="$BEFORE"
 for ((i = 0; i < POLL_TRIES; i++)); do
   AFTER=$(cast balance "$ADMIN_ADDRESS" --rpc-url "$L2_RPC_URL")
-  if [[ "$AFTER" != "$BEFORE" ]]; then
+  # Require a rise — an unrelated L2 spend must not confirm the deposit early.
+  if uint_gt "$AFTER" "$BEFORE"; then
     break
   fi
   sleep 1
 done
 
-if [[ "$AFTER" == "$BEFORE" ]]; then
-  echo "ERROR: L2 balance unchanged after ${POLL_TRIES}s — is sequencer+op-node deriving?" >&2
+if ! uint_gt "$AFTER" "$BEFORE"; then
+  echo "ERROR: L2 balance did not increase after ${POLL_TRIES}s — is sequencer+op-node deriving?" >&2
   echo "L1 tx: $L1_TX" >&2
+  echo "L2 balance before=${BEFORE} after=${AFTER}" >&2
   exit 1
 fi
 

@@ -28,6 +28,11 @@ assert_false() {
   fi
 }
 
+# Wei-safe unsigned compare (deposit poll must require increase, not inequality).
+assert_true "uint_gt larger" uint_gt "1000000000000000001" "1000000000000000000"
+assert_false "uint_gt equal" uint_gt "42" "42"
+assert_false "uint_gt smaller" uint_gt "1" "2"
+
 assert_true "valid checksum-ish address" is_eth_address "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
 assert_true "valid lowercase address" is_eth_address "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
 assert_false "reject short address" is_eth_address "0x9965507D1a55bcC2695C58ba16FB37d819"
