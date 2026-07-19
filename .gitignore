@@ -9,5 +9,6 @@ deployments/.deployer/intent.toml.bak
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+contracts/lib/forge-std/.git/
 .DS_Store
 dapp/node_modules/

@@ -73,6 +73,16 @@ chmod +x scripts/*.sh
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ```
 
+### Tests
+
+```bash
+export PATH="$HOME/.foundry/bin:$PATH"
+cd contracts && forge test          # Guestbook unit + fuzz tests
+./scripts/test-helpers.sh          # address / loopback helper checks
+```
+
+Agent workflow notes live in `AGENTS.md`.
+
 Stop / reset:
 
 ```bash

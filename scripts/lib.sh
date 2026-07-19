@@ -130,3 +130,39 @@ is_running() {
   local pidfile="$PID_DIR/$name.pid"
   [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null
 }
+
+# Accepts 0x-prefixed 40-hex-char addresses (case-insensitive).
+is_eth_address() {
+  [[ "${1:-}" =~ ^0x[0-9a-fA-F]{40}$ ]]
+}
+
+require_eth_address() {
+  local label="$1"
+  local addr="$2"
+  if ! is_eth_address "$addr"; then
+    echo "ERROR: invalid $label address: ${addr:-<empty>}" >&2
+    exit 1
+  fi
+}
+
+# Refuse binding/serving to non-loopback hosts for local learning stack.
+assert_loopback_url() {
+  local url="$1"
+  local label="${2:-URL}"
+  case "$url" in
+    http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*)
+      return 0
+      ;;
+    *)
+      echo "ERROR: $label must be loopback (127.0.0.1/localhost), got: $url" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# Reject accidental use of non-Foundry throwaway keys in scripts that broadcast.
+warn_if_missing_env_file() {
+  if [[ ! -f "$FORTEL2_ROOT/.env" ]]; then
+    echo "WARN: using .env.example defaults — copy to .env before any non-local work" >&2
+  fi
+}

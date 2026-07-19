@@ -1,0 +1,14 @@
+---
+description: ForteL2 project guardrails for every agent session
+alwaysApply: true
+---
+
+# ForteL2 agent rules
+
+- Phase 1 is **native binaries only** — do not introduce Docker/OrbStack/Kurtosis workflows.
+- Never commit `.env`, keys, JWTs, or `data/` contents. Keys in `.env.example` are throwaway Foundry defaults only.
+- Keep local RPCs and `serve-dapp.sh` on **loopback**.
+- After Solidity/ABI changes: update `contracts/test`, run `forge test`, and regenerate `dapp/config.js` via `scripts/deploy-guestbook.sh`.
+- dApp: use `textContent` for on-chain strings; keep CSP + address checks in `dapp/`.
+- Prefer extending `scripts/lib.sh` helpers over duplicating start/stop/RPC logic.
+- Do not widen scope into bridging/Sepolia/replicas unless the user asks (Phase 1b+).
