@@ -144,23 +144,30 @@ run_auto() {
   echo
   echo "-- L1 / L2 RPC --"
   local l1_block l2_block l1_chain l2_chain
+  # Guard chain-id with || echo "": under set -e, a bare failing assignment after a
+  # successful block-number aborts run_auto before fail_item (and in --all mode can
+  # skip the printed checklist / bypass fail aggregation).
   if l1_block=$(cast block-number --rpc-url "$L1_RPC_URL" 2>/dev/null); then
-    l1_chain=$(cast chain-id --rpc-url "$L1_RPC_URL")
-    if [[ "$l1_chain" == "${L1_CHAIN_ID}" ]]; then
+    l1_chain=$(cast chain-id --rpc-url "$L1_RPC_URL" 2>/dev/null || echo "")
+    if [[ -n "$l1_chain" && "$l1_chain" == "${L1_CHAIN_ID}" ]]; then
       pass "L1 block=$l1_block chain=$l1_chain"
-    else
+    elif [[ -n "$l1_chain" ]]; then
       fail_item "L1 chain-id=$l1_chain expected ${L1_CHAIN_ID}"
+    else
+      fail_item "L1 chain-id unread at $L1_RPC_URL"
     fi
   else
     fail_item "L1 RPC unreachable at $L1_RPC_URL"
   fi
 
   if l2_block=$(cast block-number --rpc-url "$L2_RPC_URL" 2>/dev/null); then
-    l2_chain=$(cast chain-id --rpc-url "$L2_RPC_URL")
-    if [[ "$l2_chain" == "${L2_CHAIN_ID}" ]]; then
+    l2_chain=$(cast chain-id --rpc-url "$L2_RPC_URL" 2>/dev/null || echo "")
+    if [[ -n "$l2_chain" && "$l2_chain" == "${L2_CHAIN_ID}" ]]; then
       pass "L2 block=$l2_block chain=$l2_chain"
-    else
+    elif [[ -n "$l2_chain" ]]; then
       fail_item "L2 chain-id=$l2_chain expected ${L2_CHAIN_ID}"
+    else
+      fail_item "L2 chain-id unread at $L2_RPC_URL"
     fi
   else
     fail_item "L2 RPC unreachable at $L2_RPC_URL"
