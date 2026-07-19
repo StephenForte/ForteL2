@@ -54,6 +54,43 @@ else
   echo "PASS reject non-loopback"
 fi
 
+# Block-time coupling
+L1_BLOCK_TIME=2 L2_BLOCK_TIME=2
+if (assert_block_times >/dev/null); then
+  echo "PASS block times equal"
+else
+  echo "FAIL block times equal" >&2
+  fail=1
+fi
+L1_BLOCK_TIME=1 L2_BLOCK_TIME=2
+if (assert_block_times >/dev/null 2>&1); then
+  echo "FAIL should reject L1 < L2 block time" >&2
+  fail=1
+else
+  echo "PASS reject L1 < L2 block time"
+fi
+
+# Foundry default key detection + Phase 2 tripwire
+DEMO_KEY="0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+assert_true "detect Foundry default key" is_foundry_default_private_key "$DEMO_KEY"
+assert_false "reject random key as Foundry default" is_foundry_default_private_key \
+  "0x1111111111111111111111111111111111111111111111111111111111111111"
+
+L2_CHAIN_ID=901
+if (refuse_foundry_defaults_unless_local_l2 "$DEMO_KEY" "DEMO" >/dev/null); then
+  echo "PASS Foundry default allowed on chain 901"
+else
+  echo "FAIL Foundry default should be allowed on 901" >&2
+  fail=1
+fi
+L2_CHAIN_ID=11155111
+if (refuse_foundry_defaults_unless_local_l2 "$DEMO_KEY" "DEMO" >/dev/null 2>&1); then
+  echo "FAIL should refuse Foundry default on Sepolia chain id" >&2
+  fail=1
+else
+  echo "PASS refuse Foundry default when L2_CHAIN_ID != 901"
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

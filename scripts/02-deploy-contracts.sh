@@ -8,6 +8,8 @@ source "$SCRIPT_DIR/lib.sh"
 require_bin op-deployer
 require_bin cast
 require_bin jq
+assert_local_rpc_urls
+refuse_foundry_defaults_unless_local_l2 "${ADMIN_PRIVATE_KEY:-}" "ADMIN_PRIVATE_KEY"
 
 wait_for_rpc "$L1_RPC_URL" "L1 Anvil"
 

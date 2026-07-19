@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  guardrails:
+    name: forge test + script helpers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Install forge-std (if missing)
+        working-directory: contracts
+        run: |
+          if [[ ! -f lib/forge-std/src/Test.sol ]]; then
+            forge install foundry-rs/forge-std --no-git --shallow
+          fi
+
+      - name: Prepare CI .env (repo-local paths)
+        run: |
+          sed \
+            -e "s|/Users/steveforte/ForteL2|${GITHUB_WORKSPACE}|g" \
+            -e "s|/Users/steveforte/src/fortel2/data|${RUNNER_TEMP}/fortel2-data|g" \
+            .env.example > .env
+
+      - name: Solidity tests
+        working-directory: contracts
+        run: forge test -vv
+
+      - name: Script helper tests
+        run: ./scripts/test-helpers.sh

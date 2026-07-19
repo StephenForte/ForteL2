@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 require_bin cast
+assert_loopback_url "$L2_RPC_URL" "L2_RPC_URL"
+refuse_foundry_defaults_unless_local_l2 "${DEMO_A_PRIVATE_KEY:-}" "DEMO_A_PRIVATE_KEY"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
 BEFORE_A=$(cast balance "$DEMO_A_ADDRESS" --rpc-url "$L2_RPC_URL")

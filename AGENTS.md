@@ -14,7 +14,8 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 - **Never commit** `.env`, private keys, JWT secrets, or live datadir contents.
 - **Loopback only** for local RPCs and the guestbook HTTP server (`127.0.0.1` / `localhost`).
 - Prefer **small, reversible diffs**. Do not expand scope into Phase 1b+ (bridging, Sepolia, Render) unless asked.
-- Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` (both `2` today) or the sequencer hits Fjord drift / `NoTxPool`.
+- Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start.
+- **`scripts/lib.sh` `start_bg` / `stop_bg` are privileged.** Any edit needs human review (see `.github/CODEOWNERS`), even when the rest of a change is AI-authored.
 
 ## Layout
 
@@ -53,6 +54,8 @@ cd contracts && forge test
 ./scripts/test-helpers.sh
 ```
 
+CI runs the same pair on every PR (`.github/workflows/ci.yml`).
+
 Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std --no-git --shallow`.
 
 ## dApp conventions
@@ -61,18 +64,19 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Render user content with `textContent` (never `innerHTML` for on-chain strings).
 - Validate `GUESTBOOK_ADDRESS` with `isAddress` before contract calls.
 - Pin wallet fee floors for quiet local base fees (see `dapp/app.js`).
+- Message length is **UTF-8 bytes** (contract `MAX_TEXT_BYTES=280`), not HTML `maxlength` characters.
 - After contract changes: redeploy, then MetaMask **Delete activity and nonce data** if txs stick post-reset.
 
 ## Security expectations (learning stack)
 
-- Keys in `.env.example` are **public Foundry test keys** — fine for local Anvil; never fund them on public nets.
+- Keys in `.env.example` are **public Foundry test keys** — fine for local Anvil chain **901**; never fund them on public nets. Broadcast scripts refuse those keys when `L2_CHAIN_ID != 901`.
 - Treat guestbook storage as unbounded demo state (DoS/growth is acceptable locally; do not ship as production).
-- Do not expose Anvil / op-geth / dApp beyond loopback without an explicit hardening task.
-- CDN scripts (`ethers` on jsDelivr) are a supply-chain trust point — bump versions deliberately and keep CSP tight in `dapp/index.html`.
+- Do not expose Anvil / op-geth / dApp beyond loopback without an explicit hardening task (Phase 1b US-012).
+- `ethers` is **vendored** under `dapp/vendor/` (CSP `script-src 'self'`). Bump via `dapp/vendor/README.md` — do not reintroduce CDN script tags.
 
 ## When editing scripts
 
-- Source `scripts/lib.sh`; use `require_bin`, `wait_for_rpc`, `start_bg` / `stop_bg`.
+- Source `scripts/lib.sh`; use `require_bin`, `wait_for_rpc`, `start_bg` / `stop_bg`, `assert_loopback_url` / `assert_local_rpc_urls`, `assert_block_times`, `refuse_foundry_defaults_unless_local_l2`.
 - Validate addresses with `is_eth_address` / `require_eth_address`.
 - Keep `set -euo pipefail` and avoid printing private keys.
 

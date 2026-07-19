@@ -2,12 +2,17 @@
  * ForteL2 Guestbook — local learning dApp (chain 901).
  * Uses ethers v6 from jsDelivr; wallet + RPC stay on loopback.
  */
-import { BrowserProvider, Contract, JsonRpcProvider, isAddress } from "https://cdn.jsdelivr.net/npm/ethers@6.13.5/+esm";
+import { BrowserProvider, Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.5.min.js";
 import { GUESTBOOK_ADDRESS, GUESTBOOK_ABI, L2_CHAIN_ID, L2_RPC_URL } from "./config.js";
 
 const L2_CHAIN_HEX = `0x${Number(L2_CHAIN_ID).toString(16)}`;
 const FEE = { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n };
 const PAGE = 50;
+const MAX_TEXT_BYTES = 280;
+
+function utf8ByteLength(text) {
+  return new TextEncoder().encode(text).length;
+}
 
 const els = {
   connect: document.getElementById("connect"),
@@ -172,8 +177,8 @@ async function signMessage() {
     setStatus("Enter a message first", true);
     return;
   }
-  if (new TextEncoder().encode(text).length > 280) {
-    setStatus("Message too long (max 280 bytes)", true);
+  if (utf8ByteLength(text) > MAX_TEXT_BYTES) {
+    setStatus(`Message too long (max ${MAX_TEXT_BYTES} bytes)`, true);
     return;
   }
   busy = true;
@@ -216,19 +221,26 @@ els.connect.addEventListener("click", () => connect());
 els.refresh.addEventListener("click", () => refresh());
 els.sign.addEventListener("click", () => signMessage());
 els.text.addEventListener("input", () => {
-  const bytes = new TextEncoder().encode(els.text.value).length;
-  els.charCount.textContent = String(bytes);
-  if (bytes > 280) {
-    els.charCount.style.color = "var(--warn)";
-  } else {
-    els.charCount.style.color = "";
+  // Enforce UTF-8 byte budget (contract MAX_TEXT_BYTES), not JS string length /
+  // HTML maxlength characters — multibyte glyphs must not slip past the UI.
+  let value = els.text.value;
+  while (utf8ByteLength(value) > MAX_TEXT_BYTES) {
+    value = value.slice(0, -1);
   }
+  if (value !== els.text.value) els.text.value = value;
+  const bytes = utf8ByteLength(els.text.value);
+  els.charCount.textContent = String(bytes);
+  els.charCount.style.color = bytes >= MAX_TEXT_BYTES ? "var(--warn)" : "";
 });
 els.text.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !els.sign.disabled) {
     ev.preventDefault();
     signMessage();
   }
+});
+els.text.addEventListener("paste", () => {
+  // Re-run byte trim after paste populates the input.
+  queueMicrotask(() => els.text.dispatchEvent(new Event("input")));
 });
 
 wireWalletEvents();

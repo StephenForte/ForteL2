@@ -7,6 +7,8 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_bin op-proposer
 require_bin jq
+assert_local_rpc_urls
+refuse_foundry_defaults_unless_local_l2 "${PROPOSER_PRIVATE_KEY:-}" "PROPOSER_PRIVATE_KEY"
 
 DEPLOYMENTS="$FORTEL2_ROOT/deployments/deployments.json"
 GAME_FACTORY=$(jq -r '.DisputeGameFactoryProxy // .disputeGameFactoryProxy // empty' "$DEPLOYMENTS")

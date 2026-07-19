@@ -7,6 +7,8 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_bin op-batcher
 require_bin jq
+assert_local_rpc_urls
+refuse_foundry_defaults_unless_local_l2 "${BATCHER_PRIVATE_KEY:-}" "BATCHER_PRIVATE_KEY"
 
 DEPLOYMENTS="$FORTEL2_ROOT/deployments/deployments.json"
 if [[ ! -f "$DEPLOYMENTS" ]]; then
