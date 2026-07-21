@@ -4,17 +4,18 @@ Guidance for coding agents working in this repository.
 
 ## What this is
 
-Personal **OP Stack L2 learning rollup** on a single Apple Silicon Mac. Phase 1 runs **native binaries only** (no Docker, OrbStack, or Kurtosis on this host). Throwaway Anvil keys only — never real funds.
+Personal **OP Stack L2 learning rollup** on a single Apple Silicon Mac. Phase 1 runs **native binaries only** (no Docker, OrbStack, or Kurtosis on this host). Throwaway Anvil keys only for local chain **901** — never real funds. Phase **2a** scaffolds Sepolia (L2 chain **852**) without broadcasting; funded Sepolia keys stay operator-local in `.env.sepolia`.
 
 Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.md`.
 
 ## Non-negotiables
 
 - **No containers** on this workstation for Phase 1 (see Phase 0 verdict in `tasks/spike-notes.md`).
-- **Never commit** `.env`, private keys, JWT secrets, or live datadir contents.
-- **Loopback only** for local RPCs, the guestbook HTTP server, and the pipeline viewer (`127.0.0.1` / `localhost`).
-- Prefer **small, reversible diffs**. Do not expand scope into Phase 2+ (Sepolia, Render) unless asked.
-- Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start.
+- **Never commit** `.env`, `.env.sepolia`, private keys, JWT secrets, or live datadir contents.
+- **Never ask the operator to paste private keys** into chat; never write keys into committed files.
+- **Loopback only** for L2 RPCs, the guestbook HTTP server, and the pipeline viewer (`127.0.0.1` / `localhost`). Sepolia **L1** may be remote HTTPS (`assert_sepolia_rpc_urls`).
+- Prefer **small, reversible diffs**. Do not expand into Phase **2b+** (Sepolia deploy/spend) or Phase 3 (Render) unless asked.
+- Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` on the **local Anvil** stack (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start. Sepolia L1 is ~12s; local L2 may stay 2s.
 - **`scripts/lib.sh` `start_bg` / `stop_bg` are privileged.** Any edit needs human review (see `.github/CODEOWNERS`), even when the rest of a change is AI-authored. (`serve_static_loopback` is not privileged process control.)
 
 ## Layout
@@ -25,11 +26,13 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `contracts/` | Foundry project (`Guestbook` demo) |
 | `dapp/` | Static guestbook UI (`index.html`, `styles.css`, `app.js`, `config.js`) |
 | `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate) |
-| `deployments/` | Checked-in addresses + local `.deployer` artifacts |
+| `deployments/` | Phase 1 checked-in addresses + local `.deployer` artifacts |
+| `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
 | `config/` | L1 chain config fragments |
 | `bin/` | Symlinks to built OP Stack binaries (gitignored) |
+| `.env.sepolia.example` | Phase 2a Sepolia template (no keys); load via `FORTEL2_ENV=.env.sepolia` |
 
-Runtime data defaults to `DATA_DIR` outside Dropbox (`~/src/fortel2/data`).
+Runtime data defaults to `DATA_DIR` outside Dropbox (`~/src/fortel2/data`). Sepolia uses a separate `DATA_DIR` (see `.env.sepolia.example`).
 
 ## Everyday commands
 
@@ -78,14 +81,16 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 
 ## Security expectations (learning stack)
 
-- Keys in `.env.example` are **public Foundry test keys** — fine for local Anvil chain **901**; never fund them on public nets. Broadcast scripts refuse those keys when `L2_CHAIN_ID != 901`.
+- Keys in `.env.example` are **public Foundry test keys** — fine for local Anvil chain **901**; never fund them on public nets. Broadcast scripts refuse those keys when `L2_CHAIN_ID != 901` (including Sepolia L2 **852**).
+- Sepolia keys live only in local `.env.sepolia` (gitignored). Agents must not request, log, or commit them.
 - Treat guestbook storage as unbounded demo state (DoS/growth is acceptable locally; do not ship as production).
 - Do not expose Anvil / op-geth / dApp / viewer beyond loopback without an explicit hardening task (Phase 1b US-012).
 - `ethers` is **vendored** under `dapp/vendor/` and copied into `viewer/vendor/` (CSP `script-src 'self'`). Do not use a symlink for the viewer copy — static serve roots at `viewer/` and symlink-as-text checkouts break the import. Bump both files via `dapp/vendor/README.md` — do not reintroduce CDN script tags.
 
 ## When editing scripts
 
-- Source `scripts/lib.sh`; use `require_bin`, `wait_for_rpc`, `start_bg` / `stop_bg`, `serve_static_loopback`, `assert_loopback_url` / `assert_local_rpc_urls`, `assert_block_times`, `refuse_foundry_defaults_unless_local_l2`.
+- Source `scripts/lib.sh`; use `require_bin`, `wait_for_rpc`, `start_bg` / `stop_bg`, `serve_static_loopback`, `assert_loopback_url` / `assert_local_rpc_urls` / `assert_sepolia_rpc_urls` / `assert_l2_loopback_urls`, `assert_block_times`, `refuse_foundry_defaults_unless_local_l2`.
+- Phase 2 scripts (when added) must set/require `FORTEL2_ENV=.env.sepolia` and call `assert_sepolia_rpc_urls` — never `assert_local_rpc_urls` against a remote L1.
 - Validate addresses with `is_eth_address` / `require_eth_address`.
 - Keep `set -euo pipefail` and avoid printing private keys.
 

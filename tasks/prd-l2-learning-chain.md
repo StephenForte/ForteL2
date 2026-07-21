@@ -20,7 +20,7 @@ This is not a production chain. No real funds, no external users, no uptime comm
 - Observe the full data pipeline: L2 block production → batch submission to L1 → state root proposal to L1
 - Inspect the chain with `cast` / RPC tooling in Phase 1; DIY **pipeline viewer** in Phase 1c (+ mempool polish in 1d); defer hosted/container explorers until a non-loopback RPC is deliberately allowed
 - Deploy and interact with a simple demo dApp on the L2
-- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Phase 2 funding gate, Sepolia migration, Render replica (stock clients), per-component reimplementation (batcher → proposer → derivation), fault proofs, decentralized sequencer
+- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Phase 2 funding gate, Sepolia cutover (2a–2d), Render replica (stock clients), per-component reimplementation (batcher → proposer → derivation), fault proofs, decentralized sequencer
 
 ## Phase Roadmap
 
@@ -31,7 +31,10 @@ This is not a production chain. No real funds, no external users, no uptime comm
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; L2→L1 withdrawals with a shortened challenge window (devnet config); **Phase 2 readiness gate** (new keys, separate deploy config, non-loopback review, sandbox/dry-run) | **Done** — deposit/withdraw scripts + US-012 docs/tripwires (operator runs against live stack) |
 | **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014); operator-verified on live stack |
 | **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | **Done** — Aggregate mempool + README US-016 faucet/key gate |
-| **2** | Migrate L1 from local devnet to **Sepolia** (new deployment of L1 contracts, testnet ETH funding, real gas/blob economics) | Future |
+| **2a** | **Sepolia scaffold**: `.env.sepolia` tree, `deployments/sepolia/`, `FORTEL2_ENV` loader, split L1/L2 RPC asserts, agent-permission checklist; L2 chain ID **852**; public L1 RPC placeholders; **no on-chain spend** | **Done** — scaffold + docs |
+| **2b** | Disposable `op-deployer apply` on Ethereum Sepolia + genesis/rollup under `deployments/sepolia/`; fund role addresses from harvest wallet | Future |
+| **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | Future |
+| **2d** | Dedicated L1 RPC (QuickNode); document optional native Mac L1 (no Docker); Render stays Phase 3 (L2 replica, not L1) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) | Future |
@@ -227,6 +230,63 @@ Phase 1d sits **between** the closed pipeline viewer (1c) and Sepolia cutover (2
 - [x] Funding path documented: faucet(s) → operator-controlled harvest address → transfer only to the Sepolia deployer/batcher/proposer addresses when ready; project scripts continue to refuse Foundry defaults when `L2_CHAIN_ID != 901`
 - [x] Phase 2 remains blocked until US-012 items + this funding floor are met; 1d does not run `op-deployer` against Sepolia
 
+## User Stories — Phase 2a (Sepolia scaffold)
+
+Phase 2a prepares a **separate** Sepolia env/deploy tree and hardens loaders/asserts. It does **not** broadcast to Sepolia. L2 learning chain ID on Sepolia is **852** (local Anvil L2 remains **901**).
+
+### US-020: Separate Sepolia env + deploy tree
+**Description:** As the operator, I want a distinct Sepolia configuration tree so Phase 1 Anvil artifacts and Foundry keys cannot be reused by accident.
+
+**Acceptance Criteria:**
+- [x] `.env.sepolia.example` exists with L1=11155111, L2=852, harvest address, role address placeholders, public L1 RPC placeholder, calldata DA, short delay knobs — **no private keys**
+- [x] `deployments/sepolia/` exists (separate from `deployments/.deployer/`); `.deployer/` gitignored
+- [x] Root `.gitignore` includes `.env.sepolia` and `deployments/sepolia/.deployer/`
+- [x] README documents: copy example → `.env.sepolia`, generate keys offline, fund roles from harvest later (2b)
+
+### US-021: FORTEL2_ENV loader + Sepolia RPC asserts
+**Description:** As the operator, I want scripts to load `.env.sepolia` explicitly and allow a remote L1 RPC while keeping L2 on loopback.
+
+**Acceptance Criteria:**
+- [x] `scripts/lib.sh` respects `FORTEL2_ENV` (basename or absolute path); missing file fails closed
+- [x] `assert_l2_loopback_urls` / `assert_sepolia_rpc_urls` / `assert_remote_l1_rpc_url` exist; Phase 1 keeps `assert_local_rpc_urls` (L1+L2 loopback)
+- [x] Foundry default keys still refused when `L2_CHAIN_ID != 901` (including 852)
+- [x] `scripts/test-helpers.sh` covers Sepolia asserts + `FORTEL2_ENV` load
+
+### US-022: Agent-permission audit checklist (before funded keys)
+**Description:** As the operator, I want a written agent/tool access audit before any Sepolia private key exists in a file an agent might read.
+
+**Acceptance Criteria:**
+- [x] README checklist: (1) no cloud agent with repo secrets for funded keys, (2) CODEOWNERS review still required for `start_bg`/`stop_bg`, (3) Foundry tripwire on for non-901, (4) never paste keys into chat, (5) `.env.sepolia` stays local/gitignored
+- [x] AGENTS.md notes Phase 2a scaffold is in-scope when asked; agents must not request private keys
+
+## User Stories — Phase 2b / 2c / 2d (scaffold only — implement later)
+
+### US-023: Disposable Sepolia L1 contract deploy (Phase 2b)
+**Description:** As the operator, I want a one-shot `op-deployer apply` against Ethereum Sepolia writing artifacts under `deployments/sepolia/`.
+
+**Acceptance Criteria:**
+- [ ] Role addresses funded from harvest; Foundry defaults unused
+- [ ] Intent: `fundDevAccounts=false`, L2 chain id 852, learning-short portal delays
+- [ ] `deployments/sepolia/deployments.json` + genesis/rollup produced; Phase 1 tree untouched
+- [ ] Gas spend recorded; disposable (safe to abandon and redeploy)
+
+### US-024: Sepolia-backed L2 dry-run (Phase 2c)
+**Description:** As the operator, I want the sequencer/batcher/proposer running against Sepolia L1 long enough to confirm batches and one deposit.
+
+**Acceptance Criteria:**
+- [ ] No Anvil; `FORTEL2_ENV=.env.sepolia`; L2 loopback only
+- [ ] Calldata DA; public L1 RPC acceptable for short run
+- [ ] L2 blocks advance; at least one batcher L1 tx; one L1→L2 deposit dry-run
+- [ ] Runbook for stop without wiping Phase 1 datadir
+
+### US-025: Dedicated L1 RPC upgrade path (Phase 2d)
+**Description:** As the operator, I want to swap public Sepolia RPC for QuickNode (or later native Mac L1) by changing env URLs only.
+
+**Acceptance Criteria:**
+- [ ] README documents QuickNode as drop-in `L1_RPC_URL` upgrade when rate limits hit
+- [ ] Optional native Mac L1 (no Docker) noted as heavy/optional — not required
+- [ ] Render explicitly **not** used for L1 Sepolia (Phase 3 = L2 replica)
+
 ## User Stories — Phase 6 (Derivation / minimal sequencer — scaffold)
 
 Phase 6 is the deepest rebuild: replace (parts of) the rollup derivation path and/or a minimal sequencer using the **OP Stack specs** and the running reference stack as the oracle. **Phase 3 does not require this** — a Render replica uses stock `op-geth`/`op-reth` + `op-node` in verifier mode.
@@ -275,16 +335,17 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - FR-9: All keys used are throwaway learning keys; nothing in the repo may ever hold value. Phase 2+ keys are generated outside the project and never committed
 - FR-10: Every phase boundary in the roadmap table must be preserved in this document as phases complete (edit status column, don't delete rows)
 - FR-11: L1 contract deployment and L2 genesis generation must use native tooling (`op-deployer` or documented equivalent), not Kurtosis-generated artifacts
-- FR-12: Before Phase 2, Foundry/Anvil default keys must be rejected for any `L2_CHAIN_ID` other than the local learning ID (901); Phase 2 must use a separate deploy/env tree and an explicit non-loopback policy review (US-012); Phase 1d adds the Sepolia ETH funding floor checklist (US-016)
+- FR-12: Before Phase 2, Foundry/Anvil default keys must be rejected for any `L2_CHAIN_ID` other than the local learning ID (901); Phase 2 must use a separate deploy/env tree and an explicit non-loopback policy review (US-012); Phase 1d adds the Sepolia ETH funding floor checklist (US-016); Phase 2a scaffolds `.env.sepolia` + L2 chain **852**
 - FR-13: Phase 3 replica uses unmodified OP Stack EL + `op-node` (verifier). Custom derivation/sequencer work is Phase 6 (US-060–062), optionally a separate PRD
 
-## Non-Goals (Out of Scope for Phase 1 / 1b / 1c / 1d)
+## Non-Goals (Out of Scope for Phase 1 / 1b / 1c / 1d / 2a)
 
 - No Docker Desktop, OrbStack, Kurtosis, docker-compose, or other container runtime on this workstation (Phase 0 verdict)
-- No Blockscout (or other containerized explorer) on this host in Phase 1 / 1b / 1c / 1d
+- No Blockscout (or other containerized explorer) on this host in Phase 1 / 1b / 1c / 1d / 2a
 - No hosted / SaaS block explorers (e.g. Ethernal) against this stack until the US-012 non-loopback policy review allows a reachable RPC (hosted explorers cannot see `127.0.0.1`)
 - No full address/tx search explorer and no Blockchair-style “latest blocks / latest transactions” pages in Phase 1c / 1d — the deliverable is a **pipeline viewer** (+ optional mempool signal), not Etherscan/Blockscout feature parity
-- No Sepolia cutover in Phase 1d (funding/key prep only; deploy is Phase 2)
+- No Sepolia cutover in Phase 1d (funding/key prep only); Phase **2a** is scaffold only (no `op-deployer apply` / no funded broadcast); deploy is **2b**
+- No QuickNode / native Mac L1 / Render L1 in 2a (2d / Phase 3 respectively)
 - No node on Render or any remote infrastructure (Phase 3)
 - No custom/reimplemented batcher, proposer, or derivation — Phases 4–6
 - No custom execution client required for Phase 3 (stock op-geth/op-reth)
@@ -305,7 +366,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - **Pipeline viewer (Phase 1c / 1d):** prefer client-side RPC polls against existing loopback L1/L2 endpoints (same pattern as the guestbook). Do not introduce an indexer DB or container stack. Phase 1d may add `txpool_*` mempool signals; Blockchair-style UIs stay deferred.
 - **Explorer deferral (locked for now):** hosted explorers (Ethernal, etc.) need a non-loopback RPC; self-hosted Blockscout/Ethernal need containers. Both wait until after the US-012 non-loopback review (or a different host). Optional native single-binary explorers remain an open later choice, not a 1c/1d requirement.
 - **L1 / blobs open question:** Anvil may or may not cover every batcher DA mode (calldata vs 4844 blobs). If blobs are required and Anvil cannot provide them, fall back to native geth/reth as L1 — still no containers.
-- **Phase 2 dependency:** the local-L1 contract deployment in Phase 1 does not carry to Sepolia; Phase 2 is a fresh contract deployment and fresh L2 genesis. The Phase 1 chain will not "migrate" — it gets replaced. Structure the runbook so redeployment is cheap. Phase 1d US-016 funding floor applies before cutover.
+- **Phase 2 dependency:** the local-L1 contract deployment in Phase 1 does not carry to Sepolia; Phase 2 is a fresh contract deployment and fresh L2 genesis (L2 chain ID **852**). The Phase 1 chain will not "migrate" — it gets replaced. Structure the runbook so redeployment is cheap. Phase 1d US-016 funding floor applies before cutover; 2a scaffolds the env tree; 2b spends gas.
 - **Phase 3 note:** a Render replica may use containers *on Render*; that does not reintroduce Docker on this Mac mini for Phase 1. Replica = stock EL + `op-node` verifier. Custom client/derivation is Phase 6.
 - **Phase 4–6 dependency:** the OP Stack's rollup node exposes RPCs (`optimism_syncStatus`, etc.) and the spec repo (ethereum-optimism/specs) defines batch/frame formats — reimplementation phases should target the spec, using the running stack as the reference implementation to diff against. Phase 6 may be split into a separate PRD before coding starts.
 
@@ -317,6 +378,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - Phase 1b: one deposit and one full withdrawal completed with all tx hashes recorded
 - Phase 1c: pipeline viewer shows live sequencer / batcher / proposer / aggregate tx panels on loopback; operator can narrate a deposit→batch→propose path from the screen
 - Phase 1d: mempool signal visible on the viewer; operator has ≥ ~1.0 Sepolia ETH (or documented floor) on fresh keys before Phase 2
+- Phase 2a: `.env.sepolia.example` + `deployments/sepolia/` + `FORTEL2_ENV` / Sepolia RPC asserts; L2 chain ID 852; no Sepolia broadcast
 - Phase 6 (when started): custom verifier derives a bounded window that matches reference `op-node` within documented tolerance
 
 ## Open Questions
@@ -334,3 +396,5 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - **Phase 1d scope:** mempool signal + Sepolia funding/key gate only. Blockchair-style latest blocks/txs **deferred** (not 1d).
 - **Phase 3 vs Phase 6:** Render replica uses **stock** OP Stack EL + `op-node` verifier. Custom derivation/sequencer is **Phase 6** (optional separate PRD).
 - **Sepolia funding:** Base Sepolia balances do not count; target ~**1.0 ETH** on Ethereum Sepolia before sustained Phase 2 batcher/proposer; ~**0.5 ETH** minimum to attempt deploy. Keys generated **outside** this repo; never Foundry defaults; never paste private keys into agent chats.
+- **Phase 2 sub-phases:** **2a** scaffold (done), **2b** disposable deploy, **2c** short Sepolia-backed L2 dry-run, **2d** QuickNode (optional native Mac L1). Learning L2 chain ID on Sepolia = **852**. Public RPC first; Render is Phase 3 L2 replica only.
+- **Harvest wallet (operator):** `0x5128889F20Ec13e0Be38b2BeBC568594159B652d` — harvest-only; fund role addresses from it in 2b.
