@@ -51,6 +51,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh  # Phase 2b after ADMIN funded
 FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh            # Phase 2c (no Anvil)
 FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh          # Phase 2d QuickNode/public L1 check
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 ./scripts/stop-all.sh
 ./scripts/reset.sh            # wipe datadir + redeploy next start (needed after portal delay overrides)
