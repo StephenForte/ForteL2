@@ -313,6 +313,19 @@ else
   fail=1
 fi
 
+# start-all-sepolia.sh must require deployments.json before the sequencer so a
+# partial deploy tree cannot leave op-geth/op-node running after batcher fails.
+if grep -q 'deployments_json_path' "$SCRIPT_DIR/start-all-sepolia.sh" \
+  && awk '
+    /04-start-sequencer-sepolia/ { exit found ? 0 : 1 }
+    /deployments_json_path/ { found = 1 }
+  ' "$SCRIPT_DIR/start-all-sepolia.sh"; then
+  echo "PASS start-all-sepolia.sh checks deployments.json before sequencer"
+else
+  echo "FAIL start-all-sepolia.sh must require deployments.json before 04-start-sequencer-sepolia.sh" >&2
+  fail=1
+fi
+
 # demo-checklist.sh: cast chain-id after a successful block-number must not abort
 # under set -e (bare assignment exits before fail_item / checklist aggregation).
 if grep -E '^\s+(l1|l2)_chain=\$\(cast chain-id' "$SCRIPT_DIR/demo-checklist.sh" \
