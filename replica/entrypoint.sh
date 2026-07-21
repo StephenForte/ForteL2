@@ -61,6 +61,16 @@ geth \
   --verbosity=3 &
 GETH_PID=$!
 
+cleanup() {
+  if [ -n "${NODE_PID:-}" ]; then
+    kill "$NODE_PID" 2>/dev/null || true
+    wait "$NODE_PID" 2>/dev/null || true
+  fi
+  kill "$GETH_PID" 2>/dev/null || true
+  wait "$GETH_PID" 2>/dev/null || true
+}
+trap cleanup INT TERM
+
 # Wait for engine API: require IPC + a successful attach, not merely a live PID.
 # (kill -0 alone succeeds as soon as geth is forked, even before authrpc binds.)
 # Do not kill a still-alive geth after a short fixed window — persistent archive
@@ -119,11 +129,5 @@ op-node \
   --log.level=info &
 NODE_PID=$!
 
-term() {
-  kill "$NODE_PID" "$GETH_PID" 2>/dev/null || true
-  wait "$NODE_PID" "$GETH_PID" 2>/dev/null || true
-}
-trap term INT TERM
-
 wait "$NODE_PID"
-term
+cleanup
