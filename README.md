@@ -31,7 +31,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **1d** | Viewer mempool signal + Sepolia funding and fresh-key gate | ✅ Done |
 | **2a** | Sepolia scaffold: `.env.sepolia` tree, L2 chain **852**, public RPC, no on-chain spend | ✅ Done |
 | **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | ✅ Done |
-| **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | Planned |
+| **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | ✅ Done |
 | **2d** | Dedicated L1 RPC (QuickNode); optional native Mac L1 later | Planned |
 | **3** | **Replica node on Render**, syncing from the sequencer over the public internet (stock clients) | Planned |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
@@ -407,6 +407,35 @@ FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh
 Intent uses `fundDevAccounts = false`, L2 chain **852**, learning-short portal delays (`faultGameClockExtension=5`, `faultGameMaxClockDuration=10` — max must be ≥ extension). Resume keeps `state.json` but always rewrites `intent.toml` from current `.env.sepolia` (roles / fault-game delays) before apply. Phase 1 Anvil `deployments/` tree is never written. This deploy is **disposable** — wipe with `FORCE_SEPOLIA_REDEPLOY=1` then re-apply.
 
 **Live Sepolia proxies (Phase 2b apply):** see `deployments/sepolia/deployments.json`. Portal `0xae399e74…52a29`, bridge `0x1623eca8…69614`, DisputeGameFactory `0x54d9c9f1…5bc39`.
+
+## Phase 2c — Sepolia-backed L2 dry-run (US-024)
+
+Runs the OP Stack L2 against **Ethereum Sepolia** L1. No Anvil. Runtime data lives in `DATA_DIR` from `.env.sepolia` (e.g. `~/src/fortel2/data-sepolia`) so Phase 1 `data/` is never touched. **Stop Phase 1 first** — default L2 ports are shared.
+
+```bash
+./scripts/stop-all.sh   # free :9545 if local Anvil stack was up
+
+FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
+FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/status.sh
+
+# Wait until L2 tip advances, then:
+cast nonce $BATCHER_ADDRESS --rpc-url "$L1_RPC_URL"   # should rise after a batch
+FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh   # default 0.01 ETH
+# First deposit after a cold start may take several minutes while L1 origin catches up
+# (default poll 600s). L1 tx: check Sepolia explorer; L2 balance confirms inclusion.
+
+FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+# Optional wipe of Sepolia runtime only (not Phase 1):
+# FORTEL2_ENV=.env.sepolia ./scripts/reset-sepolia.sh
+```
+
+| Script | Role |
+|---|---|
+| `start-all-sepolia.sh` | Sequencer + batcher + proposer (calldata DA, beacon ignored) |
+| `stop-all-sepolia.sh` | Stops Sepolia PIDs only — no Anvil |
+| `deposit-eth-sepolia.sh` | L1→L2 via Sepolia `deployments.json` |
+| `reset-sepolia.sh` | Wipes `data-sepolia` only |
 
 ## Phase 2a — Sepolia scaffold (US-020–022)
 

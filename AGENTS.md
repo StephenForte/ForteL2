@@ -49,6 +49,9 @@ cp .env.example .env          # once
 ./scripts/demo-checklist.sh   # auto smokes + Phase 1→1c verification checklist
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh  # Phase 2b after ADMIN funded
+FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh            # Phase 2c (no Anvil)
+FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 ./scripts/stop-all.sh
 ./scripts/reset.sh            # wipe datadir + redeploy next start (needed after portal delay overrides)
 ```

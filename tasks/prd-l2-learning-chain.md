@@ -34,7 +34,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | **Done** — Aggregate mempool + README US-016 faucet/key gate |
 | **2a** | **Sepolia scaffold**: `.env.sepolia` tree, `deployments/sepolia/`, `FORTEL2_ENV` loader, split L1/L2 RPC asserts, agent-permission checklist; L2 chain ID **852**; public L1 RPC placeholders; **no on-chain spend** | **Done** — scaffold + docs |
 | **2b** | Disposable `op-deployer apply` on Ethereum Sepolia + genesis/rollup under `deployments/sepolia/`; fund role addresses from harvest wallet | **Done** — L1 contracts on Sepolia; artifacts under `deployments/sepolia/` |
-| **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | Future |
+| **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | **Done** — operator dry-run: L2 tip advances, batcher L1 tx, deposit 0.01 ETH |
 | **2d** | Dedicated L1 RPC (QuickNode); document optional native Mac L1 (no Docker); Render stays Phase 3 (L2 replica, not L1) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
@@ -279,10 +279,10 @@ Phase 2a prepares a **separate** Sepolia env/deploy tree and hardens loaders/ass
 **Description:** As the operator, I want the sequencer/batcher/proposer running against Sepolia L1 long enough to confirm batches and one deposit.
 
 **Acceptance Criteria:**
-- [ ] No Anvil; `FORTEL2_ENV=.env.sepolia`; L2 loopback only
-- [ ] Calldata DA; public L1 RPC acceptable for short run
-- [ ] L2 blocks advance; at least one batcher L1 tx; one L1→L2 deposit dry-run
-- [ ] Runbook for stop without wiping Phase 1 datadir
+- [x] No Anvil; `FORTEL2_ENV=.env.sepolia`; L2 loopback only
+- [x] Calldata DA; public L1 RPC acceptable for short run
+- [x] L2 blocks advance; at least one batcher L1 tx; one L1→L2 deposit dry-run
+- [x] Runbook for stop without wiping Phase 1 datadir
 
 ### US-025: Dedicated L1 RPC upgrade path (Phase 2d)
 **Description:** As the operator, I want to swap public Sepolia RPC for QuickNode (or later native Mac L1) by changing env URLs only.
