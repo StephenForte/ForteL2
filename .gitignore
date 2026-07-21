@@ -7,6 +7,10 @@ deployments/.deployer/genesis.json
 deployments/.deployer/rollup.json
 deployments/.deployer/intent.toml.bak
 deployments/sepolia/.deployer/
+replica/config/*
+!replica/config/.gitkeep
+replica/.env
+replica/jwt.txt
 *.log
 contracts/out/
 contracts/cache/
