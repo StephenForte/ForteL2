@@ -340,9 +340,17 @@ deployments_json_path() {
 
 # Refuse starting Sepolia L2 if something already listens on the configured loopback ports
 # (Phase 1 and Phase 2c share default ports and cannot run together).
+# Includes batcher/proposer admin RPC ports (hardcoded 8548/8560 in Phase 1 + 2c start scripts).
 assert_l2_ports_free() {
   local port
-  for port in "${L2_EL_HTTP_PORT}" "${L2_EL_WS_PORT}" "${L2_EL_AUTH_PORT}" "${L2_NODE_RPC_PORT}"; do
+  for port in \
+    "${L2_EL_HTTP_PORT}" \
+    "${L2_EL_WS_PORT}" \
+    "${L2_EL_AUTH_PORT}" \
+    "${L2_NODE_RPC_PORT}" \
+    8548 \
+    8560
+  do
     if command -v lsof >/dev/null 2>&1; then
       if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
         echo "ERROR: port $port already in use — stop Phase 1 (./scripts/stop-all.sh) or free the port" >&2

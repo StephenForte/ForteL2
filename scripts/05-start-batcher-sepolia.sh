@@ -9,7 +9,7 @@ require_bin op-batcher
 require_bin jq
 require_sepolia_env
 refuse_foundry_defaults_unless_local_l2 "${BATCHER_PRIVATE_KEY:-}" "BATCHER_PRIVATE_KEY"
-require_min_balance_eth "$BATCHER_ADDRESS" "${SEPOLIA_BATCHER_MIN_ETH:-0.05}" "BATCHER"
+require_min_balance_eth "$BATCHER_ADDRESS" "${SEPOLIA_BATCHER_MIN_ETH:-0.15}" "BATCHER"
 
 DEPLOYMENTS="$(deployments_json_path)"
 if [[ ! -f "$DEPLOYMENTS" ]]; then
