@@ -11,6 +11,9 @@ replica/config/*
 !replica/config/.gitkeep
 replica/.env
 replica/jwt.txt
+.fortel2-replica-git/
+fortel2-replica/
+.replica-stage-tarball/
 *.log
 contracts/out/
 contracts/cache/

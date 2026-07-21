@@ -48,5 +48,6 @@ echo "Packed replica artifacts → $OUT_DIR"
 echo "  genesis.json  ($(wc -c < "$OUT_DIR/genesis.json" | tr -d ' ') bytes)"
 echo "  rollup.json   ($(wc -c < "$OUT_DIR/rollup.json" | tr -d ' ') bytes)"
 echo
-echo "Next: upload /config files to Render (secret files) or docker compose -f replica/docker-compose.yml up"
-echo "Sync check later: FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh"
+echo "Next: copy $OUT_DIR/{genesis,rollup}.json into https://github.com/StephenForte/fortel2-replica config/ and push"
+echo "Friends/Render use that repo (root Dockerfile) — not this monorepo."
+echo "Sync check: FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh"
