@@ -9,30 +9,11 @@ source "$SCRIPT_DIR/lib.sh"
 require_bin cast
 require_sepolia_env
 
-redact_rpc_url() {
-  python3 - <<'PY' "${1:-}"
-import sys, urllib.parse
-u = sys.argv[1]
-if not u:
-    print("<empty>")
-    raise SystemExit
-p = urllib.parse.urlparse(u)
-# Drop userinfo + query + fragment (common API-key locations)
-netloc = p.hostname or ""
-if p.port:
-    netloc = f"{netloc}:{p.port}"
-path = p.path if p.path and p.path != "/" else ""
-# If path looks like /abc123token, show only /…
-if path and len(path) > 8:
-    path = "/…"
-print(f"{p.scheme}://{netloc}{path}")
-PY
-}
-
 URL="$L1_RPC_URL"
 echo "=== Sepolia L1 RPC check ==="
 echo "L1_RPC_URL (redacted): $(redact_rpc_url "$URL")"
 
+# wait_for_rpc logs a redacted URL (shared redact_rpc_url in lib.sh).
 wait_for_rpc "$URL" "L1" 30
 CHAIN="$(cast chain-id --rpc-url "$URL")"
 BLOCK="$(cast block-number --rpc-url "$URL")"

@@ -103,6 +103,37 @@ else
   echo "PASS refuse Foundry default on L2_CHAIN_ID=852"
 fi
 
+# Phase 2d: redact QuickNode-style tokens from log display (not from cast --rpc-url).
+SECRET_URL="https://user:pass@bold-abc.quiknode.pro/SECRET_TOKEN_abc123xyz/?api_key=leakme#frag"
+REDACTED="$(redact_rpc_url "$SECRET_URL")"
+if [[ "$REDACTED" == "https://bold-abc.quiknode.pro/…" ]] \
+  && [[ "$REDACTED" != *SECRET* ]] \
+  && [[ "$REDACTED" != *api_key* ]] \
+  && [[ "$REDACTED" != *user:pass* ]]; then
+  echo "PASS redact_rpc_url drops userinfo/query/path token"
+else
+  echo "FAIL redact_rpc_url got: $REDACTED" >&2
+  fail=1
+fi
+if [[ "$(redact_rpc_url "http://127.0.0.1:8545")" == "http://127.0.0.1:8545" ]]; then
+  echo "PASS redact_rpc_url keeps loopback host:port"
+else
+  echo "FAIL redact_rpc_url should keep loopback URL" >&2
+  fail=1
+fi
+# wait_for_rpc must log the redacted form even on timeout (Phase 2d).
+WAIT_OUT="$(wait_for_rpc "$SECRET_URL" "L1" 1 2>&1 || true)"
+if [[ "$WAIT_OUT" == *"Waiting for L1 at https://bold-abc.quiknode.pro/…"* ]] \
+  && [[ "$WAIT_OUT" == *"timed out waiting for L1 at https://bold-abc.quiknode.pro/…"* ]] \
+  && [[ "$WAIT_OUT" != *SECRET_TOKEN* ]] \
+  && [[ "$WAIT_OUT" != *api_key=leakme* ]] \
+  && [[ "$WAIT_OUT" != *user:pass* ]]; then
+  echo "PASS wait_for_rpc logs redacted URL only"
+else
+  echo "FAIL wait_for_rpc leaked or missing redacted URL: $WAIT_OUT" >&2
+  fail=1
+fi
+
 # Phase 2 RPC asserts: remote L1 OK; L2 loopback; chain 852
 L1_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
 L2_RPC_URL="http://127.0.0.1:9545"
