@@ -9,6 +9,8 @@ ROLLUP="${ROLLUP:-/config/rollup.json}"
 L2_HTTP_PORT="${L2_HTTP_PORT:-8545}"
 L2_AUTH_PORT="${L2_AUTH_PORT:-8551}"
 L2_NODE_RPC_PORT="${L2_NODE_RPC_PORT:-9545}"
+# Match Phase 2c Sepolia sequencer slot override (beacon ignored for calldata DA).
+L1_BLOCK_TIME="${L1_BLOCK_TIME:-12}"
 
 if [ -z "${L1_RPC_URL:-}" ]; then
   echo "ERROR: L1_RPC_URL is required (Sepolia HTTPS — set as Render secret)" >&2
@@ -49,16 +51,31 @@ geth \
   --verbosity=3 &
 GETH_PID=$!
 
-# Wait for engine API
+# Wait for engine API: require IPC + a successful attach, not merely a live PID.
+# (kill -0 alone succeeds as soon as geth is forked, even before authrpc binds.)
+echo "Waiting for op-geth engine API..."
 i=0
+ready=0
 while [ "$i" -lt 60 ]; do
-  if [ -S "$DATA_DIR/geth.ipc" ] || kill -0 "$GETH_PID" 2>/dev/null; then
-    sleep 2
+  if ! kill -0 "$GETH_PID" 2>/dev/null; then
+    echo "ERROR: op-geth exited before engine API became ready" >&2
+    wait "$GETH_PID" || true
+    exit 1
+  fi
+  if [ -S "$DATA_DIR/geth.ipc" ] \
+    && geth attach --exec "eth.blockNumber" "$DATA_DIR/geth.ipc" >/dev/null 2>&1; then
+    ready=1
     break
   fi
   sleep 1
   i=$((i + 1))
 done
+if [ "$ready" -ne 1 ]; then
+  echo "ERROR: timed out waiting for op-geth IPC/RPC at $DATA_DIR/geth.ipc" >&2
+  kill "$GETH_PID" 2>/dev/null || true
+  wait "$GETH_PID" 2>/dev/null || true
+  exit 1
+fi
 
 echo "Starting op-node (verifier / L1 derivation)"
 op-node \
@@ -66,6 +83,7 @@ op-node \
   --l1.rpckind=standard \
   --l1.trustrpc=true \
   --l1.beacon.ignore=true \
+  --l1.beacon.slot-duration-override="$L1_BLOCK_TIME" \
   --l2="http://127.0.0.1:${L2_AUTH_PORT}" \
   --l2.jwt-secret="$JWT_FILE" \
   --l2.enginekind=geth \
