@@ -20,7 +20,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 - Observe the full data pipeline: L2 block production → batch submission to L1 → state root proposal to L1
 - Inspect the chain with `cast` / RPC tooling in Phase 1; DIY **pipeline viewer** in Phase 1c (+ mempool polish in 1d); defer hosted/container explorers until a non-loopback RPC is deliberately allowed
 - Deploy and interact with a simple demo dApp on the L2
-- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Phase 2 funding gate, Sepolia cutover (2a–2d), Render replica (stock clients), **friend-operated distributed nodes**, per-component reimplementation (batcher → proposer → derivation), fault proofs, decentralized sequencer
+- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Phase 2 funding gate, Sepolia cutover (2a–2d done; 3a = deferred native Mac L1), Render replica (stock clients), **friend-operated distributed nodes**, per-component reimplementation (batcher → proposer → derivation), fault proofs, decentralized sequencer
 - **(Tentative)** If learning phases succeed and friend-operated node network is established: explore graduating the chain to Ethereum mainnet as a real L2 (Phase 9)
 
 ## Phase Roadmap
@@ -35,9 +35,9 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **2a** | **Sepolia scaffold**: `.env.sepolia` tree, `deployments/sepolia/`, `FORTEL2_ENV` loader, split L1/L2 RPC asserts, agent-permission checklist; L2 chain ID **852**; public L1 RPC placeholders; **no on-chain spend** | **Done** — scaffold + docs |
 | **2b** | Disposable `op-deployer apply` on Ethereum Sepolia + genesis/rollup under `deployments/sepolia/`; fund role addresses from harvest wallet | **Done** — L1 contracts on Sepolia; artifacts under `deployments/sepolia/` |
 | **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | **Done** — operator dry-run: L2 tip advances, batcher L1 tx, deposit 0.01 ETH |
-| **2d** | Dedicated L1 RPC via **QuickNode** (env swap only; no redeploy). Render stays Phase 3 (L2 replica, not L1) | **Done** — runbook + `sepolia-rpc-check.sh`; native Mac L1 deferred |
-| **2e** | **(Deferred)** Native Mac mini Sepolia L1 (geth/reth + consensus client, no Docker) — disk/sync heavy; not required for calldata DA | Future (optional; after Phase 3 unless rate limits force earlier) |
-| **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
+| **2d** | Dedicated L1 RPC via **QuickNode** (env swap only; no redeploy). Render stays Phase 3 (L2 replica, not L1) | **Done** — runbook + `sepolia-rpc-check.sh`; native Mac L1 deferred to **3a** |
+| **3** | Deploy a **replica node on Render** — stock `op-geth` + `op-node` verifier deriving from Sepolia L1 (safe/finalized path). Sequencer peering / tunnel optional stretch. Containers OK **on Render only** | In progress |
+| **3a** | **(Deferred / skipped for now)** Native Mac mini Sepolia L1 (geth/reth + consensus client, no Docker) — disk/sync heavy; not required for calldata DA. Was briefly labeled 2e | Future (optional; only if QuickNode/public RPC is unusable) |
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) | Future |
@@ -292,15 +292,47 @@ Phase 2a prepares a **separate** Sepolia env/deploy tree and hardens loaders/ass
 - [x] README documents QuickNode as drop-in `L1_RPC_URL` upgrade (create endpoint → paste HTTPS URL into `.env.sepolia` → restart Sepolia L2; **no redeploy**)
 - [x] `scripts/sepolia-rpc-check.sh` verifies `L1_RPC_URL` reaches chain **11155111** and returns a block number (does not print API keys if embedded in URL — redacts query/path secrets in logs)
 - [x] Render explicitly **not** used for L1 Sepolia (Phase 3 = L2 replica only)
-- [x] Native Mac mini Sepolia L1 **deferred** to Phase **2e** (optional) — not in 2d scope
+- [x] Native Mac mini Sepolia L1 **deferred** to Phase **3a** (optional) — not in 2d scope
 
-### US-026: Native Mac mini Sepolia L1 (Phase 2e — deferred)
-**Description:** As the operator, I may later run a native Sepolia execution + consensus client on the Mac mini (no Docker) if hosted RPC limits or learning goals require it.
+### US-026: Native Mac mini Sepolia L1 (Phase 3a — deferred / skipped for now)
+**Description:** As the operator, I may later run a native Sepolia execution + consensus client on the Mac mini (no Docker) if hosted RPC limits or learning goals require it. (Formerly labeled Phase 2e.)
 
 **Acceptance Criteria:**
-- [ ] Out of scope until explicitly started; prefer after Phase 3 unless QuickNode/public RPC is unusable
+- [ ] Out of scope until explicitly started; skipped while Phase 3 proceeds unless QuickNode/public RPC is unusable
 - [ ] Would require EL + CL sync (large disk), `L1_RPC_URL=http://127.0.0.1:…`, and likely a real `L1_BEACON_URL` if leaving calldata/beacon-ignore
 - [ ] Must not reintroduce Docker/OrbStack on this host
+
+## User Stories — Phase 3 (Render L2 replica)
+
+Phase 3 deploys a **stock** verifier on Render. Primary sync is **L1 derivation** from Sepolia (same `rollup.json` / genesis as Phase 2b) — no Mac mini port exposure required for safe/finalized heads. Sequencer P2P / tunnel is optional stretch (US-032). Containers are allowed **on Render**; the Mac mini stays native-only.
+
+### US-030: Replica artifact pack + local verifier smoke
+**Description:** As the operator, I want a checked-in recipe that packages Sepolia genesis/rollup for a verifier and a local (non-Render) smoke path so the Docker compose file is proven before cloud spend.
+
+**Acceptance Criteria:**
+- [x] `replica/` holds Docker Compose for `op-geth` + `op-node` in verifier mode (pinned image tags matching Phase 1 toolchain where practical)
+- [x] `scripts/pack-replica-artifacts.sh` copies `deployments/sepolia/.deployer/{genesis,rollup}.json` into `replica/config/` (gitignored runtime copy) without printing secrets
+- [ ] Documented local `docker compose` up smoke (optional on a machine that has Docker — **not** required on the Mac mini if it remains container-free; Cloud/CI or a throwaway host is fine)
+- [x] Verifier has `--sequencer.enabled=false`; no batcher/proposer on the replica
+
+### US-031: Render deploy + sync verification
+**Description:** As the operator, I want the verifier running on Render against Sepolia L1 long enough to confirm safe L2 head advances and matches the Mac mini sequencer’s safe head within a documented lag.
+
+**Acceptance Criteria:**
+- [x] Render Blueprint / runbook uses `replica/` compose (or equivalent private service); `L1_RPC_URL` from Render secrets (QuickNode); never commit API keys
+- [x] Replica HTTP RPC may be private (Render private network / auth) — public unauthenticated L2 RPC is a deliberate go/no-go (defaults to **private** / restricted)
+- [x] `scripts/replica-sync-check.sh` compares replica `optimism_syncStatus` (or EL block) to the Mac mini Sepolia sequencer safe/unsafe heads; exits non-zero on stuck sync
+- [x] README Phase 3 section: cold start, logs, known-good sync lines, how to tear down without touching Phase 1/`data-sepolia` sequencer datadir
+- [x] Mac mini L2 binds stay loopback; Phase 3 does **not** flip US-012 non-loopback for the sequencer
+- [ ] Operator: service live on Render + sync check green against running Sepolia sequencer
+
+### US-032: Optional sequencer peering via tunnel (stretch)
+**Description:** As the operator, I may later expose unsafe-head gossip from the Mac mini sequencer to the Render replica via Tailscale/cloudflared if L1-only lag is too painful for demos.
+
+**Acceptance Criteria:**
+- [ ] Out of scope for closing Phase 3 core (US-030/031); document as optional follow-up
+- [ ] If pursued: tunnel only (no raw public bind of sequencer Engine/P2P on the Mac mini without a fresh US-012 review)
+- [ ] Replica can follow unsafe head with documented lag vs L1-only mode
 
 ## User Stories — Phase 6 (Derivation / minimal sequencer — scaffold)
 
@@ -360,8 +392,8 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - No hosted / SaaS block explorers (e.g. Ethernal) against this stack until the US-012 non-loopback policy review allows a reachable RPC (hosted explorers cannot see `127.0.0.1`)
 - No full address/tx search explorer and no Blockchair-style “latest blocks / latest transactions” pages in Phase 1c / 1d — the deliverable is a **pipeline viewer** (+ optional mempool signal), not Etherscan/Blockscout feature parity
 - No Sepolia cutover in Phase 1d (funding/key prep only); Phase **2a** is scaffold only (no `op-deployer apply` / no funded broadcast); deploy is **2b**
-- No QuickNode required in 2a–2c (public RPC OK); Phase **2d** documents QuickNode upgrade; native Mac L1 is **2e (deferred)**; Render is Phase 3 L2 replica only (never L1)
-- No node on Render or any remote infrastructure (Phase 3)
+- No QuickNode required in 2a–2c (public RPC OK); Phase **2d** documents QuickNode upgrade; native Mac L1 is **3a (deferred)**; Render is Phase 3 L2 replica only (never L1)
+- No node on Render or any remote infrastructure until Phase 3
 - No custom/reimplemented batcher, proposer, or derivation — Phases 4–6
 - No custom execution client required for Phase 3 (stock op-geth/op-reth)
 - No fault proofs, op-challenger, or dispute games (Phase 7)
@@ -406,7 +438,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - L2 block time: 2s (Base-like) or slower to make log-watching easier while learning?
 - op-geth vs op-reth for Phase 1 EL — stick with verified op-geth, or invest in Rust tooling for op-reth now?
 - After non-loopback is allowed: hosted explorer (e.g. Ethernal) vs native single-binary (e.g. Otterscan) vs staying on `cast` + pipeline viewer only?
-- For Phase 3 (Render): tunnel (Tailscale/cloudflared) vs. port forwarding for sequencer→replica peering — defer decision, but note Render's egress/ingress constraints may force the tunnel option
+- For Phase 3 (Render): **resolved for MVP** — L1-derived verifier first (US-030/031); sequencer peering only via tunnel if needed (US-032 stretch). No raw port-forward of Mac mini sequencer.
 - Phase 6: keep stories in this PRD vs spin out `tasks/prd-derivation-client.md` before US-061 coding?
 - Phase 3b: what is the minimum number of friend-operated nodes for meaningful geographic distribution? How do friends run nodes — Docker on their machines, or cloud VPS?
 - Phase 3b: how are friend node operators onboarded? Runbook + sync call, or more formal documentation?
@@ -420,5 +452,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - **Phase 1d scope:** mempool signal + Sepolia funding/key gate only. Blockchair-style latest blocks/txs **deferred** (not 1d).
 - **Phase 3 vs Phase 6:** Render replica uses **stock** OP Stack EL + `op-node` verifier. Custom derivation/sequencer is **Phase 6** (optional separate PRD).
 - **Sepolia funding:** Base Sepolia balances do not count; target ~**1.0 ETH** on Ethereum Sepolia before sustained Phase 2 batcher/proposer; ~**0.5 ETH** minimum to attempt deploy. Keys generated **outside** this repo; never Foundry defaults; never paste private keys into agent chats.
-- **Phase 2 sub-phases:** **2a–2d done** (scaffold → disposable deploy → Sepolia L2 dry-run → QuickNode RPC path). **2e** = optional native Mac Sepolia L1 (deferred). Learning L2 chain ID = **852**. Render is Phase 3 L2 replica only — never L1.
+- **Phase 2 sub-phases:** **2a–2d done** (scaffold → disposable deploy → Sepolia L2 dry-run → QuickNode RPC path). Learning L2 chain ID = **852**.
+- **Phase 3a:** optional native Mac Sepolia L1 (was 2e) — **skipped for now**; only revisit if hosted RPC fails.
+- **Phase 3 MVP:** L1-derived stock verifier on Render; Mac mini sequencer stays loopback; peering/tunnel is stretch (US-032).
 - **Harvest wallet (operator):** `0x5128889F20Ec13e0Be38b2BeBC568594159B652d` — harvest-only; fund role addresses from it in 2b.

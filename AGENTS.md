@@ -14,7 +14,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 - **Never commit** `.env`, `.env.sepolia`, private keys, JWT secrets, or live datadir contents.
 - **Never ask the operator to paste private keys** into chat; never write keys into committed files.
 - **Loopback only** for L2 RPCs, the guestbook HTTP server, and the pipeline viewer (`127.0.0.1` / `localhost`). Sepolia **L1** may be remote HTTPS (`assert_sepolia_rpc_urls`).
-- Prefer **small, reversible diffs**. Do not expand into Phase **2b+** (Sepolia deploy/spend) or Phase 3 (Render) unless asked.
+- Prefer **small, reversible diffs**. Phase **3** (Render replica) is in progress when asked; do not expand into Phase **3a** (native Mac L1) or **3b+** / **4+** unless asked.
 - Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` on the **local Anvil** stack (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start. Sepolia L1 is ~12s; local L2 may stay 2s.
 - **`scripts/lib.sh` `start_bg` / `stop_bg` are privileged.** Any edit needs human review (see `.github/CODEOWNERS`), even when the rest of a change is AI-authored. (`serve_static_loopback` is not privileged process control.)
 
@@ -28,6 +28,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate) |
 | `deployments/` | Phase 1 checked-in addresses + local `.deployer` artifacts |
 | `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
+| `replica/` | Phase 3 Render/verifier Docker compose + entrypoint (containers on Render only) |
 | `config/` | L1 chain config fragments |
 | `bin/` | Symlinks to built OP Stack binaries (gitignored) |
 | `.env.sepolia.example` | Phase 2a Sepolia template (no keys); load via `FORTEL2_ENV=.env.sepolia` |
@@ -53,6 +54,8 @@ FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh            # Phase 2c (n
 FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh          # Phase 2d QuickNode/public L1 check
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/
+# FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh
 ./scripts/stop-all.sh
 ./scripts/reset.sh            # wipe datadir + redeploy next start (needed after portal delay overrides)
 ```
