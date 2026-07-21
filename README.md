@@ -404,7 +404,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh
 | L1 proxies | `deployments/sepolia/deployments.json` |
 | Spend note | `deployments/sepolia/deploy-spend.txt` |
 
-Intent uses `fundDevAccounts = false`, L2 chain **852**, learning-short portal delays (`faultGameClockExtension=5`, `faultGameMaxClockDuration=10` — max must be ≥ extension). Phase 1 Anvil `deployments/` tree is never written. This deploy is **disposable** — wipe with `FORCE_SEPOLIA_REDEPLOY=1` then re-apply.
+Intent uses `fundDevAccounts = false`, L2 chain **852**, learning-short portal delays (`faultGameClockExtension=5`, `faultGameMaxClockDuration=10` — max must be ≥ extension). Resume keeps `state.json` but always rewrites `intent.toml` from current `.env.sepolia` (roles / fault-game delays) before apply. Phase 1 Anvil `deployments/` tree is never written. This deploy is **disposable** — wipe with `FORCE_SEPOLIA_REDEPLOY=1` then re-apply.
 
 **Live Sepolia proxies (Phase 2b apply):** see `deployments/sepolia/deployments.json`. Portal `0xae399e74…52a29`, bridge `0x1623eca8…69614`, DisputeGameFactory `0x54d9c9f1…5bc39`.
 

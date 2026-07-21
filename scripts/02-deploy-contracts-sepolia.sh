@@ -17,6 +17,8 @@ require_eth_address "BATCHER_ADDRESS" "${BATCHER_ADDRESS:-}"
 require_eth_address "PROPOSER_ADDRESS" "${PROPOSER_ADDRESS:-}"
 require_eth_address "SEQUENCER_ADDRESS" "${SEQUENCER_ADDRESS:-}"
 require_eth_address "CHALLENGER_ADDRESS" "${CHALLENGER_ADDRESS:-}"
+# Validate before any Sepolia ETH spend / rollup.json block_time patch (set -u).
+assert_block_times
 
 # Deploy needs ADMIN gas; default floor matches sepolia-fund-check.sh
 ADMIN_MIN="${SEPOLIA_ADMIN_MIN_ETH:-0.70}"
@@ -60,10 +62,8 @@ if (( FAULT_GAME_MAX_CLOCK_DURATION < FAULT_GAME_CLOCK_EXTENSION )); then
   exit 1
 fi
 
-WRITE_INTENT=1
 if [[ -f "$DEPLOY_DIR/state.json" && "${FORCE_SEPOLIA_REDEPLOY:-}" != "1" ]]; then
   echo "Resuming existing Sepolia deploy workdir at $DEPLOY_DIR (set FORCE_SEPOLIA_REDEPLOY=1 to wipe)"
-  WRITE_INTENT=0
 else
   rm -rf "$DEPLOY_DIR"
   mkdir -p "$DEPLOY_DIR"
@@ -76,10 +76,10 @@ if [[ ! -f "$DEPLOY_DIR/intent.toml" ]]; then
     --l2-chain-ids "$L2_CHAIN_ID" \
     --workdir "$DEPLOY_DIR" \
     --intent-type custom
-  WRITE_INTENT=1
 fi
 
-if [[ "$WRITE_INTENT" == "1" || "${REWRITE_SEPOLIA_INTENT:-}" == "1" ]]; then
+# Always rewrite intent from current env so logged overrides/roles match apply
+# (resume keeps state.json; stale intent.toml must not win over .env.sepolia).
 cat > "$DEPLOY_DIR/intent.toml" << EOF
 configType = "custom"
 l1ChainID = ${L1_CHAIN_ID}
@@ -123,7 +123,6 @@ useInterop = false
     proposer = "${PROPOSER_ADDRESS}"
     challenger = "${CHALLENGER_ADDRESS}"
 EOF
-fi
 
 echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameClockExtension=${FAULT_GAME_CLOCK_EXTENSION} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY}"
 echo "fundDevAccounts=false (fund L2 via bridge in Phase 2c)"
@@ -139,11 +138,7 @@ op-deployer apply \
   --l1-rpc-url "$L1_RPC_URL" \
   --private-key "$ADMIN_PRIVATE_KEY"
 
-ADMIN_BAL_AFTER="$(cast balance "$ADMIN_ADDRESS" --rpc-url "$L1_RPC_URL")"
-SPENT_WEI="$(python3 -c 'import sys; print(int(sys.argv[1]) - int(sys.argv[2]))' "$ADMIN_BAL_BEFORE" "$ADMIN_BAL_AFTER")"
-SPENT_ETH="$(cast --to-unit "$SPENT_WEI" ether)"
-echo "ADMIN gas spent this apply: ~${SPENT_ETH} ETH"
-
+# Persist artifacts before spend accounting so a balance quirk cannot skip them.
 echo "Writing genesis.json + rollup.json + deployments.json ..."
 op-deployer inspect genesis --workdir "$DEPLOY_DIR" "$L2_CHAIN_ID" > "$DEPLOY_DIR/genesis.json"
 op-deployer inspect rollup --workdir "$DEPLOY_DIR" "$L2_CHAIN_ID" > "$DEPLOY_DIR/rollup.json"
@@ -153,6 +148,13 @@ if jq -e '.block_time' "$DEPLOY_DIR/rollup.json" >/dev/null 2>&1; then
   jq --argjson t "${L2_BLOCK_TIME}" '.block_time = $t' "$DEPLOY_DIR/rollup.json" > "$DEPLOY_DIR/rollup.json.tmp"
   mv "$DEPLOY_DIR/rollup.json.tmp" "$DEPLOY_DIR/rollup.json"
 fi
+
+ADMIN_BAL_AFTER="$(cast balance "$ADMIN_ADDRESS" --rpc-url "$L1_RPC_URL")"
+# Clamp at 0: incoming transfer/refund during apply must not yield negative wei
+# (cast --to-unit fails under set -e on signed values).
+SPENT_WEI="$(python3 -c 'import sys; print(max(0, int(sys.argv[1]) - int(sys.argv[2])))' "$ADMIN_BAL_BEFORE" "$ADMIN_BAL_AFTER")"
+SPENT_ETH="$(cast --to-unit "$SPENT_WEI" ether)"
+echo "ADMIN gas spent this apply: ~${SPENT_ETH} ETH"
 
 # Record spend for the runbook (no secrets)
 SPEND_LOG="$FORTEL2_ROOT/deployments/sepolia/deploy-spend.txt"
