@@ -30,7 +30,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **1c** | DIY pipeline viewer: live sequencer / batcher / proposer / tx activity panels on loopback | ✅ Done |
 | **1d** | Viewer mempool signal + Sepolia funding and fresh-key gate | ✅ Done |
 | **2a** | Sepolia scaffold: `.env.sepolia` tree, L2 chain **852**, public RPC, no on-chain spend | ✅ Done |
-| **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | Planned |
+| **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | ✅ Done |
 | **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | Planned |
 | **2d** | Dedicated L1 RPC (QuickNode); optional native Mac L1 later | Planned |
 | **3** | **Replica node on Render**, syncing from the sequencer over the public internet (stock clients) | Planned |
@@ -386,7 +386,30 @@ Fund **Ethereum Sepolia** (chain **11155111**) on the harvest wallet, then trans
 
 Operator tip: keep harvesting toward **~1.0 ETH** before Phase 2; **~0.5 ETH** is only enough to attempt a disposable deploy.
 
+## Phase 2b — Disposable Sepolia deploy (US-023)
+
+**Prerequisite:** Phase 2a `.env.sepolia` filled offline. Fund **ADMIN** from harvest before apply (≥ ~0.70 ETH). BATCHER/PROPOSER (≥ ~0.15 each) can wait until Phase 2c.
+
+```bash
+# Balances + copy-paste cast send examples (no broadcast; no keys printed)
+FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
+
+# After ADMIN shows OK — spends Sepolia ETH; writes deployments/sepolia/ only
+FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh
+```
+
+| Artifact | Path |
+|---|---|
+| op-deployer workdir | `deployments/sepolia/.deployer/` (gitignored) |
+| L1 proxies | `deployments/sepolia/deployments.json` |
+| Spend note | `deployments/sepolia/deploy-spend.txt` |
+
+Intent uses `fundDevAccounts = false`, L2 chain **852**, learning-short portal delays (`faultGameClockExtension=5`, `faultGameMaxClockDuration=10` — max must be ≥ extension). Phase 1 Anvil `deployments/` tree is never written. This deploy is **disposable** — wipe with `FORCE_SEPOLIA_REDEPLOY=1` then re-apply.
+
+**Live Sepolia proxies (Phase 2b apply):** see `deployments/sepolia/deployments.json`. Portal `0xae399e74…52a29`, bridge `0x1623eca8…69614`, DisputeGameFactory `0x54d9c9f1…5bc39`.
+
 ## Phase 2a — Sepolia scaffold (US-020–022)
+
 
 Phase **2a is scaffold only** — no `op-deployer apply`, no funded broadcast. Learning L2 chain ID on Sepolia is **852** (local Anvil L2 stays **901**).
 

@@ -1,0 +1,5 @@
+timestamp=2026-07-21T01:50:27Z
+admin=0xBB3E19811B2c3423069B54BDFF3e90Dd8094bb0F
+spent_eth≈0.087040769448382852
+l1_rpc=https://ethereum-sepolia-rpc.publicnode.com
+l2_chain_id=852

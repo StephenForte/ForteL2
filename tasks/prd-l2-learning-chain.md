@@ -33,7 +33,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014); operator-verified on live stack |
 | **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | **Done** — Aggregate mempool + README US-016 faucet/key gate |
 | **2a** | **Sepolia scaffold**: `.env.sepolia` tree, `deployments/sepolia/`, `FORTEL2_ENV` loader, split L1/L2 RPC asserts, agent-permission checklist; L2 chain ID **852**; public L1 RPC placeholders; **no on-chain spend** | **Done** — scaffold + docs |
-| **2b** | Disposable `op-deployer apply` on Ethereum Sepolia + genesis/rollup under `deployments/sepolia/`; fund role addresses from harvest wallet | Future |
+| **2b** | Disposable `op-deployer apply` on Ethereum Sepolia + genesis/rollup under `deployments/sepolia/`; fund role addresses from harvest wallet | **Done** — L1 contracts on Sepolia; artifacts under `deployments/sepolia/` |
 | **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | Future |
 | **2d** | Dedicated L1 RPC (QuickNode); document optional native Mac L1 (no Docker); Render stays Phase 3 (L2 replica, not L1) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
@@ -262,16 +262,18 @@ Phase 2a prepares a **separate** Sepolia env/deploy tree and hardens loaders/ass
 - [x] README checklist: (1) no cloud agent with repo secrets for funded keys, (2) CODEOWNERS review still required for `start_bg`/`stop_bg`, (3) Foundry tripwire on for non-901, (4) never paste keys into chat, (5) `.env.sepolia` stays local/gitignored
 - [x] AGENTS.md notes Phase 2a scaffold is in-scope when asked; agents must not request private keys
 
-## User Stories — Phase 2b / 2c / 2d (scaffold only — implement later)
+## User Stories — Phase 2b / 2c / 2d
 
 ### US-023: Disposable Sepolia L1 contract deploy (Phase 2b)
 **Description:** As the operator, I want a one-shot `op-deployer apply` against Ethereum Sepolia writing artifacts under `deployments/sepolia/`.
 
 **Acceptance Criteria:**
-- [ ] Role addresses funded from harvest; Foundry defaults unused
-- [ ] Intent: `fundDevAccounts=false`, L2 chain id 852, learning-short portal delays
-- [ ] `deployments/sepolia/deployments.json` + genesis/rollup produced; Phase 1 tree untouched
-- [ ] Gas spend recorded; disposable (safe to abandon and redeploy)
+- [x] `scripts/sepolia-fund-check.sh` shows role balances + recommended floors; does not print private keys
+- [x] `scripts/02-deploy-contracts-sepolia.sh` requires `FORTEL2_ENV=.env.sepolia`, refuses Foundry defaults, refuses writing Phase 1 `deployments/deployments.json`
+- [x] Role addresses funded from harvest; ADMIN ≥ ~0.70 ETH before apply (operator action)
+- [x] Intent: `fundDevAccounts=false`, L2 chain id 852, learning-short portal delays (`faultGameClockExtension` + `faultGameMaxClockDuration`)
+- [x] `deployments/sepolia/deployments.json` + genesis/rollup produced; Phase 1 tree untouched; gas spend recorded
+- [x] Deploy is disposable (safe to abandon and redeploy)
 
 ### US-024: Sepolia-backed L2 dry-run (Phase 2c)
 **Description:** As the operator, I want the sequencer/batcher/proposer running against Sepolia L1 long enough to confirm batches and one deposit.

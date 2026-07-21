@@ -307,6 +307,47 @@ assert_sepolia_rpc_urls() {
   fi
 }
 
+# Fail closed unless this process loaded a Sepolia env (chain 852 + sepolia deploy tree).
+require_sepolia_env() {
+  assert_sepolia_rpc_urls
+  if [[ "${L1_CHAIN_ID:-}" != "11155111" ]]; then
+    echo "ERROR: require_sepolia_env expects L1_CHAIN_ID=11155111 (got ${L1_CHAIN_ID:-<unset>})" >&2
+    exit 1
+  fi
+  if [[ "${L2_CHAIN_ID:-}" != "852" ]]; then
+    echo "ERROR: require_sepolia_env expects L2_CHAIN_ID=852 (got ${L2_CHAIN_ID:-<unset>})" >&2
+    exit 1
+  fi
+  case "${DEPLOY_DIR:-}" in
+    */deployments/sepolia/.deployer|*/deployments/sepolia/.deployer/)
+      ;;
+    *)
+      echo "ERROR: DEPLOY_DIR must be deployments/sepolia/.deployer (got ${DEPLOY_DIR:-<unset>})" >&2
+      echo "Use FORTEL2_ENV=.env.sepolia — do not reuse Phase 1 deployments/.deployer" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# Require address balance >= min_ether (ether units as decimal string). Uses cast.
+require_min_balance_eth() {
+  local addr="$1"
+  local min_eth="$2"
+  local label="${3:-account}"
+  require_eth_address "$label" "$addr"
+  require_bin cast
+  local bal_wei min_wei
+  bal_wei="$(cast balance "$addr" --rpc-url "$L1_RPC_URL")"
+  min_wei="$(cast to-wei "$min_eth" ether)"
+  if ! python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) >= int(sys.argv[2]) else 1)' "$bal_wei" "$min_wei"; then
+    local bal_eth
+    bal_eth="$(cast --to-unit "$bal_wei" ether)"
+    echo "ERROR: $label $addr has ${bal_eth} ETH; need >= ${min_eth} ETH on Sepolia" >&2
+    echo "Fund from harvest ($HARVEST_ADDRESS) then re-run. See scripts/sepolia-fund-check.sh" >&2
+    exit 1
+  fi
+}
+
 # Validate a TCP port number (1–65535).
 require_http_port() {
   local port="$1"
