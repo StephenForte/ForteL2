@@ -64,9 +64,11 @@ GETH_PID=$!
 cleanup() {
   if [ -n "${NODE_PID:-}" ]; then
     kill "$NODE_PID" 2>/dev/null || true
-    wait "$NODE_PID" 2>/dev/null || true
   fi
   kill "$GETH_PID" 2>/dev/null || true
+  if [ -n "${NODE_PID:-}" ]; then
+    wait "$NODE_PID" 2>/dev/null || true
+  fi
   wait "$GETH_PID" 2>/dev/null || true
 }
 trap cleanup INT TERM
