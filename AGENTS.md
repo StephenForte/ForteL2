@@ -28,7 +28,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate) |
 | `deployments/` | Phase 1 checked-in addresses + local `.deployer` artifacts |
 | `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
-| `replica/` | Phase 3 Render/verifier Docker compose + entrypoint (containers on Render only) |
+| `replica/` | Phase 3 pack output + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (Docker lives there) |
 | `config/` | L1 chain config fragments |
 | `bin/` | Symlinks to built OP Stack binaries (gitignored) |
 | `.env.sepolia.example` | Phase 2a Sepolia template (no keys); load via `FORTEL2_ENV=.env.sepolia` |
@@ -54,7 +54,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh            # Phase 2c (n
 FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh          # Phase 2d QuickNode/public L1 check
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
-FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/
+FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/ (publish to fortel2-replica)
 # FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh
 ./scripts/stop-all.sh
 ./scripts/reset.sh            # wipe datadir + redeploy next start (needed after portal delay overrides)

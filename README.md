@@ -466,29 +466,28 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 
 Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1**. Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032** / Phase **3a** is unrelated native L1).
 
-Containers are allowed **on Render only**; this Mac stays native binaries.
+**Deploy / friend package:** [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica) (separate repo — root Dockerfile for Render, compose for laptops). Containers allowed **there / on Render only**; this Mac stays native binaries.
 
 ```bash
-# Package genesis + rollup for the replica (from Phase 2b artifacts)
+# After a Sepolia redeploy, pack genesis/rollup then publish into fortel2-replica
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh
 
-# After Render is up (or a remote compose host), compare heads:
+# After the remote verifier is up, compare heads:
 FORTEL2_ENV=.env.sepolia \
   REPLICA_L2_RPC_URL=https://your-replica.render.example \
   REPLICA_NODE_RPC_URL=https://your-replica-node.render.example \
   ./scripts/replica-sync-check.sh
 ```
 
-| Piece | Path |
+| Piece | Where |
 |---|---|
-| Compose + entrypoint | `replica/docker-compose.yml`, `replica/entrypoint.sh` |
-| Env template | `replica/.env.example` (Render secrets / local compose) |
-| Packed config | `replica/config/` (gitignored; from `pack-replica-artifacts.sh`) |
+| Docker / compose / Blueprint | [fortel2-replica](https://github.com/StephenForte/fortel2-replica) |
+| Pack genesis/rollup | `scripts/pack-replica-artifacts.sh` → `replica/config/` (gitignored) |
 | Sync check | `scripts/replica-sync-check.sh` |
 
-**Defaults:** replica JSON-RPC stays **private / restricted** (not a public unauthenticated L2). Mac mini L2 binds remain loopback (US-012 non-loopback still no-go for the sequencer).
+**Defaults:** replica JSON-RPC stays **private / restricted**. Mac mini L2 binds remain loopback (US-012 non-loopback still no-go for the sequencer).
 
-See `replica/README.md` for image pins, Render Blueprint notes, and tear-down.
+See [fortel2-replica README](https://github.com/StephenForte/fortel2-replica#readme) for Render / friend quick start.
 
 ## Phase 2a — Sepolia scaffold (US-020–022)
 

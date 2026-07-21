@@ -310,19 +310,19 @@ Phase 3 deploys a **stock** verifier on Render. Primary sync is **L1 derivation*
 **Description:** As the operator, I want a checked-in recipe that packages Sepolia genesis/rollup for a verifier and a local (non-Render) smoke path so the Docker compose file is proven before cloud spend.
 
 **Acceptance Criteria:**
-- [x] `replica/` holds Docker Compose for `op-geth` + `op-node` in verifier mode (pinned image tags matching Phase 1 toolchain where practical)
-- [x] `scripts/pack-replica-artifacts.sh` copies `deployments/sepolia/.deployer/{genesis,rollup}.json` into `replica/config/` (gitignored runtime copy) without printing secrets
-- [ ] Documented local `docker compose` up smoke (optional on a machine that has Docker — **not** required on the Mac mini if it remains container-free; Cloud/CI or a throwaway host is fine)
+- [x] Verifier package published as separate repo [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (root Dockerfile + compose + baked genesis/rollup) for Render and friend clones
+- [x] `scripts/pack-replica-artifacts.sh` copies `deployments/sepolia/.deployer/{genesis,rollup}.json` into `replica/config/` (gitignored) for publishing into that repo
+- [ ] Documented local `docker compose` up smoke on a Docker-capable host (see fortel2-replica README; not required on the Mac mini)
 - [x] Verifier has `--sequencer.enabled=false`; no batcher/proposer on the replica
 
 ### US-031: Render deploy + sync verification
 **Description:** As the operator, I want the verifier running on Render against Sepolia L1 long enough to confirm safe L2 head advances and matches the Mac mini sequencer’s safe head within a documented lag.
 
 **Acceptance Criteria:**
-- [x] Render Blueprint / runbook uses `replica/` compose (or equivalent private service); `L1_RPC_URL` from Render secrets (QuickNode); never commit API keys
+- [x] Render Blueprint / runbook lives in fortel2-replica (`render.yaml`, root Dockerfile); `L1_RPC_URL` from Render secrets (QuickNode); never commit API keys
 - [x] Replica HTTP RPC may be private (Render private network / auth) — public unauthenticated L2 RPC is a deliberate go/no-go (defaults to **private** / restricted)
 - [x] `scripts/replica-sync-check.sh` compares replica `optimism_syncStatus` (or EL block) to the Mac mini Sepolia sequencer safe/unsafe heads; exits non-zero on stuck sync
-- [x] README Phase 3 section: cold start, logs, known-good sync lines, how to tear down without touching Phase 1/`data-sepolia` sequencer datadir
+- [x] README Phase 3 section points at fortel2-replica; tear-down does not touch Phase 1/`data-sepolia` sequencer datadir
 - [x] Mac mini L2 binds stay loopback; Phase 3 does **not** flip US-012 non-loopback for the sequencer
 - [ ] Operator: service live on Render + sync check green against running Sepolia sequencer
 
