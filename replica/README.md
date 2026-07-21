@@ -39,7 +39,7 @@ cd replica && docker compose up -d
 ## Render
 
 1. Create a **Docker** web/private service from this repo (`replica/Dockerfile` context = `replica/`).
-2. Set secrets: `L1_RPC_URL` (QuickNode), optional `JWT_SECRET` (32+ hex; auto-generated if empty). Optional `L1_BLOCK_TIME` (default `12`) must match the Phase 2c sequencer `--l1.beacon.slot-duration-override`.
+2. Set secrets: `L1_RPC_URL` (QuickNode), optional `JWT_SECRET` (32+ hex; auto-generated if empty). Optional `L1_BLOCK_TIME` (default `12`) must match the Phase 2c sequencer `--l1.beacon.slot-duration-override`. Optional `GETH_READY_TIMEOUT_SECS` (default `0` = wait while op-geth is alive) bounds how long the entrypoint waits for IPC before failing; leave at `0` on starter disks so archive crash recovery is not killed mid-open.
 3. Mount or bake `config/genesis.json` + `config/rollup.json` (from pack step — commit a **release copy** only if you accept public genesis; prefer Render secret files / build arg from CI).
 4. Expose HTTP carefully — default is a Render **private service** (`pserv` in `render.yaml`). Do not publish an open eth_sendRawTransaction surface without a fresh policy review.
 5. Disk: attach a persistent disk at `/data` for op-geth.

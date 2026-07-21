@@ -11,6 +11,16 @@ L2_AUTH_PORT="${L2_AUTH_PORT:-8551}"
 L2_NODE_RPC_PORT="${L2_NODE_RPC_PORT:-9545}"
 # Match Phase 2c Sepolia sequencer slot override (beacon ignored for calldata DA).
 L1_BLOCK_TIME="${L1_BLOCK_TIME:-12}"
+# Seconds to wait for op-geth IPC after start. 0 = keep waiting while the PID is alive
+# (archive crash recovery on constrained Render disks often exceeds 60s).
+GETH_READY_TIMEOUT_SECS="${GETH_READY_TIMEOUT_SECS:-0}"
+
+case "$GETH_READY_TIMEOUT_SECS" in
+  ''|*[!0-9]*)
+    echo "ERROR: GETH_READY_TIMEOUT_SECS must be a non-negative integer (got: $GETH_READY_TIMEOUT_SECS)" >&2
+    exit 1
+    ;;
+esac
 
 if [ -z "${L1_RPC_URL:-}" ]; then
   echo "ERROR: L1_RPC_URL is required (Sepolia HTTPS — set as Render secret)" >&2
@@ -53,10 +63,16 @@ GETH_PID=$!
 
 # Wait for engine API: require IPC + a successful attach, not merely a live PID.
 # (kill -0 alone succeeds as soon as geth is forked, even before authrpc binds.)
-echo "Waiting for op-geth engine API..."
+# Do not kill a still-alive geth after a short fixed window — persistent archive
+# datadirs can take minutes to open IPC during startup/crash recovery.
+if [ "$GETH_READY_TIMEOUT_SECS" -eq 0 ]; then
+  echo "Waiting for op-geth engine API (no timeout while pid $GETH_PID is alive)..."
+else
+  echo "Waiting for op-geth engine API (up to ${GETH_READY_TIMEOUT_SECS}s)..."
+fi
 i=0
 ready=0
-while [ "$i" -lt 60 ]; do
+while true; do
   if ! kill -0 "$GETH_PID" 2>/dev/null; then
     echo "ERROR: op-geth exited before engine API became ready" >&2
     wait "$GETH_PID" || true
@@ -67,15 +83,22 @@ while [ "$i" -lt 60 ]; do
     ready=1
     break
   fi
+  if [ "$GETH_READY_TIMEOUT_SECS" -gt 0 ] && [ "$i" -ge "$GETH_READY_TIMEOUT_SECS" ]; then
+    break
+  fi
+  if [ "$i" -gt 0 ] && [ $((i % 30)) -eq 0 ]; then
+    echo "Still waiting for op-geth IPC at $DATA_DIR/geth.ipc (${i}s elapsed; pid $GETH_PID alive)"
+  fi
   sleep 1
   i=$((i + 1))
 done
 if [ "$ready" -ne 1 ]; then
-  echo "ERROR: timed out waiting for op-geth IPC/RPC at $DATA_DIR/geth.ipc" >&2
+  echo "ERROR: timed out waiting for op-geth IPC/RPC at $DATA_DIR/geth.ipc after ${i}s" >&2
   kill "$GETH_PID" 2>/dev/null || true
   wait "$GETH_PID" 2>/dev/null || true
   exit 1
 fi
+echo "op-geth engine API ready after ${i}s"
 
 echo "Starting op-node (verifier / L1 derivation)"
 op-node \
