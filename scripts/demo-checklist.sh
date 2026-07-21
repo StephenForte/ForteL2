@@ -94,7 +94,7 @@ print_checklist() {
 
 ── G. Guardrails / docs (US-012 + 1d funding + runbook) ───────────
   [ ] [auto] ./scripts/test-helpers.sh passes
-  [ ] [auto] node --test viewer/lib.test.js passes
+  [ ] [auto] node --test viewer/lib.test.js dapp/lib.test.js passes
   [ ] RPCs and HTTP servers stay on 127.0.0.1 / localhost only
   [ ] README “Pipeline viewer” + “Phase 2 funding gate” match what you see
   [ ] Sepolia harvest progressing toward ~1.0 ETH (Base Sepolia does not count)
@@ -263,10 +263,21 @@ run_auto() {
   else
     fail_item "scripts/test-helpers.sh (see /tmp/fortel2-helpers-$$.log)"
   fi
-  if node --test "$FORTEL2_ROOT/viewer/lib.test.js" >/tmp/fortel2-viewer-$$.log 2>&1; then
-    pass "viewer/lib.test.js"
+  if node --test "$FORTEL2_ROOT/viewer/lib.test.js" "$FORTEL2_ROOT/dapp/lib.test.js" \
+    >/tmp/fortel2-viewer-$$.log 2>&1; then
+    pass "viewer + dapp lib.test.js"
   else
-    fail_item "viewer/lib.test.js (see /tmp/fortel2-viewer-$$.log)"
+    fail_item "viewer/dapp lib.test.js (see /tmp/fortel2-viewer-$$.log)"
+  fi
+  if [[ -d "$FORTEL2_ROOT/scripts/bridge/node_modules" ]]; then
+    if (cd "$FORTEL2_ROOT/scripts/bridge" && node --test lib.test.js) \
+      >/tmp/fortel2-bridge-$$.log 2>&1; then
+      pass "scripts/bridge/lib.test.js"
+    else
+      fail_item "scripts/bridge/lib.test.js (see /tmp/fortel2-bridge-$$.log)"
+    fi
+  else
+    skip "bridge unit tests — run: (cd scripts/bridge && npm ci && node --test lib.test.js)"
   fi
 
   echo

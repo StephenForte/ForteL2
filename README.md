@@ -152,10 +152,11 @@ chmod +x scripts/*.sh
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config
-node --test viewer/lib.test.js     # pipeline viewer pure helpers
+node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers
+(cd scripts/bridge && npm ci && node --test lib.test.js)  # withdrawal bridge helpers
 ```
 
-GitHub Actions runs the same trio on every PR (`.github/workflows/ci.yml`). Startup scripts hard-fail if `L1_BLOCK_TIME < L2_BLOCK_TIME` or RPCs leave loopback. Broadcast scripts refuse Foundry default keys when `L2_CHAIN_ID != 901`.
+GitHub Actions runs the same suite on every PR (`.github/workflows/ci.yml`). Startup scripts hard-fail if `L1_BLOCK_TIME < L2_BLOCK_TIME` or RPCs leave loopback. Broadcast scripts refuse Foundry default keys when `L2_CHAIN_ID != 901`.
 
 Agent workflow notes live in `AGENTS.md`. `scripts/lib.sh` process helpers (`start_bg` / `stop_bg`) are privileged — see `.github/CODEOWNERS`. `serve_static_loopback` is not privileged process control.
 Stop / reset:

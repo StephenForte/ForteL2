@@ -67,11 +67,14 @@ cd contracts && forge test
 # Script helpers (no chain required)
 ./scripts/test-helpers.sh
 
-# Pipeline viewer pure helpers
-node --test viewer/lib.test.js
+# Pipeline viewer + dApp pure helpers
+node --test viewer/lib.test.js dapp/lib.test.js
+
+# Bridge helpers (viem deps)
+(cd scripts/bridge && npm ci && node --test lib.test.js)
 ```
 
-CI runs the same trio on every PR (`.github/workflows/ci.yml`).
+CI runs the same suite on every PR (`.github/workflows/ci.yml`).
 
 Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std --no-git --shallow`.
 
@@ -116,4 +119,4 @@ This repo was authored for macOS/`darwin-arm64`, but the Cursor Cloud VM is **Li
 - **Running the stack:** `./scripts/start-all.sh` (see README/AGENTS everyday commands). Processes are daemonized via a Python double-fork in `start_bg`, so they survive shell/agent teardown; check `./scripts/status.sh` and `data/logs/*.log`. `./scripts/stop-all.sh` / `./scripts/reset.sh` to stop / wipe.
 - **dApp reads without a wallet:** `dapp/app.js` calls `refresh()` on load through a read-only `JsonRpcProvider`, so `./scripts/serve-dapp.sh` (http://127.0.0.1:8080) shows on-chain guestbook entries even with no MetaMask. Ethers is vendored under `dapp/vendor/` (CSP `script-src 'self'`).
 - **Pipeline viewer:** `./scripts/serve-viewer.sh` (http://127.0.0.1:8081) polls L1/L2/op-node; run after deploy so `gen-viewer-config.sh` can read `rollup.json`.
-- **Tests / lint:** Solidity `cd contracts && forge test`; shell helpers `./scripts/test-helpers.sh`; viewer `node --test viewer/lib.test.js`; L2 end-to-end `./scripts/smoke-transfer.sh`. There is no dedicated linter wired up (`forge fmt --check` is the closest option).
+- **Tests / lint:** Solidity `cd contracts && forge test`; shell helpers `./scripts/test-helpers.sh`; viewer + dApp `node --test viewer/lib.test.js dapp/lib.test.js`; bridge `(cd scripts/bridge && npm ci && node --test lib.test.js)`; L2 end-to-end `./scripts/smoke-transfer.sh`. There is no dedicated linter wired up (`forge fmt --check` is the closest option).

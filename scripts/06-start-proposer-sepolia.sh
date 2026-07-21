@@ -31,7 +31,8 @@ start_bg op-proposer op-proposer \
   --proposal-interval="${PROPOSER_INTERVAL}" \
   --allow-non-finalized=true \
   --poll-interval=4s \
-  --rpc.port=8560 \
+  --rpc.addr=127.0.0.1 \
+  --rpc.port="${PROPOSER_RPC_PORT}" \
   --log.level=info
 
 echo "Sepolia proposer started against DisputeGameFactory=$GAME_FACTORY game-type=$PROPOSER_GAME_TYPE"

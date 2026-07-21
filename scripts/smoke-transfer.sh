@@ -26,4 +26,17 @@ cast receipt "$TX" --rpc-url "$L2_RPC_URL" | head -20
 AFTER_A=$(cast balance "$DEMO_A_ADDRESS" --rpc-url "$L2_RPC_URL")
 AFTER_B=$(cast balance "$DEMO_B_ADDRESS" --rpc-url "$L2_RPC_URL")
 echo "After:  A=$AFTER_A B=$AFTER_B"
+
+# Receipt success alone is not enough — require the value transfer landed.
+if ! uint_gt "$AFTER_B" "$BEFORE_B"; then
+  echo "ERROR: DEMO_B balance did not increase after transfer" >&2
+  echo "  before=$BEFORE_B after=$AFTER_B tx=$TX" >&2
+  exit 1
+fi
+if ! uint_gt "$BEFORE_A" "$AFTER_A"; then
+  echo "ERROR: DEMO_A balance did not decrease after transfer (value + gas)" >&2
+  echo "  before=$BEFORE_A after=$AFTER_A tx=$TX" >&2
+  exit 1
+fi
+
 echo "OK — L2 transfer confirmed."

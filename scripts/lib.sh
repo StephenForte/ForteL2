@@ -43,6 +43,9 @@ DATA_DIR="${DATA_DIR:-$FORTEL2_ROOT/data}"
 DEPLOY_DIR="${DEPLOY_DIR:-$FORTEL2_ROOT/deployments/.deployer}"
 LOG_DIR="${LOG_DIR:-$DATA_DIR/logs}"
 PID_DIR="${PID_DIR:-$DATA_DIR/pids}"
+# Admin RPC ports for op-batcher / op-proposer (shared by Phase 1 + 2c; must stay free together).
+BATCHER_RPC_PORT="${BATCHER_RPC_PORT:-8548}"
+PROPOSER_RPC_PORT="${PROPOSER_RPC_PORT:-8560}"
 
 mkdir -p "$DATA_DIR" "$LOG_DIR" "$PID_DIR" "$DEPLOY_DIR"
 
@@ -364,22 +367,24 @@ deployments_json_path() {
 
 # Refuse starting Sepolia L2 if something already listens on the configured loopback ports
 # (Phase 1 and Phase 2c share default ports and cannot run together).
-# Includes batcher/proposer admin RPC ports (hardcoded 8548/8560 in Phase 1 + 2c start scripts).
+# Includes batcher/proposer admin RPC ports (BATCHER_RPC_PORT / PROPOSER_RPC_PORT).
 assert_l2_ports_free() {
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "ERROR: lsof is required to verify L2 ports are free (install lsof)" >&2
+    exit 1
+  fi
   local port
   for port in \
     "${L2_EL_HTTP_PORT}" \
     "${L2_EL_WS_PORT}" \
     "${L2_EL_AUTH_PORT}" \
     "${L2_NODE_RPC_PORT}" \
-    8548 \
-    8560
+    "${BATCHER_RPC_PORT}" \
+    "${PROPOSER_RPC_PORT}"
   do
-    if command -v lsof >/dev/null 2>&1; then
-      if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-        echo "ERROR: port $port already in use — stop Phase 1 (./scripts/stop-all.sh) or free the port" >&2
-        exit 1
-      fi
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "ERROR: port $port already in use — stop Phase 1 (./scripts/stop-all.sh) or free the port" >&2
+      exit 1
     fi
   done
 }
