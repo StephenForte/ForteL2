@@ -291,27 +291,54 @@ else
 fi
 
 # assert_l2_ports_free must cover shared batcher/proposer admin ports (Phase 1 + 2c).
-if awk '/^assert_l2_ports_free\(\)/,/^}/' "$SCRIPT_DIR/lib.sh" | grep -q '8548' \
-  && awk '/^assert_l2_ports_free\(\)/,/^}/' "$SCRIPT_DIR/lib.sh" | grep -q '8560'; then
+if awk '/^assert_l2_ports_free\(\)/,/^}/' "$SCRIPT_DIR/lib.sh" | grep -q 'BATCHER_RPC_PORT' \
+  && awk '/^assert_l2_ports_free\(\)/,/^}/' "$SCRIPT_DIR/lib.sh" | grep -q 'PROPOSER_RPC_PORT'; then
   echo "PASS assert_l2_ports_free probes batcher/proposer ports"
 else
-  echo "FAIL assert_l2_ports_free must probe 8548 and 8560" >&2
+  echo "FAIL assert_l2_ports_free must probe BATCHER_RPC_PORT and PROPOSER_RPC_PORT" >&2
+  fail=1
+fi
+# Fail closed when lsof is missing (no silent skip).
+if awk '/^assert_l2_ports_free\(\)/,/^}/' "$SCRIPT_DIR/lib.sh" | grep -q 'lsof is required'; then
+  echo "PASS assert_l2_ports_free requires lsof"
+else
+  echo "FAIL assert_l2_ports_free must fail closed without lsof" >&2
+  fail=1
+fi
+# Proposer admin RPC must bind loopback (op-service defaults ListenAddr to 0.0.0.0).
+if grep -q -- '--rpc.addr=127.0.0.1' "$SCRIPT_DIR/06-start-proposer.sh" \
+  && grep -q -- '--rpc.addr=127.0.0.1' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q -- '--rpc.addr=127.0.0.1' "$SCRIPT_DIR/05-start-batcher.sh" \
+  && grep -q -- '--rpc.addr=127.0.0.1' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  echo "PASS batcher/proposer admin RPC bind loopback"
+else
+  echo "FAIL batcher/proposer start scripts must set --rpc.addr=127.0.0.1" >&2
+  fail=1
+fi
+# smoke-transfer must assert balance movement, not only receipt success.
+if grep -q 'uint_gt "\$AFTER_B" "\$BEFORE_B"' "$SCRIPT_DIR/smoke-transfer.sh" \
+  && grep -q 'uint_gt "\$BEFORE_A" "\$AFTER_A"' "$SCRIPT_DIR/smoke-transfer.sh"; then
+  echo "PASS smoke-transfer asserts A decrease and B increase"
+else
+  echo "FAIL smoke-transfer must uint_gt-assert balances after transfer" >&2
   fail=1
 fi
 # Behavioral: if default batcher admin port is free, bind it and expect assert_l2_ports_free to fail.
-if command -v lsof >/dev/null 2>&1 \
-  && ! lsof -nP -iTCP:8548 -sTCP:LISTEN >/dev/null 2>&1; then
-  python3 - <<'PY' &
+if ! command -v lsof >/dev/null 2>&1; then
+  echo "FAIL assert_l2_ports_free behavioral probe needs lsof" >&2
+  fail=1
+elif ! lsof -nP -iTCP:"${BATCHER_RPC_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+  python3 - <<PY &
 import socket, time
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("127.0.0.1", 8548))
+s.bind(("127.0.0.1", int("${BATCHER_RPC_PORT}")))
 s.listen(1)
 time.sleep(30)
 PY
   listener_pid=$!
   for _ in 1 2 3 4 5; do
-    lsof -nP -iTCP:8548 -sTCP:LISTEN >/dev/null 2>&1 && break
+    lsof -nP -iTCP:"${BATCHER_RPC_PORT}" -sTCP:LISTEN >/dev/null 2>&1 && break
     sleep 0.1
   done
   # Keep EL/op-node ports on unused values so only the batcher admin conflict trips.
@@ -322,15 +349,78 @@ PY
     L2_NODE_RPC_PORT=19547
     assert_l2_ports_free >/dev/null 2>&1
   ); then
-    echo "FAIL assert_l2_ports_free should fail when 8548 is in use" >&2
+    echo "FAIL assert_l2_ports_free should fail when ${BATCHER_RPC_PORT} is in use" >&2
     fail=1
   else
-    echo "PASS assert_l2_ports_free rejects occupied batcher port 8548"
+    echo "PASS assert_l2_ports_free rejects occupied batcher port ${BATCHER_RPC_PORT}"
   fi
   kill "$listener_pid" >/dev/null 2>&1 || true
   wait "$listener_pid" 2>/dev/null || true
 else
-  echo "PASS assert_l2_ports_free batcher-port probe skipped (8548 busy or no lsof)"
+  echo "PASS assert_l2_ports_free batcher-port probe skipped (${BATCHER_RPC_PORT} busy)"
+fi
+
+# deployments_json_path selects Phase 1 vs Sepolia tree from L2_CHAIN_ID.
+if (
+  L2_CHAIN_ID=901
+  [[ "$(deployments_json_path)" == "$FORTEL2_ROOT/deployments/deployments.json" ]]
+) && (
+  L2_CHAIN_ID=852
+  [[ "$(deployments_json_path)" == "$FORTEL2_ROOT/deployments/sepolia/deployments.json" ]]
+); then
+  echo "PASS deployments_json_path phase selection"
+else
+  echo "FAIL deployments_json_path phase selection" >&2
+  fail=1
+fi
+
+# assert_local_rpc_urls: both L1 and L2 must be loopback.
+L1_RPC_URL="http://127.0.0.1:8545"
+L2_RPC_URL="http://127.0.0.1:9545"
+L2_NODE_RPC_URL="http://127.0.0.1:9547"
+if (assert_local_rpc_urls >/dev/null); then
+  echo "PASS assert_local_rpc_urls loopback L1+L2"
+else
+  echo "FAIL assert_local_rpc_urls loopback L1+L2" >&2
+  fail=1
+fi
+L1_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
+if (assert_local_rpc_urls >/dev/null 2>&1); then
+  echo "FAIL assert_local_rpc_urls should reject remote L1" >&2
+  fail=1
+else
+  echo "PASS assert_local_rpc_urls rejects remote L1"
+fi
+L1_RPC_URL="http://127.0.0.1:8545"
+
+# require_sepolia_env: chain ids + sepolia deploy tree.
+if (
+  L1_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
+  L2_RPC_URL="http://127.0.0.1:9545"
+  L2_NODE_RPC_URL="http://127.0.0.1:9547"
+  L1_CHAIN_ID=11155111
+  L2_CHAIN_ID=852
+  DEPLOY_DIR="$FORTEL2_ROOT/deployments/sepolia/.deployer"
+  require_sepolia_env >/dev/null
+); then
+  echo "PASS require_sepolia_env happy path"
+else
+  echo "FAIL require_sepolia_env happy path" >&2
+  fail=1
+fi
+if (
+  L1_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
+  L2_RPC_URL="http://127.0.0.1:9545"
+  L2_NODE_RPC_URL="http://127.0.0.1:9547"
+  L1_CHAIN_ID=11155111
+  L2_CHAIN_ID=852
+  DEPLOY_DIR="$FORTEL2_ROOT/deployments/.deployer"
+  require_sepolia_env >/dev/null 2>&1
+); then
+  echo "FAIL require_sepolia_env should reject Phase 1 DEPLOY_DIR" >&2
+  fail=1
+else
+  echo "PASS require_sepolia_env rejects Phase 1 DEPLOY_DIR"
 fi
 
 # Phase 2c start scripts must share sepolia-fund-check.sh min-balance defaults.

@@ -56,7 +56,6 @@ fi
 echo "L1 deposit tx: $L1_TX"
 cast receipt "$L1_TX" --rpc-url "$L1_RPC_URL" >/dev/null
 
-L2_HINT=""
 echo "Waiting for L2 balance to increase (derivation; up to ${POLL_TRIES}s) ..."
 AFTER="$BEFORE"
 for ((i = 0; i < POLL_TRIES; i++)); do
@@ -99,6 +98,6 @@ echo "L1 bridge tx:            $L1_TX"
 if [[ -n "$L2_TX" ]]; then
   echo "L2 deposit tx:           $L2_TX"
 else
-  echo "L2 deposit tx:           (not found in recent tip — L1=$L1_TX; L2 balance rise confirms inclusion) ${L2_HINT}"
+  echo "L2 deposit tx:           (not found in recent tip — L1=$L1_TX; L2 balance rise confirms inclusion)"
 fi
 echo "OK — US-010 deposit confirmed."

@@ -136,11 +136,9 @@ async function refreshSequencer(l2, nodeUrl) {
 
   const tip = await l2.getBlockNumber();
   const from = scanFromBlock(tip, 5);
-  const blocks = [];
-  for (let n = from; n <= tip; n++) {
-    const b = await l2.getBlock(n);
-    if (b) blocks.push(b);
-  }
+  const blockNums = [];
+  for (let n = from; n <= tip; n++) blockNums.push(n);
+  const blocks = (await Promise.all(blockNums.map((n) => l2.getBlock(n)))).filter(Boolean);
   const agg = aggregateTxWindow(blocks);
   els.seqInterval.textContent =
     agg.avgIntervalSec == null ? "—" : `${formatRate(agg.avgIntervalSec, 1)}s`;
@@ -149,9 +147,12 @@ async function refreshSequencer(l2, nodeUrl) {
 async function refreshBatcher(l1) {
   const tip = await l1.getBlockNumber();
   const from = scanFromBlock(tip, L1_SCAN_BLOCKS);
+  const blockNums = [];
+  for (let n = from; n <= tip; n++) blockNums.push(n);
+  // Parallel fetch — local Anvil handles a short window; avoids ~40 serial round-trips.
+  const blocks = await Promise.all(blockNums.map((n) => l1.getBlock(n, true)));
   const collected = [];
-  for (let n = from; n <= tip; n++) {
-    const block = await l1.getBlock(n, true);
+  for (const block of blocks) {
     if (!block) continue;
     const txs = (block.prefetchedTransactions || block.transactions || []).map((tx) => {
       if (typeof tx === "string") return null;

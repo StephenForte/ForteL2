@@ -54,6 +54,33 @@ contract GuestbookTest is Test {
         assertEq(bytes(book.getMessage(0)).length, 280);
     }
 
+    function test_AcceptMultibyteUtf8AtMaxBytes() public {
+        // "é" is 2 UTF-8 bytes; 140 × 2 = 280.
+        string memory text = _repeatUtf8(unicode"é", 140);
+        assertEq(bytes(text).length, 280);
+        vm.prank(alice);
+        book.sign(text);
+        assertEq(bytes(book.getMessage(0)).length, 280);
+    }
+
+    function test_RevertMultibyteUtf8OverMaxBytes() public {
+        // 141 × 2 = 282 UTF-8 bytes — must reject even though char count < 280.
+        string memory text = _repeatUtf8(unicode"é", 141);
+        assertEq(bytes(text).length, 282);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Guestbook.MessageTooLong.selector, 282));
+        book.sign(text);
+    }
+
+    function test_AcceptEmojiAtMaxBytes() public {
+        // U+1F4A9 (pile of poo) is 4 UTF-8 bytes; 70 × 4 = 280.
+        string memory text = _repeatUtf8(unicode"💩", 70);
+        assertEq(bytes(text).length, 280);
+        vm.prank(alice);
+        book.sign(text);
+        assertEq(bytes(book.getMessage(0)).length, 280);
+    }
+
     function test_GetMessageOutOfBounds() public {
         vm.expectRevert(abi.encodeWithSelector(Guestbook.IndexOutOfBounds.selector, 0, 0));
         book.getMessage(0);
@@ -128,5 +155,15 @@ contract GuestbookTest is Test {
             }
         }
         return string(b);
+    }
+
+    function _repeatUtf8(string memory ch, uint256 n) internal pure returns (string memory out) {
+        out = "";
+        for (uint256 i = 0; i < n; ) {
+            out = string.concat(out, ch);
+            unchecked {
+                ++i;
+            }
+        }
     }
 }

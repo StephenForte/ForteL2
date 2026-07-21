@@ -9,7 +9,7 @@ require_bin jq
 warn_if_missing_env_file
 assert_local_rpc_urls
 
-DEPLOYMENTS="$FORTEL2_ROOT/deployments/deployments.json"
+DEPLOYMENTS="$(deployments_json_path)"
 ROLLUP="$DEPLOY_DIR/rollup.json"
 
 if [[ ! -f "$DEPLOYMENTS" ]]; then

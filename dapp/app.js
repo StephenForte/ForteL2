@@ -4,15 +4,12 @@
  */
 import { BrowserProvider, Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.5.min.js";
 import { GUESTBOOK_ADDRESS, GUESTBOOK_ABI, L2_CHAIN_ID, L2_RPC_URL } from "./config.js";
+import { trimToUtf8Bytes, utf8ByteLength } from "./lib.js";
 
 const L2_CHAIN_HEX = `0x${Number(L2_CHAIN_ID).toString(16)}`;
 const FEE = { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n };
 const PAGE = 50;
 const MAX_TEXT_BYTES = 280;
-
-function utf8ByteLength(text) {
-  return new TextEncoder().encode(text).length;
-}
 
 /**
  * Trim to MAX_TEXT_BYTES and refresh the counter/color.
@@ -20,10 +17,7 @@ function utf8ByteLength(text) {
  */
 function syncMessageByteBudget(ev, { force = false } = {}) {
   if (!force && (ev?.isComposing || imeComposing)) return;
-  let value = els.text.value;
-  while (utf8ByteLength(value) > MAX_TEXT_BYTES) {
-    value = value.slice(0, -1);
-  }
+  const value = trimToUtf8Bytes(els.text.value, MAX_TEXT_BYTES);
   if (value !== els.text.value) els.text.value = value;
   const bytes = utf8ByteLength(els.text.value);
   els.charCount.textContent = String(bytes);

@@ -38,5 +38,11 @@ jobs:
       - name: Script helper tests
         run: ./scripts/test-helpers.sh
 
-      - name: Pipeline viewer unit tests
-        run: node --test viewer/lib.test.js
+      - name: Pipeline viewer + dApp unit tests
+        run: node --test viewer/lib.test.js dapp/lib.test.js
+
+      - name: Bridge helper unit tests
+        working-directory: scripts/bridge
+        run: |
+          npm ci
+          node --test lib.test.js

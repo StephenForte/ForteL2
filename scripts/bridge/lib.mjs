@@ -121,6 +121,18 @@ export async function sleep(ms) {
 }
 
 /**
+ * Normalize gameAtIndex return value (named object or positional tuple).
+ * viem may return either shape depending on version.
+ */
+export function proxyFromGameAtIndexResult(result, gameIndex = 0) {
+  const proxy = result?.proxy_ ?? result?.[2]
+  if (!proxy || proxy === '0x0000000000000000000000000000000000000000') {
+    throw new Error(`gameAtIndex(${gameIndex}) returned empty proxy`)
+  }
+  return proxy
+}
+
+/**
  * Resolve dispute-game proxy address from factory index.
  * viem getGame()/findLatestGames do not include `proxy` — only gameAtIndex does.
  */
@@ -131,10 +143,5 @@ export async function resolveGameProxy(publicClient, factoryAddress, gameIndex) 
     functionName: 'gameAtIndex',
     args: [BigInt(gameIndex)],
   })
-  // viem may return a tuple array or named object depending on version.
-  const proxy = result?.proxy_ ?? result?.[2]
-  if (!proxy || proxy === '0x0000000000000000000000000000000000000000') {
-    throw new Error(`gameAtIndex(${gameIndex}) returned empty proxy`)
-  }
-  return proxy
+  return proxyFromGameAtIndexResult(result, gameIndex)
 }

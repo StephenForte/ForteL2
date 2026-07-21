@@ -29,7 +29,7 @@ start_bg op-batcher op-batcher \
   --private-key="${BATCHER_PRIVATE_KEY}" \
   --data-availability-type="${BATCHER_DA_TYPE}" \
   --rpc.addr=127.0.0.1 \
-  --rpc.port=8548 \
+  --rpc.port="${BATCHER_RPC_PORT}" \
   --poll-interval=1s \
   --sub-safety-margin=1 \
   --num-confirmations=1 \
