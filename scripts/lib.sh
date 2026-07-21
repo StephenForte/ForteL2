@@ -1,22 +1,42 @@
 #!/usr/bin/env bash
-# Shared helpers for ForteL2 Phase 1 scripts.
+# Shared helpers for ForteL2 scripts (Phase 1 local + Phase 2 Sepolia).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export FORTEL2_ROOT="${FORTEL2_ROOT:-$ROOT}"
 
-if [[ -f "$FORTEL2_ROOT/.env" ]]; then
-  # shellcheck disable=SC1091
-  set -a
-  source "$FORTEL2_ROOT/.env"
-  set +a
-elif [[ -f "$FORTEL2_ROOT/.env.example" ]]; then
-  echo "WARN: no .env found; loading .env.example (copy to .env for local overrides)" >&2
-  # shellcheck disable=SC1091
-  set -a
-  source "$FORTEL2_ROOT/.env.example"
-  set +a
-fi
+# Resolve env file: FORTEL2_ENV (basename or absolute) → .env → .env.example
+_fortel2_resolve_env_file() {
+  local candidate=""
+  if [[ -n "${FORTEL2_ENV:-}" ]]; then
+    if [[ "$FORTEL2_ENV" == /* ]]; then
+      candidate="$FORTEL2_ENV"
+    else
+      candidate="$FORTEL2_ROOT/$FORTEL2_ENV"
+    fi
+    if [[ ! -f "$candidate" ]]; then
+      echo "ERROR: FORTEL2_ENV=$FORTEL2_ENV not found at $candidate" >&2
+      echo "Copy .env.sepolia.example → .env.sepolia (keys offline) or unset FORTEL2_ENV for Phase 1." >&2
+      exit 1
+    fi
+  elif [[ -f "$FORTEL2_ROOT/.env" ]]; then
+    candidate="$FORTEL2_ROOT/.env"
+  elif [[ -f "$FORTEL2_ROOT/.env.example" ]]; then
+    echo "WARN: no .env found; loading .env.example (copy to .env for local overrides)" >&2
+    candidate="$FORTEL2_ROOT/.env.example"
+  else
+    echo "ERROR: no env file under $FORTEL2_ROOT (.env / .env.example / FORTEL2_ENV)" >&2
+    exit 1
+  fi
+  printf '%s' "$candidate"
+}
+
+FORTEL2_ENV_FILE="$(_fortel2_resolve_env_file)"
+export FORTEL2_ENV_FILE
+# shellcheck disable=SC1090
+set -a
+source "$FORTEL2_ENV_FILE"
+set +a
 
 BIN_DIR="${BIN_DIR:-$FORTEL2_ROOT/bin}"
 DATA_DIR="${DATA_DIR:-$FORTEL2_ROOT/data}"
@@ -225,19 +245,65 @@ refuse_foundry_defaults_unless_local_l2() {
   exit 1
 }
 
-# Reject accidental use of non-Foundry throwaway keys in scripts that broadcast.
+# Warn when running against committed example defaults (Phase 1 or missing local file).
 warn_if_missing_env_file() {
-  if [[ ! -f "$FORTEL2_ROOT/.env" ]]; then
-    echo "WARN: using .env.example defaults — copy to .env before any non-local work" >&2
+  local base
+  base="$(basename "${FORTEL2_ENV_FILE:-}")"
+  case "$base" in
+    .env.example|.env.sepolia.example)
+      echo "WARN: using $base defaults — copy to a local env file before any non-local work" >&2
+      ;;
+  esac
+  if [[ -n "${FORTEL2_ENV:-}" && "$base" == ".env.example" ]]; then
+    echo "WARN: FORTEL2_ENV set but resolved to .env.example — unexpected" >&2
   fi
+}
+
+# L2 + op-node must stay loopback (Phase 1 and Phase 2 until US-012 non-loopback review flips).
+assert_l2_loopback_urls() {
+  assert_loopback_url "${L2_RPC_URL:-}" "L2_RPC_URL"
+  if [[ -n "${L2_NODE_RPC_URL:-}" ]]; then
+    assert_loopback_url "$L2_NODE_RPC_URL" "L2_NODE_RPC_URL"
+  fi
+}
+
+# Accept http(s) L1 URLs for Sepolia (public RPC / QuickNode). Reject empty / nonsense.
+assert_remote_l1_rpc_url() {
+  local url label
+  if (( $# >= 1 )); then
+    url="$1"
+  else
+    url="${L1_RPC_URL:-}"
+  fi
+  label="${2:-L1_RPC_URL}"
+  case "$url" in
+    http://*|https://*)
+      return 0
+      ;;
+    *)
+      echo "ERROR: $label must be an http(s) URL, got: ${url:-<empty>}" >&2
+      exit 1
+      ;;
+  esac
 }
 
 # Local Phase 1 RPC surface: both L1 and L2 must stay on loopback.
 assert_local_rpc_urls() {
   assert_loopback_url "${L1_RPC_URL:-}" "L1_RPC_URL"
-  assert_loopback_url "${L2_RPC_URL:-}" "L2_RPC_URL"
-  if [[ -n "${L2_NODE_RPC_URL:-}" ]]; then
-    assert_loopback_url "$L2_NODE_RPC_URL" "L2_NODE_RPC_URL"
+  assert_l2_loopback_urls
+}
+
+# Phase 2 Sepolia: remote L1 OK; L2 / op-node remain loopback.
+assert_sepolia_rpc_urls() {
+  assert_remote_l1_rpc_url "${L1_RPC_URL:-}" "L1_RPC_URL"
+  assert_l2_loopback_urls
+  local chain="${L2_CHAIN_ID:-}"
+  if [[ "$chain" == "901" ]]; then
+    echo "ERROR: assert_sepolia_rpc_urls requires a non-local L2_CHAIN_ID (got 901 — use Phase 1 .env)" >&2
+    exit 1
+  fi
+  if [[ "$chain" != "852" ]]; then
+    echo "WARN: L2_CHAIN_ID=$chain (expected 852 for ForteL2 Sepolia learning chain)" >&2
   fi
 }
 

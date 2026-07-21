@@ -1,10 +1,12 @@
 .env
+.env.sepolia
 data/
 bin/
 deployments/.deployer/state.json
 deployments/.deployer/genesis.json
 deployments/.deployer/rollup.json
 deployments/.deployer/intent.toml.bak
+deployments/sepolia/.deployer/
 *.log
 contracts/out/
 contracts/cache/

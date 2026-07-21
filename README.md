@@ -29,7 +29,10 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **1b** | Bridging: L1→L2 deposits via the Standard Bridge; full L2→L1 withdrawals with a shortened challenge window; Phase 2 readiness gate | ✅ Done |
 | **1c** | DIY pipeline viewer: live sequencer / batcher / proposer / tx activity panels on loopback | ✅ Done |
 | **1d** | Viewer mempool signal + Sepolia funding and fresh-key gate | ✅ Done |
-| **2** | Migrate L1 to **Sepolia** — fresh contract deployment, real gas and blob economics | 🔨 In progress |
+| **2a** | Sepolia scaffold: `.env.sepolia` tree, L2 chain **852**, public RPC, no on-chain spend | ✅ Done |
+| **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | Planned |
+| **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | Planned |
+| **2d** | Dedicated L1 RPC (QuickNode); optional native Mac L1 later | Planned |
 | **3** | **Replica node on Render**, syncing from the sequencer over the public internet (stock clients) | Planned |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
 | **4** | **Reimplement the batcher** from scratch; swap out op-batcher | Planned |
@@ -361,14 +364,16 @@ Do **not** start Sepolia cutover until keys and balances are ready. **Base Sepol
 | **≥ ~0.5 ETH** Sepolia | Enough to attempt a disposable L1 contract deploy |
 | **~1.0 ETH** Sepolia | Recommended before running batcher + proposer for any sustained period |
 
+**Status:** Harvest wallet `0x5128889F20Ec13e0Be38b2BeBC568594159B652d` holds **~1.2 ETH** on Ethereum Sepolia (US-016 floor met). It is **harvest-only** — generate fresh role keys offline and fund them from this address in Phase **2b**.
+
 **Keys (never Foundry defaults, never in this repo):**
 
 ```bash
 # Outside the ForteL2 tree — private key goes in a password manager only
-cast wallet new
+cast wallet new   # repeat for admin, batcher, proposer, sequencer, challenger
 ```
 
-Fund **Ethereum Sepolia** (chain **11155111**) on a personal harvest wallet, then transfer to the Phase 2 deployer/batcher/proposer addresses when cutover starts. Never paste private keys into agent chats or commit them.
+Fund **Ethereum Sepolia** (chain **11155111**) on the harvest wallet, then transfer to the Phase 2 deployer/batcher/proposer addresses when cutover starts. Never paste private keys into agent chats or commit them.
 
 **Faucets (Ethereum Sepolia only — amounts and gates change):**
 
@@ -380,6 +385,38 @@ Fund **Ethereum Sepolia** (chain **11155111**) on a personal harvest wallet, the
 | Sepolia PoW faucet | Browser mining; slower; useful if mainnet-ETH gates block you |
 
 Operator tip: keep harvesting toward **~1.0 ETH** before Phase 2; **~0.5 ETH** is only enough to attempt a disposable deploy.
+
+## Phase 2a — Sepolia scaffold (US-020–022)
+
+Phase **2a is scaffold only** — no `op-deployer apply`, no funded broadcast. Learning L2 chain ID on Sepolia is **852** (local Anvil L2 stays **901**).
+
+```bash
+cp .env.sepolia.example .env.sepolia
+# Fill ADMIN_/BATCHER_/… ADDRESS fields (and PRIVATE_KEY only locally, offline)
+# Leave HARVEST_ADDRESS as the funded harvest wallet
+FORTEL2_ENV=.env.sepolia  # prefix any future Phase 2 script
+```
+
+| Piece | Path / behavior |
+|---|---|
+| Env example | `.env.sepolia.example` → local `.env.sepolia` (gitignored) |
+| Deploy tree | `deployments/sepolia/` (separate from Phase 1 `deployments/.deployer/`) |
+| Loader | `FORTEL2_ENV=.env.sepolia` — missing file fails closed |
+| L1 RPC | Public HTTPS Sepolia for now; swap URL later for QuickNode (Phase **2d**) |
+| L2 RPC | Loopback only (`assert_sepolia_rpc_urls`) |
+| Tripwire | Foundry defaults refused when `L2_CHAIN_ID != 901` (includes 852) |
+
+**L1 RPC upgrade path:** scripts only read `L1_RPC_URL`. Public RPC → QuickNode is an env change + restart (no redeploy). Optional native Mac L1 (geth/reth + consensus client, **no Docker**) is heavy and optional after 2d. **Render is not an L1 Sepolia node** — it stays Phase 3 for an L2 replica.
+
+### Agent-permission / tool-access audit (US-022)
+
+Complete before any Sepolia private key exists in a file an agent might read:
+
+- [x] No cloud agent with repo secrets / access to funded `.env.sepolia`
+- [x] CODEOWNERS still requires human review for `scripts/lib.sh` `start_bg` / `stop_bg`
+- [x] Foundry tripwire remains on for any `L2_CHAIN_ID != 901`
+- [x] Never paste private keys into agent chat; never commit `.env.sepolia`
+- [x] Phase 1 `.env` Foundry keys stay local-only (chain 901)
 
 ## MetaMask (US-008)
 
@@ -420,10 +457,10 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 ## Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
-Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Do **not** start Phase 2 until all of these are true:
+Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Phase 0–**1d done**; **Phase 2a done** (Sepolia scaffold, L2 chain **852**). Next: **2b** → **2c** → **2d**. Do **not** start Phase 2b+ until all of these are true:
 
 - [x] **Fresh keys / Foundry tripwire:** scripts that broadcast call `refuse_foundry_defaults_unless_local_l2` and fail closed when `L2_CHAIN_ID != 901` if a Foundry/Anvil default private key is still configured. Before Sepolia: generate **new** keys (never fund or reuse the `.env.example` mnemonic accounts on a public net).
-- [x] **Separate deploy tree (documented):** Phase 2 must **not** reuse the Phase 1 `.env` + `deployments/.deployer/` tree. Use a distinct env file (e.g. `.env.sepolia`) and deploy workdir (e.g. `deployments/sepolia/.deployer/`). Replaced artifacts: L1 contracts, L2 genesis/`rollup.json`, RPC URLs, chain IDs, funded accounts, JWT/engine secrets. Do not copy Phase 1 `deployments.json` to Sepolia.
-- [x] **Non-loopback policy review (go/no-go):** **No-go for now.** All RPCs, batcher/proposer, and the dApp stay on `127.0.0.1` / `localhost` (enforced by `assert_loopback_url` / `assert_local_rpc_urls`). Exposing anything binds an unauthenticated JSON-RPC / HTTP surface to the LAN or internet — unacceptable until a later review names: what is exposed, to whom, auth model (e.g. Tailscale + no public bind), and rollback (rebind loopback + stop processes). Default remains loopback-only through Phase 1b.
-- [x] **Sandbox / dry-run gate (prerequisite, not done yet):** Phase 2 cutover requires a **disposable Sepolia** deploy + dry-run of deposit/withdraw scripts first. Guestbook has **no** shadow/dual-write mode — do not invent one. This item is a hard gate before funding or “production” Sepolia use; execution is Phase 2 work.
-- [x] **Agent-permission / tool-access audit (scheduled):** Phase 2 prerequisite — before Sepolia keys or non-loopback binds, audit which agents/tools may read `.env`, broadcast txs, or change bind addresses. Stub checklist: (1) no cloud agent with repo secrets for funded keys, (2) CODEOWNERS review for `scripts/lib.sh` `start_bg`/`stop_bg`, (3) confirm Foundry tripwire still on for non-901.
+- [x] **Separate deploy tree (documented):** Phase 2 must **not** reuse the Phase 1 `.env` + `deployments/.deployer/` tree. Use `.env.sepolia` and `deployments/sepolia/.deployer/`. Replaced artifacts: L1 contracts, L2 genesis/`rollup.json`, RPC URLs, chain IDs (`L2=852`), funded accounts, JWT/engine secrets. Do not copy Phase 1 `deployments.json` to Sepolia.
+- [x] **Non-loopback policy review (go/no-go):** **No-go for now.** All L2 RPCs, batcher/proposer HTTP, and the dApp/viewer stay on `127.0.0.1` / `localhost`. Sepolia **L1** may be a remote HTTPS URL (`assert_sepolia_rpc_urls`). Exposing L2 binds an unauthenticated JSON-RPC surface — unacceptable until a later review.
+- [x] **Sandbox / dry-run gate (prerequisite, execution in 2b/2c):** Phase 2 cutover requires a **disposable Sepolia** deploy + dry-run of deposit/withdraw scripts. Guestbook has **no** shadow/dual-write mode. Scaffold is 2a; spend starts in 2b.
+- [x] **Agent-permission / tool-access audit:** see Phase 2a US-022 checklist above (complete before funded keys land in `.env.sepolia`).

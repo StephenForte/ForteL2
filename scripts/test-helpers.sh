@@ -95,6 +95,53 @@ if (refuse_foundry_defaults_unless_local_l2 "$DEMO_KEY" "DEMO" >/dev/null 2>&1);
 else
   echo "PASS refuse Foundry default when L2_CHAIN_ID != 901"
 fi
+L2_CHAIN_ID=852
+if (refuse_foundry_defaults_unless_local_l2 "$DEMO_KEY" "DEMO" >/dev/null 2>&1); then
+  echo "FAIL should refuse Foundry default on L2 chain 852" >&2
+  fail=1
+else
+  echo "PASS refuse Foundry default on L2_CHAIN_ID=852"
+fi
+
+# Phase 2 RPC asserts: remote L1 OK; L2 loopback; chain 852
+L1_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
+L2_RPC_URL="http://127.0.0.1:9545"
+L2_NODE_RPC_URL="http://127.0.0.1:9547"
+L2_CHAIN_ID=852
+if (assert_sepolia_rpc_urls >/dev/null); then
+  echo "PASS assert_sepolia_rpc_urls remote L1 + loopback L2"
+else
+  echo "FAIL assert_sepolia_rpc_urls remote L1 + loopback L2" >&2
+  fail=1
+fi
+L2_RPC_URL="http://192.168.1.2:9545"
+if (assert_sepolia_rpc_urls >/dev/null 2>&1); then
+  echo "FAIL assert_sepolia_rpc_urls should reject non-loopback L2" >&2
+  fail=1
+else
+  echo "PASS assert_sepolia_rpc_urls reject non-loopback L2"
+fi
+L2_RPC_URL="http://127.0.0.1:9545"
+L2_CHAIN_ID=901
+if (assert_sepolia_rpc_urls >/dev/null 2>&1); then
+  echo "FAIL assert_sepolia_rpc_urls should reject L2_CHAIN_ID=901" >&2
+  fail=1
+else
+  echo "PASS assert_sepolia_rpc_urls reject chain 901"
+fi
+L2_CHAIN_ID=852
+if (assert_remote_l1_rpc_url "https://rpc.sepolia.org" "t" >/dev/null); then
+  echo "PASS assert_remote_l1_rpc_url https"
+else
+  echo "FAIL assert_remote_l1_rpc_url https" >&2
+  fail=1
+fi
+if (assert_remote_l1_rpc_url "" "t" >/dev/null 2>&1); then
+  echo "FAIL assert_remote_l1_rpc_url should reject empty" >&2
+  fail=1
+else
+  echo "PASS assert_remote_l1_rpc_url reject empty"
+fi
 
 # HTTP port validation (serve_static_loopback)
 if (require_http_port "8081" "t" >/dev/null); then
@@ -132,8 +179,11 @@ fi
 
 # gen-viewer-config.sh against a fixture tree (no live chain)
 FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-viewer-XXXXXX")"
-cleanup_fixture() { rm -rf "$FIXTURE"; }
-trap cleanup_fixture EXIT
+SEPOLIA_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-sepolia-env-XXXXXX")"
+cleanup_fixtures() {
+  rm -rf "$FIXTURE" "$SEPOLIA_FIXTURE"
+}
+trap cleanup_fixtures EXIT
 mkdir -p "$FIXTURE/deployments/.deployer" "$FIXTURE/viewer" "$FIXTURE/data"
 cat > "$FIXTURE/.env" <<EOF
 FORTEL2_ROOT=$FIXTURE
@@ -173,6 +223,40 @@ if FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null 2>&1; t
   fail=1
 else
   echo "PASS gen-viewer-config reject bad address"
+fi
+
+# FORTEL2_ENV loader (subprocess — does not clobber this shell's env)
+mkdir -p "$SEPOLIA_FIXTURE/deployments/sepolia/.deployer" "$SEPOLIA_FIXTURE/data"
+cat > "$SEPOLIA_FIXTURE/.env.sepolia" <<EOF
+FORTEL2_ROOT=$SEPOLIA_FIXTURE
+DATA_DIR=$SEPOLIA_FIXTURE/data
+DEPLOY_DIR=$SEPOLIA_FIXTURE/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_BLOCK_TIME=12
+L2_BLOCK_TIME=2
+L1_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+HARVEST_ADDRESS=0x5128889F20Ec13e0Be38b2BeBC568594159B652d
+EOF
+if (
+  FORTEL2_ROOT="$SEPOLIA_FIXTURE" FORTEL2_ENV=.env.sepolia \
+    bash -c 'source "'"$SCRIPT_DIR"'/lib.sh" && [[ "$L2_CHAIN_ID" == "852" ]] && assert_sepolia_rpc_urls'
+) >/dev/null; then
+  echo "PASS FORTEL2_ENV=.env.sepolia loads chain 852"
+else
+  echo "FAIL FORTEL2_ENV=.env.sepolia load / assert" >&2
+  fail=1
+fi
+if (
+  FORTEL2_ROOT="$SEPOLIA_FIXTURE" FORTEL2_ENV=.env.missing \
+    bash -c 'source "'"$SCRIPT_DIR"'/lib.sh"'
+) >/dev/null 2>&1; then
+  echo "FAIL FORTEL2_ENV missing file should error" >&2
+  fail=1
+else
+  echo "PASS FORTEL2_ENV missing file errors"
 fi
 
 # demo-checklist.sh: cast chain-id after a successful block-number must not abort
