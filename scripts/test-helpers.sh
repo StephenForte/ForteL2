@@ -259,6 +259,60 @@ else
   echo "PASS FORTEL2_ENV missing file errors"
 fi
 
+# assert_l2_ports_free must cover shared batcher/proposer admin ports (Phase 1 + 2c).
+if awk '/^assert_l2_ports_free\(\)/,/^}/' "$SCRIPT_DIR/lib.sh" | grep -q '8548' \
+  && awk '/^assert_l2_ports_free\(\)/,/^}/' "$SCRIPT_DIR/lib.sh" | grep -q '8560'; then
+  echo "PASS assert_l2_ports_free probes batcher/proposer ports"
+else
+  echo "FAIL assert_l2_ports_free must probe 8548 and 8560" >&2
+  fail=1
+fi
+# Behavioral: if default batcher admin port is free, bind it and expect assert_l2_ports_free to fail.
+if command -v lsof >/dev/null 2>&1 \
+  && ! lsof -nP -iTCP:8548 -sTCP:LISTEN >/dev/null 2>&1; then
+  python3 - <<'PY' &
+import socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", 8548))
+s.listen(1)
+time.sleep(30)
+PY
+  listener_pid=$!
+  for _ in 1 2 3 4 5; do
+    lsof -nP -iTCP:8548 -sTCP:LISTEN >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+  # Keep EL/op-node ports on unused values so only the batcher admin conflict trips.
+  if (
+    L2_EL_HTTP_PORT=19545
+    L2_EL_WS_PORT=19546
+    L2_EL_AUTH_PORT=19551
+    L2_NODE_RPC_PORT=19547
+    assert_l2_ports_free >/dev/null 2>&1
+  ); then
+    echo "FAIL assert_l2_ports_free should fail when 8548 is in use" >&2
+    fail=1
+  else
+    echo "PASS assert_l2_ports_free rejects occupied batcher port 8548"
+  fi
+  kill "$listener_pid" >/dev/null 2>&1 || true
+  wait "$listener_pid" 2>/dev/null || true
+else
+  echo "PASS assert_l2_ports_free batcher-port probe skipped (8548 busy or no lsof)"
+fi
+
+# Phase 2c start scripts must share sepolia-fund-check.sh min-balance defaults.
+if grep -q 'SEPOLIA_BATCHER_MIN_ETH:-0\.15' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'SEPOLIA_PROPOSER_MIN_ETH:-0\.15' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'SEPOLIA_BATCHER_MIN_ETH:-0\.15' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'SEPOLIA_PROPOSER_MIN_ETH:-0\.15' "$SCRIPT_DIR/sepolia-fund-check.sh"; then
+  echo "PASS Sepolia batcher/proposer min ETH defaults aligned at 0.15"
+else
+  echo "FAIL Sepolia batcher/proposer min ETH defaults must be 0.15 across fund-check + start scripts" >&2
+  fail=1
+fi
+
 # demo-checklist.sh: cast chain-id after a successful block-number must not abort
 # under set -e (bare assignment exits before fail_item / checklist aggregation).
 if grep -E '^\s+(l1|l2)_chain=\$\(cast chain-id' "$SCRIPT_DIR/demo-checklist.sh" \

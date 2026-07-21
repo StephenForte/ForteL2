@@ -5,13 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 echo "=== Process status ==="
-for name in anvil op-geth op-node op-batcher op-proposer; do
+procs=(op-geth op-node op-batcher op-proposer)
+if [[ "${L2_CHAIN_ID:-}" != "852" ]]; then
+  procs=(anvil "${procs[@]}")
+fi
+for name in "${procs[@]}"; do
   if is_running "$name"; then
     echo "  $name: RUNNING pid=$(cat "$PID_DIR/$name.pid")"
   else
     echo "  $name: stopped"
   fi
 done
+
+if [[ "${L2_CHAIN_ID:-}" == "852" ]]; then
+  echo "  (Sepolia mode — no Anvil; DATA_DIR=$DATA_DIR)"
+fi
 
 echo
 echo "=== RPC ==="
