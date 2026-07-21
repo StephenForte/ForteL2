@@ -2,9 +2,9 @@
 
 ## Introduction
 
-Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP Stack), for learning purposes only. The strategy is **run first, rebuild later**: Phase 1 stands up the real production OP Stack against a local L1 devnet on a Mac mini, so the operator learns how a rollup actually works by running one. Later phases progressively replace individual OP Stack components (batcher, proposer, derivation) with from-scratch reimplementations, migrate the L1 to Sepolia, add a remote replica node on Render, and eventually explore fault proofs and decentralized sequencing.
+Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP Stack). The strategy is **run first, rebuild later**: Phase 1 stands up the real production OP Stack against a local L1 devnet on a Mac mini, so the operator learns how a rollup actually works by running one. Later phases progressively replace individual OP Stack components (batcher, proposer, derivation) with from-scratch reimplementations, migrate the L1 to Sepolia, add remote replica nodes operated by friends, and eventually explore fault proofs and decentralized sequencing.
 
-This is not a production chain. No real funds, no external users, no uptime commitments.
+**Phases 1–8 are learning phases** — no real funds, no external users, no uptime commitments. **Phase 9 (tentative)** explores graduating the chain to Ethereum mainnet as a real L2; that decision is not locked and depends on completing earlier phases successfully and recruiting geographically distributed node operators.
 
 **Phase 0 decision (locked):** Phase 1 uses **native binaries only** on this host. Kurtosis / Docker / OrbStack are out of scope here — OrbStack disrupted host networking during the Phase 0 spike (`tasks/spike-notes.md`). Native arm64 builds of `op-node` and `op-geth` were verified.
 
@@ -20,7 +20,8 @@ This is not a production chain. No real funds, no external users, no uptime comm
 - Observe the full data pipeline: L2 block production → batch submission to L1 → state root proposal to L1
 - Inspect the chain with `cast` / RPC tooling in Phase 1; DIY **pipeline viewer** in Phase 1c (+ mempool polish in 1d); defer hosted/container explorers until a non-loopback RPC is deliberately allowed
 - Deploy and interact with a simple demo dApp on the L2
-- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Phase 2 funding gate, Sepolia cutover (2a–2d), Render replica (stock clients), per-component reimplementation (batcher → proposer → derivation), fault proofs, decentralized sequencer
+- Establish a phase roadmap that explicitly sequences: bridging, pipeline viewer, Phase 2 funding gate, Sepolia cutover (2a–2d), Render replica (stock clients), **friend-operated distributed nodes**, per-component reimplementation (batcher → proposer → derivation), fault proofs, decentralized sequencer
+- **(Tentative)** If learning phases succeed and friend-operated node network is established: explore graduating the chain to Ethereum mainnet as a real L2 (Phase 9)
 
 ## Phase Roadmap
 
@@ -36,11 +37,13 @@ This is not a production chain. No real funds, no external users, no uptime comm
 | **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | Future |
 | **2d** | Dedicated L1 RPC (QuickNode); document optional native Mac L1 (no Docker); Render stays Phase 3 (L2 replica, not L1) | Future |
 | **3** | Deploy a **replica node on Render**, syncing from the Mac mini sequencer over the public internet (peering, tunnel/port exposure, sync verification) — still **stock** `op-geth`/`op-reth` + `op-node` verifier (not a custom client) | Future |
+| **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) | Future |
 | **6** | **Reimplement the derivation pipeline / minimal sequencer** (read batches from L1, derive L2 blocks; deepest rebuild — **separate detailed PRD** may split EL vs rollup-node work) | Future (stories scaffolded; expand or spin out PRD before start) |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
+| **9** | **Mainnet production (tentative)**: graduate the L2 to Ethereum mainnet as L1; real ETH for batcher/proposer gas; production key management; requires successful completion of earlier phases + committed friend-operated node network | Future (tentative — decision not locked) |
 
 Decision recorded: fault proofs deferred (Q4 = A). On a solo devnet with one trusted proposer there is no adversary; the challenge game is best learned after Phase 5, when output roots are understood from the inside.
 
@@ -354,7 +357,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - No ERC-20 bridging (ETH only in Phase 1b)
 - No public RPC exposure, no external users, no uptime targets
 - No alt-DA (blobs vs. calldata tuning is fine to observe, but no EigenDA/Celestia experiments)
-- No mainnet anything, ever, in this project
+- No mainnet in **learning phases (1–8)**; Phase 9 mainnet is **tentative** and gated on successful distributed operation with friend-operated nodes
 
 ## Technical Considerations
 
@@ -369,6 +372,8 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - **Phase 2 dependency:** the local-L1 contract deployment in Phase 1 does not carry to Sepolia; Phase 2 is a fresh contract deployment and fresh L2 genesis (L2 chain ID **852**). The Phase 1 chain will not "migrate" — it gets replaced. Structure the runbook so redeployment is cheap. Phase 1d US-016 funding floor applies before cutover; 2a scaffolds the env tree; 2b spends gas.
 - **Phase 3 note:** a Render replica may use containers *on Render*; that does not reintroduce Docker on this Mac mini for Phase 1. Replica = stock EL + `op-node` verifier. Custom client/derivation is Phase 6.
 - **Phase 4–6 dependency:** the OP Stack's rollup node exposes RPCs (`optimism_syncStatus`, etc.) and the spec repo (ethereum-optimism/specs) defines batch/frame formats — reimplementation phases should target the spec, using the running stack as the reference implementation to diff against. Phase 6 may be split into a separate PRD before coding starts.
+- **Phase 3b (friend-operated nodes):** friends run stock `op-geth`/`op-reth` + `op-node` verifiers, same as Phase 3 Render replica. Docker is acceptable **on their machines** (the "no containers" rule is for this workstation in Phase 1). Onboarding docs should be self-contained; consider a dedicated runbook or README section. Start on Sepolia so mistakes cost only testnet ETH.
+- **Phase 9 (mainnet — tentative):** requires a hosted L1 RPC (QuickNode, Alchemy, or similar) for Ethereum mainnet rather than a local node. Batcher/proposer keys need production-grade management (hardware wallet, multisig for admin). Monthly ETH budget depends heavily on blob fee market and L2 activity — estimate after Phase 2 Sepolia experience. Fault proofs (Phase 7) significantly improve trust model but may not be strictly required for a low-stakes personal L2.
 
 ## Success Metrics
 
@@ -380,6 +385,8 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - Phase 1d: mempool signal visible on the viewer; operator has ≥ ~1.0 Sepolia ETH (or documented floor) on fresh keys before Phase 2
 - Phase 2a: `.env.sepolia.example` + `deployments/sepolia/` + `FORTEL2_ENV` / Sepolia RPC asserts; L2 chain ID 852; no Sepolia broadcast
 - Phase 6 (when started): custom verifier derives a bounded window that matches reference `op-node` within documented tolerance
+- Phase 3b (when started): at least 2 friend-operated verifier nodes syncing successfully on Sepolia; nodes in different geographic regions (e.g. different continents or distant cities)
+- Phase 9 (if pursued): L2 producing blocks on Ethereum mainnet with stable batcher/proposer operation; friend-operated nodes syncing mainnet L2; monthly ETH burn within documented budget
 
 ## Open Questions
 
@@ -389,6 +396,11 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - After non-loopback is allowed: hosted explorer (e.g. Ethernal) vs native single-binary (e.g. Otterscan) vs staying on `cast` + pipeline viewer only?
 - For Phase 3 (Render): tunnel (Tailscale/cloudflared) vs. port forwarding for sequencer→replica peering — defer decision, but note Render's egress/ingress constraints may force the tunnel option
 - Phase 6: keep stories in this PRD vs spin out `tasks/prd-derivation-client.md` before US-061 coding?
+- Phase 3b: what is the minimum number of friend-operated nodes for meaningful geographic distribution? How do friends run nodes — Docker on their machines, or cloud VPS?
+- Phase 3b: how are friend node operators onboarded? Runbook + sync call, or more formal documentation?
+- Phase 9: what is the monthly batcher/proposer ETH budget that makes mainnet viable? (Depends on blob fees and activity level)
+- Phase 9: fault proofs (Phase 7) required before mainnet, or acceptable to launch with trusted proposer + upgrade path?
+- Phase 9: legal/regulatory considerations for operating a public L2?
 
 ### Resolved decisions
 

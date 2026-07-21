@@ -259,6 +259,47 @@ else
   echo "PASS FORTEL2_ENV missing file errors"
 fi
 
+# demo-checklist.sh: cast chain-id after a successful block-number must not abort
+# under set -e (bare assignment exits before fail_item / checklist aggregation).
+if grep -E '^\s+(l1|l2)_chain=\$\(cast chain-id' "$SCRIPT_DIR/demo-checklist.sh" \
+  | grep -qv '||'; then
+  echo "FAIL demo-checklist chain-id missing || guard under set -e" >&2
+  fail=1
+else
+  echo "PASS demo-checklist chain-id guarded against set -e"
+fi
+
+# Behavioral twin of the L1/L2 RPC chain-id path in demo-checklist.sh.
+chain_id_guard_ok=0
+if (
+  set -euo pipefail
+  fail=0
+  fail_item() { fail=1; }
+  L1_CHAIN_ID=900
+  if l1_block=$(echo 42); then
+    l1_chain=$(false 2>/dev/null || echo "")
+    if [[ -n "$l1_chain" && "$l1_chain" == "${L1_CHAIN_ID}" ]]; then
+      exit 2
+    elif [[ -n "$l1_chain" ]]; then
+      fail_item "wrong"
+    else
+      fail_item "unread"
+    fi
+  else
+    exit 3
+  fi
+  # Must reach aggregation with fail set (not abort on the failing assignment).
+  (( fail )) || exit 4
+); then
+  chain_id_guard_ok=1
+fi
+if (( chain_id_guard_ok )); then
+  echo "PASS demo-checklist chain-id fail records FAIL under set -e"
+else
+  echo "FAIL demo-checklist chain-id path should record FAIL without aborting" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

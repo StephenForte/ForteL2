@@ -1,6 +1,71 @@
-# ForteL2 — Phase 1 OP Stack learning rollup
+# ForteL2
 
-Personal OP Stack L2 on a single Apple Silicon Mac, for learning only. **Native binaries only** — no Docker, OrbStack, or Kurtosis on this host (Phase 0 verdict; see `tasks/spike-notes.md`).
+A personal Ethereum Layer 2, built on the [OP Stack](https://docs.optimism.io/) to understand how rollups actually work — by running one, then rebuilding its components from scratch — with a tentative plan to eventually graduate the chain to Ethereum mainnet as a full-fledged L2.
+
+The strategy is **run first, rebuild later**. The early phases stand up the real production OP Stack on a Mac mini against a local L1 devnet, so the full pipeline is observable end to end: L2 block production → batch submission to L1 → state root proposals. Later phases progressively replace individual components (batcher, proposer, derivation pipeline) with from-scratch reimplementations targeting the [OP Stack specs](https://github.com/ethereum-optimism/specs), migrate the L1 to Sepolia, add remote and friend-operated replica nodes, and explore fault proofs and decentralized sequencing.
+
+**Phases 1–8 are learning phases**: no real funds, no external users, no uptime commitments. Mainnet (Phase 9) is a gated, tentative decision — it requires the learning phases to succeed and a geographically distributed set of friend-operated verifier nodes to exist first. The acceptance criteria throughout require explaining concepts in writing, not just keeping processes alive.
+
+## Architecture
+
+Base-style rollups don't have PoS validators. The roles here are:
+
+| Component | Role | Implementation |
+|---|---|---|
+| **Sequencer** | Orders transactions, builds L2 blocks | op-node + op-geth (sequencer mode) |
+| **Batcher** | Compresses L2 tx data, posts it to L1 | op-batcher → custom rebuild (Phase 4) |
+| **Proposer** | Posts L2 state output roots to L1 | op-proposer → custom rebuild (Phase 5) |
+| **Replica / verifier** | Derives the L2 independently from L1 data | stock op-node + EL (verifier mode); remote on Render, then friend-operated |
+| **Pipeline viewer** | Loopback-only UI showing sequencer / batcher / proposer / mempool activity | DIY static UI polling RPC — deliberately not a full block explorer |
+
+Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini — no Docker, no Kurtosis (see Design Decisions and `tasks/spike-notes.md`). Local L1 is Anvil; the demo dApp is a MetaMask-connected guestbook.
+
+## Roadmap
+
+| Phase | Scope | Status |
+|---|---|---|
+| **0** | Deployment-path spike: Kurtosis `optimism-package` vs. manual builds on Apple Silicon | ✅ Done — verdict: manual native builds |
+| **1** | Full OP Stack devnet on the Mac mini: Anvil L1, op-deployer, sequencer, batcher, proposer, demo dApp | ✅ Done |
+| **1b** | Bridging: L1→L2 deposits via the Standard Bridge; full L2→L1 withdrawals with a shortened challenge window; Phase 2 readiness gate | ✅ Done |
+| **1c** | DIY pipeline viewer: live sequencer / batcher / proposer / tx activity panels on loopback | ✅ Done |
+| **1d** | Viewer mempool signal + Sepolia funding and fresh-key gate | ✅ Done |
+| **2a** | Sepolia scaffold: `.env.sepolia` tree, L2 chain **852**, public RPC, no on-chain spend | ✅ Done |
+| **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | Planned |
+| **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | Planned |
+| **2d** | Dedicated L1 RPC (QuickNode); optional native Mac L1 later | Planned |
+| **3** | **Replica node on Render**, syncing from the sequencer over the public internet (stock clients) | Planned |
+| **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
+| **4** | **Reimplement the batcher** from scratch; swap out op-batcher | Planned |
+| **5** | **Reimplement the proposer** from scratch; swap out op-proposer | Planned |
+| **6** | **Reimplement the derivation pipeline** — the deepest rebuild | Planned |
+| **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal | Planned |
+| **8** | **Decentralized sequencer** exploration: multiple candidates, leader election | Planned |
+| **9** | **Mainnet (tentative)**: graduate to Ethereum mainnet as L1, production key management, real ETH economics — gated on earlier phases + committed distributed node network | Decision not locked |
+
+Canonical acceptance criteria: `tasks/prd-l2-learning-chain.md`.
+
+## Design decisions
+
+- **Native builds, no containers.** The Phase 0 spike attempted Kurtosis's `optimism-package`; OrbStack disrupted host networking and the enclave never stabilized, while op-node and op-geth built cleanly as native arm64 binaries. Verdict: manual builds from the optimism monorepo, orchestrated with shell scripts. No Docker on this workstation.
+- **DIY pipeline viewer instead of Blockscout.** Hosted explorers need a non-loopback RPC; self-hosted ones need containers. Both violate current constraints, so the chain gets a purpose-built loopback UI that shows exactly what a learning operator needs — the sequencer→batcher→proposer pipeline and mempool — and nothing Etherscan-shaped.
+- **Withdrawals in Phase 1b, not later.** The 7-day challenge window normally makes withdrawals a scope grenade, but a local devnet controls the finalization period — shortened, the full initiate→prove→finalize flow becomes a one-evening exercise. Cheap to learn locally, expensive to learn on Sepolia where the window can't be shortened.
+- **Fault proofs deferred to Phase 7.** On a solo devnet with one trusted proposer there is no adversary; the dispute game is best learned after rebuilding the proposer (Phase 5), when output roots are understood from the inside.
+- **Sepolia doesn't inherit the Phase 1 chain.** Phase 2 is a fresh contract deployment and fresh genesis — the local chain gets replaced, not migrated. The runbook is structured so redeployment is cheap.
+- **Key hygiene as a phase gate.** Phase 2 requires fresh keys generated outside the repo — never Foundry defaults, never keys pasted into agent chats — and a funded Sepolia balance floor before sustained batcher/proposer operation.
+
+## Success metrics
+
+Cold start to producing L2 blocks in under 30 minutes from the runbook alone. The full pipeline — L2 tx → batch on L1 → output root on L1 — demonstrable in one sitting with `cast`. The operator can explain, without notes, what each OP Stack component does and what breaks when it stops.
+
+## Notes
+
+Built and operated as a solo project (for now — Phase 3b changes that). Related work: [settlementos](https://github.com/StephenForte/settlementos) and its [independent explorer](https://github.com/StephenForte/settlementos-explorer), deployed to Base Sepolia and Polygon Amoy.
+
+---
+
+# Operator runbook (Phase 1)
+
+Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries only** — no Docker, OrbStack, or Kurtosis on this host.
 
 ## Locked decisions (Phase 1)
 
@@ -390,13 +455,9 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 `./scripts/stop-all.sh` then `./scripts/start-all.sh` (without `reset.sh`) resumes from the existing op-geth datadir — no re-genesis. Deploy artifacts are reused.
 
-## Phase roadmap status
+## Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
-See `tasks/prd-l2-learning-chain.md`. Phase 0–**1d done**; **Phase 2a done** (Sepolia scaffold, L2 chain **852**). Next: **2b** disposable Sepolia deploy → **2c** short L2 dry-run → **2d** QuickNode. Phase 3 = Render **L2** replica (stock clients). Hosted explorers stay deferred until non-loopback is allowed.
-
-### Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
-
-Do **not** start Phase 2b+ until all of these are true:
+Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Phase 0–**1d done**; **Phase 2a done** (Sepolia scaffold, L2 chain **852**). Next: **2b** → **2c** → **2d**. Do **not** start Phase 2b+ until all of these are true:
 
 - [x] **Fresh keys / Foundry tripwire:** scripts that broadcast call `refuse_foundry_defaults_unless_local_l2` and fail closed when `L2_CHAIN_ID != 901` if a Foundry/Anvil default private key is still configured. Before Sepolia: generate **new** keys (never fund or reuse the `.env.example` mnemonic accounts on a public net).
 - [x] **Separate deploy tree (documented):** Phase 2 must **not** reuse the Phase 1 `.env` + `deployments/.deployer/` tree. Use `.env.sepolia` and `deployments/sepolia/.deployer/`. Replaced artifacts: L1 contracts, L2 genesis/`rollup.json`, RPC URLs, chain IDs (`L2=852`), funded accounts, JWT/engine secrets. Do not copy Phase 1 `deployments.json` to Sepolia.
