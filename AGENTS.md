@@ -95,7 +95,7 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 
 ## When editing scripts
 
-- Source `scripts/lib.sh`; use `require_bin`, `wait_for_rpc`, `start_bg` / `stop_bg`, `serve_static_loopback`, `assert_loopback_url` / `assert_local_rpc_urls` / `assert_sepolia_rpc_urls` / `assert_l2_loopback_urls`, `assert_block_times`, `refuse_foundry_defaults_unless_local_l2`.
+- Source `scripts/lib.sh`; use `require_bin`, `redact_rpc_url`, `wait_for_rpc` (logs redacted URLs), `start_bg` / `stop_bg`, `serve_static_loopback`, `assert_loopback_url` / `assert_local_rpc_urls` / `assert_sepolia_rpc_urls` / `assert_l2_loopback_urls`, `assert_block_times`, `refuse_foundry_defaults_unless_local_l2`.
 - Phase 2 scripts (when added) must set/require `FORTEL2_ENV=.env.sepolia` and call `assert_sepolia_rpc_urls` — never `assert_local_rpc_urls` against a remote L1.
 - Validate addresses with `is_eth_address` / `require_eth_address`.
 - Keep `set -euo pipefail` and avoid printing private keys.

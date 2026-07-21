@@ -56,12 +56,36 @@ require_bin() {
   fi
 }
 
+# Redact userinfo / query / fragment and long path tokens (QuickNode-style API keys).
+# Safe for terminal logs; still pass the raw URL to cast/--rpc-url.
+redact_rpc_url() {
+  python3 - <<'PY' "${1:-}"
+import sys, urllib.parse
+u = sys.argv[1]
+if not u:
+    print("<empty>")
+    raise SystemExit
+p = urllib.parse.urlparse(u)
+# Drop userinfo + query + fragment (common API-key locations)
+netloc = p.hostname or ""
+if p.port:
+    netloc = f"{netloc}:{p.port}"
+path = p.path if p.path and p.path != "/" else ""
+# If path looks like /abc123token, show only /…
+if path and len(path) > 8:
+    path = "/…"
+print(f"{p.scheme}://{netloc}{path}")
+PY
+}
+
 wait_for_rpc() {
   local url="$1"
   local label="${2:-RPC}"
   local tries="${3:-60}"
   local i=0
-  echo "Waiting for $label at $url ..."
+  local display
+  display="$(redact_rpc_url "$url")"
+  echo "Waiting for $label at $display ..."
   while (( i < tries )); do
     if cast block-number --rpc-url "$url" >/dev/null 2>&1; then
       echo "$label is up (block $(cast block-number --rpc-url "$url"))"
@@ -70,7 +94,7 @@ wait_for_rpc() {
     sleep 1
     ((i++)) || true
   done
-  echo "ERROR: timed out waiting for $label at $url" >&2
+  echo "ERROR: timed out waiting for $label at $display" >&2
   return 1
 }
 
