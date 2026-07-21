@@ -10,8 +10,12 @@ assert_block_times
 assert_l2_ports_free
 warn_if_missing_env_file
 
-if [[ ! -f "$DEPLOY_DIR/genesis.json" || ! -f "$DEPLOY_DIR/rollup.json" ]]; then
-  echo "ERROR: missing Sepolia genesis/rollup under $DEPLOY_DIR" >&2
+DEPLOYMENTS="$(deployments_json_path)"
+# Require L1 proxy JSON too — batcher/proposer read it; without this check the
+# sequencer can start and then 05-start-batcher-sepolia.sh exits, leaving
+# op-geth + op-node orphaned.
+if [[ ! -f "$DEPLOY_DIR/genesis.json" || ! -f "$DEPLOY_DIR/rollup.json" || ! -f "$DEPLOYMENTS" ]]; then
+  echo "ERROR: missing Sepolia genesis/rollup under $DEPLOY_DIR or L1 proxies at $DEPLOYMENTS" >&2
   echo "Run: FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh" >&2
   exit 1
 fi
