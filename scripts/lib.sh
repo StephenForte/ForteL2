@@ -59,7 +59,7 @@ require_bin() {
   fi
 }
 
-# Redact userinfo / query / fragment and long path tokens (QuickNode-style API keys).
+# Redact userinfo / query / fragment and all non-root paths (which may be API keys).
 # Safe for terminal logs; still pass the raw URL to cast/--rpc-url.
 redact_rpc_url() {
   python3 - <<'PY' "${1:-}"
@@ -73,10 +73,7 @@ p = urllib.parse.urlparse(u)
 netloc = p.hostname or ""
 if p.port:
     netloc = f"{netloc}:{p.port}"
-path = p.path if p.path and p.path != "/" else ""
-# If path looks like /abc123token, show only /…
-if path and len(path) > 8:
-    path = "/…"
+path = "/…" if p.path and p.path != "/" else ""
 print(f"{p.scheme}://{netloc}{path}")
 PY
 }

@@ -507,7 +507,7 @@ Phase **2a is scaffold only** — no `op-deployer apply`, no funded broadcast. L
 cp .env.sepolia.example .env.sepolia
 # Fill ADMIN_/BATCHER_/… ADDRESS fields (and PRIVATE_KEY only locally, offline)
 # Leave HARVEST_ADDRESS as the funded harvest wallet
-FORTEL2_ENV=.env.sepolia  # prefix any future Phase 2 script
+FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh  # prefix Sepolia commands
 ```
 
 | Piece | Path / behavior |

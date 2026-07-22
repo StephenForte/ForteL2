@@ -210,7 +210,7 @@ describe("pruneBatchTxsToWindow", () => {
 });
 
 describe("contiguousScanTip", () => {
-  it("returns last contiguous success from from", () => {
+  it("returns last contiguous success from the starting block", () => {
     const blocks = [
       { number: 10 },
       { number: 11 },
