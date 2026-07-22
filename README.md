@@ -147,6 +147,7 @@ chmod +x scripts/*.sh
 FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh   # Sepolia twin (or --sepolia)
 ./scripts/demo-live.sh --local   # health + talk track + guestbook/viewer URLs
 FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
+python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pipeline health JSON
 ```
 
 ### Tests / merge guardrails
@@ -349,6 +350,7 @@ Ops dashboard for the sequencer → batcher → proposer path. Client-side polls
 FORTEL2_ENV=.env.sepolia ./scripts/serve-viewer.sh
 FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
 FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh   # or --sepolia
+python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json  # one-shot JSON mini-viewer
 ```
 
 Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from the active env + `deployments.json` + `rollup.json`. `viewer/config.js` and `viewer/.csp-header` are **gitignored** (Sepolia `config.js` embeds your L1 RPC URL). Use `./scripts/serve-viewer.sh` so the CSP header allows the L1 origin without committing it into `index.html`.
