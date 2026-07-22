@@ -4,10 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <meta
-    http-equiv="Content-Security-Policy"
-    content="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;"
-  />
+  <!-- CSP is HTTP-only via serve-viewer.sh → viewer/.csp-header. A meta policy
+       with default-src 'self' (and no connect-src) would block L1/L2 RPC fetch
+       even when the header allows those origins (policies are AND-combined). -->
   <title>ForteL2 Pipeline viewer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
