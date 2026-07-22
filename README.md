@@ -457,9 +457,10 @@ Phase **2d is QuickNode-only**. Native Mac mini Sepolia L1 is **Phase 3a** (defe
 
 **Upgrade (no redeploy, no new keys):**
 
-1. In [QuickNode](https://www.quicknode.com/), create an **Ethereum Sepolia** endpoint (HTTPS).
-2. Copy the HTTPS URL into local `.env.sepolia` as `L1_RPC_URL=…` (gitignored — do not commit).
-3. Validate, then bounce the Sepolia L2 stack:
+1. In [QuickNode](https://www.quicknode.com/), create **two** Ethereum Sepolia endpoints — one labeled for the Mac mini, one for the Render replica. Do **not** share one URL/token across both (credits and blast radius).
+2. Paste the **Mac** HTTPS URL into local `.env.sepolia` as `L1_RPC_URL=…` (gitignored — do not commit).
+3. Paste the **Render** HTTPS URL into fortel2-replica Render secrets as `L1_RPC_URL` (never into this repo).
+4. Validate, then bounce the Sepolia L2 stack:
 
 ```bash
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh
@@ -472,6 +473,21 @@ FORTEL2_ENV=.env.sepolia ./scripts/status.sh
 
 Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not required for 2d).
 
+**Credit budget (Build ~80M/mo):** Sepolia start scripts default to a slower cadence so a 24/7 learning stack stays nearer ~2.5–3M credits/day:
+
+| Knob | Default | Env override |
+|---|---|---|
+| Batcher poll | `12s` | `SEPOLIA_BATCHER_POLL_INTERVAL` |
+| Batcher max channel duration | `30` L1 blocks (~6 min) | `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION` |
+| Batcher txmgr receipt / rebroadcast | `24s` | `SEPOLIA_BATCHER_TXMGR_*_INTERVAL` |
+| Proposer interval | `5m` (`PROPOSER_INTERVAL` in `.env.sepolia`) | same |
+| Proposer poll | `12s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
+| op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
+
+For a short fast demo: set `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=2`, `SEPOLIA_BATCHER_POLL_INTERVAL=2s`, `PROPOSER_INTERVAL=12s` then restart. Prefer stopping the stack when idle over burning credits overnight.
+
+**QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
+
 **Not in 2d:** Render as L1 (Phase 3 = L2 replica only). Native geth/reth+consensus on the Mac mini (Phase **3a**, after 4–6).
 
 ## Phase 3 — Render L2 replica (US-030 / US-031) ✅
@@ -482,7 +498,9 @@ Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **85
 
 **Keep Mac + Render aligned:** do **not** `reset-sepolia` / wipe only one side. After any Sepolia redeploy: pack → push genesis/rollup to fortel2-replica → wipe Mac `data-sepolia` **and** Render `/data` → restart both.
 
-**Batcher funding:** calldata posts burn Sepolia ETH on the batcher address. Keep a buffer (≥ ~0.15 ETH; more if you leave it running). Drip faucets into the **harvest** wallet, then top up batcher/proposer when `sepolia-fund-check.sh` shows NEED — not every day if the buffer is healthy.
+**Batcher funding:** calldata posts burn Sepolia ETH on the batcher address. Keep a buffer (≥ ~0.15 ETH; more if you leave it running). Drip faucets into the **harvest** wallet, then top up batcher/proposer when `sepolia-fund-check.sh` shows NEED — not every day if the buffer is healthy. With the credit-budget batcher defaults (`max-channel-duration=30`), L1 posts are far less frequent than the old `=2` profile — gas spend drops with them.
+
+Set Render’s `L1_RPC_URL` secret to the **Render-only** QuickNode endpoint (not the Mac mini URL). See Phase 2d.
 
 ```bash
 # After a Sepolia redeploy, pack genesis/rollup then publish into fortel2-replica
