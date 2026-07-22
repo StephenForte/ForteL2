@@ -17,23 +17,24 @@ PROPOSER_MIN="${SEPOLIA_PROPOSER_MIN_ETH:-0.15}"
 # Sequencer / challenger / demos: not required for 2b apply
 OPTIONAL_MIN="0.00"
 
-# Set when any row with a positive floor prints NEED (automation / demo-checklist).
+# Exit non-zero only when Phase 2c gas roles (BATCHER/PROPOSER) print NEED.
+# ADMIN/HARVEST floors stay advisory: after 2b apply ADMIN is often below 0.70
+# while the stack is healthy; 02-deploy-contracts-sepolia.sh gates ADMIN itself.
 fund_needs=0
 
 print_row() {
   local label="$1"
   local addr="$2"
   local min="$3"
+  # 1 = counts toward exit status (BATCHER/PROPOSER); 0 = advisory OK/NEED only.
+  local blocking="${4:-0}"
   local bal_eth
   bal_eth="$(cast balance "$addr" --rpc-url "$L1_RPC_URL" --ether)"
   local ok="NEED"
   if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal_eth" "$min"; then
     ok="OK"
-  else
-    # Optional roles use min=0.00 and never NEED; count only positive floors.
-    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$min"; then
-      fund_needs=1
-    fi
+  elif (( blocking )); then
+    fund_needs=1
   fi
   printf '%-12s %-42s %18s  min=%-6s %s\n' "$label" "$addr" "$bal_eth" "$min" "$ok"
 }
@@ -41,17 +42,17 @@ print_row() {
 echo "=== ForteL2 Sepolia fund check (L1=$(cast chain-id --rpc-url "$L1_RPC_URL")) ==="
 echo "RPC: $L1_RPC_URL"
 echo
-print_row "HARVEST" "$HARVEST_ADDRESS" "0.05"
-print_row "ADMIN" "$ADMIN_ADDRESS" "$ADMIN_MIN"
-print_row "BATCHER" "$BATCHER_ADDRESS" "$BATCHER_MIN"
-print_row "PROPOSER" "$PROPOSER_ADDRESS" "$PROPOSER_MIN"
-print_row "SEQUENCER" "$SEQUENCER_ADDRESS" "$OPTIONAL_MIN"
-print_row "CHALLENGER" "$CHALLENGER_ADDRESS" "$OPTIONAL_MIN"
+print_row "HARVEST" "$HARVEST_ADDRESS" "0.05" 0
+print_row "ADMIN" "$ADMIN_ADDRESS" "$ADMIN_MIN" 0
+print_row "BATCHER" "$BATCHER_ADDRESS" "$BATCHER_MIN" 1
+print_row "PROPOSER" "$PROPOSER_ADDRESS" "$PROPOSER_MIN" 1
+print_row "SEQUENCER" "$SEQUENCER_ADDRESS" "$OPTIONAL_MIN" 0
+print_row "CHALLENGER" "$CHALLENGER_ADDRESS" "$OPTIONAL_MIN" 0
 if [[ -n "${DEMO_A_ADDRESS:-}" ]]; then
-  print_row "DEMO_A" "$DEMO_A_ADDRESS" "$OPTIONAL_MIN"
+  print_row "DEMO_A" "$DEMO_A_ADDRESS" "$OPTIONAL_MIN" 0
 fi
 if [[ -n "${DEMO_B_ADDRESS:-}" ]]; then
-  print_row "DEMO_B" "$DEMO_B_ADDRESS" "$OPTIONAL_MIN"
+  print_row "DEMO_B" "$DEMO_B_ADDRESS" "$OPTIONAL_MIN" 0
 fi
 
 echo
@@ -69,6 +70,6 @@ echo "When ADMIN shows OK, run:"
 echo "  FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh"
 
 if (( fund_needs )); then
-  echo "Fund check: one or more required roles are below recommended floors (NEED)." >&2
+  echo "Fund check: BATCHER and/or PROPOSER below recommended floors (NEED)." >&2
   exit 1
 fi

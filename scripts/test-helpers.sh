@@ -574,34 +574,38 @@ else
   fail=1
 fi
 
-# sepolia-fund-check.sh must exit non-zero when a required role prints NEED so
-# demo-checklist --auto cannot PASS on under-funded BATCHER/PROPOSER.
+# sepolia-fund-check.sh exits non-zero only for BATCHER/PROPOSER NEED (Phase 2c).
+# ADMIN/HARVEST floors are advisory so post-2b ADMIN < 0.70 does not fail --auto.
 if grep -q 'fund_needs=0' "$SCRIPT_DIR/sepolia-fund-check.sh" \
   && grep -q 'fund_needs=1' "$SCRIPT_DIR/sepolia-fund-check.sh" \
-  && grep -q 'exit 1' "$SCRIPT_DIR/sepolia-fund-check.sh"; then
-  echo "PASS sepolia-fund-check tracks NEED and exits non-zero"
+  && grep -q 'exit 1' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'local blocking=' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "BATCHER".* 1$' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "PROPOSER".* 1$' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "ADMIN".* 0$' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "HARVEST".* 0$' "$SCRIPT_DIR/sepolia-fund-check.sh"; then
+  echo "PASS sepolia-fund-check blocks only BATCHER/PROPOSER NEED"
 else
-  echo "FAIL sepolia-fund-check must set fund_needs and exit 1 on NEED" >&2
+  echo "FAIL sepolia-fund-check must exit 1 only for BATCHER/PROPOSER NEED" >&2
   fail=1
 fi
 
-# Behavioral twin: balance < min → NEED → exit 1; balance ≥ min → exit 0.
+# Behavioral twin: blocking under min → exit 1; advisory under min → exit 0.
 fund_need_twin_ok=1
+# Under-funded BATCHER (blocking) must fail.
 if (
   set -euo pipefail
   fund_needs=0
   row() {
-    local bal="$1" min="$2"
+    local bal="$1" min="$2" blocking="${3:-0}"
     if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal" "$min"; then
       :
-    else
-      if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$min"; then
-        fund_needs=1
-      fi
+    elif (( blocking )); then
+      fund_needs=1
     fi
   }
-  row "0.10" "0.15"
-  row "1.00" "0.00"
+  row "0.10" "0.15" 1
+  row "0.01" "0.70" 0
   if (( fund_needs )); then
     exit 1
   fi
@@ -609,21 +613,21 @@ if (
 ); then
   fund_need_twin_ok=0
 fi
+# Only ADMIN under floor (advisory) must pass.
 if ! (
   set -euo pipefail
   fund_needs=0
   row() {
-    local bal="$1" min="$2"
+    local bal="$1" min="$2" blocking="${3:-0}"
     if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal" "$min"; then
       :
-    else
-      if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$min"; then
-        fund_needs=1
-      fi
+    elif (( blocking )); then
+      fund_needs=1
     fi
   }
-  row "0.20" "0.15"
-  row "0.00" "0.00"
+  row "0.20" "0.15" 1
+  row "0.01" "0.70" 0
+  row "0.01" "0.05" 0
   if (( fund_needs )); then
     exit 1
   fi
@@ -632,7 +636,7 @@ if ! (
   fund_need_twin_ok=0
 fi
 if (( fund_need_twin_ok )); then
-  echo "PASS sepolia-fund-check NEED twin (under min → fail, ok → pass)"
+  echo "PASS sepolia-fund-check NEED twin (blocking vs advisory)"
 else
   echo "FAIL sepolia-fund-check NEED twin" >&2
   fail=1
@@ -643,9 +647,9 @@ fi
 fund_check_block="$(
   grep -A4 'if "$SCRIPT_DIR/sepolia-fund-check.sh"' "$SCRIPT_DIR/demo-checklist.sh" || true
 )"
-if echo "$fund_check_block" | grep -q 'fail_item "sepolia-fund-check reported NEED' \
-  && echo "$fund_check_block" | grep -q 'pass "sepolia-fund-check: required roles'; then
-  echo "PASS demo-checklist fails auto check on sepolia-fund-check NEED"
+if echo "$fund_check_block" | grep -q 'fail_item "sepolia-fund-check: BATCHER/PROPOSER NEED' \
+  && echo "$fund_check_block" | grep -q 'pass "sepolia-fund-check: BATCHER/PROPOSER'; then
+  echo "PASS demo-checklist fails auto check on BATCHER/PROPOSER NEED"
 else
   echo "FAIL demo-checklist must fail_item when sepolia-fund-check exits non-zero" >&2
   fail=1

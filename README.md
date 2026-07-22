@@ -404,7 +404,8 @@ Operator tip: keep harvesting toward **~1.0 ETH** before Phase 2; **~0.5 ETH** i
 **Prerequisite:** Phase 2a `.env.sepolia` filled offline. Fund **ADMIN** from harvest before apply (≥ ~0.70 ETH). BATCHER/PROPOSER (≥ ~0.15 each) can wait until Phase 2c.
 
 ```bash
-# Balances + cast send examples (no broadcast/keys). Exit 1 if any required role shows NEED.
+# Balances + cast send examples (no broadcast/keys). Exit 1 if BATCHER/PROPOSER show NEED
+# (ADMIN/HARVEST floors are advisory; deploy script gates ADMIN itself).
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 
 # After ADMIN shows OK — spends Sepolia ETH; writes deployments/sepolia/ only

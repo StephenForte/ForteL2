@@ -294,11 +294,11 @@ run_auto() {
   if (( IS_SEPOLIA )); then
     echo
     echo "-- Sepolia fund check --"
-    # sepolia-fund-check.sh exits 0 only when required roles are ≥ floors (no NEED).
+    # Exit 1 only when BATCHER/PROPOSER are below floors (ADMIN/HARVEST are advisory).
     if "$SCRIPT_DIR/sepolia-fund-check.sh"; then
-      pass "sepolia-fund-check: required roles ≥ floors"
+      pass "sepolia-fund-check: BATCHER/PROPOSER ≥ floors"
     else
-      fail_item "sepolia-fund-check reported NEED / errors — top up from harvest before long demos"
+      fail_item "sepolia-fund-check: BATCHER/PROPOSER NEED — top up from harvest before long demos"
     fi
   fi
 
