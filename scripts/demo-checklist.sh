@@ -332,7 +332,11 @@ run_auto() {
       if (( games_dec >= 1 )); then
         pass "DisputeGameFactory gameCount=$games_dec"
       else
-        skip "gameCount=0 (wait for proposer interval ~${SEPOLIA_PROPOSER_INTERVAL:-5m}, re-run)"
+        if (( IS_SEPOLIA )); then
+          skip "gameCount=0 (wait for proposer interval ~${SEPOLIA_PROPOSER_INTERVAL:-5m}, re-run)"
+        else
+          skip "gameCount=0 (wait for proposer interval ~${PROPOSER_INTERVAL:-12s}, re-run)"
+        fi
       fi
     else
       fail_item "gameCount() call failed on $factory"

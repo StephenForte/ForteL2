@@ -371,6 +371,16 @@ else
   echo "FAIL Sepolia start scripts must keep credit-budget env defaults" >&2
   fail=1
 fi
+# Overnight sleep/wake helper for metered Sepolia / QuickNode.
+if [[ -x "$SCRIPT_DIR/dev-sleep.sh" ]] \
+  && grep -q 'cmd_sleep' "$SCRIPT_DIR/dev-sleep.sh" \
+  && grep -q 'stop-all-sepolia' "$SCRIPT_DIR/dev-sleep.sh" \
+  && grep -q 'start-all-sepolia' "$SCRIPT_DIR/dev-sleep.sh"; then
+  echo "PASS dev-sleep.sh sleep/wake wraps Sepolia start/stop"
+else
+  echo "FAIL missing scripts/dev-sleep.sh sleep/wake helper" >&2
+  fail=1
+fi
 # smoke-transfer must assert balance movement, not only receipt success.
 if grep -q 'uint_gt "\$AFTER_B" "\$BEFORE_B"' "$SCRIPT_DIR/smoke-transfer.sh" \
   && grep -q 'uint_gt "\$BEFORE_A" "\$AFTER_A"' "$SCRIPT_DIR/smoke-transfer.sh"; then

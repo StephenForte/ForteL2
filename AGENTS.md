@@ -59,6 +59,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh            # Phase 2c (n
 FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh          # Phase 2d QuickNode/public L1 check
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep            # overnight: stop stack + HTTP; wake with … wake
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/ (publish to fortel2-replica)
 # FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh
 ./scripts/stop-all.sh

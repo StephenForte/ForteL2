@@ -485,6 +485,17 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 
 For a short fast demo: set `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=2`, `SEPOLIA_BATCHER_POLL_INTERVAL=2s`, `SEPOLIA_PROPOSER_INTERVAL=12s` then restart. Prefer stopping the stack when idle over burning credits overnight.
 
+**Sleep / wake (recommended overnight):**
+
+```bash
+FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep   # stop Mac stack + dApp/viewer HTTP
+# optional: Suspend fortel2-replica on Render
+FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh wake    # start Mac stack again (credit-budget defaults)
+FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh status
+```
+
+Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clients is enough).
+
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 
 **Not in 2d:** Render as L1 (Phase 3 = L2 replica only). Native geth/reth+consensus on the Mac mini (Phase **3a**, after 4–6).
