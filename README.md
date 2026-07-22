@@ -480,11 +480,22 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 | Batcher poll | `12s` | `SEPOLIA_BATCHER_POLL_INTERVAL` |
 | Batcher max channel duration | `30` L1 blocks (~6 min) | `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION` |
 | Batcher txmgr receipt / rebroadcast | `24s` | `SEPOLIA_BATCHER_TXMGR_*_INTERVAL` |
-| Proposer interval | `5m` (`PROPOSER_INTERVAL` in `.env.sepolia`) | same |
+| Proposer interval | `5m` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`) |
 | Proposer poll | `12s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
 | op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
 
-For a short fast demo: set `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=2`, `SEPOLIA_BATCHER_POLL_INTERVAL=2s`, `PROPOSER_INTERVAL=12s` then restart. Prefer stopping the stack when idle over burning credits overnight.
+For a short fast demo: set `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=2`, `SEPOLIA_BATCHER_POLL_INTERVAL=2s`, `SEPOLIA_PROPOSER_INTERVAL=12s` then restart. Prefer stopping the stack when idle over burning credits overnight.
+
+**Sleep / wake (recommended overnight):**
+
+```bash
+FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep   # stop Mac stack + dApp/viewer HTTP
+# optional: Suspend fortel2-replica on Render
+FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh wake    # start Mac stack again (credit-budget defaults)
+FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh status
+```
+
+Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clients is enough).
 
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 
@@ -510,9 +521,11 @@ FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 
 | Piece | Where |
 |---|---|
-| Docker / compose / Blueprint | [fortel2-replica](https://github.com/StephenForte/fortel2-replica) |
-| Pack genesis/rollup | `scripts/pack-replica-artifacts.sh` → `replica/config/` (gitignored) |
+| Docker / compose / Blueprint | [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only — not in this monorepo |
+| Pack genesis/rollup (operator bridge) | `scripts/pack-replica-artifacts.sh` → `replica/config/` (gitignored staging) |
 | Sync check | `scripts/replica-sync-check.sh` (needs reachable replica RPC) or Shell hash compare |
+
+This repo keeps only the **pack + sync-check bridge**. Runtime Docker lives in fortel2-replica — see `replica/README.md`.
 
 See [fortel2-replica README](https://github.com/StephenForte/fortel2-replica#readme) for Render / friend quick start.
 

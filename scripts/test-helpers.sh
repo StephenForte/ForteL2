@@ -370,12 +370,22 @@ if grep -q 'SEPOLIA_BATCHER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/05-start-batcher-se
   && grep -q 'SEPOLIA_BATCHER_MAX_CHANNEL_DURATION:-30' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'SEPOLIA_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL:-24s' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
-  && grep -q 'PROPOSER_INTERVAL:=5m' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'SEPOLIA_PROPOSER_INTERVAL:-5m' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_L1_HTTP_POLL_INTERVAL:-12s' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
   && grep -q 'SEPOLIA_L1_RPC_RATE_LIMIT:-20' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
   echo "PASS Sepolia start scripts use credit-budget poll/channel defaults"
 else
   echo "FAIL Sepolia start scripts must keep credit-budget env defaults" >&2
+  fail=1
+fi
+# Overnight sleep/wake helper for metered Sepolia / QuickNode.
+if [[ -x "$SCRIPT_DIR/dev-sleep.sh" ]] \
+  && grep -q 'cmd_sleep' "$SCRIPT_DIR/dev-sleep.sh" \
+  && grep -q 'stop-all-sepolia' "$SCRIPT_DIR/dev-sleep.sh" \
+  && grep -q 'start-all-sepolia' "$SCRIPT_DIR/dev-sleep.sh"; then
+  echo "PASS dev-sleep.sh sleep/wake wraps Sepolia start/stop"
+else
+  echo "FAIL missing scripts/dev-sleep.sh sleep/wake helper" >&2
   fail=1
 fi
 # smoke-transfer must assert balance movement, not only receipt success.
