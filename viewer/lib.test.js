@@ -5,12 +5,16 @@ import {
   filterBatchTxs,
   formatAge,
   formatRate,
+  nextBatcherScanRange,
   parseHexQuantity,
+  pruneBatchTxsToWindow,
   scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
   summarizeSyncStatus,
   summarizeTxpoolStatus,
+  viewerL1ScanBlocks,
+  viewerRefreshMs,
 } from "./lib.js";
 
 describe("formatAge", () => {
@@ -156,5 +160,59 @@ describe("scanFromBlock", () => {
   });
   it("accepts bigint tip without mixing types in callers", () => {
     assert.equal(scanFromBlock(100n, 30), 71);
+  });
+});
+
+describe("nextBatcherScanRange", () => {
+  it("full window on first scan", () => {
+    const r = nextBatcherScanRange(null, 100, 12);
+    assert.equal(r.from, 89);
+    assert.equal(r.tip, 100);
+    assert.equal(r.reset, true);
+    assert.equal(r.skip, false);
+  });
+  it("skips when tip unchanged", () => {
+    const r = nextBatcherScanRange(100, 100, 12);
+    assert.equal(r.skip, true);
+    assert.equal(r.reset, false);
+  });
+  it("fetches only new blocks when tip advances", () => {
+    const r = nextBatcherScanRange(100, 103, 12);
+    assert.equal(r.from, 101);
+    assert.equal(r.tip, 103);
+    assert.equal(r.skip, false);
+  });
+  it("clamps catch-up to window", () => {
+    const r = nextBatcherScanRange(50, 100, 12);
+    assert.equal(r.from, 89);
+    assert.equal(r.reset, false);
+  });
+});
+
+describe("pruneBatchTxsToWindow", () => {
+  it("drops txs outside the tip window", () => {
+    const out = pruneBatchTxsToWindow(
+      [
+        { blockNumber: 88 },
+        { blockNumber: 89 },
+        { blockNumber: 100 },
+      ],
+      100,
+      12,
+    );
+    assert.deepEqual(
+      out.map((t) => t.blockNumber),
+      [89, 100],
+    );
+  });
+});
+
+describe("viewer Sepolia defaults", () => {
+  it("uses a smaller L1 window and slower refresh on 852", () => {
+    assert.equal(viewerL1ScanBlocks(852), 12);
+    assert.equal(viewerL1ScanBlocks(901), 40);
+    assert.equal(viewerRefreshMs(852, undefined), 15_000);
+    assert.equal(viewerRefreshMs(901, undefined), 5_000);
+    assert.equal(viewerRefreshMs(852, 20_000), 20_000);
   });
 });

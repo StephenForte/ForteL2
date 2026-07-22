@@ -218,11 +218,63 @@ export function summarizeTxpoolStatus(status) {
  * Number space (mixing with BigInt throws TypeError).
  * @param {number|bigint|string} tip
  * @param {number} windowSize
- * @returns {number}
  */
 export function scanFromBlock(tip, windowSize) {
   const t = Number(tip);
-  const w = Math.max(1, Number(windowSize) || 1);
-  if (!Number.isFinite(t) || t <= 0) return 0;
-  return t > w - 1 ? t - (w - 1) : 0;
+  const w = Number(windowSize);
+  if (!Number.isFinite(t) || t < 0) return 0;
+  if (!Number.isFinite(w) || w <= 0) return t;
+  return Math.max(0, t - w + 1);
+}
+
+/**
+ * Next inclusive [from, tip] range for incremental L1 batcher scans.
+ * @param {number|null|undefined} prevTip last successfully scanned tip (or null)
+ * @param {number|bigint|string} tip current L1 tip
+ * @param {number} windowBlocks rolling window size
+ * @returns {{ from: number, tip: number, reset: boolean, skip: boolean }}
+ */
+export function nextBatcherScanRange(prevTip, tip, windowBlocks) {
+  const t = Number(tip);
+  const w = Math.max(1, Number(windowBlocks) || 1);
+  if (!Number.isFinite(t) || t < 0) {
+    return { from: 0, tip: 0, reset: true, skip: true };
+  }
+  if (prevTip == null || !Number.isFinite(Number(prevTip)) || t < Number(prevTip)) {
+    return { from: scanFromBlock(t, w), tip: t, reset: true, skip: false };
+  }
+  const prev = Number(prevTip);
+  if (t === prev) {
+    return { from: t, tip: t, reset: false, skip: true };
+  }
+  let from = prev + 1;
+  const minFrom = scanFromBlock(t, w);
+  if (from < minFrom) from = minFrom;
+  return { from, tip: t, reset: false, skip: false };
+}
+
+/**
+ * Keep batch txs whose blockNumber is within the rolling window ending at tip.
+ * @param {Array<{blockNumber?: number|string}>} txs
+ * @param {number} tip
+ * @param {number} windowBlocks
+ */
+export function pruneBatchTxsToWindow(txs, tip, windowBlocks) {
+  if (!Array.isArray(txs)) return [];
+  const minBlock = scanFromBlock(tip, windowBlocks);
+  return txs.filter((tx) => {
+    const n = Number(tx?.blockNumber);
+    return Number.isFinite(n) && n >= minBlock && n <= Number(tip);
+  });
+}
+
+/** Sepolia viewer defaults: fewer L1 blocks, slower poll (QuickNode credit budget). */
+export function viewerL1ScanBlocks(l2ChainId) {
+  return Number(l2ChainId) === 852 ? 12 : 40;
+}
+
+export function viewerRefreshMs(l2ChainId, configuredMs) {
+  const configured = Number(configuredMs);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return Number(l2ChainId) === 852 ? 15_000 : 5_000;
 }
