@@ -639,12 +639,12 @@ else
 fi
 
 # demo-checklist must FAIL (not PASS/SKIP) when sepolia-fund-check exits non-zero.
-if awk '
-  /sepolia-fund-check\.sh/ { in_block = 1 }
-  in_block && /fail_item/ { found_fail = 1 }
-  in_block && /pass / { found_pass = 1 }
-  in_block && /^\s*fi$/ { exit (found_fail && found_pass) ? 0 : 1 }
-' "$SCRIPT_DIR/demo-checklist.sh"; then
+# Match the auto-check if-block only (checklist prose also mentions the script).
+fund_check_block="$(
+  grep -A4 'if "$SCRIPT_DIR/sepolia-fund-check.sh"' "$SCRIPT_DIR/demo-checklist.sh" || true
+)"
+if echo "$fund_check_block" | grep -q 'fail_item "sepolia-fund-check reported NEED' \
+  && echo "$fund_check_block" | grep -q 'pass "sepolia-fund-check: required roles'; then
   echo "PASS demo-checklist fails auto check on sepolia-fund-check NEED"
 else
   echo "FAIL demo-checklist must fail_item when sepolia-fund-check exits non-zero" >&2
