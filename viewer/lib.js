@@ -268,6 +268,24 @@ export function pruneBatchTxsToWindow(txs, tip, windowBlocks) {
   });
 }
 
+/**
+ * Apply a successful L1 batcher scan to cache state.
+ * Call only after blocks were fetched — never clear/advance tip before I/O succeeds,
+ * or a failed fetch + unchanged tip yields skip:true with an empty cache forever.
+ * @param {{ tip: number|null, txs: Array<{blockNumber?: number|string}> }} cache
+ * @param {{ tip: number, reset: boolean }} range
+ * @param {Array<{blockNumber?: number|string}>} collected
+ * @param {number} windowBlocks
+ */
+export function applyBatcherScanSuccess(cache, range, collected, windowBlocks) {
+  const base = range.reset ? [] : cache.txs || [];
+  const tip = range.tip;
+  return {
+    tip,
+    txs: pruneBatchTxsToWindow([...base, ...(collected || [])], tip, windowBlocks),
+  };
+}
+
 /** Sepolia viewer defaults: fewer L1 blocks, slower poll (QuickNode credit budget). */
 export function viewerL1ScanBlocks(l2ChainId) {
   return Number(l2ChainId) === 852 ? 12 : 40;

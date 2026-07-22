@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   aggregateTxWindow,
+  applyBatcherScanSuccess,
   filterBatchTxs,
   formatAge,
   formatRate,
@@ -204,6 +205,44 @@ describe("pruneBatchTxsToWindow", () => {
       out.map((t) => t.blockNumber),
       [89, 100],
     );
+  });
+});
+
+describe("applyBatcherScanSuccess", () => {
+  it("on reset replaces txs and advances tip only via returned state", () => {
+    const cache = {
+      tip: 50,
+      txs: [{ blockNumber: 50, hash: "0xold" }],
+    };
+    const next = applyBatcherScanSuccess(
+      cache,
+      { tip: 100, reset: true },
+      [{ blockNumber: 100, hash: "0xnew" }],
+      12,
+    );
+    assert.equal(next.tip, 100);
+    assert.deepEqual(
+      next.txs.map((t) => t.hash),
+      ["0xnew"],
+    );
+    // Caller must assign — original cache untouched until then.
+    assert.equal(cache.tip, 50);
+    assert.equal(cache.txs.length, 1);
+  });
+
+  it("on incremental append keeps prior txs in window", () => {
+    const cache = {
+      tip: 99,
+      txs: [{ blockNumber: 95, hash: "0xa" }],
+    };
+    const next = applyBatcherScanSuccess(
+      cache,
+      { tip: 100, reset: false },
+      [{ blockNumber: 100, hash: "0xb" }],
+      12,
+    );
+    assert.equal(next.tip, 100);
+    assert.equal(next.txs.length, 2);
   });
 });
 

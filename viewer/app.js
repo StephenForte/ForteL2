@@ -17,11 +17,11 @@ import {
 } from "./config.js";
 import {
   aggregateTxWindow,
+  applyBatcherScanSuccess,
   filterBatchTxs,
   formatAge,
   formatRate,
   nextBatcherScanRange,
-  pruneBatchTxsToWindow,
   scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
@@ -163,15 +163,21 @@ async function refreshSequencer(l2, nodeUrl) {
 async function refreshBatcher(l1) {
   const tip = await l1.getBlockNumber();
   const range = nextBatcherScanRange(batcherCache.tip, tip, L1_SCAN_BLOCKS);
-  if (range.reset) batcherCache.txs = [];
 
   if (!range.skip) {
     const blockNums = [];
     for (let n = range.from; n <= range.tip; n++) blockNums.push(n);
+    // Fetch before mutating cache. Clearing txs on reset before I/O would leave
+    // tip unchanged on failure → next poll skip:true with an empty panel.
     const blocks = await Promise.all(blockNums.map((n) => l1.getBlock(n, true)));
+    const present = blocks.filter(Boolean);
+    if (blockNums.length > 0 && present.length === 0) {
+      throw new Error(
+        `L1 getBlock returned no blocks for ${range.from}..${range.tip}`,
+      );
+    }
     const collected = [];
-    for (const block of blocks) {
-      if (!block) continue;
+    for (const block of present) {
       const txs = (block.prefetchedTransactions || block.transactions || [])
         .map((tx) => {
           if (typeof tx === "string") return null;
@@ -186,12 +192,14 @@ async function refreshBatcher(l1) {
         .filter(Boolean);
       collected.push(...filterBatchTxs(txs, BATCHER_ADDRESS, BATCH_INBOX_ADDRESS));
     }
-    batcherCache.txs = pruneBatchTxsToWindow(
-      [...batcherCache.txs, ...collected],
-      range.tip,
+    const next = applyBatcherScanSuccess(
+      batcherCache,
+      range,
+      collected,
       L1_SCAN_BLOCKS,
     );
-    batcherCache.tip = range.tip;
+    batcherCache.tip = next.tip;
+    batcherCache.txs = next.txs;
   }
 
   const summary = summarizeBatcherActivity(batcherCache.txs);
