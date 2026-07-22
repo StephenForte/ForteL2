@@ -574,6 +574,83 @@ else
   fail=1
 fi
 
+# sepolia-fund-check.sh must exit non-zero when a required role prints NEED so
+# demo-checklist --auto cannot PASS on under-funded BATCHER/PROPOSER.
+if grep -q 'fund_needs=0' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'fund_needs=1' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'exit 1' "$SCRIPT_DIR/sepolia-fund-check.sh"; then
+  echo "PASS sepolia-fund-check tracks NEED and exits non-zero"
+else
+  echo "FAIL sepolia-fund-check must set fund_needs and exit 1 on NEED" >&2
+  fail=1
+fi
+
+# Behavioral twin: balance < min → NEED → exit 1; balance ≥ min → exit 0.
+fund_need_twin_ok=1
+if (
+  set -euo pipefail
+  fund_needs=0
+  row() {
+    local bal="$1" min="$2"
+    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal" "$min"; then
+      :
+    else
+      if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$min"; then
+        fund_needs=1
+      fi
+    fi
+  }
+  row "0.10" "0.15"
+  row "1.00" "0.00"
+  if (( fund_needs )); then
+    exit 1
+  fi
+  exit 0
+); then
+  fund_need_twin_ok=0
+fi
+if ! (
+  set -euo pipefail
+  fund_needs=0
+  row() {
+    local bal="$1" min="$2"
+    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal" "$min"; then
+      :
+    else
+      if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$min"; then
+        fund_needs=1
+      fi
+    fi
+  }
+  row "0.20" "0.15"
+  row "0.00" "0.00"
+  if (( fund_needs )); then
+    exit 1
+  fi
+  exit 0
+); then
+  fund_need_twin_ok=0
+fi
+if (( fund_need_twin_ok )); then
+  echo "PASS sepolia-fund-check NEED twin (under min → fail, ok → pass)"
+else
+  echo "FAIL sepolia-fund-check NEED twin" >&2
+  fail=1
+fi
+
+# demo-checklist must FAIL (not PASS/SKIP) when sepolia-fund-check exits non-zero.
+if awk '
+  /sepolia-fund-check\.sh/ { in_block = 1 }
+  in_block && /fail_item/ { found_fail = 1 }
+  in_block && /pass / { found_pass = 1 }
+  in_block && /^\s*fi$/ { exit (found_fail && found_pass) ? 0 : 1 }
+' "$SCRIPT_DIR/demo-checklist.sh"; then
+  echo "PASS demo-checklist fails auto check on sepolia-fund-check NEED"
+else
+  echo "FAIL demo-checklist must fail_item when sepolia-fund-check exits non-zero" >&2
+  fail=1
+fi
+
 if "$SCRIPT_DIR/demo-live.sh" --help >/dev/null 2>&1; then
   echo "PASS demo-live.sh --help"
 else

@@ -17,6 +17,9 @@ PROPOSER_MIN="${SEPOLIA_PROPOSER_MIN_ETH:-0.15}"
 # Sequencer / challenger / demos: not required for 2b apply
 OPTIONAL_MIN="0.00"
 
+# Set when any row with a positive floor prints NEED (automation / demo-checklist).
+fund_needs=0
+
 print_row() {
   local label="$1"
   local addr="$2"
@@ -26,6 +29,11 @@ print_row() {
   local ok="NEED"
   if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal_eth" "$min"; then
     ok="OK"
+  else
+    # Optional roles use min=0.00 and never NEED; count only positive floors.
+    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$min"; then
+      fund_needs=1
+    fi
   fi
   printf '%-12s %-42s %18s  min=%-6s %s\n' "$label" "$addr" "$bal_eth" "$min" "$ok"
 }
@@ -59,3 +67,8 @@ EOF
 echo
 echo "When ADMIN shows OK, run:"
 echo "  FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh"
+
+if (( fund_needs )); then
+  echo "Fund check: one or more required roles are below recommended floors (NEED)." >&2
+  exit 1
+fi
