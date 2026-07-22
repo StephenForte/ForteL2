@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   aggregateTxWindow,
   applyBatcherScanSuccess,
+  contiguousScanTip,
   filterBatchTxs,
   formatAge,
   formatRate,
@@ -204,6 +205,27 @@ describe("pruneBatchTxsToWindow", () => {
     assert.deepEqual(
       out.map((t) => t.blockNumber),
       [89, 100],
+    );
+  });
+});
+
+describe("contiguousScanTip", () => {
+  it("returns last contiguous success from from", () => {
+    const blocks = [
+      { number: 10 },
+      { number: 11 },
+      null,
+      { number: 13 },
+    ];
+    assert.equal(contiguousScanTip(10, blocks), 11);
+  });
+  it("returns null when the first block is missing", () => {
+    assert.equal(contiguousScanTip(10, [null, { number: 11 }]), null);
+  });
+  it("returns full tip when all present", () => {
+    assert.equal(
+      contiguousScanTip(5, [{ number: 5 }, { number: 6 }, { number: 7 }]),
+      7,
     );
   });
 });

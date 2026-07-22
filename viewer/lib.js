@@ -269,6 +269,29 @@ export function pruneBatchTxsToWindow(txs, tip, windowBlocks) {
 }
 
 /**
+ * Highest L1 block scanned contiguously from `from` given parallel getBlock results.
+ * Null entries (or gaps) stop the run so tip does not advance past missing heights.
+ * @param {number} from first requested block number
+ * @param {Array<object|null|undefined>} blockResults aligned with from, from+1, …
+ * @returns {number|null} last contiguous success, or null if `from` itself missing
+ */
+export function contiguousScanTip(from, blockResults) {
+  const start = Number(from);
+  if (!Number.isFinite(start) || start < 0 || !Array.isArray(blockResults)) {
+    return null;
+  }
+  let last = null;
+  for (let i = 0; i < blockResults.length; i++) {
+    const block = blockResults[i];
+    if (!block) break;
+    const n = Number(block.number);
+    if (!Number.isFinite(n) || n !== start + i) break;
+    last = n;
+  }
+  return last;
+}
+
+/**
  * Apply a successful L1 batcher scan to cache state.
  * Call only after blocks were fetched — never clear/advance tip before I/O succeeds,
  * or a failed fetch + unchanged tip yields skip:true with an empty cache forever.

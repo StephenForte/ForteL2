@@ -18,6 +18,7 @@ import {
 import {
   aggregateTxWindow,
   applyBatcherScanSuccess,
+  contiguousScanTip,
   filterBatchTxs,
   formatAge,
   formatRate,
@@ -170,14 +171,19 @@ async function refreshBatcher(l1) {
     // Fetch before mutating cache. Clearing txs on reset before I/O would leave
     // tip unchanged on failure → next poll skip:true with an empty panel.
     const blocks = await Promise.all(blockNums.map((n) => l1.getBlock(n, true)));
-    const present = blocks.filter(Boolean);
-    if (blockNums.length > 0 && present.length === 0) {
+    // Only advance through a contiguous success run from `from`. Sparse nulls
+    // must not bump tip past gaps — those heights are retried next poll.
+    const scannedTip = contiguousScanTip(range.from, blocks);
+    if (scannedTip == null) {
       throw new Error(
-        `L1 getBlock returned no blocks for ${range.from}..${range.tip}`,
+        `L1 getBlock returned no block at ${range.from} (range ${range.from}..${range.tip})`,
       );
     }
     const collected = [];
-    for (const block of present) {
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      const height = range.from + i;
+      if (!block || height > scannedTip) break;
       const txs = (block.prefetchedTransactions || block.transactions || [])
         .map((tx) => {
           if (typeof tx === "string") return null;
@@ -194,7 +200,7 @@ async function refreshBatcher(l1) {
     }
     const next = applyBatcherScanSuccess(
       batcherCache,
-      range,
+      { tip: scannedTip, reset: range.reset },
       collected,
       L1_SCAN_BLOCKS,
     );
