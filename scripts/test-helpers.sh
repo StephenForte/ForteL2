@@ -115,6 +115,13 @@ else
   echo "FAIL redact_rpc_url got: $REDACTED" >&2
   fail=1
 fi
+SHORT_PATH_REDACTED="$(redact_rpc_url "https://rpc.example/secret")"
+if [[ "$SHORT_PATH_REDACTED" == "https://rpc.example/…" ]]; then
+  echo "PASS redact_rpc_url redacts short path tokens"
+else
+  echo "FAIL redact_rpc_url exposed short path: $SHORT_PATH_REDACTED" >&2
+  fail=1
+fi
 if [[ "$(rpc_origin "https://example.quiknode.pro/secrettoken123/")" == "https://example.quiknode.pro" ]]; then
   echo "PASS rpc_origin strips path token"
 else

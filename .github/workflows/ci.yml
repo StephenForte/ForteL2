@@ -38,6 +38,9 @@ jobs:
       - name: Script helper tests
         run: ./scripts/test-helpers.sh
 
+      - name: Pipeline snapshot unit tests
+        run: python3 -m unittest scripts/test_pipeline_snapshot.py
+
       - name: Pipeline viewer + dApp unit tests
         run: node --test viewer/lib.test.js dapp/lib.test.js
 

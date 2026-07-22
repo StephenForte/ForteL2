@@ -76,9 +76,7 @@ def redact_rpc_url(url: str) -> str:
     netloc = p.hostname or ""
     if p.port:
         netloc = f"{netloc}:{p.port}"
-    path = p.path if p.path and p.path != "/" else ""
-    if path and len(path) > 8:
-        path = "/…"
+    path = "/…" if p.path and p.path != "/" else ""
     return f"{p.scheme}://{netloc}{path}"
 
 
