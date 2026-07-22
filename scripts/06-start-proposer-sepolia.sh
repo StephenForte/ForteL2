@@ -19,6 +19,11 @@ if [[ -z "$GAME_FACTORY" || "$GAME_FACTORY" == "null" ]]; then
   exit 1
 fi
 
+# Credit-budget defaults: proposals every few minutes, slower L1 poll.
+PROPOSER_POLL="${SEPOLIA_PROPOSER_POLL_INTERVAL:-12s}"
+# PROPOSER_INTERVAL comes from .env.sepolia (example default 5m).
+: "${PROPOSER_INTERVAL:=5m}"
+
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
@@ -30,10 +35,10 @@ start_bg op-proposer op-proposer \
   --game-type="${PROPOSER_GAME_TYPE}" \
   --proposal-interval="${PROPOSER_INTERVAL}" \
   --allow-non-finalized=true \
-  --poll-interval=4s \
+  --poll-interval="${PROPOSER_POLL}" \
   --rpc.addr=127.0.0.1 \
   --rpc.port="${PROPOSER_RPC_PORT}" \
   --log.level=info
 
-echo "Sepolia proposer started against DisputeGameFactory=$GAME_FACTORY game-type=$PROPOSER_GAME_TYPE"
+echo "Sepolia proposer started against DisputeGameFactory=$GAME_FACTORY game-type=$PROPOSER_GAME_TYPE interval=${PROPOSER_INTERVAL} poll=${PROPOSER_POLL}"
 echo "Known-good: 'created dispute game' or 'Proposing'"

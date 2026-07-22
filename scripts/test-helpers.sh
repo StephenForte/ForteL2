@@ -358,6 +358,19 @@ else
   echo "FAIL batcher/proposer start scripts must set --rpc.addr=127.0.0.1" >&2
   fail=1
 fi
+# Sepolia credit-budget defaults (metered QuickNode L1).
+if grep -q 'SEPOLIA_BATCHER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'SEPOLIA_BATCHER_MAX_CHANNEL_DURATION:-30' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'SEPOLIA_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL:-24s' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'SEPOLIA_PROPOSER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'PROPOSER_INTERVAL:=5m' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'SEPOLIA_L1_HTTP_POLL_INTERVAL:-12s' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -q 'SEPOLIA_L1_RPC_RATE_LIMIT:-20' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
+  echo "PASS Sepolia start scripts use credit-budget poll/channel defaults"
+else
+  echo "FAIL Sepolia start scripts must keep credit-budget env defaults" >&2
+  fail=1
+fi
 # smoke-transfer must assert balance movement, not only receipt success.
 if grep -q 'uint_gt "\$AFTER_B" "\$BEFORE_B"' "$SCRIPT_DIR/smoke-transfer.sh" \
   && grep -q 'uint_gt "\$BEFORE_A" "\$AFTER_A"' "$SCRIPT_DIR/smoke-transfer.sh"; then

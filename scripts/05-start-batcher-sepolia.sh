@@ -20,6 +20,12 @@ fi
 BATCH_INBOX=$(jq -r '.batch_inbox_address // .batch_inbox // empty' "$DEPLOY_DIR/rollup.json")
 BATCHER_DA_TYPE="${BATCHER_DA_TYPE:-calldata}"
 BATCHER_CONFS="${SEPOLIA_BATCHER_NUM_CONFIRMATIONS:-2}"
+# Credit-budget defaults (QuickNode): longer channels + slower polls cut fee-oracle spam.
+# Override via .env.sepolia when demoing a faster cadence.
+BATCHER_POLL="${SEPOLIA_BATCHER_POLL_INTERVAL:-12s}"
+BATCHER_CHANNEL_DURATION="${SEPOLIA_BATCHER_MAX_CHANNEL_DURATION:-30}"
+BATCHER_RECEIPT_QUERY="${SEPOLIA_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL:-24s}"
+BATCHER_REBROADCAST="${SEPOLIA_BATCHER_TXMGR_REBROADCAST_INTERVAL:-24s}"
 
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
 wait_for_rpc "$L2_RPC_URL" "L2"
@@ -32,15 +38,17 @@ start_bg op-batcher op-batcher \
   --data-availability-type="${BATCHER_DA_TYPE}" \
   --rpc.addr=127.0.0.1 \
   --rpc.port="${BATCHER_RPC_PORT}" \
-  --poll-interval=2s \
+  --poll-interval="${BATCHER_POLL}" \
   --sub-safety-margin=2 \
   --num-confirmations="${BATCHER_CONFS}" \
   --safe-abort-nonce-too-low-count=3 \
   --resubmission-timeout=60s \
-  --max-channel-duration=2 \
+  --max-channel-duration="${BATCHER_CHANNEL_DURATION}" \
+  --txmgr.receipt-query-interval="${BATCHER_RECEIPT_QUERY}" \
+  --txmgr.rebroadcast-interval="${BATCHER_REBROADCAST}" \
   --log.level=info
 
-echo "Sepolia batcher started (DA=${BATCHER_DA_TYPE}, confs=${BATCHER_CONFS})."
+echo "Sepolia batcher started (DA=${BATCHER_DA_TYPE}, confs=${BATCHER_CONFS}, poll=${BATCHER_POLL}, max-channel-duration=${BATCHER_CHANNEL_DURATION})."
 echo "Inspect: cast nonce ${BATCHER_ADDRESS} --rpc-url $L1_RPC_URL"
 if [[ -n "${BATCH_INBOX:-}" ]]; then
   echo "Batch inbox: $BATCH_INBOX"

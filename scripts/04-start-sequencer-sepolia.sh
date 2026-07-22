@@ -61,10 +61,15 @@ sleep 2
 # Calldata DA dry-run: ignore beacon (same class as Phase 1). No custom L1-900 chain-config —
 # Sepolia is a known L1. Slightly higher L1 confs than Anvil for public RPC noise.
 L1_CONFS="${SEPOLIA_VERIFIER_L1_CONFS:-1}"
+# Credit-budget: explicit tip poll + soft self-throttle on L1 RPC (requests/sec).
+L1_HTTP_POLL="${SEPOLIA_L1_HTTP_POLL_INTERVAL:-12s}"
+L1_RPC_RATE_LIMIT="${SEPOLIA_L1_RPC_RATE_LIMIT:-20}"
 start_bg op-node op-node \
   --l1="$L1_RPC_URL" \
   --l1.rpckind=standard \
   --l1.trustrpc=true \
+  --l1.http-poll-interval="${L1_HTTP_POLL}" \
+  --l1.rpc-rate-limit="${L1_RPC_RATE_LIMIT}" \
   --l1.beacon.ignore=true \
   --l1.beacon.slot-duration-override="${L1_BLOCK_TIME}" \
   --l2="http://127.0.0.1:${L2_EL_AUTH_PORT}" \
@@ -85,4 +90,5 @@ start_bg op-node op-node \
 wait_for_rpc "$L2_RPC_URL" "L2 op-geth"
 echo "Sepolia sequencer up. L2 block=$(cast block-number --rpc-url "$L2_RPC_URL") chain=$(cast chain-id --rpc-url "$L2_RPC_URL")"
 echo "DATA_DIR=$DATA_DIR (Phase 1 datadir untouched)"
+echo "op-node L1 poll=${L1_HTTP_POLL} rpc-rate-limit=${L1_RPC_RATE_LIMIT}"
 echo "Known-good: op-geth 'HTTP server started' ; op-node 'Sequencer' / 'Created new L2 block'"
