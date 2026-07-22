@@ -33,12 +33,12 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | ✅ Done |
 | **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | ✅ Done |
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap; no redeploy) | ✅ Done |
-| **3** | **Replica node on Render** — stock verifier, L1-derived sync (peering optional) | In progress |
-| **3a** | Native Mac mini Sepolia L1 (optional; was 2e) | Deferred / skipped for now |
+| **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
 | **4** | **Reimplement the batcher** from scratch; swap out op-batcher | Planned |
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | Planned |
 | **6** | **Reimplement the derivation pipeline** — the deepest rebuild | Planned |
+| **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal | Planned |
 | **8** | **Decentralized sequencer** exploration: multiple candidates, leader election | Planned |
 | **9** | **Mainnet (tentative)**: graduate to Ethereum mainnet as L1, production key management, real ETH economics — gated on earlier phases + committed distributed node network | Decision not locked |
@@ -408,7 +408,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh
 
 Intent uses `fundDevAccounts = false`, L2 chain **852**, learning-short portal delays (`faultGameClockExtension=5`, `faultGameMaxClockDuration=10` — max must be ≥ extension). Resume keeps `state.json` but always rewrites `intent.toml` from current `.env.sepolia` (roles / fault-game delays) before apply. Phase 1 Anvil `deployments/` tree is never written. This deploy is **disposable** — wipe with `FORCE_SEPOLIA_REDEPLOY=1` then re-apply.
 
-**Live Sepolia proxies (Phase 2b apply):** see `deployments/sepolia/deployments.json`. Portal `0xae399e74…52a29`, bridge `0x1623eca8…69614`, DisputeGameFactory `0x54d9c9f1…5bc39`.
+**Live Sepolia proxies (Phase 2b apply, 2026-07-22 cutover):** see `deployments/sepolia/deployments.json`. Portal `0xb4679b1c…08c624`, bridge `0x7ec222d9…85089f8`, DisputeGameFactory `0xba1fda6b…e49eed`. Prior Sepolia deploy is abandoned (disposable).
 
 ## Phase 2c — Sepolia-backed L2 dry-run (US-024)
 
@@ -441,7 +441,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 ## Phase 2d — QuickNode L1 RPC (US-025)
 
-Phase **2d is QuickNode-only**. Native Mac mini Sepolia L1 is **Phase 3a (deferred / skipped for now)** — large disk + EL/CL sync; not needed while calldata + beacon-ignore works.
+Phase **2d is QuickNode-only**. Native Mac mini Sepolia L1 is **Phase 3a** (deferred until after Phases **4–6** unless RPC forces earlier).
 
 **Upgrade (no redeploy, no new keys):**
 
@@ -460,32 +460,29 @@ FORTEL2_ENV=.env.sepolia ./scripts/status.sh
 
 Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not required for 2d).
 
-**Not in 2d:** Render as L1 (Phase 3 = L2 replica only). Native geth/reth+consensus on the Mac mini (Phase **3a**).
+**Not in 2d:** Render as L1 (Phase 3 = L2 replica only). Native geth/reth+consensus on the Mac mini (Phase **3a**, after 4–6).
 
-## Phase 3 — Render L2 replica (US-030 / US-031)
+## Phase 3 — Render L2 replica (US-030 / US-031) ✅
 
-Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1**. Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032** / Phase **3a** is unrelated native L1).
+Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1**. Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032**). Native Mac L1 is **Phase 3a** (after 4–6).
 
-**Deploy / friend package:** [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica) (separate repo — root Dockerfile for Render, compose for laptops). Containers allowed **there / on Render only**; this Mac stays native binaries.
+**Status:** Operator-verified after a fresh Phase 2b cutover (2026-07-22): Mac and Render share matching L2 block hashes (e.g. block 20). Package: [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica). Use **≥2GB** RAM on Render (Starter 512MB OOMs). Prefer **Private Service**; compare tips via Render Shell `geth attach` if you lack a public URL.
+
+**Keep Mac + Render aligned:** do **not** `reset-sepolia` / wipe only one side. After any Sepolia redeploy: pack → push genesis/rollup to fortel2-replica → wipe Mac `data-sepolia` **and** Render `/data` → restart both.
+
+**Batcher funding:** calldata posts burn Sepolia ETH on the batcher address. Keep a buffer (≥ ~0.15 ETH; more if you leave it running). Drip faucets into the **harvest** wallet, then top up batcher/proposer when `sepolia-fund-check.sh` shows NEED — not every day if the buffer is healthy.
 
 ```bash
 # After a Sepolia redeploy, pack genesis/rollup then publish into fortel2-replica
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh
-
-# After the remote verifier is up, compare heads:
-FORTEL2_ENV=.env.sepolia \
-  REPLICA_L2_RPC_URL=https://your-replica.render.example \
-  REPLICA_NODE_RPC_URL=https://your-replica-node.render.example \
-  ./scripts/replica-sync-check.sh
+FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 ```
 
 | Piece | Where |
 |---|---|
 | Docker / compose / Blueprint | [fortel2-replica](https://github.com/StephenForte/fortel2-replica) |
 | Pack genesis/rollup | `scripts/pack-replica-artifacts.sh` → `replica/config/` (gitignored) |
-| Sync check | `scripts/replica-sync-check.sh` |
-
-**Defaults:** replica JSON-RPC stays **private / restricted**. Mac mini L2 binds remain loopback (US-012 non-loopback still no-go for the sequencer).
+| Sync check | `scripts/replica-sync-check.sh` (needs reachable replica RPC) or Shell hash compare |
 
 See [fortel2-replica README](https://github.com/StephenForte/fortel2-replica#readme) for Render / friend quick start.
 
@@ -510,7 +507,7 @@ FORTEL2_ENV=.env.sepolia  # prefix any future Phase 2 script
 | L2 RPC | Loopback only (`assert_sepolia_rpc_urls`) |
 | Tripwire | Foundry defaults refused when `L2_CHAIN_ID != 901` (includes 852) |
 
-**L1 RPC upgrade path (2d):** scripts only read `L1_RPC_URL`. Public → QuickNode is an env change + Sepolia stack restart (no redeploy). Native Mac mini Sepolia L1 is **Phase 3a (deferred)**. **Render is not an L1 Sepolia node** — Phase 3 is an L2 replica.
+**L1 RPC upgrade path (2d):** scripts only read `L1_RPC_URL`. Public → QuickNode is an env change + Sepolia stack restart (no redeploy). Native Mac mini Sepolia L1 is **Phase 3a** (after 4–6). **Render is not an L1 Sepolia node** — Phase 3 is an L2 replica.
 
 ### Agent-permission / tool-access audit (US-022)
 
@@ -561,7 +558,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 
 ## Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
-Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Phase 0–**2d done**; **3a** native Mac L1 skipped for now. Next / current: Phase **3** Render L2 replica. Do **not** start Phase 2b+ until all of these are true:
+Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Phase 0–**3 done** (Sepolia + Render replica); **3a** native Mac L1 deferred until after 4–6. Next: Phase **3b** (friends) or **4** (reimplement batcher). Do **not** start Phase 2b+ until all of these are true:
 
 - [x] **Fresh keys / Foundry tripwire:** scripts that broadcast call `refuse_foundry_defaults_unless_local_l2` and fail closed when `L2_CHAIN_ID != 901` if a Foundry/Anvil default private key is still configured. Before Sepolia: generate **new** keys (never fund or reuse the `.env.example` mnemonic accounts on a public net).
 - [x] **Separate deploy tree (documented):** Phase 2 must **not** reuse the Phase 1 `.env` + `deployments/.deployer/` tree. Use `.env.sepolia` and `deployments/sepolia/.deployer/`. Replaced artifacts: L1 contracts, L2 genesis/`rollup.json`, RPC URLs, chain IDs (`L2=852`), funded accounts, JWT/engine secrets. Do not copy Phase 1 `deployments.json` to Sepolia.
