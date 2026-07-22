@@ -49,6 +49,10 @@ cp .env.example .env          # once
 ./scripts/serve-viewer.sh     # http://127.0.0.1:8081 pipeline viewer
 FORTEL2_ENV=.env.sepolia ./scripts/serve-viewer.sh  # same UI against Sepolia L1 + local L2 852
 ./scripts/demo-checklist.sh   # auto smokes + Phase 1→1c verification checklist
+FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh  # Sepolia checklist (or --sepolia)
+./scripts/demo-live.sh --local  # guided demo: health, talk track, open :8080/:8081
+FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
+python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json  # one-shot JSON mini-viewer
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh  # Phase 2b after ADMIN funded
 FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh            # Phase 2c (no Anvil)

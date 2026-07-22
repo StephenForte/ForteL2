@@ -531,6 +531,137 @@ else
   fail=1
 fi
 
+# demo-checklist Sepolia path: --print with fixture env mentions Sepolia (not Anvil five-proc list)
+SEPOLIA_DEMO_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-demo-sepolia-XXXXXX")"
+mkdir -p "$SEPOLIA_DEMO_FIXTURE/deployments/sepolia/.deployer" "$SEPOLIA_DEMO_FIXTURE/data"
+cat > "$SEPOLIA_DEMO_FIXTURE/.env.sepolia" <<EOF
+FORTEL2_ROOT=$SEPOLIA_DEMO_FIXTURE
+DATA_DIR=$SEPOLIA_DEMO_FIXTURE/data
+DEPLOY_DIR=$SEPOLIA_DEMO_FIXTURE/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_BLOCK_TIME=12
+L2_BLOCK_TIME=2
+L1_RPC_URL=https://example.ethereum-sepolia.quiknode.pro/token/
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+BATCHER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+PROPOSER_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+HARVEST_ADDRESS=0x5128889F20Ec13e0Be38b2BeBC568594159B652d
+ADMIN_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+SEQUENCER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+CHALLENGER_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+EOF
+SEPOLIA_PRINT="$(
+  FORTEL2_ROOT="$SEPOLIA_DEMO_FIXTURE" FORTEL2_ENV=.env.sepolia \
+    "$SCRIPT_DIR/demo-checklist.sh" --print 2>/dev/null || true
+)"
+rm -rf "$SEPOLIA_DEMO_FIXTURE"
+if echo "$SEPOLIA_PRINT" | grep -q 'Sepolia (L2 852' \
+  && echo "$SEPOLIA_PRINT" | grep -q 'no Anvil' \
+  && echo "$SEPOLIA_PRINT" | grep -q 'demo-live.sh --sepolia'; then
+  echo "PASS demo-checklist --print Sepolia mode"
+else
+  echo "FAIL demo-checklist Sepolia --print content" >&2
+  fail=1
+fi
+
+if grep -q 'assert_sepolia_rpc_urls' "$SCRIPT_DIR/demo-checklist.sh" \
+  && grep -q 'IS_SEPOLIA' "$SCRIPT_DIR/demo-checklist.sh"; then
+  echo "PASS demo-checklist has Sepolia assert path"
+else
+  echo "FAIL demo-checklist missing Sepolia assert wiring" >&2
+  fail=1
+fi
+
+# sepolia-fund-check.sh exits non-zero only for BATCHER/PROPOSER NEED (Phase 2c).
+# ADMIN/HARVEST floors are advisory so post-2b ADMIN < 0.70 does not fail --auto.
+if grep -q 'fund_needs=0' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'fund_needs=1' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'exit 1' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'local blocking=' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "BATCHER".* 1$' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "PROPOSER".* 1$' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "ADMIN".* 0$' "$SCRIPT_DIR/sepolia-fund-check.sh" \
+  && grep -q 'print_row "HARVEST".* 0$' "$SCRIPT_DIR/sepolia-fund-check.sh"; then
+  echo "PASS sepolia-fund-check blocks only BATCHER/PROPOSER NEED"
+else
+  echo "FAIL sepolia-fund-check must exit 1 only for BATCHER/PROPOSER NEED" >&2
+  fail=1
+fi
+
+# Behavioral twin: blocking under min → exit 1; advisory under min → exit 0.
+fund_need_twin_ok=1
+# Under-funded BATCHER (blocking) must fail.
+if (
+  set -euo pipefail
+  fund_needs=0
+  row() {
+    local bal="$1" min="$2" blocking="${3:-0}"
+    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal" "$min"; then
+      :
+    elif (( blocking )); then
+      fund_needs=1
+    fi
+  }
+  row "0.10" "0.15" 1
+  row "0.01" "0.70" 0
+  if (( fund_needs )); then
+    exit 1
+  fi
+  exit 0
+); then
+  fund_need_twin_ok=0
+fi
+# Only ADMIN under floor (advisory) must pass.
+if ! (
+  set -euo pipefail
+  fund_needs=0
+  row() {
+    local bal="$1" min="$2" blocking="${3:-0}"
+    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + 1e-18 >= float(sys.argv[2]) else 1)' "$bal" "$min"; then
+      :
+    elif (( blocking )); then
+      fund_needs=1
+    fi
+  }
+  row "0.20" "0.15" 1
+  row "0.01" "0.70" 0
+  row "0.01" "0.05" 0
+  if (( fund_needs )); then
+    exit 1
+  fi
+  exit 0
+); then
+  fund_need_twin_ok=0
+fi
+if (( fund_need_twin_ok )); then
+  echo "PASS sepolia-fund-check NEED twin (blocking vs advisory)"
+else
+  echo "FAIL sepolia-fund-check NEED twin" >&2
+  fail=1
+fi
+
+# demo-checklist must FAIL (not PASS/SKIP) when sepolia-fund-check exits non-zero.
+# Match the auto-check if-block only (checklist prose also mentions the script).
+fund_check_block="$(
+  grep -A4 'if "$SCRIPT_DIR/sepolia-fund-check.sh"' "$SCRIPT_DIR/demo-checklist.sh" || true
+)"
+if echo "$fund_check_block" | grep -q 'fail_item "sepolia-fund-check: BATCHER/PROPOSER NEED' \
+  && echo "$fund_check_block" | grep -q 'pass "sepolia-fund-check: BATCHER/PROPOSER'; then
+  echo "PASS demo-checklist fails auto check on BATCHER/PROPOSER NEED"
+else
+  echo "FAIL demo-checklist must fail_item when sepolia-fund-check exits non-zero" >&2
+  fail=1
+fi
+
+if "$SCRIPT_DIR/demo-live.sh" --help >/dev/null 2>&1; then
+  echo "PASS demo-live.sh --help"
+else
+  echo "FAIL demo-live.sh --help" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

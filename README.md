@@ -144,6 +144,10 @@ chmod +x scripts/*.sh
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ./scripts/serve-viewer.sh     # http://127.0.0.1:8081 pipeline viewer (Phase 1c)
 ./scripts/demo-checklist.sh   # operator demo: auto smokes + human checklist
+FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh   # Sepolia twin (or --sepolia)
+./scripts/demo-live.sh --local   # health + talk track + guestbook/viewer URLs
+FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
+python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pipeline health JSON
 ```
 
 ### Tests / merge guardrails
@@ -340,9 +344,13 @@ Ops dashboard for the sequencer → batcher → proposer path. Client-side polls
 ```bash
 # Phase 1 (local Anvil L1 + L2 901)
 ./scripts/serve-viewer.sh   # regenerates viewer/config.js + .csp-header, then http://127.0.0.1:8081/
+./scripts/demo-live.sh --local   # health checks + talk track + open guestbook/viewer
 
 # Phase 2 Sepolia (remote L1 + local L2 852) — stack must already be up via start-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/serve-viewer.sh
+FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
+FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh   # or --sepolia
+python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json  # one-shot JSON mini-viewer
 ```
 
 Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from the active env + `deployments.json` + `rollup.json`. `viewer/config.js` and `viewer/.csp-header` are **gitignored** (Sepolia `config.js` embeds your L1 RPC URL). Use `./scripts/serve-viewer.sh` so the CSP header allows the L1 origin without committing it into `index.html`.
@@ -396,7 +404,8 @@ Operator tip: keep harvesting toward **~1.0 ETH** before Phase 2; **~0.5 ETH** i
 **Prerequisite:** Phase 2a `.env.sepolia` filled offline. Fund **ADMIN** from harvest before apply (≥ ~0.70 ETH). BATCHER/PROPOSER (≥ ~0.15 each) can wait until Phase 2c.
 
 ```bash
-# Balances + copy-paste cast send examples (no broadcast; no keys printed)
+# Balances + cast send examples (no broadcast/keys). Exit 1 if BATCHER/PROPOSER show NEED
+# (ADMIN/HARVEST floors are advisory; deploy script gates ADMIN itself).
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 
 # After ADMIN shows OK — spends Sepolia ETH; writes deployments/sepolia/ only
