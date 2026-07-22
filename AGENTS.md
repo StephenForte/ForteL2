@@ -28,7 +28,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate) |
 | `deployments/` | Phase 1 checked-in addresses + local `.deployer` artifacts |
 | `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
-| `replica/` | Phase 3 pack output + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (Docker lives there) |
+| `replica/` | Thin Phase 3 bridge: pack staging + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (Docker/runtime lives there) |
 | `config/` | L1 chain config fragments |
 | `bin/` | Symlinks to built OP Stack binaries (gitignored) |
 | `.env.sepolia.example` | Phase 2a Sepolia template (no keys); load via `FORTEL2_ENV=.env.sepolia` |

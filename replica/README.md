@@ -1,21 +1,23 @@
-# Phase 3 replica — moved
+# Phase 3 replica — operator bridge only
 
-The verifier package (Dockerfile, compose, Render Blueprint, baked genesis/rollup) lives in a **separate repo** so friends and Render only clone what they need:
+Runtime (Dockerfile, compose, Render Blueprint, baked genesis/rollup) lives in a **separate repo**:
 
 **https://github.com/StephenForte/fortel2-replica**
+
+This directory is a thin staging area for the Mac operator — not a second node package.
 
 | Audience | What to use |
 |---|---|
 | Friends / Render | Clone `fortel2-replica` — root `Dockerfile`, `docker compose`, no keys |
-| Operator (this repo) | `./scripts/pack-replica-artifacts.sh` then publish `replica/config/{genesis,rollup}.json` into that repo when Sepolia genesis changes |
-| Sync check | `./scripts/replica-sync-check.sh` (still here; needs reachable replica RPC) |
+| Operator (this repo) | `./scripts/pack-replica-artifacts.sh` → publish `replica/config/{genesis,rollup}.json` into fortel2-replica after a Sepolia redeploy |
+| Sync check | `./scripts/replica-sync-check.sh` (needs reachable replica RPC) |
 
 ## Pack (operator)
 
 ```bash
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh
 # → replica/config/genesis.json + rollup.json (gitignored)
-# Copy those into fortel2-replica/config/ and push a release there.
+# Copy those into fortel2-replica/config/ and push.
 ```
 
-Do **not** put `.env.sepolia` or role keys in `fortel2-replica`.
+Do **not** put `.env.sepolia`, role keys, or JWTs here. fortel2-replica generates its own JWT on disk / via `JWT_SECRET`.

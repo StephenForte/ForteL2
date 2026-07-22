@@ -19,10 +19,10 @@ if [[ -z "$GAME_FACTORY" || "$GAME_FACTORY" == "null" ]]; then
   exit 1
 fi
 
-# Credit-budget defaults: proposals every few minutes, slower L1 poll.
+# Credit-budget defaults. Use SEPOLIA_PROPOSER_INTERVAL (default 5m) — do not inherit
+# legacy PROPOSER_INTERVAL=12s from older .env.sepolia templates (Phase 1 Anvil knob).
+PROPOSER_INTERVAL="${SEPOLIA_PROPOSER_INTERVAL:-5m}"
 PROPOSER_POLL="${SEPOLIA_PROPOSER_POLL_INTERVAL:-12s}"
-# PROPOSER_INTERVAL comes from .env.sepolia (example default 5m).
-: "${PROPOSER_INTERVAL:=5m}"
 
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
 wait_for_rpc "$L2_RPC_URL" "L2"
