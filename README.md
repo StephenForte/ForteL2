@@ -508,7 +508,7 @@ Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **85
 
 **Status:** Operator-verified after a fresh Phase 2b cutover (2026-07-22): Mac and Render share matching L2 block hashes (e.g. block 20). Package: [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica). Use **≥2GB** RAM on Render (Starter 512MB OOMs). Prefer **Private Service**; compare tips via Render Shell `geth attach` if you lack a public URL.
 
-**Keep Mac + Render aligned:** the both-sides wipe (Mac `data-sepolia` **and** Render `/data`, after `pack-replica-artifacts` + pushing new genesis/rollup) is **not routine maintenance** — it is triggered **only by a redeploy**. A redeploy produces new L1 contracts, a new genesis, and a new `rollup.json`; the old replica state is then a different chain that can never catch up. With the deployment **pinned through Phase 6**, replica operators (Phase 3b friends) should **not** expect a wipe before Phase 7. The failure mode to avoid is wiping only one side — both nodes would then follow different chains under the same chain ID. See **Network reset procedure** below.
+**Keep Mac + Render aligned:** the both-sides wipe (Mac `data-sepolia` **and** Render `/data`, after `pack-replica-artifacts` + pushing new genesis/rollup) is **not routine maintenance** — it is triggered **only by a redeploy**. A redeploy produces new L1 contracts, a new genesis, and a new `rollup.json`; the old replica state is then a different chain that can never catch up. With the deployment **pinned through Phase 6**, replica operators (Phase 3b friends) should **not** expect a coordinated wipe before Phase 7. The failure mode to avoid is wiping only one side **around a redeploy** — both nodes would then follow different chains under the same chain ID. See **Network reset procedure** below. A single node with a corrupted/stuck datadir can still be reset alone without coordination, as long as the deployment is unchanged: `reset-sepolia.sh` preserves `$DEPLOY_DIR` by default (only `WIPE_SEPOLIA_DEPLOY=1` clears it), so that node resyncs the same genesis/`rollup.json` — it does not fork.
 
 **Batcher funding:** calldata posts burn Sepolia ETH on the batcher address. Keep a buffer (≥ ~0.15 ETH; more if you leave it running). Drip faucets into the **harvest** wallet, then top up batcher/proposer when `sepolia-fund-check.sh` shows NEED — not every day if the buffer is healthy. With the credit-budget batcher defaults (`max-channel-duration=30`), L1 posts are far less frequent than the old `=2` profile — gas spend drops with them.
 
@@ -535,10 +535,12 @@ See [fortel2-replica README](https://github.com/StephenForte/fortel2-replica#rea
 A Sepolia redeploy is an **operational event for every verifier operator**, not a Mac-only action — new L1 contracts mean a new genesis and `rollup.json`, so all nodes must reset together. Not expected before the **Phase 7 gate** while the deployment is pinned. Order:
 
 1. **Announce** the reset to all replica operators (Render + Phase 3b friends) before touching anything.
-2. **Pack + publish**: `FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh`, then push the new genesis/rollup into [fortel2-replica](https://github.com/StephenForte/fortel2-replica).
-3. **All operators wipe**: Mac `data-sepolia` (`reset-sepolia.sh`) and every replica `/data`. All sides, never one.
-4. **All restart** against the new artifacts.
-5. **Cross-check block hashes** (Mac vs each replica, same block number) before declaring the network healthy.
+2. **Stop Mac writers**: `FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh` — the old batcher/proposer/op-node/op-geth must not keep posting against the deployment about to be replaced.
+3. **Redeploy** with the selected Phase 7 immutable overrides: `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 FAULT_GAME_CLOCK_EXTENSION=… FAULT_GAME_MAX_CLOCK_DURATION=… ./scripts/02-deploy-contracts-sepolia.sh`. This is the step that actually produces the new L1 contracts, genesis, and `rollup.json` — `pack-replica-artifacts.sh` only copies whatever is already in `$DEPLOY_DIR`, so packing before redeploying just republishes the old (pinned) artifacts.
+4. **Pack + publish**: `FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh`, then push the new genesis/rollup into [fortel2-replica](https://github.com/StephenForte/fortel2-replica).
+5. **All operators wipe**: Mac `data-sepolia` (`reset-sepolia.sh`) and every replica `/data`. All sides, never one.
+6. **All restart** against the new artifacts (Mac: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh`).
+7. **Cross-check block hashes** (Mac vs each replica, same block number) before declaring the network healthy.
 
 Treat this as deliberate practice for coordinated network upgrades — the same choreography Phases 8–9 (decentralized sequencing, mainnet) will demand with higher stakes.
 
