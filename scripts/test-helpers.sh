@@ -531,6 +531,56 @@ else
   fail=1
 fi
 
+# demo-checklist Sepolia path: --print with fixture env mentions Sepolia (not Anvil five-proc list)
+SEPOLIA_DEMO_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-demo-sepolia-XXXXXX")"
+mkdir -p "$SEPOLIA_DEMO_FIXTURE/deployments/sepolia/.deployer" "$SEPOLIA_DEMO_FIXTURE/data"
+cat > "$SEPOLIA_DEMO_FIXTURE/.env.sepolia" <<EOF
+FORTEL2_ROOT=$SEPOLIA_DEMO_FIXTURE
+DATA_DIR=$SEPOLIA_DEMO_FIXTURE/data
+DEPLOY_DIR=$SEPOLIA_DEMO_FIXTURE/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_BLOCK_TIME=12
+L2_BLOCK_TIME=2
+L1_RPC_URL=https://example.ethereum-sepolia.quiknode.pro/token/
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+BATCHER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+PROPOSER_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+HARVEST_ADDRESS=0x5128889F20Ec13e0Be38b2BeBC568594159B652d
+ADMIN_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+SEQUENCER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+CHALLENGER_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+EOF
+SEPOLIA_PRINT="$(
+  FORTEL2_ROOT="$SEPOLIA_DEMO_FIXTURE" FORTEL2_ENV=.env.sepolia \
+    "$SCRIPT_DIR/demo-checklist.sh" --print 2>/dev/null || true
+)"
+rm -rf "$SEPOLIA_DEMO_FIXTURE"
+if echo "$SEPOLIA_PRINT" | grep -q 'Sepolia (L2 852' \
+  && echo "$SEPOLIA_PRINT" | grep -q 'no Anvil' \
+  && echo "$SEPOLIA_PRINT" | grep -q 'demo-live.sh --sepolia'; then
+  echo "PASS demo-checklist --print Sepolia mode"
+else
+  echo "FAIL demo-checklist Sepolia --print content" >&2
+  fail=1
+fi
+
+if grep -q 'assert_sepolia_rpc_urls' "$SCRIPT_DIR/demo-checklist.sh" \
+  && grep -q 'IS_SEPOLIA' "$SCRIPT_DIR/demo-checklist.sh"; then
+  echo "PASS demo-checklist has Sepolia assert path"
+else
+  echo "FAIL demo-checklist missing Sepolia assert wiring" >&2
+  fail=1
+fi
+
+if "$SCRIPT_DIR/demo-live.sh" --help >/dev/null 2>&1; then
+  echo "PASS demo-live.sh --help"
+else
+  echo "FAIL demo-live.sh --help" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

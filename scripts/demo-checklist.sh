@@ -1,33 +1,52 @@
 #!/usr/bin/env bash
-# Operator demo / verification checklist through Phase 1c.
-# Runs automated smoke checks, then prints a human checklist for browser/MetaMask steps.
+# Operator demo / verification checklist (Phase 1 local or Phase 2 Sepolia).
+# Runs automated smoke checks, then prints a human checklist for browser steps.
 #
 # Usage:
-#   ./scripts/demo-checklist.sh           # auto checks + print full checklist
-#   ./scripts/demo-checklist.sh --auto    # automated checks only
-#   ./scripts/demo-checklist.sh --print   # checklist only (no RPC calls)
+#   ./scripts/demo-checklist.sh              # Phase 1 (default .env) — auto + checklist
+#   ./scripts/demo-checklist.sh --auto
+#   ./scripts/demo-checklist.sh --print
+#   FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh
+#   ./scripts/demo-checklist.sh --sepolia     # forces FORTEL2_ENV=.env.sepolia if unset
+#   ./scripts/demo-checklist.sh --sepolia --auto
 #
-# Prerequisites: stack running (./scripts/start-all.sh). Bridge/guestbook steps
-# are optional and marked in the printed checklist.
+# Prerequisites: stack running (start-all.sh or start-all-sepolia.sh).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+MODE="all"
+FORCE_SEPOLIA=0
+for arg in "$@"; do
+  case "$arg" in
+    --auto) MODE="auto" ;;
+    --print) MODE="print" ;;
+    --sepolia) FORCE_SEPOLIA=1 ;;
+    -h|--help)
+      awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} /^set -euo/{exit}' "$0"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg (try --auto, --print, --sepolia, or --help)" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if (( FORCE_SEPOLIA )) && [[ -z "${FORTEL2_ENV:-}" ]]; then
+  export FORTEL2_ENV=.env.sepolia
+fi
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
-MODE="all"
-case "${1:-}" in
-  --auto) MODE="auto" ;;
-  --print) MODE="print" ;;
-  -h|--help)
-    sed -n '2,14p' "$0" | sed 's/^# \?//'
-    exit 0
-    ;;
-  "") ;;
-  *)
-    echo "Unknown option: $1 (try --auto, --print, or --help)" >&2
-    exit 1
-    ;;
-esac
+if (( FORCE_SEPOLIA )); then
+  require_sepolia_env
+fi
+
+IS_SEPOLIA=0
+if [[ "${L2_CHAIN_ID:-}" == "852" ]]; then
+  IS_SEPOLIA=1
+fi
 
 fail=0
 pass() { echo "  PASS  $1"; }
@@ -35,7 +54,7 @@ fail_item() { echo "  FAIL  $1" >&2; fail=1; }
 skip() { echo "  SKIP  $1"; }
 info() { echo "  ·     $1"; }
 
-print_checklist() {
+print_checklist_local() {
   cat <<'EOF'
 
 ══════════════════════════════════════════════════════════════════
@@ -81,6 +100,7 @@ print_checklist() {
 
 ── F. Pipeline viewer (Phase 1c / 1d) ─────────────────────────────
   [ ] ./scripts/serve-viewer.sh → http://127.0.0.1:8081
+  [ ] Or: ./scripts/demo-live.sh --local  (health + talk track + open URLs)
   [ ] Page title / brand: “ForteL2” + “Pipeline viewer” (not “explorer”)
   [ ] Status line shows live polling; refresh cadence visible (~5s)
   [ ] Sequencer panel: unsafe / safe / finalized (or ages) update
@@ -97,7 +117,6 @@ print_checklist() {
   [ ] [auto] node --test viewer/lib.test.js dapp/lib.test.js passes
   [ ] RPCs and HTTP servers stay on 127.0.0.1 / localhost only
   [ ] README “Pipeline viewer” + “Phase 2 funding gate” match what you see
-  [ ] Sepolia harvest progressing toward ~1.0 ETH (Base Sepolia does not count)
   [ ] Hosted/Blockscout explorers still out of scope (by design)
 
 ── Suggested full demo order ─────────────────────────────────────
@@ -105,31 +124,114 @@ print_checklist() {
   2. ./scripts/demo-checklist.sh --auto
   3. ./scripts/smoke-transfer.sh
   4. ./scripts/deploy-guestbook.sh   # if guestbook.txt empty / first time
-  5. ./scripts/serve-dapp.sh         # terminal A — guestbook :8080
-  6. ./scripts/serve-viewer.sh       # terminal B — viewer :8081
-  7. MetaMask guestbook sign
-  8. ./scripts/deposit-eth.sh
-  9. Watch viewer Sequencer + Aggregate update
- 10. ./scripts/withdraw-initiate.sh && ./scripts/withdraw-prove.sh && ./scripts/withdraw-finalize.sh
- 11. Confirm Proposer panel game count / last age; narrate prove path
- 12. Ctrl-C servers; ./scripts/stop-all.sh when done
+  5. ./scripts/demo-live.sh --local  # or serve-dapp + serve-viewer in two terminals
+  6. MetaMask guestbook sign
+  7. ./scripts/deposit-eth.sh
+  8. Watch viewer Sequencer + Aggregate update
+  9. ./scripts/withdraw-initiate.sh && ./scripts/withdraw-prove.sh && ./scripts/withdraw-finalize.sh
+ 10. Confirm Proposer panel game count / last age; narrate prove path
+ 11. Ctrl-C demo-live / servers; ./scripts/stop-all.sh when done
 
 ══════════════════════════════════════════════════════════════════
 EOF
 }
 
+print_checklist_sepolia() {
+  cat <<'EOF'
+
+══════════════════════════════════════════════════════════════════
+  ForteL2 demo checklist — Sepolia (L2 852 / L1 11155111)
+  Check each box as you verify. Automated smokes are marked [auto].
+══════════════════════════════════════════════════════════════════
+
+── A. Stack health (Phase 2c) ────────────────────────────────────
+  [ ] [auto] Processes: op-geth, op-node, op-batcher, op-proposer (no Anvil)
+  [ ] [auto] L1 RPC reachable (Sepolia 11155111) — QuickNode or equivalent
+  [ ] [auto] L2 RPC reachable on loopback (chain 852), block number increasing
+  [ ] [auto] op-node optimism_syncStatus returns unsafe + safe heads
+  [ ] Logs under data-sepolia look healthy; close viewer when idle (API credits)
+
+── B. Funding + L2 activity ──────────────────────────────────────
+  [ ] [auto] ./scripts/sepolia-fund-check.sh — BATCHER/PROPOSER ≥ floors
+  [ ] Foundry default keys refused on 852 — do not run smoke-transfer.sh with them
+  [ ] Optional: funded DEMO_A/B transfer via cast with your Sepolia role keys
+  [ ] cast block latest on L2 shows recent activity
+
+── C. Batcher + proposer on Sepolia L1 ───────────────────────────
+  [ ] [auto] Batcher L1 nonce > 0 (or rising) — batches posting
+  [ ] [auto] DisputeGameFactory gameCount() (may be 0 early — wait for proposer)
+  [ ] Optional: watch Batcher/Proposer panels on viewer (15s refresh)
+
+── D. Guestbook dApp ─────────────────────────────────────────────
+  [ ] Guestbook is a Phase 1 local demo — usually SKIP on Sepolia
+  [ ] If you deployed Guestbook on 852: serve-dapp + MetaMask chain 852 / :9545
+  [ ] Else use pipeline viewer + cast for the live demo surface
+
+── E. Bridging (Sepolia) ─────────────────────────────────────────
+  [ ] FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
+  [ ] Deposit narrative: L1 inclusion → L2 derivation (cannot be censored by sequencer)
+  [ ] Withdraw prove/finalize: real Sepolia finality (no Anvil time-warp) — long waits
+  [ ] Do not reset-sepolia without full cutover (redeploy + pack + wipe both datadirs)
+
+── F. Pipeline viewer ────────────────────────────────────────────
+  [ ] FORTEL2_ENV=.env.sepolia ./scripts/serve-viewer.sh → http://127.0.0.1:8081
+  [ ] Or: FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
+  [ ] Lede shows Sepolia mode; refresh ~15s
+  [ ] Sequencer + Aggregate (loopback L2); Batcher + Proposer (L1 HTTPS)
+  [ ] Close the viewer tab when not demoing (QuickNode credit budget)
+  [ ] Kill serve-viewer (Ctrl-C) — chain keeps running
+
+── G. Guardrails / replica ───────────────────────────────────────
+  [ ] [auto] ./scripts/test-helpers.sh passes
+  [ ] [auto] node --test viewer/lib.test.js dapp/lib.test.js passes
+  [ ] L2 / dApp / viewer stay on loopback; L1 may be remote HTTPS
+  [ ] Optional: fortel2-replica sync check when a verifier is up
+
+── Suggested Sepolia demo order ──────────────────────────────────
+  1. FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
+  2. FORTEL2_ENV=.env.sepolia ./scripts/status.sh
+  3. FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh --auto
+  4. FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
+  5. FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
+  6. Narrate Sequencer → Batcher → Proposer on the viewer
+  7. Optional: deposit-eth-sepolia.sh; watch Sequencer / Aggregate
+  8. Ctrl-C demo-live; FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh when done
+
+══════════════════════════════════════════════════════════════════
+EOF
+}
+
+print_checklist() {
+  if (( IS_SEPOLIA )); then
+    print_checklist_sepolia
+  else
+    print_checklist_local
+  fi
+}
+
 run_auto() {
   echo
-  echo "=== Automated checks ==="
-  require_bin cast
-  require_bin jq
-  assert_local_rpc_urls
+  if (( IS_SEPOLIA )); then
+    echo "=== Automated checks (Sepolia L2=${L2_CHAIN_ID}) ==="
+    require_bin cast
+    require_bin jq
+    assert_sepolia_rpc_urls
+  else
+    echo "=== Automated checks (local L2=${L2_CHAIN_ID:-901}) ==="
+    require_bin cast
+    require_bin jq
+    assert_local_rpc_urls
+  fi
 
   echo
   echo "-- Processes --"
   local name
   local any_proc_missing=0
-  for name in anvil op-geth op-node op-batcher op-proposer; do
+  local procs=(op-geth op-node op-batcher op-proposer)
+  if (( ! IS_SEPOLIA )); then
+    procs=(anvil "${procs[@]}")
+  fi
+  for name in "${procs[@]}"; do
     if is_running "$name"; then
       pass "$name running (pid $(cat "$PID_DIR/$name.pid"))"
     else
@@ -138,7 +240,7 @@ run_auto() {
     fi
   done
   if (( any_proc_missing )); then
-    info "If RPCs below pass, stack is fine — pidfiles only matter for stop-all.sh"
+    info "If RPCs below pass, stack is fine — pidfiles only matter for stop scripts"
   fi
 
   echo
@@ -154,10 +256,10 @@ run_auto() {
     elif [[ -n "$l1_chain" ]]; then
       fail_item "L1 chain-id=$l1_chain expected ${L1_CHAIN_ID}"
     else
-      fail_item "L1 chain-id unread at $L1_RPC_URL"
+      fail_item "L1 chain-id unread at $(redact_rpc_url "$L1_RPC_URL")"
     fi
   else
-    fail_item "L1 RPC unreachable at $L1_RPC_URL"
+    fail_item "L1 RPC unreachable at $(redact_rpc_url "$L1_RPC_URL")"
   fi
 
   if l2_block=$(cast block-number --rpc-url "$L2_RPC_URL" 2>/dev/null); then
@@ -189,6 +291,16 @@ run_auto() {
     fail_item "optimism_syncStatus failed at ${L2_NODE_RPC_URL:-unset}"
   fi
 
+  if (( IS_SEPOLIA )); then
+    echo
+    echo "-- Sepolia fund check --"
+    if "$SCRIPT_DIR/sepolia-fund-check.sh"; then
+      pass "sepolia-fund-check.sh completed"
+    else
+      skip "sepolia-fund-check.sh reported NEED / errors — top up from harvest before long demos"
+    fi
+  fi
+
   echo
   echo "-- Batcher / proposer on L1 --"
   if [[ -n "${BATCHER_ADDRESS:-}" ]] && is_eth_address "$BATCHER_ADDRESS"; then
@@ -207,13 +319,13 @@ run_auto() {
     skip "BATCHER_ADDRESS unset"
   fi
 
-  local factory
-  factory=$(jq -r '.DisputeGameFactoryProxy // empty' "$FORTEL2_ROOT/deployments/deployments.json" 2>/dev/null || true)
+  local factory deployments
+  deployments="$(deployments_json_path)"
+  factory=$(jq -r '.DisputeGameFactoryProxy // empty' "$deployments" 2>/dev/null || true)
   if is_eth_address "${factory:-}"; then
     local games
     games=$(cast call "$factory" "gameCount()(uint256)" --rpc-url "$L1_RPC_URL" 2>/dev/null || echo "")
     if [[ -n "$games" ]]; then
-      # cast may return hex or decimal depending on version/flags
       local games_dec
       games_dec=$(python3 -c "import sys; v=sys.argv[1].strip(); print(int(v,0) if v else 0)" "$games" 2>/dev/null || echo "0")
       if (( games_dec >= 1 )); then
@@ -225,25 +337,29 @@ run_auto() {
       fail_item "gameCount() call failed on $factory"
     fi
   else
-    fail_item "DisputeGameFactoryProxy missing in deployments/deployments.json"
+    fail_item "DisputeGameFactoryProxy missing in $deployments"
   fi
 
   echo
   echo "-- Guestbook deploy artifact --"
-  local gb=""
-  if [[ -f "$FORTEL2_ROOT/deployments/guestbook.txt" ]]; then
-    gb=$(tr -d '[:space:]' < "$FORTEL2_ROOT/deployments/guestbook.txt")
-  fi
-  if is_eth_address "$gb"; then
-    local count
-    count=$(cast call "$gb" "count()(uint256)" --rpc-url "$L2_RPC_URL" 2>/dev/null || echo "")
-    if [[ -n "$count" ]]; then
-      pass "Guestbook $gb count=$count"
-    else
-      fail_item "Guestbook at $gb not readable on L2 — redeploy?"
-    fi
+  if (( IS_SEPOLIA )); then
+    skip "Guestbook is Phase 1 local demo UI — optional on Sepolia"
   else
-    skip "Guestbook not deployed — ./scripts/deploy-guestbook.sh"
+    local gb=""
+    if [[ -f "$FORTEL2_ROOT/deployments/guestbook.txt" ]]; then
+      gb=$(tr -d '[:space:]' < "$FORTEL2_ROOT/deployments/guestbook.txt")
+    fi
+    if is_eth_address "$gb"; then
+      local count
+      count=$(cast call "$gb" "count()(uint256)" --rpc-url "$L2_RPC_URL" 2>/dev/null || echo "")
+      if [[ -n "$count" ]]; then
+        pass "Guestbook $gb count=$count"
+      else
+        fail_item "Guestbook at $gb not readable on L2 — redeploy?"
+      fi
+    else
+      skip "Guestbook not deployed — ./scripts/deploy-guestbook.sh"
+    fi
   fi
 
   echo
@@ -253,7 +369,7 @@ run_auto() {
     && grep -q 'DISPUTE_GAME_FACTORY = "0x' "$FORTEL2_ROOT/viewer/config.js"; then
     pass "viewer/config.js has inbox + factory addresses"
   else
-    skip "viewer/config.js incomplete — ./scripts/gen-viewer-config.sh"
+    skip "viewer/config.js incomplete — ./scripts/gen-viewer-config.sh (or demo-live / serve-viewer)"
   fi
 
   echo
@@ -283,12 +399,21 @@ run_auto() {
   echo
   if (( fail )); then
     echo "Automated checks: FAILED (fix stack items above, then re-run)"
-    echo "Tip: ./scripts/status.sh && ./scripts/start-all.sh"
+    if (( IS_SEPOLIA )); then
+      echo "Tip: FORTEL2_ENV=.env.sepolia ./scripts/status.sh && ./scripts/start-all-sepolia.sh"
+    else
+      echo "Tip: ./scripts/status.sh && ./scripts/start-all.sh"
+    fi
     return 1
   fi
   echo "Automated checks: all critical items passed (SKIPs are optional waits)."
-  info "Next: print checklist with ./scripts/demo-checklist.sh --print"
-  info "Or walk the Suggested full demo order in the checklist below."
+  if (( IS_SEPOLIA )); then
+    info "Next: FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh --print"
+    info "Or: FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia"
+  else
+    info "Next: print checklist with ./scripts/demo-checklist.sh --print"
+    info "Or: ./scripts/demo-live.sh --local"
+  fi
   return 0
 }
 

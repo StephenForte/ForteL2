@@ -144,6 +144,9 @@ chmod +x scripts/*.sh
 ./scripts/serve-dapp.sh       # http://127.0.0.1:8080
 ./scripts/serve-viewer.sh     # http://127.0.0.1:8081 pipeline viewer (Phase 1c)
 ./scripts/demo-checklist.sh   # operator demo: auto smokes + human checklist
+FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh   # Sepolia twin (or --sepolia)
+./scripts/demo-live.sh --local   # health + talk track + guestbook/viewer URLs
+FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
 ```
 
 ### Tests / merge guardrails
@@ -340,9 +343,12 @@ Ops dashboard for the sequencer → batcher → proposer path. Client-side polls
 ```bash
 # Phase 1 (local Anvil L1 + L2 901)
 ./scripts/serve-viewer.sh   # regenerates viewer/config.js + .csp-header, then http://127.0.0.1:8081/
+./scripts/demo-live.sh --local   # health checks + talk track + open guestbook/viewer
 
 # Phase 2 Sepolia (remote L1 + local L2 852) — stack must already be up via start-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/serve-viewer.sh
+FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
+FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh   # or --sepolia
 ```
 
 Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from the active env + `deployments.json` + `rollup.json`. `viewer/config.js` and `viewer/.csp-header` are **gitignored** (Sepolia `config.js` embeds your L1 RPC URL). Use `./scripts/serve-viewer.sh` so the CSP header allows the L1 origin without committing it into `index.html`.
