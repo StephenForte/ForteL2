@@ -333,16 +333,19 @@ cast balance 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc --rpc-url http://127.0.0
 
 Blockscout / other containerized explorers, and hosted SaaS explorers (e.g. Ethernal), are **explicitly deferred** on this host until the Phase 1b non-loopback policy review allows a reachable RPC (or a container-capable host is used). Phase 1c’s **pipeline viewer** is the intentional learning UI — not a full explorer.
 
-## Pipeline viewer (Phase 1c / 1d)
+## Pipeline viewer (Phase 1c / 1d / Sepolia)
 
 Ops dashboard for the sequencer → batcher → proposer path. Client-side polls only (no indexer).
 
 ```bash
-./scripts/serve-viewer.sh   # regenerates viewer/config.js, then http://127.0.0.1:8081/
-# or: ./scripts/gen-viewer-config.sh && open the viewer after deploy
+# Phase 1 (local Anvil L1 + L2 901)
+./scripts/serve-viewer.sh   # regenerates viewer/config.js + .csp-header, then http://127.0.0.1:8081/
+
+# Phase 2 Sepolia (remote L1 + local L2 852) — stack must already be up via start-all-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/serve-viewer.sh
 ```
 
-Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from `.env` + `deployments/deployments.json` + `deployments/.deployer/rollup.json`.
+Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from the active env + `deployments.json` + `rollup.json`. `viewer/config.js` and `viewer/.csp-header` are **gitignored** (Sepolia `config.js` embeds your L1 RPC URL). Use `./scripts/serve-viewer.sh` so the CSP header allows the L1 origin without committing it into `index.html`.
 
 | Panel | RPCs | What it shows |
 |---|---|---|

@@ -81,6 +81,23 @@ print(f"{p.scheme}://{netloc}{path}")
 PY
 }
 
+# scheme://host[:port] for CSP connect-src (never includes path tokens).
+rpc_origin() {
+  python3 - <<'PY' "${1:-}"
+import sys, urllib.parse
+u = sys.argv[1]
+if not u:
+    raise SystemExit("empty URL")
+p = urllib.parse.urlparse(u)
+if p.scheme not in ("http", "https") or not p.hostname:
+    raise SystemExit(f"not an http(s) URL: {u!r}")
+netloc = p.hostname
+if p.port:
+    netloc = f"{netloc}:{p.port}"
+print(f"{p.scheme}://{netloc}")
+PY
+}
+
 wait_for_rpc() {
   local url="$1"
   local label="${2:-RPC}"
@@ -419,11 +436,14 @@ require_http_port() {
 }
 
 # Serve a static directory on loopback only (guestbook / pipeline viewer).
+# Optional 4th arg: path to a file whose contents are sent as Content-Security-Policy
+# (used by the pipeline viewer so Sepolia L1 HTTPS origins need not patch index.html).
 # Not privileged process control — does not use start_bg / stop_bg.
 serve_static_loopback() {
   local dir="$1"
   local port="$2"
   local label="${3:-static HTTP}"
+  local csp_file="${4:-}"
   if [[ -z "$dir" || ! -d "$dir" ]]; then
     echo "ERROR: $label directory missing: ${dir:-<empty>}" >&2
     exit 1
@@ -432,5 +452,29 @@ serve_static_loopback() {
   assert_loopback_url "http://127.0.0.1:${port}" "$label"
   echo "Serving $label at http://127.0.0.1:${port}/ (loopback only)"
   cd "$dir"
+  if [[ -n "$csp_file" ]]; then
+    if [[ ! -f "$csp_file" ]]; then
+      echo "ERROR: CSP file missing: $csp_file" >&2
+      exit 1
+    fi
+    exec python3 - "$port" "$csp_file" <<'PY'
+import http.server, pathlib, sys
+
+port = int(sys.argv[1])
+csp = pathlib.Path(sys.argv[2]).read_text().strip()
+if not csp:
+    raise SystemExit("empty CSP file")
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header("Content-Security-Policy", csp)
+        super().end_headers()
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+
+http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+PY
+  fi
   exec python3 -m http.server "${port}" --bind 127.0.0.1
 }

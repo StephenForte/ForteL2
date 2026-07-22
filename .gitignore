@@ -14,6 +14,8 @@ replica/jwt.txt
 .fortel2-replica-git/
 fortel2-replica/
 .replica-stage-tarball/
+viewer/config.js
+viewer/.csp-header
 *.log
 contracts/out/
 contracts/cache/

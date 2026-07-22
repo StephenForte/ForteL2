@@ -115,10 +115,16 @@ else
   echo "FAIL redact_rpc_url got: $REDACTED" >&2
   fail=1
 fi
-if [[ "$(redact_rpc_url "http://127.0.0.1:8545")" == "http://127.0.0.1:8545" ]]; then
-  echo "PASS redact_rpc_url keeps loopback host:port"
+if [[ "$(rpc_origin "https://example.quiknode.pro/secrettoken123/")" == "https://example.quiknode.pro" ]]; then
+  echo "PASS rpc_origin strips path token"
 else
-  echo "FAIL redact_rpc_url should keep loopback URL" >&2
+  echo "FAIL rpc_origin should return scheme://host only" >&2
+  fail=1
+fi
+if [[ "$(rpc_origin "http://127.0.0.1:8545")" == "http://127.0.0.1:8545" ]]; then
+  echo "PASS rpc_origin keeps loopback host:port"
+else
+  echo "FAIL rpc_origin should keep loopback URL" >&2
   fail=1
 fi
 # wait_for_rpc must log the redacted form even on timeout (Phase 2d).
@@ -244,6 +250,42 @@ if FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null; then
   fi
 else
   echo "FAIL gen-viewer-config fixture run" >&2
+  fail=1
+fi
+
+# Sepolia: remote L1 allowed; CSP header must include L1 origin (no path token)
+mkdir -p "$SEPOLIA_FIXTURE/viewer" "$SEPOLIA_FIXTURE/deployments/sepolia/.deployer" "$SEPOLIA_FIXTURE/data"
+cat > "$SEPOLIA_FIXTURE/.env.sepolia" <<EOF
+FORTEL2_ROOT=$SEPOLIA_FIXTURE
+DATA_DIR=$SEPOLIA_FIXTURE/data
+DEPLOY_DIR=$SEPOLIA_FIXTURE/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_BLOCK_TIME=12
+L2_BLOCK_TIME=2
+L1_RPC_URL=https://example.ethereum-sepolia.quiknode.pro/secrettoken1234567890/
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+BATCHER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+PROPOSER_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+HARVEST_ADDRESS=0x5128889F20Ec13e0Be38b2BeBC568594159B652d
+EOF
+echo '{"DisputeGameFactoryProxy":"0xb3cc73ce8efac81f5c1ee1943b9f1ffeed98c4d2"}' \
+  > "$SEPOLIA_FIXTURE/deployments/sepolia/deployments.json"
+echo '{"batch_inbox_address":"0x00289c189bee4e70334629f04cd5ed602b6600eb"}' \
+  > "$SEPOLIA_FIXTURE/deployments/sepolia/.deployer/rollup.json"
+if FORTEL2_ROOT="$SEPOLIA_FIXTURE" FORTEL2_ENV=.env.sepolia \
+  "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null; then
+  if grep -q 'L2_CHAIN_ID = 852' "$SEPOLIA_FIXTURE/viewer/config.js" \
+    && grep -q 'https://example.ethereum-sepolia.quiknode.pro' "$SEPOLIA_FIXTURE/viewer/.csp-header" \
+    && ! grep -q 'secrettoken' "$SEPOLIA_FIXTURE/viewer/.csp-header"; then
+    echo "PASS gen-viewer-config Sepolia remote L1 + CSP origin"
+  else
+    echo "FAIL gen-viewer-config Sepolia CSP / chain exports" >&2
+    fail=1
+  fi
+else
+  echo "FAIL gen-viewer-config Sepolia run" >&2
   fail=1
 fi
 

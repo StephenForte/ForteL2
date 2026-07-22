@@ -1,9 +1,11 @@
 /**
- * ForteL2 pipeline viewer — Phase 1c/1d ops UI (chain 901).
+ * ForteL2 pipeline viewer — Phase 1c/1d ops UI (chain 901 local or 852 Sepolia).
  * Client-side RPC polls only; ethers vendored under ./vendor/.
  */
 import { Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.5.min.js";
 import {
+  L1_CHAIN_ID,
+  L2_CHAIN_ID,
   L1_RPC_URL,
   L2_RPC_URL,
   L2_NODE_RPC_URL,
@@ -279,6 +281,22 @@ async function tick() {
   }
 }
 
+function applyModeCopy() {
+  const lede = document.getElementById("lede");
+  if (!lede) return;
+  if (Number(L2_CHAIN_ID) === 852) {
+    lede.textContent =
+      `Sepolia mode (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer heads on loopback, ` +
+      "batcher posts and proposer games on Ethereum Sepolia, L2 tx throughput and mempool. " +
+      "Not a block explorer.";
+  } else {
+    lede.textContent =
+      `Local Anvil mode (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer heads, batcher posts to L1, ` +
+      "proposer dispute games, L2 tx throughput, and mempool pending. Not a block explorer.";
+  }
+}
+
+applyModeCopy();
 tick();
 pollTimer = setInterval(tick, refreshMs);
 
