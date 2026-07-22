@@ -17,18 +17,22 @@ import {
 } from "./config.js";
 import {
   aggregateTxWindow,
+  applyBatcherScanSuccess,
   filterBatchTxs,
   formatAge,
   formatRate,
+  nextBatcherScanRange,
   scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
   summarizeSyncStatus,
   summarizeTxpoolStatus,
+  viewerL1ScanBlocks,
+  viewerRefreshMs,
 } from "./lib.js";
 
-const L1_SCAN_BLOCKS = 40;
-const L2_WINDOW_BLOCKS = 30;
+const L1_SCAN_BLOCKS = viewerL1ScanBlocks(L2_CHAIN_ID);
+const L2_WINDOW_BLOCKS = Number(L2_CHAIN_ID) === 852 ? 15 : 30;
 
 const els = {
   status: document.getElementById("status"),
@@ -63,9 +67,19 @@ const els = {
   panelAggregate: document.getElementById("panel-aggregate"),
 };
 
-const refreshMs = Number(REFRESH_MS) > 0 ? Number(REFRESH_MS) : 5000;
+const refreshMs = viewerRefreshMs(L2_CHAIN_ID, REFRESH_MS);
 let pollTimer = null;
 let inFlight = false;
+let l1Provider = null;
+let l2Provider = null;
+/** @type {{ tip: number|null, txs: Array<{hash?: string, from?: string, to?: string, blockNumber?: number, blockTimestamp?: number}> }} */
+const batcherCache = { tip: null, txs: [] };
+
+function getProviders() {
+  if (!l1Provider) l1Provider = new JsonRpcProvider(L1_RPC_URL);
+  if (!l2Provider) l2Provider = new JsonRpcProvider(L2_RPC_URL);
+  return { l1: l1Provider, l2: l2Provider };
+}
 
 function setStatus(msg, isError = false) {
   els.status.textContent = msg;
@@ -148,27 +162,47 @@ async function refreshSequencer(l2, nodeUrl) {
 
 async function refreshBatcher(l1) {
   const tip = await l1.getBlockNumber();
-  const from = scanFromBlock(tip, L1_SCAN_BLOCKS);
-  const blockNums = [];
-  for (let n = from; n <= tip; n++) blockNums.push(n);
-  // Parallel fetch — local Anvil handles a short window; avoids ~40 serial round-trips.
-  const blocks = await Promise.all(blockNums.map((n) => l1.getBlock(n, true)));
-  const collected = [];
-  for (const block of blocks) {
-    if (!block) continue;
-    const txs = (block.prefetchedTransactions || block.transactions || []).map((tx) => {
-      if (typeof tx === "string") return null;
-      return {
-        hash: tx.hash,
-        from: tx.from,
-        to: tx.to,
-        blockNumber: Number(block.number),
-        blockTimestamp: Number(block.timestamp),
-      };
-    }).filter(Boolean);
-    collected.push(...filterBatchTxs(txs, BATCHER_ADDRESS, BATCH_INBOX_ADDRESS));
+  const range = nextBatcherScanRange(batcherCache.tip, tip, L1_SCAN_BLOCKS);
+
+  if (!range.skip) {
+    const blockNums = [];
+    for (let n = range.from; n <= range.tip; n++) blockNums.push(n);
+    // Fetch before mutating cache. Clearing txs on reset before I/O would leave
+    // tip unchanged on failure → next poll skip:true with an empty panel.
+    const blocks = await Promise.all(blockNums.map((n) => l1.getBlock(n, true)));
+    const present = blocks.filter(Boolean);
+    if (blockNums.length > 0 && present.length === 0) {
+      throw new Error(
+        `L1 getBlock returned no blocks for ${range.from}..${range.tip}`,
+      );
+    }
+    const collected = [];
+    for (const block of present) {
+      const txs = (block.prefetchedTransactions || block.transactions || [])
+        .map((tx) => {
+          if (typeof tx === "string") return null;
+          return {
+            hash: tx.hash,
+            from: tx.from,
+            to: tx.to,
+            blockNumber: Number(block.number),
+            blockTimestamp: Number(block.timestamp),
+          };
+        })
+        .filter(Boolean);
+      collected.push(...filterBatchTxs(txs, BATCHER_ADDRESS, BATCH_INBOX_ADDRESS));
+    }
+    const next = applyBatcherScanSuccess(
+      batcherCache,
+      range,
+      collected,
+      L1_SCAN_BLOCKS,
+    );
+    batcherCache.tip = next.tip;
+    batcherCache.txs = next.txs;
   }
-  const summary = summarizeBatcherActivity(collected);
+
+  const summary = summarizeBatcherActivity(batcherCache.txs);
   els.batCount.textContent = `${summary.count} in last ${L1_SCAN_BLOCKS} L1 blocks`;
   els.batHash.textContent = summary.lastHash ? shortHex(summary.lastHash, 8, 6) : "none yet";
   els.batAge.textContent = summary.lastAge;
@@ -232,8 +266,7 @@ async function tick() {
   const started = Date.now();
   try {
     assertViewerConfig();
-    const l1 = new JsonRpcProvider(L1_RPC_URL);
-    const l2 = new JsonRpcProvider(L2_RPC_URL);
+    const { l1, l2 } = getProviders();
 
     const results = await Promise.allSettled([
       refreshSequencer(l2, L2_NODE_RPC_URL).then(() =>

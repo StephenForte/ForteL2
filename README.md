@@ -356,7 +356,7 @@ Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from t
 
 **Mempool vs heads:** Sequencer unsafe/safe is what already landed (or is safe via L1). Aggregate mempool is txs still waiting in op-geth — useful right after MetaMask submit, before the next L2 block. Not a full mempool dump or tx search.
 
-Refresh cadence defaults to **5s** (shown in the UI). Panel RPC failures surface as plain status text — panels do not silently go stale. After a deposit, watch L2 inclusion and sync heads; after a withdrawal initiate, you need proposer output before prove/finalize.
+Refresh cadence defaults to **5s** locally and **15s** on Sepolia (override with `VIEWER_REFRESH_MS`). Sepolia mode also uses a 12-block incremental L1 scan so Batcher/Proposer do not re-fetch dozens of full blocks every tick. Panel RPC failures surface as plain status text — panels do not silently go stale.
 
 Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer (Blockchair-style UIs stay deferred).
 

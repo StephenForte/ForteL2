@@ -277,6 +277,7 @@ echo '{"batch_inbox_address":"0x00289c189bee4e70334629f04cd5ed602b6600eb"}' \
 if FORTEL2_ROOT="$SEPOLIA_FIXTURE" FORTEL2_ENV=.env.sepolia \
   "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null; then
   if grep -q 'L2_CHAIN_ID = 852' "$SEPOLIA_FIXTURE/viewer/config.js" \
+    && grep -q 'REFRESH_MS = 15000' "$SEPOLIA_FIXTURE/viewer/config.js" \
     && grep -q 'https://example.ethereum-sepolia.quiknode.pro' "$SEPOLIA_FIXTURE/viewer/.csp-header" \
     && ! grep -q 'secrettoken' "$SEPOLIA_FIXTURE/viewer/.csp-header"; then
     echo "PASS gen-viewer-config Sepolia remote L1 + CSP origin"
