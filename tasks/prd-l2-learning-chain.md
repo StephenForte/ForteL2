@@ -33,22 +33,24 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **1c** | **Pipeline viewer**: loopback-only static UI showing sequencer / batcher / proposer / aggregate tx activity (not a full block explorer); hosted explorers remain deferred until non-loopback | **Done** — `viewer/` + `serve-viewer.sh` (US-013 / US-014); operator-verified on live stack |
 | **1d** | **Viewer polish + Phase 2 funding gate**: L2 mempool signal on the pipeline viewer; Sepolia ETH harvest checklist + fresh keys (never Foundry defaults / never project-exposed keys); Blockchair-style block/tx explorer UI stays deferred | **Done** — Aggregate mempool + README US-016 faucet/key gate |
 | **2a** | **Sepolia scaffold**: `.env.sepolia` tree, `deployments/sepolia/`, `FORTEL2_ENV` loader, split L1/L2 RPC asserts, agent-permission checklist; L2 chain ID **852**; public L1 RPC placeholders; **no on-chain spend** | **Done** — scaffold + docs |
-| **2b** | Disposable `op-deployer apply` on Ethereum Sepolia + genesis/rollup under `deployments/sepolia/`; fund role addresses from harvest wallet | **Done** — L1 contracts on Sepolia; artifacts under `deployments/sepolia/` |
+| **2b** | Disposable `op-deployer apply` on Ethereum Sepolia + genesis/rollup under `deployments/sepolia/`; fund role addresses from harvest wallet | **Done** — L1 contracts on Sepolia; artifacts under `deployments/sepolia/`; 2026-07-22 deploy **pinned through Phase 6** (redeploy = Phase 7 gate) |
 | **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | **Done** — operator dry-run: L2 tip advances, batcher L1 tx, deposit 0.01 ETH |
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap only; no redeploy). Render stays Phase 3 (L2 replica, not L1) | **Done** — runbook + `sepolia-rpc-check.sh` |
 | **3** | Deploy a **replica node on Render** — stock `op-geth` + `op-node` verifier deriving from Sepolia L1 (safe/finalized path). Sequencer peering / tunnel optional stretch. Containers OK **on Render only** | **Done** — [fortel2-replica](https://github.com/StephenForte/fortel2-replica); operator-verified matching block hashes after fresh 2b cutover |
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
-| **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) | Future |
-| **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) | Future |
-| **6** | **Reimplement the derivation pipeline / minimal sequencer** (read batches from L1, derive L2 blocks; deepest rebuild — **separate detailed PRD** may split EL vs rollup-node work) | Future (stories scaffolded; expand or spin out PRD before start) |
+| **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) — against the **pinned** Sepolia deployment; no redeploy | Future |
+| **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) — against the **pinned** Sepolia deployment; no redeploy | Future |
+| **6** | **Reimplement the derivation pipeline / minimal sequencer** (read batches from L1, derive L2 blocks; deepest rebuild — **separate detailed PRD** may split EL vs rollup-node work) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the test data | Future (stories scaffolded; expand or spin out PRD before start) |
 | **3a** | **(Deferred)** Native Mac mini Sepolia L1 (geth/reth + consensus client, no Docker) — disk/sync heavy; not required for calldata DA. Was briefly labeled 2e; scheduled **after** Phases 4–6 unless QuickNode fails earlier | Future (optional) |
-| **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal | Future |
+| **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal. **Precondition:** coordinated Sepolia redeploy with deliberately chosen immutables (fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — minutes-to-hours scale) + completed network reset across all replica operators | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
 | **9** | **Mainnet production (tentative)**: graduate the L2 to Ethereum mainnet as L1; real ETH for batcher/proposer gas; production key management; requires successful completion of earlier phases + committed friend-operated node network | Future (tentative — decision not locked) |
 
 Decision recorded: fault proofs deferred (Q4 = A). On a solo devnet with one trusted proposer there is no adversary; the challenge game is best learned after Phase 5, when output roots are understood from the inside.
 
 Decision recorded: Phase 1 deployment path = **manual native builds** (Phase 0 verdict). No Docker Desktop, OrbStack, or Kurtosis on the operator's workstation.
+
+Decision recorded (2026-07-22): the Phase 2b Sepolia deployment is **pinned through Phases 4–6** — no longer disposable. Phases 4–6 are client-side rebuilds against unchanged L1 contracts; no redeploy is needed or permitted during them, and the accumulating L1 batch history becomes Phase 6 derivation test data. The next redeploy is the **Phase 7 entry gate** (current fault-game immutables, e.g. `faultGameMaxClockDuration=10`, are too short for a real dispute game and only change via redeploy).
 
 ## User Stories — Phase 0
 
@@ -274,7 +276,7 @@ Phase 2a prepares a **separate** Sepolia env/deploy tree and hardens loaders/ass
 - [x] Role addresses funded from harvest; ADMIN ≥ ~0.70 ETH before apply (operator action)
 - [x] Intent: `fundDevAccounts=false`, L2 chain id 852, learning-short portal delays (`faultGameClockExtension` + `faultGameMaxClockDuration`)
 - [x] `deployments/sepolia/deployments.json` + genesis/rollup produced; Phase 1 tree untouched; gas spend recorded
-- [x] Deploy is disposable (safe to abandon and redeploy)
+- [x] Deploy is disposable (safe to abandon and redeploy) — *design-time criterion; superseded 2026-07-22: the current deploy is **pinned through Phase 6**, next redeploy is the Phase 7 entry gate*
 
 ### US-024: Sepolia-backed L2 dry-run (Phase 2c)
 **Description:** As the operator, I want the sequencer/batcher/proposer running against Sepolia L1 long enough to confirm batches and one deposit.
@@ -338,6 +340,8 @@ Phase 3 deploys a **stock** verifier on Render. Primary sync is **L1 derivation*
 
 Phase 6 is the deepest rebuild: replace (parts of) the rollup derivation path and/or a minimal sequencer using the **OP Stack specs** and the running reference stack as the oracle. **Phase 3 does not require this** — a Render replica uses stock `op-geth`/`op-reth` + `op-node` in verifier mode.
 
+**Deployment constraint (applies to Phases 4–6):** all work runs against the **pinned** 2026-07-22 Sepolia deployment. Acceptance for Phases 4–6 must **not** include or permit a Sepolia redeploy — the rebuilds target unchanged L1 contracts, and the pinned deployment's accumulated batch history is the derivation test data. Redeploy is the Phase 7 entry gate.
+
 Before implementation starts, either expand these stories in-place **or** spin out a dedicated PRD (recommended if splitting EL vs `op-node`-shaped work).
 
 ### US-060: Spec-aligned derivation spike
@@ -395,6 +399,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - No QuickNode required in 2a–2c (public RPC OK); Phase **2d** documents QuickNode upgrade; native Mac L1 is **3a (deferred after 4–6)**; Render is Phase 3 L2 replica only (never L1)
 - No node on Render or any remote infrastructure until Phase 3
 - No custom/reimplemented batcher, proposer, or derivation — Phases 4–6
+- No Sepolia redeploy during Phases 4–6 — the 2026-07-22 Phase 2b deployment is **pinned**; redeploy happens only as the Phase 7 entry gate (new immutables + coordinated network reset)
 - No custom execution client required for Phase 3 (stock op-geth/op-reth)
 - No fault proofs, op-challenger, or dispute games (Phase 7)
 - No decentralized or shared sequencing (Phase 8)
@@ -415,7 +420,7 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - **L1 / blobs open question:** Anvil may or may not cover every batcher DA mode (calldata vs 4844 blobs). If blobs are required and Anvil cannot provide them, fall back to native geth/reth as L1 — still no containers.
 - **Phase 2 dependency:** the local-L1 contract deployment in Phase 1 does not carry to Sepolia; Phase 2 is a fresh contract deployment and fresh L2 genesis (L2 chain ID **852**). The Phase 1 chain will not "migrate" — it gets replaced. Structure the runbook so redeployment is cheap. Phase 1d US-016 funding floor applies before cutover; 2a scaffolds the env tree; 2b spends gas.
 - **Phase 3 note:** a Render replica may use containers *on Render*; that does not reintroduce Docker on this Mac mini for Phase 1. Replica = stock EL + `op-node` verifier. Custom client/derivation is Phase 6.
-- **Phase 4–6 dependency:** the OP Stack's rollup node exposes RPCs (`optimism_syncStatus`, etc.) and the spec repo (ethereum-optimism/specs) defines batch/frame formats — reimplementation phases should target the spec, using the running stack as the reference implementation to diff against. Phase 6 may be split into a separate PRD before coding starts.
+- **Phase 4–6 dependency:** the OP Stack's rollup node exposes RPCs (`optimism_syncStatus`, etc.) and the spec repo (ethereum-optimism/specs) defines batch/frame formats — reimplementation phases should target the spec, using the running stack as the reference implementation to diff against. Phase 6 may be split into a separate PRD before coding starts. All three phases run against the **pinned** 2026-07-22 Sepolia deployment (unchanged L1 contracts, no redeploy) — keeping it accumulates months of real batch history on L1, which is exactly the Phase 6 derivation test data.
 - **Phase 3b (friend-operated nodes):** friends run stock `op-geth`/`op-reth` + `op-node` verifiers, same as Phase 3 Render replica. Docker is acceptable **on their machines** (the "no containers" rule is for this workstation in Phase 1). Onboarding docs should be self-contained; consider a dedicated runbook or README section. Start on Sepolia so mistakes cost only testnet ETH.
 - **Phase 9 (mainnet — tentative):** requires a hosted L1 RPC (QuickNode, Alchemy, or similar) for Ethereum mainnet rather than a local node. Batcher/proposer keys need production-grade management (hardware wallet, multisig for admin). Monthly ETH budget depends heavily on blob fee market and L2 activity — estimate after Phase 2 Sepolia experience. Fault proofs (Phase 7) significantly improve trust model but may not be strictly required for a low-stakes personal L2.
 
@@ -455,4 +460,5 @@ Before implementation starts, either expand these stories in-place **or** spin o
 - **Phase 2 sub-phases:** **2a–2d done** (scaffold → disposable deploy → Sepolia L2 dry-run → QuickNode RPC path). Learning L2 chain ID = **852**.
 - **Phase 3a:** optional native Mac Sepolia L1 (was 2e) — **deferred until after Phases 4–6** unless hosted RPC fails earlier.
 - **Phase 3:** **done** — stock verifier on Render via [fortel2-replica](https://github.com/StephenForte/fortel2-replica); operator-verified matching L2 block hashes after a fresh Phase 2b cutover (do not `reset-sepolia` without redeploying + packing + wiping Render `/data`).
+- **Sepolia deployment lifecycle (2026-07-22):** the Phase 2b deploy (current `deployments/sepolia/deployments.json`) is **pinned through Phases 4–6** — no longer disposable. Next redeploy is the **Phase 7 entry gate**: choose all new immutables in one sitting (fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds`) sized minutes-to-hours for realistic dispute games, then run the coordinated network reset (announce → publish artifacts → all operators wipe → all restart → cross-check hashes). A forgotten parameter means a second redeploy and a second network-wide wipe.
 - **Harvest wallet (operator):** `0x5128889F20Ec13e0Be38b2BeBC568594159B652d` — harvest-only; fund role addresses from it in 2b.

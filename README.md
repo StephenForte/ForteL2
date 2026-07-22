@@ -30,7 +30,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **1c** | DIY pipeline viewer: live sequencer / batcher / proposer / tx activity panels on loopback | ✅ Done |
 | **1d** | Viewer mempool signal + Sepolia funding and fresh-key gate | ✅ Done |
 | **2a** | Sepolia scaffold: `.env.sepolia` tree, L2 chain **852**, public RPC, no on-chain spend | ✅ Done |
-| **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | ✅ Done |
+| **2b** | Disposable `op-deployer apply` on Sepolia + genesis under `deployments/sepolia/` | ✅ Done — 2026-07-22 deploy now **pinned through Phase 6** |
 | **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | ✅ Done |
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap; no redeploy) | ✅ Done |
 | **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
@@ -39,7 +39,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | Planned |
 | **6** | **Reimplement the derivation pipeline** — the deepest rebuild | Planned |
 | **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
-| **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal | Planned |
+| **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal — begins with a **coordinated redeploy** (all new fault-game immutables chosen in one sitting) + network-wide reset | Planned |
 | **8** | **Decentralized sequencer** exploration: multiple candidates, leader election | Planned |
 | **9** | **Mainnet (tentative)**: graduate to Ethereum mainnet as L1, production key management, real ETH economics — gated on earlier phases + committed distributed node network | Decision not locked |
 
@@ -50,7 +50,8 @@ Canonical acceptance criteria: `tasks/prd-l2-learning-chain.md`.
 - **Native builds, no containers.** The Phase 0 spike attempted Kurtosis's `optimism-package`; OrbStack disrupted host networking and the enclave never stabilized, while op-node and op-geth built cleanly as native arm64 binaries. Verdict: manual builds from the optimism monorepo, orchestrated with shell scripts. No Docker on this workstation.
 - **DIY pipeline viewer instead of Blockscout.** Hosted explorers need a non-loopback RPC; self-hosted ones need containers. Both violate current constraints, so the chain gets a purpose-built loopback UI that shows exactly what a learning operator needs — the sequencer→batcher→proposer pipeline and mempool — and nothing Etherscan-shaped.
 - **Withdrawals in Phase 1b, not later.** The 7-day challenge window normally makes withdrawals a scope grenade, but a local devnet controls the finalization period — shortened, the full initiate→prove→finalize flow becomes a one-evening exercise. Cheap to learn locally, expensive to learn on Sepolia where the window can't be shortened.
-- **Fault proofs deferred to Phase 7.** On a solo devnet with one trusted proposer there is no adversary; the dispute game is best learned after rebuilding the proposer (Phase 5), when output roots are understood from the inside.
+- **Fault proofs deferred to Phase 7.** On a solo devnet with one trusted proposer there is no adversary; the dispute game is best learned after rebuilding the proposer (Phase 5), when output roots are understood from the inside. Phase 7 **begins with the next Sepolia redeploy**: the current fault-game immutables (`faultGameMaxClockDuration=10`, learning-short proof-maturity / finality delays) are too short to exercise a real dispute game, and immutables only change via redeploy. Choose **all** new immutables in one sitting — fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — sized for realistic games (minutes-to-hours, not seconds, not mainnet's multi-day values). A forgotten parameter means a second redeploy and a second network-wide wipe.
+- **Sepolia deployment pinned through Phase 6 (decided 2026-07-22).** Phases 4–6 are client-side rebuilds (batcher, proposer, derivation) against **unchanged** L1 contracts — no redeploy is needed or permitted during them. Keeping the same deployment also accumulates months of real batch history on L1, which becomes the test data for the Phase 6 derivation rebuild. The next redeploy is the **Phase 7 entry gate**.
 - **Sepolia doesn't inherit the Phase 1 chain.** Phase 2 is a fresh contract deployment and fresh genesis — the local chain gets replaced, not migrated. The runbook is structured so redeployment is cheap.
 - **Key hygiene as a phase gate.** Phase 2 requires fresh keys generated outside the repo — never Foundry defaults, never keys pasted into agent chats — and a funded Sepolia balance floor before sustained batcher/proposer operation.
 
@@ -418,9 +419,9 @@ FORTEL2_ENV=.env.sepolia ./scripts/02-deploy-contracts-sepolia.sh
 | L1 proxies | `deployments/sepolia/deployments.json` |
 | Spend note | `deployments/sepolia/deploy-spend.txt` |
 
-Intent uses `fundDevAccounts = false`, L2 chain **852**, learning-short portal delays (`faultGameClockExtension=5`, `faultGameMaxClockDuration=10` — max must be ≥ extension). Resume keeps `state.json` but always rewrites `intent.toml` from current `.env.sepolia` (roles / fault-game delays) before apply. Phase 1 Anvil `deployments/` tree is never written. This deploy is **disposable** — wipe with `FORCE_SEPOLIA_REDEPLOY=1` then re-apply.
+Intent uses `fundDevAccounts = false`, L2 chain **852**, learning-short portal delays (`faultGameClockExtension=5`, `faultGameMaxClockDuration=10` — max must be ≥ extension). Resume keeps `state.json` but always rewrites `intent.toml` from current `.env.sepolia` (roles / fault-game delays) before apply. Phase 1 Anvil `deployments/` tree is never written. 2b was **designed** disposable (`FORCE_SEPOLIA_REDEPLOY=1` wipes then re-applies) — but the 2026-07-22 apply is now **pinned through Phase 6**. Do not redeploy: Phases 4–6 rebuild clients against these unchanged contracts, and the accumulating L1 batch history is Phase 6 derivation test data. Next redeploy = **Phase 7 entry gate** (new fault-game immutables; see Network reset procedure).
 
-**Live Sepolia proxies (Phase 2b apply, 2026-07-22 cutover):** see `deployments/sepolia/deployments.json`. Portal `0xb4679b1c…08c624`, bridge `0x7ec222d9…85089f8`, DisputeGameFactory `0xba1fda6b…e49eed`. Prior Sepolia deploy is abandoned (disposable).
+**Live Sepolia proxies (Phase 2b apply, 2026-07-22 cutover):** see `deployments/sepolia/deployments.json`. Portal `0xb4679b1c…08c624`, bridge `0x7ec222d9…85089f8`, DisputeGameFactory `0xba1fda6b…e49eed`. Prior Sepolia deploy is abandoned (that one was disposable). **This deployment is pinned through Phase 6** — redeployment is deferred to the Phase 7 gate.
 
 ## Phase 2c — Sepolia-backed L2 dry-run (US-024)
 
@@ -507,14 +508,14 @@ Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **85
 
 **Status:** Operator-verified after a fresh Phase 2b cutover (2026-07-22): Mac and Render share matching L2 block hashes (e.g. block 20). Package: [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica). Use **≥2GB** RAM on Render (Starter 512MB OOMs). Prefer **Private Service**; compare tips via Render Shell `geth attach` if you lack a public URL.
 
-**Keep Mac + Render aligned:** do **not** `reset-sepolia` / wipe only one side. After any Sepolia redeploy: pack → push genesis/rollup to fortel2-replica → wipe Mac `data-sepolia` **and** Render `/data` → restart both.
+**Keep Mac + Render aligned:** the both-sides wipe (Mac `data-sepolia` **and** Render `/data`, after `pack-replica-artifacts` + pushing new genesis/rollup) is **not routine maintenance** — it is triggered **only by a redeploy**. A redeploy produces new L1 contracts, a new genesis, and a new `rollup.json`; the old replica state is then a different chain that can never catch up. With the deployment **pinned through Phase 6**, replica operators (Phase 3b friends) should **not** expect a wipe before Phase 7. The failure mode to avoid is wiping only one side — both nodes would then follow different chains under the same chain ID. See **Network reset procedure** below.
 
 **Batcher funding:** calldata posts burn Sepolia ETH on the batcher address. Keep a buffer (≥ ~0.15 ETH; more if you leave it running). Drip faucets into the **harvest** wallet, then top up batcher/proposer when `sepolia-fund-check.sh` shows NEED — not every day if the buffer is healthy. With the credit-budget batcher defaults (`max-channel-duration=30`), L1 posts are far less frequent than the old `=2` profile — gas spend drops with them.
 
 Set Render’s `L1_RPC_URL` secret to the **Render-only** QuickNode endpoint (not the Mac mini URL). See Phase 2d.
 
 ```bash
-# After a Sepolia redeploy, pack genesis/rollup then publish into fortel2-replica
+# Only after a Sepolia redeploy (not before Phase 7): pack genesis/rollup then publish into fortel2-replica
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 ```
@@ -528,6 +529,18 @@ FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 This repo keeps only the **pack + sync-check bridge**. Runtime Docker lives in fortel2-replica — see `replica/README.md`.
 
 See [fortel2-replica README](https://github.com/StephenForte/fortel2-replica#readme) for Render / friend quick start.
+
+### Network reset procedure (redeploy-triggered only)
+
+A Sepolia redeploy is an **operational event for every verifier operator**, not a Mac-only action — new L1 contracts mean a new genesis and `rollup.json`, so all nodes must reset together. Not expected before the **Phase 7 gate** while the deployment is pinned. Order:
+
+1. **Announce** the reset to all replica operators (Render + Phase 3b friends) before touching anything.
+2. **Pack + publish**: `FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh`, then push the new genesis/rollup into [fortel2-replica](https://github.com/StephenForte/fortel2-replica).
+3. **All operators wipe**: Mac `data-sepolia` (`reset-sepolia.sh`) and every replica `/data`. All sides, never one.
+4. **All restart** against the new artifacts.
+5. **Cross-check block hashes** (Mac vs each replica, same block number) before declaring the network healthy.
+
+Treat this as deliberate practice for coordinated network upgrades — the same choreography Phases 8–9 (decentralized sequencing, mainnet) will demand with higher stakes.
 
 ## Phase 2a — Sepolia scaffold (US-020–022)
 
