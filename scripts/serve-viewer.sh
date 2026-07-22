@@ -9,4 +9,5 @@ source "$SCRIPT_DIR/lib.sh"
 "$SCRIPT_DIR/gen-viewer-config.sh"
 
 PORT="${VIEWER_HTTP_PORT:-8081}"
-serve_static_loopback "$FORTEL2_ROOT/viewer" "$PORT" "pipeline viewer HTTP"
+serve_static_loopback "$FORTEL2_ROOT/viewer" "$PORT" "pipeline viewer HTTP" \
+  "$FORTEL2_ROOT/viewer/.csp-header"
