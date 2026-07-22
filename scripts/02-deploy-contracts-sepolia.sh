@@ -162,7 +162,7 @@ SPEND_LOG="$FORTEL2_ROOT/deployments/sepolia/deploy-spend.txt"
   echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "admin=$ADMIN_ADDRESS"
   echo "spent_eth≈$SPENT_ETH"
-  echo "l1_rpc=$L1_RPC_URL"
+  echo "l1_rpc=$(redact_rpc_url "$L1_RPC_URL")"
   echo "l2_chain_id=$L2_CHAIN_ID"
 } > "$SPEND_LOG"
 

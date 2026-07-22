@@ -1,5 +1,5 @@
-timestamp=2026-07-21T01:50:27Z
+timestamp=2026-07-22T01:15:28Z
 admin=0xBB3E19811B2c3423069B54BDFF3e90Dd8094bb0F
-spent_eth≈0.087040769448382852
-l1_rpc=https://ethereum-sepolia-rpc.publicnode.com
+spent_eth≈0.045625090854385812
+l1_rpc=https://ultra-empty-asphalt.ethereum-sepolia.quiknode.pro/… (token redacted)
 l2_chain_id=852

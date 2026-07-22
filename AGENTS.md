@@ -14,7 +14,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 - **Never commit** `.env`, `.env.sepolia`, private keys, JWT secrets, or live datadir contents.
 - **Never ask the operator to paste private keys** into chat; never write keys into committed files.
 - **Loopback only** for L2 RPCs, the guestbook HTTP server, and the pipeline viewer (`127.0.0.1` / `localhost`). Sepolia **L1** may be remote HTTPS (`assert_sepolia_rpc_urls`).
-- Prefer **small, reversible diffs**. Phase **3** (Render replica) is in progress when asked; do not expand into Phase **3a** (native Mac L1) or **3b+** / **4+** unless asked.
+- Prefer **small, reversible diffs**. Phase **3** (Render replica) is done; do not expand into Phase **3a** (native Mac L1, after 4–6), **3b**, or **4+** unless asked.
 - Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` on the **local Anvil** stack (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start. Sepolia L1 is ~12s; local L2 may stay 2s.
 - **`scripts/lib.sh` `start_bg` / `stop_bg` are privileged.** Any edit needs human review (see `.github/CODEOWNERS`), even when the rest of a change is AI-authored. (`serve_static_loopback` is not privileged process control.)
 
