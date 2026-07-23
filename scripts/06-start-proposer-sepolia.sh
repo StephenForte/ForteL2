@@ -21,8 +21,13 @@ fi
 
 # Credit-budget defaults. Use SEPOLIA_PROPOSER_INTERVAL (default 5m) — do not inherit
 # legacy PROPOSER_INTERVAL=12s from older .env.sepolia templates (Phase 1 Anvil knob).
+# Pin txmgr receipt/rebroadcast (upstream defaults are 12s) so in-flight fee bumps
+# do not outpace the batcher's credit-budget cadence.
 PROPOSER_INTERVAL="${SEPOLIA_PROPOSER_INTERVAL:-5m}"
 PROPOSER_POLL="${SEPOLIA_PROPOSER_POLL_INTERVAL:-12s}"
+PROPOSER_RECEIPT_QUERY="${SEPOLIA_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s}"
+PROPOSER_REBROADCAST="${SEPOLIA_PROPOSER_TXMGR_REBROADCAST_INTERVAL:-36s}"
+PROPOSER_RESUBMISSION="${SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT:-72s}"
 
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
 wait_for_rpc "$L2_RPC_URL" "L2"
@@ -36,9 +41,12 @@ start_bg op-proposer op-proposer \
   --proposal-interval="${PROPOSER_INTERVAL}" \
   --allow-non-finalized=true \
   --poll-interval="${PROPOSER_POLL}" \
+  --resubmission-timeout="${PROPOSER_RESUBMISSION}" \
+  --txmgr.receipt-query-interval="${PROPOSER_RECEIPT_QUERY}" \
+  --txmgr.rebroadcast-interval="${PROPOSER_REBROADCAST}" \
   --rpc.addr=127.0.0.1 \
   --rpc.port="${PROPOSER_RPC_PORT}" \
   --log.level=info
 
-echo "Sepolia proposer started against DisputeGameFactory=$GAME_FACTORY game-type=$PROPOSER_GAME_TYPE interval=${PROPOSER_INTERVAL} poll=${PROPOSER_POLL}"
+echo "Sepolia proposer started against DisputeGameFactory=$GAME_FACTORY game-type=$PROPOSER_GAME_TYPE interval=${PROPOSER_INTERVAL} poll=${PROPOSER_POLL} txmgr receipt/rebroadcast=${PROPOSER_RECEIPT_QUERY}/${PROPOSER_REBROADCAST}"
 echo "Known-good: 'created dispute game' or 'Proposing'"
