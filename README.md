@@ -480,9 +480,10 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 |---|---|---|
 | Batcher poll | `12s` | `SEPOLIA_BATCHER_POLL_INTERVAL` |
 | Batcher max channel duration | `30` L1 blocks (~6 min) | `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION` |
-| Batcher txmgr receipt / rebroadcast | `24s` | `SEPOLIA_BATCHER_TXMGR_*_INTERVAL` |
+| Batcher txmgr receipt / rebroadcast | `36s` | `SEPOLIA_BATCHER_TXMGR_*_INTERVAL` |
 | Proposer interval | `5m` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`) |
 | Proposer poll | `12s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
+| Proposer txmgr receipt / rebroadcast / resubmission | `36s` / `36s` / `72s` | `SEPOLIA_PROPOSER_TXMGR_*` / `SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT` |
 | op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
 
 For a short fast demo: set `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=2`, `SEPOLIA_BATCHER_POLL_INTERVAL=2s`, `SEPOLIA_PROPOSER_INTERVAL=12s` then restart. Prefer stopping the stack when idle over burning credits overnight.
