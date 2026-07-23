@@ -536,11 +536,12 @@ A Sepolia redeploy is an **operational event for every verifier operator**, not 
 
 1. **Announce** the reset to all replica operators (Render + Phase 3b friends) before touching anything.
 2. **Stop Mac writers**: `FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh` — the old batcher/proposer/op-node/op-geth must not keep posting against the deployment about to be replaced.
-3. **Redeploy** with the selected Phase 7 immutable overrides: `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 FAULT_GAME_CLOCK_EXTENSION=… FAULT_GAME_MAX_CLOCK_DURATION=… ./scripts/02-deploy-contracts-sepolia.sh`. This is the step that actually produces the new L1 contracts, genesis, and `rollup.json` — `pack-replica-artifacts.sh` only copies whatever is already in `$DEPLOY_DIR`, so packing before redeploying just republishes the old (pinned) artifacts.
-4. **Pack + publish**: `FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh`, then push the new genesis/rollup into [fortel2-replica](https://github.com/StephenForte/fortel2-replica).
-5. **All operators wipe**: Mac `data-sepolia` (`reset-sepolia.sh`) and every replica `/data`. All sides, never one.
-6. **All restart** against the new artifacts (Mac: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh`).
-7. **Cross-check block hashes** (Mac vs each replica, same block number) before declaring the network healthy.
+3. **Choose Phase 7 immutables in `.env.sepolia` first** — edit `PROOF_MATURITY_DELAY_SECONDS`, `DISPUTE_GAME_FINALITY_DELAY_SECONDS`, `FAULT_GAME_CLOCK_EXTENSION`, and `FAULT_GAME_MAX_CLOCK_DURATION` directly in the file (sized minutes-to-hours for a realistic dispute game). Do **not** pass these as inline env overrides on the command line: `scripts/lib.sh` sources `.env.sepolia` *after* the process starts, so the file's values win and silently overwrite anything set inline for these four vars.
+4. **Redeploy**: `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 ./scripts/02-deploy-contracts-sepolia.sh` — `FORCE_SEPOLIA_REDEPLOY` is not set anywhere in `.env.sepolia`, so it's safe to pass inline. This is the step that actually produces the new L1 contracts, genesis, and `rollup.json` — `pack-replica-artifacts.sh` only copies whatever is already in `$DEPLOY_DIR`, so packing before redeploying just republishes the old (pinned) artifacts.
+5. **Pack + publish**: `FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh`, then push the new genesis/rollup into [fortel2-replica](https://github.com/StephenForte/fortel2-replica).
+6. **All operators wipe**: Mac `data-sepolia` (`FORTEL2_ENV=.env.sepolia ./scripts/reset-sepolia.sh`) and every replica `/data`. All sides, never one.
+7. **All restart** against the new artifacts (Mac: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh`).
+8. **Cross-check block hashes** (Mac vs each replica, same block number) before declaring the network healthy.
 
 Treat this as deliberate practice for coordinated network upgrades — the same choreography Phases 8–9 (decentralized sequencing, mainnet) will demand with higher stakes.
 
