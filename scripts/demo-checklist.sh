@@ -171,7 +171,8 @@ print_checklist_sepolia() {
   [ ] FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
   [ ] Deposit narrative: L1 inclusion → L2 derivation (cannot be censored by sequencer)
   [ ] Withdraw prove/finalize: real Sepolia finality (no Anvil time-warp) — long waits
-  [ ] Do not reset-sepolia without full cutover (redeploy + pack + wipe both datadirs)
+  [ ] reset-sepolia alone is fine for a single stuck node (deployment unchanged, DEPLOY_DIR kept)
+  [ ] After a redeploy: full cutover only (redeploy + pack + wipe every operator's datadir)
 
 ── F. Pipeline viewer ────────────────────────────────────────────
   [ ] FORTEL2_ENV=.env.sepolia ./scripts/serve-viewer.sh → http://127.0.0.1:8081
