@@ -18,9 +18,15 @@
     <key>Minute</key>
     <integer>5</integer>
   </dict>
+  <!--
+    Log under ~/Library/Logs (always present on macOS). Do NOT use repo data/:
+    that dir is gitignored and only created inside refresh_health.sh; launchd
+    opens StandardOutPath/StandardErrorPath before the program runs, so a
+    missing parent directory fails the job on a fresh clone.
+  -->
   <key>StandardOutPath</key>
-  <string>/Users/steveforte/ForteL2/data/launchd.out.log</string>
+  <string>/Users/steveforte/Library/Logs/fortel2-health.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/steveforte/ForteL2/data/launchd.err.log</string>
+  <string>/Users/steveforte/Library/Logs/fortel2-health.err.log</string>
 </dict>
 </plist>

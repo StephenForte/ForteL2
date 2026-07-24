@@ -11,8 +11,11 @@ Minimal OP Stack batch submitter rebuild. Specs:
 
 | Story | Status |
 |---|---|
-| US-040 frame decode + CLI | In progress (unit tests + `decode-l1`) |
-| US-041+ channel build / submit | Not started |
+| US-040 frame decode + CLI | Done |
+| US-041 singular batch + zlib channel + frame split | Done (unit tests + live local fixture) |
+| US-042+ submit loop | Not started |
+
+**Channel encoding note (local ForteL2):** stock batches use **raw zlib** (no Fjord channel-version prefix). Span batches may appear on the wire; our builder emits **singular** batches first.
 
 Stock `op-batcher` remains the default via `scripts/05-start-batcher*.sh`. Do not stop Sepolia stock batcher until US-042 is green on local Anvil.
 

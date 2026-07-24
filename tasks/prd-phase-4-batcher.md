@@ -49,7 +49,7 @@ This is a **learning rebuild**, not a production batcher. Target the specs; use 
 | Story | Scope | Status |
 |---|---|---|
 | **US-040** | Spec spike: frame/channel decode + one real L1 batch decoded | **Done** |
-| **US-041** | Singular-batch encode + zlib channel + frame pack (unit-tested) | Planned |
+| **US-041** | Singular-batch encode + zlib channel + frame pack (unit-tested) | **Done** |
 | **US-042** | Submit loop against **local** Anvil L2 (901); stock batcher stopped | Planned |
 | **US-043** | Script switch: `USE_CUSTOM_BATCHER=1` for local start path | Planned |
 | **US-044** | Optional Sepolia demo window + documented revert to stock | Planned |
@@ -71,10 +71,10 @@ This is a **learning rebuild**, not a production batcher. Target the specs; use 
 **Description:** As the operator, I want to build a zlib channel from singular batches so we can produce valid frames without stock op-batcher.
 
 **Acceptance Criteria:**
-- [ ] Encode singular batch (version 0) from L2 block fields needed by the spec
-- [ ] zlib channel compress + frame split with configurable max frame data size
-- [ ] Unit tests with fixtures; optional compare against a captured stock-batcher payload
-- [ ] Explicit deferral note if span batches are required by the live chain’s fork schedule
+- [x] Encode singular batch (version 0) from L2 block fields needed by the spec
+- [x] zlib channel compress + frame split with configurable max frame data size
+- [x] Unit tests with fixtures; optional compare against a captured stock-batcher payload (live local channel decompresses; first batches are singular)
+- [x] Explicit deferral note if span batches are required by the live chain’s fork schedule — **deferred**: builder emits singular only; live fixture may also contain span (type 1); revisit if local submit (US-042) rejects singular-only channels
 
 ### US-042: Local submit loop
 **Description:** As the operator, I want the custom batcher to post at least one channel to local Anvil L1 while stock `op-batcher` is stopped, and see `op-node` advance safe head.

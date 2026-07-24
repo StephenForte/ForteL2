@@ -57,8 +57,13 @@ is_last=true
 notes=Decoded from cast tx input (supermini live stack). batcher/ CLI not yet on /Users/steveforte/ForteL2 until Phase 4 scaffold is committed/pushed and pulled.
 ```
 
-## Next (US-041)
+## US-041 notes (done)
 
-1. Read L2 block → singular batch encode  
-2. zlib channel + frame split  
-3. Compare to a captured stock `op-batcher` payload if available  
+- Channel body on local ForteL2: **raw zlib** (header `78da`), not Fjord `version++compress`.
+- Channel stream: `zlib( concat( rlp(typedBatchBytes)… ) )` where typedBatch = `0x00 ++ rlp(singular fields)`.
+- Live fixture decompresses to **6** batches; first is singular (empty txs OK).
+- Span batch encode **deferred** until US-042 proves singular-only is rejected.
+
+## Next (US-042)
+
+Submit loop on local Anvil with stock `op-batcher` stopped; watch safe head advance.  
