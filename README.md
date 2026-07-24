@@ -63,6 +63,19 @@ Cold start to producing L2 blocks in under 30 minutes from the runbook alone. Th
 
 Built and operated as a solo project (for now — Phase 3b changes that). Related work: [settlementos](https://github.com/StephenForte/settlementos) and its [independent explorer](https://github.com/StephenForte/settlementos-explorer), deployed to Base Sepolia and Polygon Amoy.
 
+### SettlementOS money-rail track
+
+SettlementOS is the payments application; this L2 is the intended home rail. **SOS may start integration now** on Sepolia ForteL2 (chain **852**) — do not wait for Phase 3b or 4–6.
+
+| Doc | Purpose |
+|---|---|
+| [`deployments/rail-interface.json`](deployments/rail-interface.json) | Chain IDs, RPCs, bridge proxies, reset + replica policy |
+| [`tasks/prd-money-rail.md`](tasks/prd-money-rail.md) | ForteL2 money-rail PRD (SOS gates + **Replica update checklist**) |
+| [`tasks/coordination-settlementos.md`](tasks/coordination-settlementos.md) | Who owns what (no duplicate escrow/MMF) |
+| SOS handoff | `settlementos/tasks/prd-fortel2-integration.md` |
+
+**Replica reminder:** Phase 3 is done. Republish genesis/rollup to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only on a Sepolia **redeploy** (next expected: Phase 7). See `replica/README.md` and the Network reset procedure under Phase 3.
+
 ---
 
 # Operator runbook (Phase 1)

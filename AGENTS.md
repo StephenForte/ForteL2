@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 
 Personal **OP Stack L2 learning rollup** on a single Apple Silicon Mac. Phase 1 runs **native binaries only** (no Docker, OrbStack, or Kurtosis on this host). Throwaway Anvil keys only for local chain **901** — never real funds. Phase **2a** scaffolds Sepolia (L2 chain **852**) without broadcasting; funded Sepolia keys stay operator-local in `.env.sepolia`.
 
-Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.md`.
+Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.md`. Money-rail / SettlementOS: `tasks/prd-money-rail.md`, `tasks/coordination-settlementos.md`, `deployments/rail-interface.json`. **SOS may integrate on chain 852 now.** Replica is Phase 3 done — republish artifacts only on Sepolia redeploy (Phase 7); see `replica/README.md`.
 
 ## Non-negotiables
 

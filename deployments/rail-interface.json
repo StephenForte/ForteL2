@@ -1,0 +1,94 @@
+{
+  "$schema_note": "ForteL2 rail interface for SettlementOS and explorers. Version bumps when chain ID, bridge proxies, or reset policy change.",
+  "version": "1",
+  "updated": "2026-07-24",
+  "docs": {
+    "moneyRailPrd": "tasks/prd-money-rail.md",
+    "coordination": "tasks/coordination-settlementos.md",
+    "settlementOsHandoff": "https://github.com/StephenForte/settlementos/blob/main/tasks/prd-fortel2-integration.md",
+    "replicaRepo": "https://github.com/StephenForte/fortel2-replica"
+  },
+  "networks": {
+    "fortel2-local": {
+      "networkId": "fortel2-local",
+      "label": "ForteL2 (local Anvil L1)",
+      "l2ChainId": 901,
+      "l1ChainId": 900,
+      "l2RpcUrl": "http://127.0.0.1:9545",
+      "l2NodeRpcUrl": "http://127.0.0.1:9547",
+      "l1RpcUrl": "http://127.0.0.1:8545",
+      "feeToken": "ETH",
+      "explorer": null,
+      "bridge": {
+        "mode": "standard-bridge",
+        "note": "Addresses in deployments/deployments.json after local deploy; ephemeral across reset.sh"
+      },
+      "replica": null,
+      "resetPolicy": "May re-genesis anytime via ./scripts/reset.sh. SOS must redeploy contracts after reset.",
+      "sosRecommended": false,
+      "notes": "Optional offline SOS testing only. Prefer fortel2-sepolia for the real integration path."
+    },
+    "fortel2-sepolia": {
+      "networkId": "fortel2-sepolia",
+      "label": "ForteL2 (Sepolia L1)",
+      "l2ChainId": 852,
+      "l1ChainId": 11155111,
+      "l2RpcUrl": "http://127.0.0.1:9545",
+      "l2NodeRpcUrl": "http://127.0.0.1:9547",
+      "l1RpcUrl": "operator-local QuickNode HTTPS in .env.sepolia (never commit)",
+      "feeToken": "ETH",
+      "explorer": null,
+      "bridge": {
+        "mode": "standard-bridge",
+        "optimismPortalProxy": "0xb4679b1c65e5c07bac95988583c2d7a65108c624",
+        "l1StandardBridgeProxy": "0x7ec222d979bd8445ac51776f67d914b6775089f8",
+        "l1CrossDomainMessengerProxy": "0x68c9b25d887fbda4139f3f54394892027e0cbbe8",
+        "systemConfigProxy": "0x8416cd475d75b558899d83f4cf0ffeb85d7bc361",
+        "disputeGameFactoryProxy": "0xba1fda6baf25f43a340cdd5a86c02a69c8e49eed",
+        "source": "deployments/sepolia/deployments.json",
+        "funding": "L2 accounts funded via L1→L2 deposit (no genesis fundDevAccounts). Use deposit-eth-sepolia.sh patterns."
+      },
+      "replica": {
+        "status": "phase3-done",
+        "repo": "https://github.com/StephenForte/fortel2-replica",
+        "syncMode": "derive-from-sepolia-l1",
+        "readRpcUrl": "operator-configured (Render private service / shell; not committed)",
+        "writeRpcUrl": null,
+        "updateTriggers": [
+          "Phase 7 Sepolia redeploy / network-wide wipe only while deployment pinned through Phase 6",
+          "After redeploy: pack-replica-artifacts.sh → publish genesis+rollup → wipe Mac data-sepolia AND Render /data → hash cross-check"
+        ],
+        "consumers": [
+          "fortel2-replica operators",
+          "SettlementOS heavy reads (optional)",
+          "settlementos-explorer (optional)"
+        ]
+      },
+      "resetPolicy": "Sepolia L1 contracts + genesis pinned through learning Phase 6. Next redeploy is Phase 7 entry gate — coordinated wipe for Mac sequencer, Render replica, and all SOS contract deployments.",
+      "sosRecommended": true,
+      "notes": "Primary SOS target. Writes: Mac sequencer L2 RPC (loopback today). Reads: prefer replica when reachable. Do not share QuickNode L1 URL/token with Render."
+    }
+  },
+  "healthChecks": {
+    "localOrSepoliaL2": [
+      "cast chain-id --rpc-url http://127.0.0.1:9545",
+      "cast block-number --rpc-url http://127.0.0.1:9545",
+      "cast gas-price --rpc-url http://127.0.0.1:9545"
+    ],
+    "replica": [
+      "FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=<url> ./scripts/replica-sync-check.sh"
+    ]
+  },
+  "sosGate": {
+    "mayStartIntegration": true,
+    "recommendedNetworkId": "fortel2-sepolia",
+    "doNotWaitFor": [
+      "phase-3b-friend-replicas",
+      "phase-4-batcher-rewrite",
+      "phase-5-proposer-rewrite",
+      "phase-6-derivation-rewrite",
+      "paymaster",
+      "canonical-usdc"
+    ]
+  }
+}
