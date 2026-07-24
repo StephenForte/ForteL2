@@ -35,7 +35,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap; no redeploy) | ✅ Done |
 | **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
-| **4** | **Reimplement the batcher** from scratch; swap out op-batcher | Planned |
+| **4** | **Reimplement the batcher** from scratch; swap out op-batcher | In progress — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/) |
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | Planned |
 | **6** | **Reimplement the derivation pipeline** — the deepest rebuild | Planned |
 | **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
