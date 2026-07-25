@@ -16,7 +16,8 @@ Base-style rollups don't have PoS validators. The roles here are:
 | **Batcher** | Compresses L2 tx data, posts it to L1 | op-batcher → custom rebuild (Phase 4) |
 | **Proposer** | Posts L2 state output roots to L1 | op-proposer → custom rebuild (Phase 5) |
 | **Replica / verifier** | Derives the L2 independently from L1 data | stock op-node + EL (verifier mode); remote on Render, then friend-operated |
-| **Pipeline viewer** | Loopback-only UI showing sequencer / batcher / proposer / mempool activity | DIY static UI polling RPC — deliberately not a full block explorer |
+| **Pipeline viewer** | Loopback-only UI showing sequencer / batcher / proposer / mempool activity | DIY static UI polling RPC — ops dashboard, not a full block explorer |
+| **Block viewer** | Latest L2 blocks → per-block detail (Blockchair-shaped) | Phase 6 — still loopback/static; Blockscout much later |
 
 Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini — no Docker, no Kurtosis (see Design Decisions and `tasks/spike-notes.md`). Local L1 is Anvil; the demo dApp is a MetaMask-connected guestbook.
 
@@ -37,7 +38,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
 | **4** | **Reimplement the batcher** from scratch; swap out op-batcher | ✅ Done — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/); `USE_CUSTOM_BATCHER=1` opt-in |
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | Planned |
-| **6** | **Reimplement the derivation pipeline** — the deepest rebuild | Planned |
+| **6** | **Derivation / minimal sequencer** + simple Blockchair-style **block viewer** (latest blocks → block detail); Blockscout stays much later | Planned |
 | **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal — begins with a **coordinated redeploy** (all new fault-game immutables chosen in one sitting) + network-wide reset | Planned |
 | **8** | **Decentralized sequencer** exploration: multiple candidates, leader election | Planned |
@@ -48,7 +49,7 @@ Canonical acceptance criteria: `tasks/prd-l2-learning-chain.md`.
 ## Design decisions
 
 - **Native builds, no containers.** The Phase 0 spike attempted Kurtosis's `optimism-package`; OrbStack disrupted host networking and the enclave never stabilized, while op-node and op-geth built cleanly as native arm64 binaries. Verdict: manual builds from the optimism monorepo, orchestrated with shell scripts. No Docker on this workstation.
-- **DIY pipeline viewer instead of Blockscout.** Hosted explorers need a non-loopback RPC; self-hosted ones need containers. Both violate current constraints, so the chain gets a purpose-built loopback UI that shows exactly what a learning operator needs — the sequencer→batcher→proposer pipeline and mempool — and nothing Etherscan-shaped.
+- **DIY viewers instead of Blockscout.** Hosted explorers need a non-loopback RPC; self-hosted Blockscout needs containers. Both stay out of scope for a long time. Phase 1c ships a purpose-built loopback **pipeline viewer** (sequencer→batcher→proposer + mempool). Phase 6 adds a simple Blockchair-style **block viewer** (newest-first blocks list + per-block detail) — still loopback/static, still not Etherscan/Blockscout.
 - **Withdrawals in Phase 1b, not later.** The 7-day challenge window normally makes withdrawals a scope grenade, but a local devnet controls the finalization period — shortened, the full initiate→prove→finalize flow becomes a one-evening exercise. Cheap to learn locally, expensive to learn on Sepolia where the window can't be shortened.
 - **Fault proofs deferred to Phase 7.** On a solo devnet with one trusted proposer there is no adversary; the dispute game is best learned after rebuilding the proposer (Phase 5), when output roots are understood from the inside. Phase 7 **begins with the next Sepolia redeploy**: the current fault-game immutables (`faultGameMaxClockDuration=10`, learning-short proof-maturity / finality delays) are too short to exercise a real dispute game, and immutables only change via redeploy. Choose **all** new immutables in one sitting — fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — sized for realistic games (minutes-to-hours, not seconds, not mainnet's multi-day values). A forgotten parameter means a second redeploy and a second network-wide wipe.
 - **Sepolia deployment pinned through Phase 6 (decided 2026-07-22).** Phases 4–6 are client-side rebuilds (batcher, proposer, derivation) against **unchanged** L1 contracts — no redeploy is needed or permitted during them. Keeping the same deployment also accumulates months of real batch history on L1, which becomes the test data for the Phase 6 derivation rebuild. The next redeploy is the **Phase 7 entry gate**.
@@ -92,7 +93,7 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | DA | **calldata** batches (`--data-availability-type=calldata`) — Anvil has no beacon/blobs |
 | EL | **op-geth** (`--l2.enginekind=geth`) — verified arm64 in Phase 0 |
 | L1 / L2 block time | **both 2s** (`L1_BLOCK_TIME` must be ≥ `L2_BLOCK_TIME`) |
-| Explorer | `cast` / RPC + Phase 1c **pipeline viewer** — Blockscout / hosted explorers deferred |
+| Explorer | `cast` / RPC + Phase 1c **pipeline viewer**; Phase 6 **block viewer** (planned); Blockscout / hosted explorers deferred much later |
 
 ## Toolchain versions
 
@@ -367,7 +368,7 @@ cast call <ADDR> "count()(uint256)" --rpc-url http://127.0.0.1:9545
 cast balance 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc --rpc-url http://127.0.0.1:9545
 ```
 
-Blockscout / other containerized explorers, and hosted SaaS explorers (e.g. Ethernal), are **explicitly deferred** on this host until the Phase 1b non-loopback policy review allows a reachable RPC (or a container-capable host is used). Phase 1c’s **pipeline viewer** is the intentional learning UI — not a full explorer.
+Blockscout / other containerized explorers, and hosted SaaS explorers (e.g. Ethernal), are **explicitly deferred** on this host to a **much later** stage (after Phase 8 learning goals, or when a non-loopback RPC is deliberately allowed). Phase 1c’s **pipeline viewer** is the ops dashboard; Phase 6 adds a simple Blockchair-style **block viewer** (latest blocks → block detail) — still not a full explorer.
 
 ## Pipeline viewer (Phase 1c / 1d / Sepolia)
 
@@ -398,7 +399,7 @@ Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from t
 
 Refresh cadence defaults to **5s** locally and **15s** on Sepolia (override with `VIEWER_REFRESH_MS`). Sepolia mode also uses a 12-block incremental L1 scan so Batcher/Proposer do not re-fetch dozens of full blocks every tick. Panel RPC failures surface as plain status text — panels do not silently go stale.
 
-Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer (Blockchair-style UIs stay deferred).
+Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer — a simple Blockchair-style **block viewer** (latest blocks → block detail) is scoped to **Phase 6** (US-063). Blockscout stays much later.
 
 ## Phase 2 funding gate (Phase 1d / US-016)
 

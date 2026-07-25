@@ -25,7 +25,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `scripts/` | Start/stop/deploy helpers; shared logic in `scripts/lib.sh` |
 | `contracts/` | Foundry project (`Guestbook` demo) |
 | `dapp/` | Static guestbook UI (`index.html`, `styles.css`, `app.js`, `config.js`) |
-| `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate) |
+| `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate); Phase 6 adds a Blockchair-style block viewer (US-063) — not Blockscout |
 | `deployments/` | Phase 1 checked-in addresses + local `.deployer` artifacts |
 | `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
 | `replica/` | Thin Phase 3 bridge: pack staging + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (Docker/runtime lives there) |
