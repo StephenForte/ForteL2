@@ -6,5 +6,8 @@
   "description": "Phase 1b withdrawal prove/finalize helpers (viem op-stack)",
   "dependencies": {
     "viem": "2.31.7"
+  },
+  "overrides": {
+    "ws": "8.21.0"
   }
 }
