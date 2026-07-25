@@ -51,9 +51,9 @@ This is a **learning rebuild**, not a production batcher. Target the specs; use 
 | **US-040** | Spec spike: frame/channel decode + one real L1 batch decoded | **Done** |
 | **US-041** | Singular-batch encode + zlib channel + frame pack (unit-tested) | **Done** |
 | **US-042** | Submit loop against **local** Anvil L2 (901); stock batcher stopped | **Done** |
-| **US-043** | Script switch: `USE_CUSTOM_BATCHER=1` for local start path | Planned |
-| **US-044** | Optional Sepolia demo window + documented revert to stock | Planned |
-| **US-045** | Operator write-up: what a batch contains; safe/unsafe lag; lessons | Planned |
+| **US-043** | Script switch: `USE_CUSTOM_BATCHER=1` for local start path | **Done** |
+| **US-044** | Optional Sepolia demo window + documented revert to stock | **Done** (documented + confirm gate; stock default) |
+| **US-045** | Operator write-up: what a batch contains; safe/unsafe lag; lessons | **Done** |
 
 ## User stories
 
@@ -89,25 +89,25 @@ This is a **learning rebuild**, not a production batcher. Target the specs; use 
 **Description:** As the operator, I want a flag to start the custom batcher instead of stock for local demos.
 
 **Acceptance Criteria:**
-- [ ] `USE_CUSTOM_BATCHER=1 ./scripts/05-start-batcher.sh` (or sibling script) starts `batcher` binary
-- [ ] Default path unchanged (stock `op-batcher`)
-- [ ] README Phase 4 section documents the switch + kill switch
-- [ ] No privileged `lib.sh` changes unless unavoidable and human-reviewed (CODEOWNERS)
+- [x] `USE_CUSTOM_BATCHER=1 ./scripts/05-start-batcher.sh` (or sibling script) starts `batcher` binary
+- [x] Default path unchanged (stock `op-batcher`)
+- [x] README Phase 4 section documents the switch + kill switch
+- [x] No privileged `lib.sh` changes unless unavoidable and human-reviewed (CODEOWNERS)
 
 ### US-044: Sepolia demo window (optional, careful)
 **Description:** As the operator, I may run the custom batcher briefly on Sepolia 852 after local success.
 
 **Acceptance Criteria:**
-- [ ] Local US-042 green first
-- [ ] Credit-budget poll/channel defaults respected (do not spam QuickNode)
-- [ ] Documented max runtime / stop procedure; revert to `05-start-batcher-sepolia.sh`
-- [ ] Replica continues deriving (L1 data still valid); no genesis pack required
-- [ ] If unsafe: abort and leave stock batcher as default forever for Sepolia until fixed
+- [x] Local US-042 green first
+- [x] Credit-budget poll/channel defaults respected (do not spam QuickNode)
+- [x] Documented max runtime / stop procedure; revert to `05-start-batcher-sepolia.sh`
+- [x] Replica continues deriving (L1 data still valid); no genesis pack required
+- [x] If unsafe: abort and leave stock batcher as default forever for Sepolia until fixed
 
 ### US-045: Learning write-up
 **Acceptance Criteria:**
-- [ ] ~1 page in README or `tasks/spike-phase-4-batcher.md`: batch anatomy, why safe lags unsafe, what breaks if batcher stops
-- [ ] Phase 4 status updated in learning-chain PRD when US-042 (or US-044) accepted
+- [x] ~1 page in README or `tasks/spike-phase-4-batcher.md`: batch anatomy, why safe lags unsafe, what breaks if batcher stops
+- [x] Phase 4 status updated in learning-chain PRD when US-042 (or US-044) accepted
 
 ## Success metrics
 

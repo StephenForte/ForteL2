@@ -35,7 +35,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap; no redeploy) | ✅ Done |
 | **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
-| **4** | **Reimplement the batcher** from scratch; swap out op-batcher | In progress — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/) |
+| **4** | **Reimplement the batcher** from scratch; swap out op-batcher | ✅ Done — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/); `USE_CUSTOM_BATCHER=1` opt-in |
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | Planned |
 | **6** | **Reimplement the derivation pipeline** — the deepest rebuild | Planned |
 | **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
@@ -293,6 +293,24 @@ Ran on this chain (2026-07-18): kill `op-batcher` only, leave sequencer + Anvil 
 | On restart | Batcher immediately closed a **catch-up channel** covering the backlog (~164 L2 blocks, ~12KB compressed calldata, gas ~498k vs normal ~41k). Nonce resumed climbing (49 → 57 in ~90s). **Safe L2 climbed** toward the tip (296 → 496) as frames landed and op-node derived them. |
 
 Takeaway: stopping the batcher does **not** stop the sequencer; it only pauses L1 data availability. Restart recovers by posting a larger backlog batch, then resumes steady-state cadence.
+
+### Phase 4 — custom batcher (opt-in)
+
+Learning rebuild under [`batcher/`](batcher/). Stock `op-batcher` stays the default.
+
+```bash
+# Local demo
+USE_CUSTOM_BATCHER=1 ./scripts/05-start-batcher.sh
+# Kill switch
+kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
+./scripts/05-start-batcher.sh
+
+# Optional Sepolia window (~15 min max) — requires explicit confirm
+FORTEL2_ENV=.env.sepolia USE_CUSTOM_BATCHER=1 CONFIRM_CUSTOM_BATCHER_SEPOLIA=1 \
+  ./scripts/05-start-batcher-sepolia.sh
+```
+
+Wire-format notes and safe/unsafe lag: [`tasks/spike-phase-4-batcher.md`](tasks/spike-phase-4-batcher.md) (US-045). Operator switch details: [`batcher/README.md`](batcher/README.md).
 
 Reproduce:
 

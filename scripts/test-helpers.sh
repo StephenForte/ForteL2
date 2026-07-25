@@ -381,6 +381,16 @@ else
   echo "FAIL Sepolia start scripts must keep credit-budget env defaults" >&2
   fail=1
 fi
+# Phase 4: custom batcher is opt-in; stock path remains default; Sepolia needs confirm gate.
+if grep -q 'USE_CUSTOM_BATCHER' "$SCRIPT_DIR/05-start-batcher.sh" \
+  && grep -q 'fortel2-batcher' "$SCRIPT_DIR/05-start-batcher.sh" \
+  && grep -q 'CONFIRM_CUSTOM_BATCHER_SEPOLIA' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'USE_CUSTOM_BATCHER' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  echo "PASS Phase 4 USE_CUSTOM_BATCHER switch (local + Sepolia confirm gate)"
+else
+  echo "FAIL 05-start-batcher*.sh must support USE_CUSTOM_BATCHER with Sepolia confirm gate" >&2
+  fail=1
+fi
 # Overnight sleep/wake helper for metered Sepolia / QuickNode.
 if [[ -x "$SCRIPT_DIR/dev-sleep.sh" ]] \
   && grep -q 'cmd_sleep' "$SCRIPT_DIR/dev-sleep.sh" \

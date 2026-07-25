@@ -71,6 +71,43 @@ notes=Decoded from cast tx input (supermini live stack). batcher/ CLI not yet on
 - Live local Anvil: stock batcher stopped; custom `-once` posted L2 17..22; **safe 16→22** within wait window; stock `05-start-batcher.sh` resumes afterward.
 - Side fix: local `02-deploy-contracts.sh` now sets `faultGameClockExtension` (same constraint as Sepolia) so fresh `reset`/`start-all` works with current op-deployer.
 
-## Next
+## US-043 / US-044 (done)
 
-US-043 (`USE_CUSTOM_BATCHER=1` local start path).  
+- Local: `USE_CUSTOM_BATCHER=1 ./scripts/05-start-batcher.sh` builds `$BIN_DIR/fortel2-batcher` and starts it under pid name `op-batcher` (stop-all compatible). Default path unchanged.
+- Sepolia: same flag **plus** `CONFIRM_CUSTOM_BATCHER_SEPOLIA=1`; poll defaults to credit-budget **12s**. Documented max ~15 min + revert to stock.
+- No `lib.sh` `start_bg`/`stop_bg` changes.
+
+## US-045 — What a batch is (operator write-up)
+
+### Anatomy (calldata path we rebuilt)
+
+1. **L2 block** (sequencer) includes an L1-info deposit plus optional user txs.
+2. **Singular batch** = type `0x00` + RLP(`[parent_hash, epoch_number, epoch_hash, timestamp, user_txs]`). Deposit txs are stripped; epoch comes from the L1-info deposit.
+3. **Channel** = zlib over a concatenation of RLP(typed-batch-bytes). Local ForteL2 uses **raw zlib** (no Fjord channel-version prefix).
+4. **Frames** slice the channel (`channel_id`, frame number, data, `is_last`).
+5. **Batcher tx** = version byte `0` + frames, sent to the **Batch Inbox** from the SystemConfig batcher EOA.
+
+Span batches (type `1`) appear on the wire from stock; our learning builder submits **singular only**, which op-node accepted on local 901.
+
+### Why safe lags unsafe
+
+- **Unsafe** = tip the sequencer has built (local EL).
+- **Safe** = tip that can be **derived from L1** batch data.
+- Until a channel covering those L2 blocks is posted and included on L1, and op-node derives it, safe stays behind. That lag is normal; a healthy batcher keeps it bounded.
+
+### What breaks if the batcher stops
+
+- Sequencer keeps producing **unsafe** blocks.
+- **Safe** freezes → withdrawals that need a safe/finalized view stall; replicas that only follow L1 also stop advancing.
+- Restarting a correct batcher (stock or custom) posts the gap; derivation catches up. Bad channels are dropped by derivation rules — prefer abort + stock over forcing through.
+
+### Lessons from Phase 4
+
+- Spec-first decode (US-040) beat guessing wire format.
+- Matching live compression (raw zlib) mattered more than implementing every fork day one.
+- Duplicate submission is mostly “remember last submitted / start from safe.”
+- Script integration is an env flag; Sepolia stays confirm-gated because L1 gas + QuickNode credits are real.
+
+## Phase 4 complete
+
+US-040 → US-045 accepted for the learning rebuild. Stock remains default; custom is opt-in.
