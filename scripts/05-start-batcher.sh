@@ -28,6 +28,14 @@ wait_for_rpc "$L1_RPC_URL" "L1"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
 if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
+  # start_bg returns 0 when the shared op-batcher pid is already alive — refuse so we
+  # never claim fortel2-batcher started while stock (or a prior custom) still holds the pid.
+  if is_running op-batcher; then
+    echo "ERROR: op-batcher already running (pid $(cat "$PID_DIR/op-batcher.pid"))." >&2
+    echo "  Stop it before starting the custom batcher:" >&2
+    echo "  kill \"\$(cat \"$DATA_DIR/pids/op-batcher.pid\")\" && rm -f \"$DATA_DIR/pids/op-batcher.pid\"" >&2
+    exit 1
+  fi
   require_bin go
   CUSTOM_BATCHER_BIN="${CUSTOM_BATCHER_BIN:-$BIN_DIR/fortel2-batcher}"
   mkdir -p "$(dirname "$CUSTOM_BATCHER_BIN")"
@@ -42,6 +50,7 @@ if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
     -rollup-json "$ROLLUP_JSON" \
     -poll "$CUSTOM_POLL" \
     -max-blocks "${CUSTOM_BATCHER_MAX_BLOCKS:-6}" \
+    -confirmations "${CUSTOM_BATCHER_CONFIRMATIONS:-1}" \
     -wait-safe=0
   echo "Custom batcher started (USE_CUSTOM_BATCHER=1, poll=${CUSTOM_POLL})."
   echo "Kill switch: stop this process, then USE_CUSTOM_BATCHER=0 ./scripts/05-start-batcher.sh"

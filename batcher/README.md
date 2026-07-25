@@ -63,7 +63,7 @@ Custom (learning demo):
 USE_CUSTOM_BATCHER=1 ./scripts/05-start-batcher.sh
 ```
 
-Builds `$BIN_DIR/fortel2-batcher` from `cmd/submit-loop` and starts it under the same `op-batcher` pid name so `./scripts/stop-all.sh` still works. No `lib.sh` `start_bg`/`stop_bg` edits.
+Builds `$BIN_DIR/fortel2-batcher` from `cmd/submit-loop` and starts it under the same `op-batcher` pid name so `./scripts/stop-all.sh` still works. No `lib.sh` `start_bg`/`stop_bg` edits. Refuses to start if that pid is already alive (avoids a false “started” while stock still holds the slot).
 
 Kill switch back to stock:
 
@@ -104,10 +104,12 @@ Only after local US-042 is green. Stock remains the default forever unless you e
 # 1) Stop stock Sepolia batcher only
 kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
 
-# 2) Start custom (credit-budget poll default 12s — do not override lower without reason)
+# 2) Start custom (credit-budget poll default 12s; L1 confirmations default 2 like stock)
 FORTEL2_ENV=.env.sepolia \
   USE_CUSTOM_BATCHER=1 CONFIRM_CUSTOM_BATCHER_SEPOLIA=1 \
   ./scripts/05-start-batcher-sepolia.sh
+# submit-loop waits for SEPOLIA_BATCHER_NUM_CONFIRMATIONS before advancing lastSubmitted
+# so a single receipt that later reorgs away is not treated as submitted.
 
 # 3) Max ~15 minutes. Watch safe/unsafe via cast rpc optimism_syncStatus.
 

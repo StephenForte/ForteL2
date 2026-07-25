@@ -40,7 +40,11 @@ func main() {
 	maxBlocks := flag.Int("max-blocks", 6, "max L2 blocks per channel")
 	once := flag.Bool("once", false, "submit one channel (if work) then exit")
 	waitSafe := flag.Duration("wait-safe", 60*time.Second, "after submit, wait this long for safe head to advance (0=skip)")
+	confirmations := flag.Uint64("confirmations", 1, "L1 confirmations required before advancing lastSubmitted (matches stock num-confirmations)")
 	flag.Parse()
+	if *confirmations == 0 {
+		*confirmations = 1
+	}
 
 	keyHex := strings.TrimSpace(*keyFlag)
 	if keyHex == "" {
@@ -75,8 +79,8 @@ func main() {
 	}
 	defer l1.Close()
 
-	fmt.Printf("custom batcher starting from=%s inbox=%s max_blocks=%d once=%v\n",
-		from.Hex(), inbox.Hex(), *maxBlocks, *once)
+	fmt.Printf("custom batcher starting from=%s inbox=%s max_blocks=%d confirmations=%d once=%v\n",
+		from.Hex(), inbox.Hex(), *maxBlocks, *confirmations, *once)
 	fmt.Println("duplicate safeguard: track lastSubmitted; never re-submit <= that L2 number; on restart begin at safe+1")
 
 	var lastSubmitted uint64
@@ -142,15 +146,21 @@ func main() {
 			continue
 		}
 		fmt.Printf("l1_tx=%s\n", txHash.Hex())
-		if err := waitReceipt(ctx, l1, txHash, 30*time.Second); err != nil {
-			fmt.Fprintf(os.Stderr, "receipt: %v\n", err)
+		// Do not advance lastSubmitted until the receipt is deep enough — a single
+		// inclusion can reorg away on Sepolia; stock op-batcher uses num-confirmations.
+		receiptTimeout := 90 * time.Second
+		if *confirmations > 1 {
+			receiptTimeout = 3 * time.Minute
+		}
+		if err := waitReceiptConfirmed(ctx, l1, txHash, *confirmations, receiptTimeout); err != nil {
+			fmt.Fprintf(os.Stderr, "receipt/confirmations: %v\n", err)
 			if sleepCtx(ctx, *poll) != nil {
 				return
 			}
 			continue
 		}
 		lastSubmitted = toBlock
-		fmt.Printf("submitted ok lastSubmitted=%d\n", lastSubmitted)
+		fmt.Printf("submitted ok lastSubmitted=%d confirmations=%d\n", lastSubmitted, *confirmations)
 
 		if *waitSafe > 0 {
 			deadline := time.Now().Add(*waitSafe)
@@ -280,19 +290,54 @@ func sendBatcherTx(ctx context.Context, l1 *ethclient.Client, key *ecdsa.Private
 	return signed.Hash(), nil
 }
 
-func waitReceipt(ctx context.Context, l1 *ethclient.Client, hash common.Hash, timeout time.Duration) error {
+// receiptConfirmed reports whether an L1 head gives `confirmations` depth to a
+// receipt mined at receiptBlock (confirmations=1 ⇒ receipt alone is enough).
+func receiptConfirmed(head, receiptBlock, confirmations uint64) bool {
+	if confirmations == 0 {
+		confirmations = 1
+	}
+	return head+1 >= receiptBlock+confirmations
+}
+
+func waitReceiptConfirmed(ctx context.Context, l1 *ethclient.Client, hash common.Hash, confirmations uint64, timeout time.Duration) error {
+	if confirmations == 0 {
+		confirmations = 1
+	}
 	deadline := time.Now().Add(timeout)
+	var receiptBlock uint64
+	haveReceipt := false
 	for time.Now().Before(deadline) {
 		rcpt, err := l1.TransactionReceipt(ctx, hash)
-		if err == nil && rcpt != nil {
-			if rcpt.Status != types.ReceiptStatusSuccessful {
-				return fmt.Errorf("tx failed status=%d", rcpt.Status)
+		if err != nil || rcpt == nil {
+			if haveReceipt {
+				return fmt.Errorf("receipt for %s disappeared after reorg", hash.Hex())
 			}
+			if sleepCtx(ctx, 500*time.Millisecond) != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		if rcpt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("tx failed status=%d", rcpt.Status)
+		}
+		receiptBlock = rcpt.BlockNumber.Uint64()
+		haveReceipt = true
+		head, err := l1.HeaderByNumber(ctx, nil)
+		if err != nil {
+			if sleepCtx(ctx, 500*time.Millisecond) != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		if receiptConfirmed(head.Number.Uint64(), receiptBlock, confirmations) {
 			return nil
 		}
 		if sleepCtx(ctx, 500*time.Millisecond) != nil {
 			return ctx.Err()
 		}
 	}
-	return fmt.Errorf("timeout waiting for %s", hash.Hex())
+	if !haveReceipt {
+		return fmt.Errorf("timeout waiting for receipt %s", hash.Hex())
+	}
+	return fmt.Errorf("timeout waiting for %d confirmations of %s (receipt block %d)", confirmations, hash.Hex(), receiptBlock)
 }

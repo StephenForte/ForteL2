@@ -382,10 +382,14 @@ else
   fail=1
 fi
 # Phase 4: custom batcher is opt-in; stock path remains default; Sepolia needs confirm gate.
+# Refuse start when shared op-batcher pid is alive; Sepolia passes L1 confirmations.
 if grep -q 'USE_CUSTOM_BATCHER' "$SCRIPT_DIR/05-start-batcher.sh" \
   && grep -q 'fortel2-batcher' "$SCRIPT_DIR/05-start-batcher.sh" \
+  && grep -q 'is_running op-batcher' "$SCRIPT_DIR/05-start-batcher.sh" \
   && grep -q 'CONFIRM_CUSTOM_BATCHER_SEPOLIA' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
-  && grep -q 'USE_CUSTOM_BATCHER' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  && grep -q 'USE_CUSTOM_BATCHER' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'is_running op-batcher' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q -- '-confirmations' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
   echo "PASS Phase 4 USE_CUSTOM_BATCHER switch (local + Sepolia confirm gate)"
 else
   echo "FAIL 05-start-batcher*.sh must support USE_CUSTOM_BATCHER with Sepolia confirm gate" >&2
