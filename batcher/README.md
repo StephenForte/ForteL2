@@ -12,13 +12,15 @@ Minimal OP Stack batch submitter rebuild. Specs:
 | Story | Status |
 |---|---|
 | US-040 frame decode + CLI | Done |
-| US-041 singular batch + zlib channel + frame split | Done (unit tests + live local fixture) |
-| US-042 local submit loop | **Done** (live: safe 16→22 on Anvil 901) |
-| US-043+ script switch / Sepolia demo | Not started |
+| US-041 singular batch + zlib channel + frame split | Done |
+| US-042 local submit loop | Done (live: safe 16→22 on Anvil 901) |
+| US-043 `USE_CUSTOM_BATCHER=1` local start | Done |
+| US-044 Sepolia demo window (optional) | Documented (confirm gate; stock remains default) |
+| US-045 learning write-up | Done — see spike notes |
 
 **Channel encoding note (local ForteL2):** stock batches use **raw zlib** (no Fjord channel-version prefix). Span batches may appear on the wire; our builder emits **singular** batches first.
 
-Stock `op-batcher` remains the default via `scripts/05-start-batcher*.sh`. Do not stop Sepolia stock batcher until US-042 is green on local Anvil.
+Stock `op-batcher` remains the **default** via `scripts/05-start-batcher*.sh`.
 
 ## Layout
 
@@ -26,7 +28,7 @@ Stock `op-batcher` remains the default via `scripts/05-start-batcher*.sh`. Do no
 batcher/
   frame.go / singular.go / channel.go / l1info.go / block.go
   cmd/decode-l1/     # fetch one L1 tx and print frame metadata
-  cmd/submit-loop/   # US-042: poll syncStatus → build → post to Batch Inbox
+  cmd/submit-loop/   # poll syncStatus → build → post to Batch Inbox
 ```
 
 ## Tests
@@ -36,8 +38,6 @@ cd batcher && go test ./...
 ```
 
 ## Decode a real L1 batcher tx
-
-With the local or Sepolia stack up, find a tx from the batcher EOA to the Batch Inbox (`rollup.json` → `batch_inbox_address`), then:
 
 ```bash
 cd batcher
@@ -49,15 +49,39 @@ go run ./cmd/decode-l1 \
 
 Never paste private keys into this tool — it is read-only.
 
-## US-042: local submit (stock batcher stopped)
+## US-043: local switch + kill switch
+
+Default (unchanged):
+
+```bash
+./scripts/05-start-batcher.sh
+```
+
+Custom (learning demo):
+
+```bash
+USE_CUSTOM_BATCHER=1 ./scripts/05-start-batcher.sh
+```
+
+Builds `$BIN_DIR/fortel2-batcher` from `cmd/submit-loop` and starts it under the same `op-batcher` pid name so `./scripts/stop-all.sh` still works. No `lib.sh` `start_bg`/`stop_bg` edits. Refuses to start if that pid is already alive (avoids a false “started” while stock still holds the slot).
+
+Kill switch back to stock:
+
+```bash
+kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
+./scripts/05-start-batcher.sh   # USE_CUSTOM_BATCHER unset/0
+```
+
+## US-042: one-shot submit (manual)
 
 1. Start local Anvil stack (`./scripts/start-all.sh`), confirm chain **901**.
-2. Stop stock batcher only (keep sequencer/proposer):
+2. Stop stock batcher only:
 
 ```bash
 kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
 ```
-3. Run one channel:
+
+3. One channel:
 
 ```bash
 set -a && source .env && set +a
@@ -68,14 +92,37 @@ go run ./cmd/submit-loop \
   -once -wait-safe=90s
 ```
 
-Key comes from `BATCHER_PRIVATE_KEY` in `.env` (Foundry throwaway on chain 901 only).
+**Duplicate safeguards:** in-memory `lastSubmitted` L2 number; never re-post `<= lastSubmitted`; on restart initialize from `safe` head.
 
-**Duplicate safeguards:** in-memory `lastSubmitted` L2 number; never re-post `<= lastSubmitted`; on restart initialize from `safe` head so already-derived blocks are skipped.
+**Recovery:** restart stock with `./scripts/05-start-batcher.sh`.
 
-**Recovery:** if the custom batcher misbehaves, stop it and restart stock with `./scripts/05-start-batcher.sh`. Safe head should resume once valid channels land on L1.
+## US-044: Sepolia demo window (optional)
+
+Only after local US-042 is green. Stock remains the default forever unless you explicitly confirm.
+
+```bash
+# 1) Stop stock Sepolia batcher only
+kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
+
+# 2) Start custom (credit-budget poll default 12s; L1 confirmations default 2 like stock)
+FORTEL2_ENV=.env.sepolia \
+  USE_CUSTOM_BATCHER=1 CONFIRM_CUSTOM_BATCHER_SEPOLIA=1 \
+  ./scripts/05-start-batcher-sepolia.sh
+# submit-loop waits for SEPOLIA_BATCHER_NUM_CONFIRMATIONS before advancing lastSubmitted
+# so a single receipt that later reorgs away is not treated as submitted.
+
+# 3) Max ~15 minutes. Watch safe/unsafe via cast rpc optimism_syncStatus.
+
+# 4) Revert immediately if anything looks wrong
+kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
+FORTEL2_ENV=.env.sepolia ./scripts/05-start-batcher-sepolia.sh
+```
+
+- Replica keeps deriving from L1 calldata — no genesis pack / Phase 7 redeploy.
+- If unsafe: abort, leave stock as default, fix locally before another attempt.
 
 ## Constraints
 
 - Calldata DA only (no blobs) for Phase 4 v1
 - No Sepolia redeploy
-- Kill switch: stock `op-batcher` scripts unchanged
+- Kill switch: unset `USE_CUSTOM_BATCHER` and run stock start scripts
