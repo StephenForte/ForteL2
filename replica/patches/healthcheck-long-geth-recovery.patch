@@ -1,0 +1,237 @@
+From 42f0950a7fca7f4a905c39a16e4eab28786df819 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sat, 25 Jul 2026 22:06:09 +0000
+Subject: [PATCH] fix: keep Docker healthcheck starting until geth IPC is ready
+
+Crash recovery on a large persistent /data can exceed the fixed 5m
+HEALTHCHECK start-period. Exit 0 until entrypoint marks EL ready so
+schedulers do not restart the container mid-recovery; require attach
+afterward.
+---
+ Dockerfile               |  8 +++-
+ README.md                |  2 +
+ entrypoint.sh            |  6 +++
+ healthcheck.sh           | 20 +++++++++
+ tests/test_entrypoint.py | 91 +++++++++++++++++++++++++++++++++++++++-
+ 5 files changed, 123 insertions(+), 4 deletions(-)
+ create mode 100755 healthcheck.sh
+
+diff --git a/Dockerfile b/Dockerfile
+index 7994e3b..762c71c 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -22,9 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
+ COPY --from=geth /usr/local/bin/geth /usr/local/bin/geth
+ COPY --from=node /usr/local/bin/op-node /usr/local/bin/op-node
+ COPY entrypoint.sh /entrypoint.sh
++COPY healthcheck.sh /healthcheck.sh
+ COPY config/genesis.json /config/genesis.json
+ COPY config/rollup.json /config/rollup.json
+-RUN chmod +x /entrypoint.sh /usr/local/bin/geth /usr/local/bin/op-node
++RUN chmod +x /entrypoint.sh /healthcheck.sh /usr/local/bin/geth /usr/local/bin/op-node
+ 
+ # Render Web Service sets PORT; default 8545 for local / private service.
+ ENV DATA_DIR=/data \
+@@ -41,6 +42,9 @@ VOLUME ["/data"]
+ EXPOSE 8545 9545
+ 
+ USER fortel2
++# start-period is a floor for short boots; healthcheck.sh stays "starting"
++# (exit 0) until entrypoint writes FORTEL2_EL_READY_FILE after IPC is up, so
++# crash recovery longer than 5m does not flap unhealthy / restart.
+ HEALTHCHECK --interval=30s --timeout=10s --start-period=5m --retries=3 \
+-  CMD geth attach --exec "eth.blockNumber" "$DATA_DIR/geth.ipc" >/dev/null 2>&1 || exit 1
++  CMD ["/healthcheck.sh"]
+ ENTRYPOINT ["/entrypoint.sh"]
+diff --git a/README.md b/README.md
+index e0d4d2c..a465bfd 100644
+--- a/README.md
++++ b/README.md
+@@ -48,6 +48,8 @@ cast rpc optimism_syncStatus --rpc-url http://127.0.0.1:9547 | jq '{safe:.safe_l
+ 
+ **Private Service tip:** you cannot flip Private → Web on an existing service. Compare sync via **Shell** (`geth attach --exec "eth.blockNumber" /data/geth.ipc`) or add a temporary reverse-proxy Web service on Render’s private network. Do not leave an open public `eth_sendRawTransaction` surface up.
+ 
++**Health check / long recovery:** the image `HEALTHCHECK` stays in a starting-success state until `entrypoint.sh` marks op-geth IPC ready (`/tmp/fortel2-el-ready`). Large or crash-recovering `/data` volumes can take longer than Docker’s 5m `start-period`; this avoids flapping unhealthy and restarting mid-recovery. After readiness, probes require a successful `geth attach`.
++
+ **QuickNode:** Prefer a dedicated endpoint token for this replica. Render outbound IPs are CIDR ranges (not stably allowlistable on QuickNode’s per-IP whitelist) — keep the service Private and rotate the URL if leaked.
+ 
+ If you change genesis/rollup (ForteL2 Phase 2b redeploy), **wipe `/data`** (or recreate the disk) after deploying the new image so the replica does not keep the old L1 history.
+diff --git a/entrypoint.sh b/entrypoint.sh
+index 6294aaa..755224b 100755
+--- a/entrypoint.sh
++++ b/entrypoint.sh
+@@ -19,6 +19,10 @@ GETH_READY_TIMEOUT_SECS="${GETH_READY_TIMEOUT_SECS:-0}"
+ GETH_CACHE_MB="${GETH_CACHE_MB:-256}"
+ # How often to check that both long-running processes are alive.
+ PROCESS_POLL_INTERVAL_SECS="${PROCESS_POLL_INTERVAL_SECS:-1}"
++# Marker for Docker HEALTHCHECK: absent = still starting (tolerate long recovery).
++# Keep off the persistent volume so a prior run cannot leave a stale ready flag.
++FORTEL2_EL_READY_FILE="${FORTEL2_EL_READY_FILE:-/tmp/fortel2-el-ready}"
++rm -f "$FORTEL2_EL_READY_FILE"
+ 
+ case "$GETH_READY_TIMEOUT_SECS" in
+   ''|*[!0-9]*)
+@@ -131,6 +135,8 @@ if [ "$ready" -ne 1 ]; then
+   wait "$GETH_PID" 2>/dev/null || true
+   exit 1
+ fi
++# Signal HEALTHCHECK that fixed --start-period grace is no longer needed.
++: >"$FORTEL2_EL_READY_FILE"
+ echo "op-geth engine API ready after ${i}s"
+ 
+ # Credit-budget defaults for metered Sepolia RPC (QuickNode Build plan).
+diff --git a/healthcheck.sh b/healthcheck.sh
+new file mode 100755
+index 0000000..9e7fec4
+--- /dev/null
++++ b/healthcheck.sh
+@@ -0,0 +1,20 @@
++#!/bin/sh
++# Docker HEALTHCHECK for the single-container verifier.
++#
++# Entrypoint waits indefinitely (by default) for op-geth IPC during long
++# datadir open / crash recovery. Docker's --start-period is a fixed window, so
++# a naive attach-only check can mark the container unhealthy and trigger
++# restarts before recovery finishes. Until entrypoint records readiness, treat
++# probes as still-starting (exit 0). After that, require a live engine attach.
++set -eu
++
++DATA_DIR="${DATA_DIR:-/data}"
++# Ephemeral path (not on the persistent /data volume) so a previous run cannot
++# leave a stale "ready" marker across container recreation.
++READY_FILE="${FORTEL2_EL_READY_FILE:-/tmp/fortel2-el-ready}"
++
++if [ ! -f "$READY_FILE" ]; then
++  exit 0
++fi
++
++geth attach --exec "eth.blockNumber" "$DATA_DIR/geth.ipc" >/dev/null 2>&1 || exit 1
+diff --git a/tests/test_entrypoint.py b/tests/test_entrypoint.py
+index dfa4dbb..b143d2b 100644
+--- a/tests/test_entrypoint.py
++++ b/tests/test_entrypoint.py
+@@ -95,6 +95,7 @@ printf '%064d\n' 0
+ ''',
+             )
+             jwt_file = data_dir / "jwt.txt"
++            ready_file = data_dir / "fortel2-el-ready"
+             env = {
+                 **os.environ,
+                 "PATH": f"{bin_dir}:{os.environ['PATH']}",
+@@ -108,6 +109,8 @@ printf '%064d\n' 0
+                 # Always pin JWT into the temp tree so an inherited JWT_FILE
+                 # from the invoking shell/CI cannot escape the fixture.
+                 "JWT_FILE": str(jwt_file),
++                # Pin readiness marker off /tmp so tests can assert on it.
++                "FORTEL2_EL_READY_FILE": str(ready_file),
+             }
+             # Drop inherited JWT_SECRET so each test opts in explicitly;
+             # otherwise the openssl "unset" branch is never exercised.
+@@ -160,7 +163,13 @@ printf '%064d\n' 0
+         self.assertIn("missing", result.stderr)
+ 
+     def test_initializes_and_starts_both_clients_with_expected_options(self):
+-        result, log, data_dir, _ = self.run_entrypoint({"JWT_SECRET": "a" * 64})
++        def after(result, log, data_dir):
++            self.assertTrue((data_dir / "fortel2-el-ready").is_file())
++
++        result, log, data_dir, _ = self.run_entrypoint(
++            {"JWT_SECRET": "a" * 64},
++            after=after,
++        )
+         self.assertEqual(0, result.returncode, result.stderr)
+         self.assertIn("geth init --datadir=", log)
+         self.assertIn("--cache=256", log)
+@@ -303,10 +312,88 @@ printf '%064d\n' 0
+         self.assertIn("op-node ", log)
+ 
+     def test_times_out_when_ipc_attach_never_succeeds(self):
+-        result, _, _, _ = self.run_entrypoint({"GETH_ATTACH_EXIT": "1"})
++        def after(result, log, data_dir):
++            self.assertFalse((data_dir / "fortel2-el-ready").exists())
++
++        result, _, _, _ = self.run_entrypoint(
++            {"GETH_ATTACH_EXIT": "1"},
++            after=after,
++        )
++        self.assertEqual(1, result.returncode)
++        self.assertIn("timed out waiting", result.stderr)
++
++    def test_clears_stale_ready_marker_before_wait(self):
++        def prepare(data_dir, _env):
++            marker = data_dir / "fortel2-el-ready"
++            marker.write_text("stale")
++
++        def after(result, log, data_dir):
++            # Timeout path must not leave (or recreate) a ready marker.
++            self.assertFalse((data_dir / "fortel2-el-ready").exists())
++
++        result, _, _, _ = self.run_entrypoint(
++            {"GETH_ATTACH_EXIT": "1"},
++            prepare=prepare,
++            after=after,
++        )
+         self.assertEqual(1, result.returncode)
+         self.assertIn("timed out waiting", result.stderr)
+ 
+ 
++class HealthcheckTests(unittest.TestCase):
++    def run_healthcheck(self, env):
++        return subprocess.run(
++            ["/bin/sh", str(ROOT / "healthcheck.sh")],
++            env={**os.environ, **env},
++            text=True,
++            capture_output=True,
++            timeout=5,
++        )
++
++    def test_succeeds_while_entrypoint_still_starting(self):
++        with tempfile.TemporaryDirectory() as temp:
++            data_dir = Path(temp)
++            ready = data_dir / "missing-ready"
++            result = self.run_healthcheck(
++                {
++                    "DATA_DIR": str(data_dir),
++                    "FORTEL2_EL_READY_FILE": str(ready),
++                },
++            )
++            self.assertEqual(0, result.returncode, result.stderr)
++
++    def test_requires_attach_after_ready_marker(self):
++        with tempfile.TemporaryDirectory() as temp:
++            root = Path(temp)
++            data_dir = root / "data"
++            bin_dir = root / "bin"
++            data_dir.mkdir()
++            bin_dir.mkdir()
++            ready = data_dir / "ready"
++            ready.write_text("")
++            # Fail attach → unhealthy once marked ready.
++            geth = bin_dir / "geth"
++            geth.write_text("#!/bin/sh\nexit 1\n")
++            geth.chmod(0o755)
++            result = self.run_healthcheck(
++                {
++                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
++                    "DATA_DIR": str(data_dir),
++                    "FORTEL2_EL_READY_FILE": str(ready),
++                },
++            )
++            self.assertEqual(1, result.returncode)
++
++            geth.write_text("#!/bin/sh\nexit 0\n")
++            result = self.run_healthcheck(
++                {
++                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
++                    "DATA_DIR": str(data_dir),
++                    "FORTEL2_EL_READY_FILE": str(ready),
++                },
++            )
++            self.assertEqual(0, result.returncode, result.stderr)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+-- 
+2.43.0
+
