@@ -50,7 +50,7 @@ This is a **learning rebuild**, not a production batcher. Target the specs; use 
 |---|---|---|
 | **US-040** | Spec spike: frame/channel decode + one real L1 batch decoded | **Done** |
 | **US-041** | Singular-batch encode + zlib channel + frame pack (unit-tested) | **Done** |
-| **US-042** | Submit loop against **local** Anvil L2 (901); stock batcher stopped | Planned |
+| **US-042** | Submit loop against **local** Anvil L2 (901); stock batcher stopped | **Done** |
 | **US-043** | Script switch: `USE_CUSTOM_BATCHER=1` for local start path | Planned |
 | **US-044** | Optional Sepolia demo window + documented revert to stock | Planned |
 | **US-045** | Operator write-up: what a batch contains; safe/unsafe lag; lessons | Planned |
@@ -80,10 +80,10 @@ This is a **learning rebuild**, not a production batcher. Target the specs; use 
 **Description:** As the operator, I want the custom batcher to post at least one channel to local Anvil L1 while stock `op-batcher` is stopped, and see `op-node` advance safe head.
 
 **Acceptance Criteria:**
-- [ ] Binary reads L2 EL + rollup RPC (`optimism_syncStatus` or equivalent), L1 RPC, rollup.json inbox, batcher key from env (not committed)
-- [ ] With stock batcher stopped: custom batcher submits; safe L2 head moves forward within a documented window
-- [ ] Duplicate-submission safeguards documented (at least: track last submitted L2 block)
-- [ ] Failure leaves chain recoverable by restarting stock `op-batcher`
+- [x] Binary reads L2 EL + rollup RPC (`optimism_syncStatus` or equivalent), L1 RPC, rollup.json inbox, batcher key from env (not committed) — `batcher/cmd/submit-loop`
+- [x] With stock batcher stopped: custom batcher submits; safe L2 head moves forward within a documented window — live 2026-07-24: safe 16→22 after `-once`
+- [x] Duplicate-submission safeguards documented (at least: track last submitted L2 block) — see `batcher/README.md`
+- [x] Failure leaves chain recoverable by restarting stock `op-batcher`
 
 ### US-043: Script integration (local)
 **Description:** As the operator, I want a flag to start the custom batcher instead of stock for local demos.

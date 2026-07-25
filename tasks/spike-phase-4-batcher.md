@@ -64,6 +64,13 @@ notes=Decoded from cast tx input (supermini live stack). batcher/ CLI not yet on
 - Live fixture decompresses to **6** batches; first is singular (empty txs OK).
 - Span batch encode **deferred** until US-042 proves singular-only is rejected.
 
-## Next (US-042)
+## US-042 notes (done 2026-07-24)
 
-Submit loop on local Anvil with stock `op-batcher` stopped; watch safe head advance.  
+- `cmd/submit-loop` polls `optimism_syncStatus`, builds singular zlib channels, posts version-0 calldata to Batch Inbox.
+- Duplicate safeguard: in-memory `lastSubmitted`; init from `safe` on start.
+- Live local Anvil: stock batcher stopped; custom `-once` posted L2 17..22; **safe 16→22** within wait window; stock `05-start-batcher.sh` resumes afterward.
+- Side fix: local `02-deploy-contracts.sh` now sets `faultGameClockExtension` (same constraint as Sepolia) so fresh `reset`/`start-all` works with current op-deployer.
+
+## Next
+
+US-043 (`USE_CUSTOM_BATCHER=1` local start path).  

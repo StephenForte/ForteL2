@@ -29,10 +29,17 @@ op-deployer init \
 # Phase 1b (US-011): shorten portal / dispute-game delays for local prove→finalize.
 # Mainnet defaults are 7d / 3.5d. Some op-deployer builds ignore these (optimism#14869);
 # scripts/withdraw-finalize.sh can Anvil time-warp as a fallback — still name the knobs in README.
+# Must keep maxClockDuration >= clockExtension (DeployImplementations check).
 PROOF_MATURITY_DELAY_SECONDS="${PROOF_MATURITY_DELAY_SECONDS:-12}"
 DISPUTE_GAME_FINALITY_DELAY_SECONDS="${DISPUTE_GAME_FINALITY_DELAY_SECONDS:-6}"
+FAULT_GAME_CLOCK_EXTENSION="${FAULT_GAME_CLOCK_EXTENSION:-5}"
 FAULT_GAME_MAX_CLOCK_DURATION="${FAULT_GAME_MAX_CLOCK_DURATION:-10}"
 FAULT_GAME_WITHDRAWAL_DELAY="${FAULT_GAME_WITHDRAWAL_DELAY:-1}"
+
+if (( FAULT_GAME_MAX_CLOCK_DURATION < FAULT_GAME_CLOCK_EXTENSION )); then
+  echo "ERROR: FAULT_GAME_MAX_CLOCK_DURATION ($FAULT_GAME_MAX_CLOCK_DURATION) must be >= FAULT_GAME_CLOCK_EXTENSION ($FAULT_GAME_CLOCK_EXTENSION)" >&2
+  exit 1
+fi
 
 cat > "$DEPLOY_DIR/intent.toml" << EOF
 configType = "custom"
@@ -45,6 +52,7 @@ useInterop = false
 [globalDeployOverrides]
   proofMaturityDelaySeconds = ${PROOF_MATURITY_DELAY_SECONDS}
   disputeGameFinalityDelaySeconds = ${DISPUTE_GAME_FINALITY_DELAY_SECONDS}
+  faultGameClockExtension = ${FAULT_GAME_CLOCK_EXTENSION}
   faultGameMaxClockDuration = ${FAULT_GAME_MAX_CLOCK_DURATION}
   faultGameWithdrawalDelay = ${FAULT_GAME_WITHDRAWAL_DELAY}
 
@@ -77,7 +85,7 @@ useInterop = false
     challenger = "${CHALLENGER_ADDRESS}"
 EOF
 
-echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY}"
+echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameClockExtension=${FAULT_GAME_CLOCK_EXTENSION} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY}"
 
 echo "Applying op-deployer intent to live L1 at $L1_RPC_URL ..."
 op-deployer apply \

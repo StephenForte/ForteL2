@@ -13,7 +13,8 @@ Minimal OP Stack batch submitter rebuild. Specs:
 |---|---|
 | US-040 frame decode + CLI | Done |
 | US-041 singular batch + zlib channel + frame split | Done (unit tests + live local fixture) |
-| US-042+ submit loop | Not started |
+| US-042 local submit loop | **Done** (live: safe 16→22 on Anvil 901) |
+| US-043+ script switch / Sepolia demo | Not started |
 
 **Channel encoding note (local ForteL2):** stock batches use **raw zlib** (no Fjord channel-version prefix). Span batches may appear on the wire; our builder emits **singular** batches first.
 
@@ -23,8 +24,9 @@ Stock `op-batcher` remains the default via `scripts/05-start-batcher*.sh`. Do no
 
 ```text
 batcher/
-  frame.go          # version-0 batcher tx + frame encode/decode
-  cmd/decode-l1/    # fetch one L1 tx and print frame metadata
+  frame.go / singular.go / channel.go / l1info.go / block.go
+  cmd/decode-l1/     # fetch one L1 tx and print frame metadata
+  cmd/submit-loop/   # US-042: poll syncStatus → build → post to Batch Inbox
 ```
 
 ## Tests
@@ -46,6 +48,31 @@ go run ./cmd/decode-l1 \
 ```
 
 Never paste private keys into this tool — it is read-only.
+
+## US-042: local submit (stock batcher stopped)
+
+1. Start local Anvil stack (`./scripts/start-all.sh`), confirm chain **901**.
+2. Stop stock batcher only (keep sequencer/proposer):
+
+```bash
+kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
+```
+3. Run one channel:
+
+```bash
+set -a && source .env && set +a
+cd batcher
+go run ./cmd/submit-loop \
+  -l1 "$L1_RPC_URL" -l2 "$L2_RPC_URL" -rollup "$L2_NODE_RPC_URL" \
+  -rollup-json "$DEPLOY_DIR/rollup.json" \
+  -once -wait-safe=90s
+```
+
+Key comes from `BATCHER_PRIVATE_KEY` in `.env` (Foundry throwaway on chain 901 only).
+
+**Duplicate safeguards:** in-memory `lastSubmitted` L2 number; never re-post `<= lastSubmitted`; on restart initialize from `safe` head so already-derived blocks are skipped.
+
+**Recovery:** if the custom batcher misbehaves, stop it and restart stock with `./scripts/05-start-batcher.sh`. Safe head should resume once valid channels land on L1.
 
 ## Constraints
 
