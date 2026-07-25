@@ -41,9 +41,18 @@ func main() {
 	once := flag.Bool("once", false, "submit one channel (if work) then exit")
 	waitSafe := flag.Duration("wait-safe", 60*time.Second, "after submit, wait this long for safe head to advance (0=skip)")
 	confirmations := flag.Uint64("confirmations", 1, "L1 confirmations required before advancing lastSubmitted (matches stock num-confirmations)")
+	receiptTimeoutFlag := flag.Duration("receipt-timeout", 0, "per-wait timeout for receipt+confirmations (0=auto: 90s, or 10m when confirmations>1)")
 	flag.Parse()
 	if *confirmations == 0 {
 		*confirmations = 1
+	}
+	receiptTimeout := *receiptTimeoutFlag
+	if receiptTimeout <= 0 {
+		receiptTimeout = 90 * time.Second
+		if *confirmations > 1 {
+			// Sepolia inclusion + confirmations often exceed Anvil waits.
+			receiptTimeout = 10 * time.Minute
+		}
 	}
 
 	keyHex := strings.TrimSpace(*keyFlag)
@@ -79,18 +88,58 @@ func main() {
 	}
 	defer l1.Close()
 
-	fmt.Printf("custom batcher starting from=%s inbox=%s max_blocks=%d confirmations=%d once=%v\n",
-		from.Hex(), inbox.Hex(), *maxBlocks, *confirmations, *once)
+	fmt.Printf("custom batcher starting from=%s inbox=%s max_blocks=%d confirmations=%d receipt_timeout=%s once=%v\n",
+		from.Hex(), inbox.Hex(), *maxBlocks, *confirmations, receiptTimeout, *once)
 	fmt.Println("duplicate safeguard: track lastSubmitted; never re-submit <= that L2 number; on restart begin at safe+1")
+	fmt.Println("pending safeguard: after broadcast, keep waiting the same L1 tx — never resubmit the range on receipt timeout")
 
 	var lastSubmitted uint64
 	var initialized bool
+	// After SendTransaction succeeds, track the in-flight L1 tx until confirmations.
+	// A receipt-query timeout must NOT rebuild/resubmit the same L2 range (new nonce).
+	var pendingHash common.Hash
+	var pendingTo uint64
+	var havePending bool
 
 	for {
 		if err := ctx.Err(); err != nil {
 			fmt.Println("stopped")
 			return
 		}
+
+		// Resume waiting on an in-flight submission before considering new work.
+		if havePending {
+			fmt.Printf("awaiting pending l1_tx=%s (L2 ..%d)\n", pendingHash.Hex(), pendingTo)
+			if err := waitReceiptConfirmed(ctx, l1, pendingHash, *confirmations, receiptTimeout); err != nil {
+				if isHardTxFailure(err) {
+					fmt.Fprintf(os.Stderr, "pending tx failed hard: %v — clearing; will rebuild range\n", err)
+					havePending = false
+					pendingHash = common.Hash{}
+					pendingTo = 0
+				} else {
+					fmt.Fprintf(os.Stderr, "receipt/confirmations still pending: %v — not resubmitting\n", err)
+				}
+				if sleepCtx(ctx, *poll) != nil {
+					return
+				}
+				continue
+			}
+			lastSubmitted = pendingTo
+			havePending = false
+			pendingHash = common.Hash{}
+			pendingTo = 0
+			fmt.Printf("submitted ok lastSubmitted=%d confirmations=%d\n", lastSubmitted, *confirmations)
+			if *waitSafe > 0 {
+				if err := waitSafeHead(ctx, *rollupRPC, lastSubmitted, *waitSafe, *poll); err != nil {
+					return
+				}
+			}
+			if *once {
+				return
+			}
+			continue
+		}
+
 		safeN, unsafeN, err := syncHeads(ctx, *rollupRPC)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "syncStatus: %v\n", err)
@@ -146,39 +195,35 @@ func main() {
 			continue
 		}
 		fmt.Printf("l1_tx=%s\n", txHash.Hex())
+		// Record pending before waiting so a timeout cannot cause a duplicate submit.
+		pendingHash = txHash
+		pendingTo = toBlock
+		havePending = true
 		// Do not advance lastSubmitted until the receipt is deep enough — a single
 		// inclusion can reorg away on Sepolia; stock op-batcher uses num-confirmations.
-		receiptTimeout := 90 * time.Second
-		if *confirmations > 1 {
-			receiptTimeout = 3 * time.Minute
-		}
 		if err := waitReceiptConfirmed(ctx, l1, txHash, *confirmations, receiptTimeout); err != nil {
-			fmt.Fprintf(os.Stderr, "receipt/confirmations: %v\n", err)
+			if isHardTxFailure(err) {
+				fmt.Fprintf(os.Stderr, "tx failed hard: %v — clearing pending; will rebuild range\n", err)
+				havePending = false
+				pendingHash = common.Hash{}
+				pendingTo = 0
+			} else {
+				fmt.Fprintf(os.Stderr, "receipt/confirmations: %v — keeping pending tx, not resubmitting\n", err)
+			}
 			if sleepCtx(ctx, *poll) != nil {
 				return
 			}
 			continue
 		}
 		lastSubmitted = toBlock
+		havePending = false
+		pendingHash = common.Hash{}
+		pendingTo = 0
 		fmt.Printf("submitted ok lastSubmitted=%d confirmations=%d\n", lastSubmitted, *confirmations)
 
 		if *waitSafe > 0 {
-			deadline := time.Now().Add(*waitSafe)
-			advanced := false
-			for time.Now().Before(deadline) {
-				s, _, err := syncHeads(ctx, *rollupRPC)
-				if err == nil && s >= toBlock {
-					fmt.Printf("safe head advanced to %d\n", s)
-					advanced = true
-					break
-				}
-				if sleepCtx(ctx, *poll) != nil {
-					return
-				}
-			}
-			if !advanced {
-				s, u, _ := syncHeads(ctx, *rollupRPC)
-				fmt.Printf("safe head not yet at target after wait: safe=%d unsafe=%d target=%d\n", s, u, toBlock)
+			if err := waitSafeHead(ctx, *rollupRPC, toBlock, *waitSafe, *poll); err != nil {
+				return
 			}
 		}
 
@@ -186,6 +231,38 @@ func main() {
 			return
 		}
 	}
+}
+
+// isHardTxFailure is true when the L1 tx will never confirm as submitted
+// (reverted or receipt vanished after a reorg). Soft timeouts keep pending.
+func isHardTxFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "tx failed status=") ||
+		strings.Contains(msg, "disappeared after reorg")
+}
+
+func waitSafeHead(ctx context.Context, rollupRPC string, target uint64, wait, poll time.Duration) error {
+	deadline := time.Now().Add(wait)
+	advanced := false
+	for time.Now().Before(deadline) {
+		s, _, err := syncHeads(ctx, rollupRPC)
+		if err == nil && s >= target {
+			fmt.Printf("safe head advanced to %d\n", s)
+			advanced = true
+			break
+		}
+		if sleepCtx(ctx, poll) != nil {
+			return ctx.Err()
+		}
+	}
+	if !advanced {
+		s, u, _ := syncHeads(ctx, rollupRPC)
+		fmt.Printf("safe head not yet at target after wait: safe=%d unsafe=%d target=%d\n", s, u, target)
+	}
+	return nil
 }
 
 func envOr(k, def string) string {

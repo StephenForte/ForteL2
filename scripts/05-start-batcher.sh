@@ -28,13 +28,11 @@ wait_for_rpc "$L1_RPC_URL" "L1"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
 if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
-  # start_bg returns 0 when the shared op-batcher pid is already alive — refuse so we
-  # never claim fortel2-batcher started while stock (or a prior custom) still holds the pid.
+  # start_bg returns 0 when the shared op-batcher pid is already alive — stop stock
+  # (or a prior custom) first so we actually launch fortel2-batcher, not a false "started".
   if is_running op-batcher; then
-    echo "ERROR: op-batcher already running (pid $(cat "$PID_DIR/op-batcher.pid"))." >&2
-    echo "  Stop it before starting the custom batcher:" >&2
-    echo "  kill \"\$(cat \"$DATA_DIR/pids/op-batcher.pid\")\" && rm -f \"$DATA_DIR/pids/op-batcher.pid\"" >&2
-    exit 1
+    echo "Stopping existing op-batcher (pid $(cat "$PID_DIR/op-batcher.pid")) before custom start…"
+    stop_bg op-batcher
   fi
   require_bin go
   CUSTOM_BATCHER_BIN="${CUSTOM_BATCHER_BIN:-$BIN_DIR/fortel2-batcher}"
