@@ -35,3 +35,17 @@ FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh
 **While the 2026-07-22 Sepolia deploy is pinned through Phase 6:** do not pack/publish unless you actually redeployed. Packing without redeploy only copies the current (unchanged) artifacts.
 
 Do **not** put `.env.sepolia`, role keys, or JWTs here. fortel2-replica generates its own JWT on disk / via `JWT_SECRET`.
+
+## Patch staging (fortel2-replica)
+
+Operator-only: apply pending Docker healthcheck fix in the sibling repo:
+
+```bash
+cd ../fortel2-replica   # or your clone path
+git checkout -B cursor/healthcheck-long-geth-recovery-f3d9
+bash ../ForteL2/replica/patches/apply-healthcheck-fix.sh
+# expects 18 unit tests, then commits + pushes
+```
+
+Or: `git apply ../ForteL2/replica/patches/healthcheck-long-geth-recovery.patch`
+
