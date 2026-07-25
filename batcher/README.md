@@ -92,7 +92,7 @@ go run ./cmd/submit-loop \
   -once -wait-safe=90s
 ```
 
-**Duplicate safeguards:** in-memory `lastSubmitted` L2 number; never re-post `<= lastSubmitted`; on restart initialize from `safe` head. After broadcast, keep the pending L1 tx hash across receipt timeouts — soft timeouts do not rebuild the range or take a new nonce.
+**Duplicate safeguards:** in-memory `lastSubmitted` L2 number; never re-post `<= lastSubmitted`; on restart initialize from `safe` head. After broadcast, keep the pending L1 tx hash across receipt/confirmation timeouts and temporary reorg receipt loss — the loop re-checks whether that hash is still pending or mined before ever rebuilding the range. Only a reverted receipt or a fully dropped/unknown tx clears pending and allows a new nonce.
 
 **Recovery:** restart stock with `./scripts/05-start-batcher.sh`.
 
@@ -109,7 +109,8 @@ FORTEL2_ENV=.env.sepolia \
   ./scripts/05-start-batcher-sepolia.sh
 # submit-loop waits for SEPOLIA_BATCHER_NUM_CONFIRMATIONS before advancing lastSubmitted
 # so a single receipt that later reorgs away is not treated as submitted.
-# On receipt/RPC timeout it keeps awaiting the same tx hash (no range resubmit).
+# On receipt/RPC timeout (or reorg receipt flicker) it keeps awaiting the same
+# tx hash while TransactionByHash/receipt still know it — no range resubmit.
 
 # Max ~15 minutes. Watch safe/unsafe via cast rpc optimism_syncStatus.
 

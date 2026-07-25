@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math/big"
@@ -91,12 +92,13 @@ func main() {
 	fmt.Printf("custom batcher starting from=%s inbox=%s max_blocks=%d confirmations=%d receipt_timeout=%s once=%v\n",
 		from.Hex(), inbox.Hex(), *maxBlocks, *confirmations, receiptTimeout, *once)
 	fmt.Println("duplicate safeguard: track lastSubmitted; never re-submit <= that L2 number; on restart begin at safe+1")
-	fmt.Println("pending safeguard: after broadcast, keep waiting the same L1 tx — never resubmit the range on receipt timeout")
+	fmt.Println("pending safeguard: after broadcast, keep waiting the same L1 tx — never resubmit while it is pending or mined")
 
 	var lastSubmitted uint64
 	var initialized bool
 	// After SendTransaction succeeds, track the in-flight L1 tx until confirmations.
-	// A receipt-query timeout must NOT rebuild/resubmit the same L2 range (new nonce).
+	// Soft receipt timeouts / temporary reorg receipt loss must NOT rebuild the same
+	// L2 range under a new nonce (duplicate calldata on Sepolia).
 	var pendingHash common.Hash
 	var pendingTo uint64
 	var havePending bool
@@ -111,13 +113,14 @@ func main() {
 		if havePending {
 			fmt.Printf("awaiting pending l1_tx=%s (L2 ..%d)\n", pendingHash.Hex(), pendingTo)
 			if err := waitReceiptConfirmed(ctx, l1, pendingHash, *confirmations, receiptTimeout); err != nil {
-				if isHardTxFailure(err) {
-					fmt.Fprintf(os.Stderr, "pending tx failed hard: %v — clearing; will rebuild range\n", err)
+				clear, reason := shouldClearPending(ctx, l1, pendingHash, err)
+				if clear {
+					fmt.Fprintf(os.Stderr, "pending tx cleared (%s): %v — will rebuild range\n", reason, err)
 					havePending = false
 					pendingHash = common.Hash{}
 					pendingTo = 0
 				} else {
-					fmt.Fprintf(os.Stderr, "receipt/confirmations still pending: %v — not resubmitting\n", err)
+					fmt.Fprintf(os.Stderr, "receipt/confirmations still pending (%s): %v — not resubmitting\n", reason, err)
 				}
 				if sleepCtx(ctx, *poll) != nil {
 					return
@@ -202,13 +205,14 @@ func main() {
 		// Do not advance lastSubmitted until the receipt is deep enough — a single
 		// inclusion can reorg away on Sepolia; stock op-batcher uses num-confirmations.
 		if err := waitReceiptConfirmed(ctx, l1, txHash, *confirmations, receiptTimeout); err != nil {
-			if isHardTxFailure(err) {
-				fmt.Fprintf(os.Stderr, "tx failed hard: %v — clearing pending; will rebuild range\n", err)
+			clear, reason := shouldClearPending(ctx, l1, pendingHash, err)
+			if clear {
+				fmt.Fprintf(os.Stderr, "tx cleared (%s): %v — clearing pending; will rebuild range\n", reason, err)
 				havePending = false
 				pendingHash = common.Hash{}
 				pendingTo = 0
 			} else {
-				fmt.Fprintf(os.Stderr, "receipt/confirmations: %v — keeping pending tx, not resubmitting\n", err)
+				fmt.Fprintf(os.Stderr, "receipt/confirmations: %v (%s) — keeping pending tx, not resubmitting\n", err, reason)
 			}
 			if sleepCtx(ctx, *poll) != nil {
 				return
@@ -233,15 +237,61 @@ func main() {
 	}
 }
 
-// isHardTxFailure is true when the L1 tx will never confirm as submitted
-// (reverted or receipt vanished after a reorg). Soft timeouts keep pending.
+// isHardTxFailure is true when the L1 tx reverted on-chain. Soft timeouts and
+// temporary reorg receipt loss keep pending so we do not burn a new nonce.
 func isHardTxFailure(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "tx failed status=") ||
-		strings.Contains(msg, "disappeared after reorg")
+	return strings.Contains(err.Error(), "tx failed status=")
+}
+
+// l1TxTracker is the receipt/tx lookup surface used while deciding whether a
+// soft wait failure may clear pending state (dropped) or must keep waiting.
+type l1TxTracker interface {
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+	TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error)
+}
+
+// shouldClearPending decides whether to abandon an in-flight L1 hash after a
+// wait error. Only a reverted receipt or a fully dropped/unknown tx clears
+// pending; timeouts and reorg receipt flicker keep waiting the same hash.
+func shouldClearPending(ctx context.Context, l1 l1TxTracker, hash common.Hash, waitErr error) (clear bool, reason string) {
+	if isHardTxFailure(waitErr) {
+		return true, "reverted"
+	}
+	known, pending, err := txStillTracked(ctx, l1, hash)
+	if err != nil {
+		// RPC blip: keep pending rather than risk a duplicate submit.
+		return false, "rpc-error-keep-pending"
+	}
+	if known {
+		if pending {
+			return false, "still-pending"
+		}
+		return false, "still-known"
+	}
+	return true, "dropped-or-unknown"
+}
+
+// txStillTracked reports whether the L1 node still knows about hash (mempool
+// pending and/or a receipt). Unknown means safe to rebuild the L2 range.
+func txStillTracked(ctx context.Context, l1 l1TxTracker, hash common.Hash) (known bool, pending bool, err error) {
+	tx, isPending, err := l1.TransactionByHash(ctx, hash)
+	if err == nil && tx != nil {
+		return true, isPending, nil
+	}
+	if err != nil && !errors.Is(err, ethereum.NotFound) {
+		return false, false, err
+	}
+	rcpt, rerr := l1.TransactionReceipt(ctx, hash)
+	if rerr == nil && rcpt != nil {
+		return true, false, nil
+	}
+	if rerr != nil && !errors.Is(rerr, ethereum.NotFound) {
+		return false, false, rerr
+	}
+	return false, false, nil
 }
 
 func waitSafeHead(ctx context.Context, rollupRPC string, target uint64, wait, poll time.Duration) error {
