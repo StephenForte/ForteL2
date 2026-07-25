@@ -63,7 +63,7 @@ Custom (learning demo):
 USE_CUSTOM_BATCHER=1 ./scripts/05-start-batcher.sh
 ```
 
-Builds `$BIN_DIR/fortel2-batcher` from `cmd/submit-loop` and starts it under the same `op-batcher` pid name so `./scripts/stop-all.sh` still works. No `lib.sh` `start_bg`/`stop_bg` edits. Refuses to start if that pid is already alive (avoids a false “started” while stock still holds the slot).
+Builds `$BIN_DIR/fortel2-batcher` from `cmd/submit-loop` and starts it under the same `op-batcher` pid name so `./scripts/stop-all.sh` still works. No `lib.sh` `start_bg`/`stop_bg` edits. If an `op-batcher` pid is already alive (stock after `start-all`, or a prior custom), the script stops it first, then launches the custom binary — so the advertised `USE_CUSTOM_BATCHER=1` flow actually switches implementations.
 
 Kill switch back to stock:
 
@@ -92,7 +92,7 @@ go run ./cmd/submit-loop \
   -once -wait-safe=90s
 ```
 
-**Duplicate safeguards:** in-memory `lastSubmitted` L2 number; never re-post `<= lastSubmitted`; on restart initialize from `safe` head.
+**Duplicate safeguards:** in-memory `lastSubmitted` L2 number; never re-post `<= lastSubmitted`; on restart initialize from `safe` head. After broadcast, keep the pending L1 tx hash across receipt timeouts — soft timeouts do not rebuild the range or take a new nonce.
 
 **Recovery:** restart stock with `./scripts/05-start-batcher.sh`.
 
@@ -101,19 +101,19 @@ go run ./cmd/submit-loop \
 Only after local US-042 is green. Stock remains the default forever unless you explicitly confirm.
 
 ```bash
-# 1) Stop stock Sepolia batcher only
-kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
-
-# 2) Start custom (credit-budget poll default 12s; L1 confirmations default 2 like stock)
+# Start custom (stops any existing op-batcher pid first; credit-budget poll default 12s;
+# L1 confirmations default 2 like stock; receipt-timeout default 10m — keeps the same
+# pending L1 tx across waits so congestion does not burn a new nonce)
 FORTEL2_ENV=.env.sepolia \
   USE_CUSTOM_BATCHER=1 CONFIRM_CUSTOM_BATCHER_SEPOLIA=1 \
   ./scripts/05-start-batcher-sepolia.sh
 # submit-loop waits for SEPOLIA_BATCHER_NUM_CONFIRMATIONS before advancing lastSubmitted
 # so a single receipt that later reorgs away is not treated as submitted.
+# On receipt/RPC timeout it keeps awaiting the same tx hash (no range resubmit).
 
-# 3) Max ~15 minutes. Watch safe/unsafe via cast rpc optimism_syncStatus.
+# Max ~15 minutes. Watch safe/unsafe via cast rpc optimism_syncStatus.
 
-# 4) Revert immediately if anything looks wrong
+# Revert immediately if anything looks wrong
 kill "$(cat "$DATA_DIR/pids/op-batcher.pid")" && rm -f "$DATA_DIR/pids/op-batcher.pid"
 FORTEL2_ENV=.env.sepolia ./scripts/05-start-batcher-sepolia.sh
 ```

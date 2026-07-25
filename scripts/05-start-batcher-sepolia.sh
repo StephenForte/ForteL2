@@ -43,13 +43,11 @@ if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
     echo "ERROR: missing $ROLLUP_JSON" >&2
     exit 1
   fi
-  # start_bg returns 0 when the shared op-batcher pid is already alive — refuse so we
-  # never claim fortel2-batcher started while stock (or a prior custom) still holds the pid.
+  # start_bg returns 0 when the shared op-batcher pid is already alive — stop stock
+  # (or a prior custom) first so we actually launch fortel2-batcher, not a false "started".
   if is_running op-batcher; then
-    echo "ERROR: op-batcher already running (pid $(cat "$PID_DIR/op-batcher.pid"))." >&2
-    echo "  Stop it before starting the custom batcher:" >&2
-    echo "  kill \"\$(cat \"$DATA_DIR/pids/op-batcher.pid\")\" && rm -f \"$DATA_DIR/pids/op-batcher.pid\"" >&2
-    exit 1
+    echo "Stopping existing op-batcher (pid $(cat "$PID_DIR/op-batcher.pid")) before custom start…"
+    stop_bg op-batcher
   fi
   require_bin go
   CUSTOM_BATCHER_BIN="${CUSTOM_BATCHER_BIN:-$BIN_DIR/fortel2-batcher}"
@@ -60,6 +58,8 @@ if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
   CUSTOM_POLL="${CUSTOM_BATCHER_POLL_INTERVAL:-$BATCHER_POLL}"
   # Match stock SEPOLIA_BATCHER_NUM_CONFIRMATIONS before advancing lastSubmitted.
   CUSTOM_CONFS="${CUSTOM_BATCHER_CONFIRMATIONS:-$BATCHER_CONFS}"
+  # Sepolia inclusion can exceed local Anvil waits; keep waiting the same tx (no resubmit).
+  CUSTOM_RECEIPT_TIMEOUT="${CUSTOM_BATCHER_RECEIPT_TIMEOUT:-10m}"
   echo "WARN: US-044 Sepolia custom-batcher demo — max ~15 min; abort → stock script." >&2
   start_bg op-batcher "$CUSTOM_BATCHER_BIN" \
     -l1 "$L1_RPC_URL" \
@@ -69,8 +69,9 @@ if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
     -poll "$CUSTOM_POLL" \
     -max-blocks "${CUSTOM_BATCHER_MAX_BLOCKS:-6}" \
     -confirmations "$CUSTOM_CONFS" \
+    -receipt-timeout "$CUSTOM_RECEIPT_TIMEOUT" \
     -wait-safe=0
-  echo "Custom Sepolia batcher started (poll=${CUSTOM_POLL}, confirmations=${CUSTOM_CONFS}). Revert: stop pid, then stock 05-start-batcher-sepolia.sh"
+  echo "Custom Sepolia batcher started (poll=${CUSTOM_POLL}, confirmations=${CUSTOM_CONFS}, receipt-timeout=${CUSTOM_RECEIPT_TIMEOUT}). Revert: stop pid, then stock 05-start-batcher-sepolia.sh"
 else
   require_bin op-batcher
   start_bg op-batcher op-batcher \
