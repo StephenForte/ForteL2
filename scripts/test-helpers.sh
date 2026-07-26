@@ -560,6 +560,25 @@ else
   fail=1
 fi
 
+# Gas floors must be checked before the sequencer, and wake must stop leftovers
+# first — otherwise launchd wake fails on underfunded BATCHER then on :9545.
+if awk '
+    /04-start-sequencer-sepolia/ { exit (batcher && proposer) ? 0 : 1 }
+    /require_min_balance_eth.*BATCHER/ { batcher = 1 }
+    /require_min_balance_eth.*PROPOSER/ { proposer = 1 }
+  ' "$SCRIPT_DIR/start-all-sepolia.sh" \
+  && grep -q 'stop-all-sepolia' "$SCRIPT_DIR/start-all-sepolia.sh" \
+  && awk '
+    /start-all-sepolia/ { exit stopped ? 0 : 1 }
+    /cmd_wake/ { in_wake = 1 }
+    in_wake && /stop-all-sepolia/ { stopped = 1 }
+  ' "$SCRIPT_DIR/dev-sleep.sh"; then
+  echo "PASS Sepolia wake/start preflight funds + orphan cleanup"
+else
+  echo "FAIL start-all-sepolia must preflight BATCHER/PROPOSER; wake must stop leftovers first" >&2
+  fail=1
+fi
+
 # demo-checklist.sh: cast chain-id after a successful block-number must not abort
 # under set -e (bare assignment exits before fail_item / checklist aggregation).
 if grep -E '^\s+(l1|l2)_chain=\$\(cast chain-id' "$SCRIPT_DIR/demo-checklist.sh" \

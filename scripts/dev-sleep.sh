@@ -101,6 +101,10 @@ cmd_sleep() {
 cmd_wake() {
   echo "=== ForteL2 dev-wake ==="
   if (( IS_SEPOLIA )); then
+    # Idempotent: clear leftover partial starts (e.g. prior underfunded batcher)
+    # so assert_l2_ports_free does not fail the next launchd wake.
+    echo "Clearing any leftover Sepolia processes…"
+    "$SCRIPT_DIR/stop-all-sepolia.sh" || true
     echo "Starting Sepolia stack (credit-budget poll/channel defaults)…"
     "$SCRIPT_DIR/start-all-sepolia.sh"
     echo

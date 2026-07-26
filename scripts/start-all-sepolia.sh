@@ -20,6 +20,14 @@ if [[ ! -f "$DEPLOY_DIR/genesis.json" || ! -f "$DEPLOY_DIR/rollup.json" || ! -f 
   exit 1
 fi
 
+# Preflight gas floors before touching the sequencer. A mid-start fail on
+# require_min_balance_eth otherwise leaves op-geth holding :9545 and the next
+# wake (launchd) dies on assert_l2_ports_free.
+require_eth_address "BATCHER_ADDRESS" "${BATCHER_ADDRESS:-}"
+require_eth_address "PROPOSER_ADDRESS" "${PROPOSER_ADDRESS:-}"
+require_min_balance_eth "$BATCHER_ADDRESS" "${SEPOLIA_BATCHER_MIN_ETH:-0.15}" "BATCHER"
+require_min_balance_eth "$PROPOSER_ADDRESS" "${SEPOLIA_PROPOSER_MIN_ETH:-0.15}" "PROPOSER"
+
 echo "=== ForteL2 Phase 2c — Sepolia-backed L2 ==="
 echo "L1 RPC:  $L1_RPC_URL"
 echo "DATA_DIR: $DATA_DIR"
@@ -27,10 +35,19 @@ echo "DEPLOY:  $DEPLOY_DIR"
 echo "(Phase 1 Anvil/datadir not started or modified)"
 echo
 
+# If batcher/proposer still fail after the sequencer is up, tear down so wake
+# does not leave orphans on L2 ports.
+sepolia_start_cleanup() {
+  echo "ERROR: Sepolia start failed after sequencer — stopping partial stack" >&2
+  "$SCRIPT_DIR/stop-all-sepolia.sh" || true
+}
+trap sepolia_start_cleanup ERR
+
 "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"
 sleep 3
 "$SCRIPT_DIR/05-start-batcher-sepolia.sh"
 "$SCRIPT_DIR/06-start-proposer-sepolia.sh"
+trap - ERR
 
 echo
 echo "=== Sepolia L2 stack is up ==="
