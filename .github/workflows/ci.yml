@@ -44,6 +44,19 @@ jobs:
       - name: Pipeline viewer + dApp unit tests
         run: node --test viewer/lib.test.js dapp/lib.test.js
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+
+      - name: Phase 4 batcher unit tests
+        working-directory: batcher
+        run: go test ./...
+
+      - name: Phase 5 proposer unit tests
+        working-directory: proposer
+        run: go test ./...
+
       - name: Bridge helper unit tests
         working-directory: scripts/bridge
         run: |

@@ -14,7 +14,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 - **Never commit** `.env`, `.env.sepolia`, private keys, JWT secrets, or live datadir contents.
 - **Never ask the operator to paste private keys** into chat; never write keys into committed files.
 - **Loopback only** for L2 RPCs, the guestbook HTTP server, and the pipeline viewer (`127.0.0.1` / `localhost`). Sepolia **L1** may be remote HTTPS (`assert_sepolia_rpc_urls`).
-- Prefer **small, reversible diffs**. Phase **3** (Render replica) is done. Phase **4** custom batcher is **done** under `batcher/` + `tasks/prd-phase-4-batcher.md` (`USE_CUSTOM_BATCHER=1` opt-in; stock default) — do not expand into Phase **3a**, **3b**, **5+**, or Sepolia redeploy unless asked.
+- Prefer **small, reversible diffs**. Phase **3** (Render replica) is done. Phase **4** custom batcher is **done** under `batcher/` + `tasks/prd-phase-4-batcher.md` (`USE_CUSTOM_BATCHER=1` opt-in; stock default). Phase **5** custom proposer is **done** under `proposer/` + `tasks/prd-phase-5-proposer.md` (`USE_CUSTOM_PROPOSER=1` opt-in; stock default) — do not expand into Phase **3a**, **3b**, **6+**, or Sepolia redeploy unless asked.
 - Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` on the **local Anvil** stack (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start. Sepolia L1 is ~12s; local L2 may stay 2s.
 - **`scripts/lib.sh` `start_bg` / `stop_bg` are privileged.** Any edit needs human review (see `.github/CODEOWNERS`), even when the rest of a change is AI-authored. (`serve_static_loopback` is not privileged process control.)
 
@@ -30,6 +30,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
 | `replica/` | Thin Phase 3 bridge: pack staging + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (Docker/runtime lives there) |
 | `batcher/` | Phase 4 custom batcher (Go); stock `op-batcher` remains default; `USE_CUSTOM_BATCHER=1` opt-in |
+| `proposer/` | Phase 5 custom proposer (Go); stock `op-proposer` remains default; `USE_CUSTOM_PROPOSER=1` opt-in |
 | `config/` | L1 chain config fragments |
 | `bin/` | Symlinks to built OP Stack binaries (gitignored) |
 | `.env.sepolia.example` | Phase 2a Sepolia template (no keys); load via `FORTEL2_ENV=.env.sepolia` |
@@ -79,6 +80,10 @@ cd contracts && forge test
 
 # Pipeline viewer + dApp pure helpers
 node --test viewer/lib.test.js dapp/lib.test.js
+
+# Phase 4 / 5 Go modules
+(cd batcher && go test ./...)
+(cd proposer && go test ./...)
 
 # Bridge helpers (viem deps)
 (cd scripts/bridge && npm ci && node --test lib.test.js)

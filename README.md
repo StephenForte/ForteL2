@@ -37,7 +37,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned |
 | **4** | **Reimplement the batcher** from scratch; swap out op-batcher | ✅ Done — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/); `USE_CUSTOM_BATCHER=1` opt-in |
-| **5** | **Reimplement the proposer** from scratch; swap out op-proposer | Planned |
+| **5** | **Reimplement the proposer** from scratch; swap out op-proposer | ✅ Done — [`tasks/prd-phase-5-proposer.md`](tasks/prd-phase-5-proposer.md) + [`proposer/`](proposer/); `USE_CUSTOM_PROPOSER=1` opt-in |
 | **6** | **Derivation / minimal sequencer** + simple Blockchair-style **block viewer** (latest blocks → block detail); Blockscout stays much later | Planned |
 | **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal — begins with a **coordinated redeploy** (all new fault-game immutables chosen in one sitting) + network-wide reset | Planned |
@@ -312,6 +312,24 @@ FORTEL2_ENV=.env.sepolia USE_CUSTOM_BATCHER=1 CONFIRM_CUSTOM_BATCHER_SEPOLIA=1 \
 ```
 
 Wire-format notes and safe/unsafe lag: [`tasks/spike-phase-4-batcher.md`](tasks/spike-phase-4-batcher.md) (US-045). Operator switch details: [`batcher/README.md`](batcher/README.md).
+
+### Phase 5 — custom proposer (opt-in)
+
+Learning rebuild under [`proposer/`](proposer/). Stock `op-proposer` stays the default. Posts to **DisputeGameFactory** (`PROPOSER_GAME_TYPE=1`); L2OutputOracle is unused on this deploy.
+
+```bash
+# Local demo
+USE_CUSTOM_PROPOSER=1 ./scripts/06-start-proposer.sh
+# Kill switch
+kill "$(cat "$DATA_DIR/pids/op-proposer.pid")" && rm -f "$DATA_DIR/pids/op-proposer.pid"
+./scripts/06-start-proposer.sh
+
+# Optional Sepolia window (~15 min max) — requires explicit confirm
+FORTEL2_ENV=.env.sepolia USE_CUSTOM_PROPOSER=1 CONFIRM_CUSTOM_PROPOSER_SEPOLIA=1 \
+  ./scripts/06-start-proposer-sepolia.sh
+```
+
+Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike-phase-5-proposer.md) (US-055). Operator switch details: [`proposer/README.md`](proposer/README.md).
 
 Reproduce:
 
