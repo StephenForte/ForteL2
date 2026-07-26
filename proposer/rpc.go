@@ -125,7 +125,10 @@ func FetchOutputAtBlock(ctx context.Context, rollupRPC string, blockNum uint64) 
 	if out.OutputRoot == "" {
 		return OutputAtBlock{}, fmt.Errorf("outputAtBlock %d: empty outputRoot", blockNum)
 	}
-	root := common.HexToHash(out.OutputRoot)
+	root, err := ParseExactHash(out.OutputRoot)
+	if err != nil {
+		return OutputAtBlock{}, fmt.Errorf("outputAtBlock %d: outputRoot: %w", blockNum, err)
+	}
 	n := out.BlockRef.Number
 	if n == 0 {
 		n = blockNum
@@ -322,6 +325,31 @@ func HexOrAddress(s string) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("invalid address %q", s)
 	}
 	return common.HexToAddress(s), nil
+}
+
+// ParseExactHash requires a 0x-prefixed 32-byte hex hash (64 hex digits).
+// Unlike common.HexToHash, it rejects truncated/padded/malformed values so we
+// do not propose a silently normalized false output root.
+func ParseExactHash(s string) (common.Hash, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return common.Hash{}, fmt.Errorf("empty hash")
+	}
+	if !strings.HasPrefix(s, "0x") && !strings.HasPrefix(s, "0X") {
+		return common.Hash{}, fmt.Errorf("hash must be 0x-prefixed, got %q", s)
+	}
+	body := s[2:]
+	if len(body) != 64 {
+		return common.Hash{}, fmt.Errorf("hash must be 32 bytes (64 hex chars), got len=%d", len(body))
+	}
+	for _, c := range body {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return common.Hash{}, fmt.Errorf("invalid hex digit in hash")
+		}
+	}
+	return common.HexToHash(s), nil
 }
 
 func asHash(v interface{}) common.Hash {
