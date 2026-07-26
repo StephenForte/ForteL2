@@ -93,7 +93,7 @@ go run ./cmd/propose-loop \
   -once
 ```
 
-**Duplicate safeguards:** in-memory `lastProposedL2` + `lastProposalTime`; never re-propose `<= lastProposedL2`; on restart initialize from latest factory game of the configured type; respect `-proposal-interval` (stock uses time-since-last-game).
+**Duplicate safeguards:** in-memory `lastProposedL2` + `lastProposalTime`; never re-propose `<= lastProposedL2`; on restart initialize from latest factory game of the configured type (retry on L1 RPC failure — do not treat hydrate errors as “no games”); respect `-proposal-interval` (stock uses time-since-last-game). Advance `lastProposedL2` only after L1 receipt confirmations; reverted/dropped txs clear pending and allow retry (same pattern as Phase 4 `submit-loop`).
 
 **Recovery:** restart stock with `./scripts/06-start-proposer.sh`.
 

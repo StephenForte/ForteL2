@@ -79,6 +79,7 @@ func main() {
 	fmt.Printf("custom proposer starting from=%s factory=%s gameType=%d interval=%s allowNonFinalized=%v once=%v\n",
 		from.Hex(), factoryAddr.Hex(), gt, *interval, *allowNonFinalized, *once)
 	fmt.Println("duplicate safeguard: track lastProposedL2 + lastProposalTime; init from latest factory game of this type")
+	fmt.Println("pending safeguard: after broadcast, keep waiting the same L1 tx — advance lastProposedL2 only after confirmations")
 	fmt.Println("output root: fetched via optimism_outputAtBlock (not recomputed locally)")
 
 	var (
@@ -86,6 +87,7 @@ func main() {
 		lastProposalTime time.Time
 		initialized      bool
 		pendingHash      common.Hash
+		pendingL2        uint64
 		havePending      bool
 	)
 
@@ -96,16 +98,29 @@ func main() {
 		}
 
 		if havePending {
-			fmt.Printf("awaiting pending l1_tx=%s\n", pendingHash.Hex())
+			fmt.Printf("awaiting pending l1_tx=%s (l2=%d)\n", pendingHash.Hex(), pendingL2)
 			if err := waitReceiptConfirmed(ctx, l1, pendingHash, *confirmations, *receiptTimeout); err != nil {
-				fmt.Fprintf(os.Stderr, "receipt wait: %v\n", err)
+				clear, reason := shouldClearPending(ctx, l1, pendingHash, err)
+				if clear {
+					fmt.Fprintf(os.Stderr, "pending tx cleared (%s): %v — will retry propose\n", reason, err)
+					havePending = false
+					pendingHash = common.Hash{}
+					pendingL2 = 0
+				} else {
+					fmt.Fprintf(os.Stderr, "receipt/confirmations still pending (%s): %v — not re-proposing\n", reason, err)
+				}
 				if sleepCtx(ctx, *poll) != nil {
 					return
 				}
 				continue
 			}
+			// Advance counters only after L1 confirmations — a revert/drop must not
+			// skip this L2 head or stick us on a dead hash (matches Phase 4 submit-loop).
+			lastProposedL2 = pendingL2
+			lastProposalTime = time.Now()
 			havePending = false
 			pendingHash = common.Hash{}
+			pendingL2 = 0
 			fmt.Printf("proposed ok lastProposedL2=%d\n", lastProposedL2)
 			if *once {
 				return
@@ -117,9 +132,17 @@ func main() {
 		}
 
 		if !initialized {
-			if g, ok, err := proposer.LatestGameOfType(ctx, l1, factoryAddr, gt); err != nil {
+			g, ok, err := proposer.LatestGameOfType(ctx, l1, factoryAddr, gt)
+			if err != nil {
+				// Transient L1 RPC failure: retry hydration so we do not re-propose
+				// heights that already have games while lastProposedL2 is still 0.
 				fmt.Fprintf(os.Stderr, "init from factory: %v\n", err)
-			} else if ok {
+				if sleepCtx(ctx, *poll) != nil {
+					return
+				}
+				continue
+			}
+			if ok {
 				lastProposedL2 = g.L2Sequence
 				lastProposalTime = time.Unix(int64(g.CreatedAt), 0)
 				fmt.Printf("initialized from factory index=%d l2=%d createdAt=%s root=%s\n",
@@ -215,9 +238,9 @@ func main() {
 			continue
 		}
 		fmt.Printf("broadcast l1_tx=%s\n", txHash.Hex())
-		lastProposedL2 = blockNum
-		lastProposalTime = time.Now()
+		// Record pending before waiting — do not advance lastProposedL2 until confirmed.
 		pendingHash = txHash
+		pendingL2 = blockNum
 		havePending = true
 	}
 }
@@ -252,36 +275,112 @@ func sendCreate(ctx context.Context, l1 *ethclient.Client, priv *ecdsa.PrivateKe
 	return signed.Hash(), nil
 }
 
+// isHardTxFailure is true when the L1 tx reverted on-chain. Soft timeouts and
+// temporary reorg receipt loss keep pending so we do not burn a new nonce.
+func isHardTxFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "tx failed status=")
+}
+
+// l1TxTracker is the receipt/tx lookup surface used while deciding whether a
+// soft wait failure may clear pending state (dropped) or must keep waiting.
+type l1TxTracker interface {
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+	TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error)
+}
+
+// shouldClearPending decides whether to abandon an in-flight L1 hash after a
+// wait error. Only a reverted receipt or a fully dropped/unknown tx clears
+// pending; timeouts and reorg receipt flicker keep waiting the same hash.
+func shouldClearPending(ctx context.Context, l1 l1TxTracker, hash common.Hash, waitErr error) (clear bool, reason string) {
+	if isHardTxFailure(waitErr) {
+		return true, "reverted"
+	}
+	known, pending, err := txStillTracked(ctx, l1, hash)
+	if err != nil {
+		return false, "rpc-error-keep-pending"
+	}
+	if known {
+		if pending {
+			return false, "still-pending"
+		}
+		return false, "still-known"
+	}
+	return true, "dropped-or-unknown"
+}
+
+// txStillTracked reports whether the L1 node still knows about hash (mempool
+// pending and/or a receipt). Unknown means safe to retry the propose.
+func txStillTracked(ctx context.Context, l1 l1TxTracker, hash common.Hash) (known bool, pending bool, err error) {
+	tx, isPending, err := l1.TransactionByHash(ctx, hash)
+	if err == nil && tx != nil {
+		return true, isPending, nil
+	}
+	if err != nil && !errors.Is(err, ethereum.NotFound) {
+		return false, false, err
+	}
+	rcpt, rerr := l1.TransactionReceipt(ctx, hash)
+	if rerr == nil && rcpt != nil {
+		return true, false, nil
+	}
+	if rerr != nil && !errors.Is(rerr, ethereum.NotFound) {
+		return false, false, rerr
+	}
+	return false, false, nil
+}
+
+// receiptConfirmed reports whether an L1 head gives `confirmations` depth to a
+// receipt mined at receiptBlock (confirmations=1 ⇒ receipt alone is enough).
+func receiptConfirmed(head, receiptBlock, confirmations uint64) bool {
+	if confirmations == 0 {
+		confirmations = 1
+	}
+	return head+1 >= receiptBlock+confirmations
+}
+
 func waitReceiptConfirmed(ctx context.Context, l1 *ethclient.Client, hash common.Hash, confirmations uint64, timeout time.Duration) error {
+	if confirmations == 0 {
+		confirmations = 1
+	}
 	deadline := time.Now().Add(timeout)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for %s", hash.Hex())
-		}
-		receipt, err := l1.TransactionReceipt(ctx, hash)
-		if err != nil {
-			if sleepCtx(ctx, time.Second) != nil {
+	var receiptBlock uint64
+	haveReceipt := false
+	for time.Now().Before(deadline) {
+		rcpt, err := l1.TransactionReceipt(ctx, hash)
+		if err != nil || rcpt == nil {
+			if haveReceipt {
+				return fmt.Errorf("receipt for %s disappeared after reorg", hash.Hex())
+			}
+			if sleepCtx(ctx, 500*time.Millisecond) != nil {
 				return ctx.Err()
 			}
 			continue
 		}
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("tx %s reverted", hash.Hex())
+		if rcpt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("tx failed status=%d", rcpt.Status)
 		}
+		receiptBlock = rcpt.BlockNumber.Uint64()
+		haveReceipt = true
 		head, err := l1.BlockNumber(ctx)
 		if err != nil {
-			return err
+			if sleepCtx(ctx, 500*time.Millisecond) != nil {
+				return ctx.Err()
+			}
+			continue
 		}
-		if head >= receipt.BlockNumber.Uint64()+confirmations-1 {
+		if receiptConfirmed(head, receiptBlock, confirmations) {
 			return nil
 		}
-		if sleepCtx(ctx, time.Second) != nil {
+		if sleepCtx(ctx, 500*time.Millisecond) != nil {
 			return ctx.Err()
 		}
 	}
+	if !haveReceipt {
+		return fmt.Errorf("timeout waiting for receipt %s", hash.Hex())
+	}
+	return fmt.Errorf("timeout waiting for %d confirmations of %s (receipt block %d)", confirmations, hash.Hex(), receiptBlock)
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
