@@ -29,15 +29,29 @@ op-deployer init \
 # Phase 1b (US-011): shorten portal / dispute-game delays for local prove→finalize.
 # Mainnet defaults are 7d / 3.5d. Some op-deployer builds ignore these (optimism#14869);
 # scripts/withdraw-finalize.sh can Anvil time-warp as a fallback — still name the knobs in README.
-# Must keep maxClockDuration >= clockExtension (DeployImplementations check).
+# Fault-game clocks must satisfy BOTH:
+#   DeployImplementations: maxClockDuration >= clockExtension
+#   PermissionedDisputeGame.initialize: maxClockDuration >= max(2*clockExtension, clockExtension+preimageOracleChallengePeriod)
+# Stock op-deployer defaults preimageOracleChallengePeriod=86400, which makes learning-short
+# maxClockDuration=10 revert create() with InvalidClockExtension (0x8d77ecac). Override locally.
 PROOF_MATURITY_DELAY_SECONDS="${PROOF_MATURITY_DELAY_SECONDS:-12}"
 DISPUTE_GAME_FINALITY_DELAY_SECONDS="${DISPUTE_GAME_FINALITY_DELAY_SECONDS:-6}"
 FAULT_GAME_CLOCK_EXTENSION="${FAULT_GAME_CLOCK_EXTENSION:-5}"
 FAULT_GAME_MAX_CLOCK_DURATION="${FAULT_GAME_MAX_CLOCK_DURATION:-10}"
 FAULT_GAME_WITHDRAWAL_DELAY="${FAULT_GAME_WITHDRAWAL_DELAY:-1}"
+PREIMAGE_ORACLE_CHALLENGE_PERIOD="${PREIMAGE_ORACLE_CHALLENGE_PERIOD:-1}"
 
 if (( FAULT_GAME_MAX_CLOCK_DURATION < FAULT_GAME_CLOCK_EXTENSION )); then
   echo "ERROR: FAULT_GAME_MAX_CLOCK_DURATION ($FAULT_GAME_MAX_CLOCK_DURATION) must be >= FAULT_GAME_CLOCK_EXTENSION ($FAULT_GAME_CLOCK_EXTENSION)" >&2
+  exit 1
+fi
+_min_init=$(( FAULT_GAME_CLOCK_EXTENSION * 2 ))
+_min_oracle=$(( FAULT_GAME_CLOCK_EXTENSION + PREIMAGE_ORACLE_CHALLENGE_PERIOD ))
+_min_needed=$_min_init
+if (( _min_oracle > _min_needed )); then _min_needed=$_min_oracle; fi
+if (( FAULT_GAME_MAX_CLOCK_DURATION < _min_needed )); then
+  echo "ERROR: FAULT_GAME_MAX_CLOCK_DURATION ($FAULT_GAME_MAX_CLOCK_DURATION) must be >= max(2*clockExtension, clockExtension+preimageOracleChallengePeriod) = $_min_needed" >&2
+  echo "  (clockExtension=$FAULT_GAME_CLOCK_EXTENSION preimageOracleChallengePeriod=$PREIMAGE_ORACLE_CHALLENGE_PERIOD)" >&2
   exit 1
 fi
 
@@ -55,6 +69,7 @@ useInterop = false
   faultGameClockExtension = ${FAULT_GAME_CLOCK_EXTENSION}
   faultGameMaxClockDuration = ${FAULT_GAME_MAX_CLOCK_DURATION}
   faultGameWithdrawalDelay = ${FAULT_GAME_WITHDRAWAL_DELAY}
+  preimageOracleChallengePeriod = ${PREIMAGE_ORACLE_CHALLENGE_PERIOD}
 
 [superchainRoles]
   SuperchainProxyAdminOwner = "${ADMIN_ADDRESS}"
@@ -85,7 +100,7 @@ useInterop = false
     challenger = "${CHALLENGER_ADDRESS}"
 EOF
 
-echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameClockExtension=${FAULT_GAME_CLOCK_EXTENSION} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY}"
+echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameClockExtension=${FAULT_GAME_CLOCK_EXTENSION} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY} preimageOracleChallengePeriod=${PREIMAGE_ORACLE_CHALLENGE_PERIOD}"
 
 echo "Applying op-deployer intent to live L1 at $L1_RPC_URL ..."
 op-deployer apply \

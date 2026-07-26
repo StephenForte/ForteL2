@@ -5,6 +5,14 @@ l1ContractsLocator = "embedded"
 l2ContractsLocator = "embedded"
 useInterop = false
 
+[globalDeployOverrides]
+  proofMaturityDelaySeconds = 12
+  disputeGameFinalityDelaySeconds = 6
+  faultGameClockExtension = 5
+  faultGameMaxClockDuration = 10
+  faultGameWithdrawalDelay = 1
+  preimageOracleChallengePeriod = 1
+
 [superchainRoles]
   SuperchainProxyAdminOwner = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
   SuperchainGuardian = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"

@@ -396,6 +396,28 @@ else
   echo "FAIL 05-start-batcher*.sh must support USE_CUSTOM_BATCHER with Sepolia confirm gate" >&2
   fail=1
 fi
+# Local deploy must override preimageOracleChallengePeriod so short fault-game clocks can create().
+if grep -q 'preimageOracleChallengePeriod' "$SCRIPT_DIR/02-deploy-contracts.sh" \
+  && grep -q 'PREIMAGE_ORACLE_CHALLENGE_PERIOD' "$SCRIPT_DIR/02-deploy-contracts.sh"; then
+  echo "PASS local deploy sets preimageOracleChallengePeriod for short fault-game clocks"
+else
+  echo "FAIL 02-deploy-contracts.sh must set preimageOracleChallengePeriod (InvalidClockExtension otherwise)" >&2
+  fail=1
+fi
+# Phase 5: custom proposer is opt-in; stock path remains default; Sepolia needs confirm gate.
+if grep -q 'USE_CUSTOM_PROPOSER' "$SCRIPT_DIR/06-start-proposer.sh" \
+  && grep -q 'fortel2-proposer' "$SCRIPT_DIR/06-start-proposer.sh" \
+  && grep -q 'stop_bg op-proposer' "$SCRIPT_DIR/06-start-proposer.sh" \
+  && grep -q 'CONFIRM_CUSTOM_PROPOSER_SEPOLIA' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'USE_CUSTOM_PROPOSER' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'stop_bg op-proposer' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q -- '-confirmations' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q -- '-receipt-timeout' "$SCRIPT_DIR/06-start-proposer-sepolia.sh"; then
+  echo "PASS Phase 5 USE_CUSTOM_PROPOSER switch (local + Sepolia confirm gate)"
+else
+  echo "FAIL 06-start-proposer*.sh must support USE_CUSTOM_PROPOSER with Sepolia confirm gate" >&2
+  fail=1
+fi
 # Overnight sleep/wake helper for metered Sepolia / QuickNode.
 if [[ -x "$SCRIPT_DIR/dev-sleep.sh" ]] \
   && grep -q 'cmd_sleep' "$SCRIPT_DIR/dev-sleep.sh" \
