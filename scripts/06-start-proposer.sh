@@ -22,17 +22,25 @@ wait_for_rpc "$L1_RPC_URL" "L1"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
 if [[ "${USE_CUSTOM_PROPOSER:-0}" == "1" ]]; then
+  # Build before stopping stock so a failed go build leaves the running proposer intact
+  # (especially important on Sepolia — see AGENTS.md: prefer reversible ops).
+  require_bin go
+  CUSTOM_PROPOSER_BIN="${CUSTOM_PROPOSER_BIN:-$BIN_DIR/fortel2-proposer}"
+  mkdir -p "$(dirname "$CUSTOM_PROPOSER_BIN")"
+  build_tmp="${CUSTOM_PROPOSER_BIN}.building.$$"
+  cleanup_build_tmp() { rm -f "$build_tmp"; }
+  trap cleanup_build_tmp EXIT
+  echo "Building custom proposer → $build_tmp"
+  (cd "$FORTEL2_ROOT/proposer" && go build -o "$build_tmp" ./cmd/propose-loop)
+  mv -f "$build_tmp" "$CUSTOM_PROPOSER_BIN"
+  trap - EXIT
+
   # start_bg returns 0 when the shared op-proposer pid is already alive — stop stock
   # (or a prior custom) first so we actually launch fortel2-proposer, not a false "started".
   if is_running op-proposer; then
     echo "Stopping existing op-proposer (pid $(cat "$PID_DIR/op-proposer.pid")) before custom start…"
     stop_bg op-proposer
   fi
-  require_bin go
-  CUSTOM_PROPOSER_BIN="${CUSTOM_PROPOSER_BIN:-$BIN_DIR/fortel2-proposer}"
-  mkdir -p "$(dirname "$CUSTOM_PROPOSER_BIN")"
-  echo "Building custom proposer → $CUSTOM_PROPOSER_BIN"
-  (cd "$FORTEL2_ROOT/proposer" && go build -o "$CUSTOM_PROPOSER_BIN" ./cmd/propose-loop)
   # Keep pid name op-proposer so stop-all.sh / status still work (no lib.sh changes).
   CUSTOM_POLL="${CUSTOM_PROPOSER_POLL_INTERVAL:-2s}"
   CUSTOM_INTERVAL="${CUSTOM_PROPOSER_INTERVAL:-${PROPOSER_INTERVAL:-12s}}"

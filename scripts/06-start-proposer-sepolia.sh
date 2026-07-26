@@ -39,17 +39,24 @@ if [[ "${USE_CUSTOM_PROPOSER:-0}" == "1" ]]; then
     echo "  Default remains stock: FORTEL2_ENV=.env.sepolia ./scripts/06-start-proposer-sepolia.sh" >&2
     exit 1
   fi
+  # Build before stopping stock so a failed go build leaves Sepolia proposals running.
+  require_bin go
+  CUSTOM_PROPOSER_BIN="${CUSTOM_PROPOSER_BIN:-$BIN_DIR/fortel2-proposer}"
+  mkdir -p "$(dirname "$CUSTOM_PROPOSER_BIN")"
+  build_tmp="${CUSTOM_PROPOSER_BIN}.building.$$"
+  cleanup_build_tmp() { rm -f "$build_tmp"; }
+  trap cleanup_build_tmp EXIT
+  echo "Building custom proposer → $build_tmp"
+  (cd "$FORTEL2_ROOT/proposer" && go build -o "$build_tmp" ./cmd/propose-loop)
+  mv -f "$build_tmp" "$CUSTOM_PROPOSER_BIN"
+  trap - EXIT
+
   # start_bg returns 0 when the shared op-proposer pid is already alive — stop stock
   # (or a prior custom) first so we actually launch fortel2-proposer, not a false "started".
   if is_running op-proposer; then
     echo "Stopping existing op-proposer (pid $(cat "$PID_DIR/op-proposer.pid")) before custom start…"
     stop_bg op-proposer
   fi
-  require_bin go
-  CUSTOM_PROPOSER_BIN="${CUSTOM_PROPOSER_BIN:-$BIN_DIR/fortel2-proposer}"
-  mkdir -p "$(dirname "$CUSTOM_PROPOSER_BIN")"
-  echo "Building custom proposer → $CUSTOM_PROPOSER_BIN"
-  (cd "$FORTEL2_ROOT/proposer" && go build -o "$CUSTOM_PROPOSER_BIN" ./cmd/propose-loop)
   CUSTOM_POLL="${CUSTOM_PROPOSER_POLL_INTERVAL:-$PROPOSER_POLL}"
   CUSTOM_INTERVAL="${CUSTOM_PROPOSER_INTERVAL:-$PROPOSER_INTERVAL}"
   CUSTOM_CONFS="${CUSTOM_PROPOSER_CONFIRMATIONS:-2}"
