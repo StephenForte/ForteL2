@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -48,6 +50,7 @@ func TestIsHardTxFailure(t *testing.T) {
 		{name: "nil", err: nil, want: false},
 		{name: "receipt timeout", err: errors.New("timeout waiting for receipt 0xabc"), want: false},
 		{name: "confirmations timeout", err: errors.New("timeout waiting for 2 confirmations of 0xabc (receipt block 1)"), want: false},
+		{name: "failed confirmations timeout", err: errors.New("timeout waiting for 2 confirmations of failed tx 0xabc (receipt block 1)"), want: false},
 		{name: "reverted", err: errors.New("tx failed status=0"), want: true},
 		{name: "reorg", err: errors.New("receipt for 0xabc disappeared after reorg"), want: false},
 	}
@@ -91,11 +94,21 @@ func TestShouldClearPending(t *testing.T) {
 		wantReason string
 	}{
 		{
-			name:       "reverted clears",
+			name:       "confirmed revert clears",
 			waitErr:    errors.New("tx failed status=0"),
 			l1:         &fakeL1TxTracker{},
 			wantClear:  true,
 			wantReason: "reverted",
+		},
+		{
+			name: "unconfirmed failed timeout keeps",
+			waitErr: errors.New("timeout waiting for 2 confirmations of failed tx 0xabc (receipt block 10)"),
+			l1: &fakeL1TxTracker{
+				byHashErr: ethereum.NotFound,
+				receipt:   &types.Receipt{Status: types.ReceiptStatusFailed, BlockNumber: big.NewInt(10)},
+			},
+			wantClear:  false,
+			wantReason: "still-known",
 		},
 		{
 			name:    "timeout still pending keeps",
@@ -175,5 +188,87 @@ func TestTxStillTracked(t *testing.T) {
 	}, hash)
 	if err != nil || known || pending {
 		t.Fatalf("dropped: known=%v pending=%v err=%v", known, pending, err)
+	}
+}
+
+type scriptedReceiptWaiter struct {
+	calls    int
+	receipts []*types.Receipt
+	heads    []uint64
+	errs     []error
+}
+
+func (s *scriptedReceiptWaiter) TransactionReceipt(context.Context, common.Hash) (*types.Receipt, error) {
+	i := s.calls
+	if i >= len(s.receipts) {
+		i = len(s.receipts) - 1
+	}
+	var err error
+	if i < len(s.errs) {
+		err = s.errs[i]
+	}
+	rcpt := s.receipts[i]
+	s.calls++
+	return rcpt, err
+}
+
+func (s *scriptedReceiptWaiter) BlockNumber(context.Context) (uint64, error) {
+	i := s.calls - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(s.heads) {
+		i = len(s.heads) - 1
+	}
+	return s.heads[i], nil
+}
+
+func TestWaitReceiptConfirmedFailedNeedsConfirmations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	hash := common.HexToHash("0xabc")
+	failed := &types.Receipt{
+		Status:      types.ReceiptStatusFailed,
+		BlockNumber: big.NewInt(10),
+	}
+
+	// Tip revert with confirmations=2 must not finalize until head advances.
+	l1 := &scriptedReceiptWaiter{
+		receipts: []*types.Receipt{failed, failed, failed},
+		heads:    []uint64{10, 10, 11},
+		errs:     []error{nil, nil, nil},
+	}
+	err := waitReceiptConfirmed(ctx, l1, hash, 2, 3*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "tx failed status=0") {
+		t.Fatalf("want confirmed revert, got %v", err)
+	}
+	if l1.calls < 3 {
+		t.Fatalf("expected to poll until confirmations, calls=%d", l1.calls)
+	}
+}
+
+func TestWaitReceiptConfirmedFailedReorgKeepsSoft(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	hash := common.HexToHash("0xabc")
+	failed := &types.Receipt{
+		Status:      types.ReceiptStatusFailed,
+		BlockNumber: big.NewInt(10),
+	}
+	l1 := &scriptedReceiptWaiter{
+		receipts: []*types.Receipt{failed, nil},
+		heads:    []uint64{10},
+		errs:     []error{nil, ethereum.NotFound},
+	}
+	err := waitReceiptConfirmed(ctx, l1, hash, 2, 2*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "disappeared after reorg") {
+		t.Fatalf("want reorg error, got %v", err)
+	}
+	clear, reason := shouldClearPending(ctx, &fakeL1TxTracker{
+		byHashTx:      types.NewTx(&types.LegacyTx{Nonce: 1, GasPrice: big.NewInt(1), Gas: 21000}),
+		byHashPending: true,
+	}, hash, err)
+	if clear || reason != "still-pending" {
+		t.Fatalf("reorged failed tip should keep pending, got clear=%v reason=%q", clear, reason)
 	}
 }

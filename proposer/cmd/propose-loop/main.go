@@ -275,8 +275,9 @@ func sendCreate(ctx context.Context, l1 *ethclient.Client, priv *ecdsa.PrivateKe
 	return signed.Hash(), nil
 }
 
-// isHardTxFailure is true when the L1 tx reverted on-chain. Soft timeouts and
-// temporary reorg receipt loss keep pending so we do not burn a new nonce.
+// isHardTxFailure is true when a reverted receipt has already reached the
+// requested confirmation depth. Soft timeouts and reorg receipt loss keep
+// pending so we do not burn a new nonce while the original hash may still win.
 func isHardTxFailure(err error) bool {
 	if err == nil {
 		return false
@@ -291,9 +292,16 @@ type l1TxTracker interface {
 	TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error)
 }
 
+// l1ReceiptWaiter is the surface used while waiting for inclusion + confirmations.
+type l1ReceiptWaiter interface {
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+	BlockNumber(ctx context.Context) (uint64, error)
+}
+
 // shouldClearPending decides whether to abandon an in-flight L1 hash after a
-// wait error. Only a reverted receipt or a fully dropped/unknown tx clears
-// pending; timeouts and reorg receipt flicker keep waiting the same hash.
+// wait error. Only a confirmation-deep reverted receipt or a fully
+// dropped/unknown tx clears pending; timeouts and reorg receipt flicker keep
+// waiting the same hash.
 func shouldClearPending(ctx context.Context, l1 l1TxTracker, hash common.Hash, waitErr error) (clear bool, reason string) {
 	if isHardTxFailure(waitErr) {
 		return true, "reverted"
@@ -340,17 +348,21 @@ func receiptConfirmed(head, receiptBlock, confirmations uint64) bool {
 	return head+1 >= receiptBlock+confirmations
 }
 
-func waitReceiptConfirmed(ctx context.Context, l1 *ethclient.Client, hash common.Hash, confirmations uint64, timeout time.Duration) error {
+func waitReceiptConfirmed(ctx context.Context, l1 l1ReceiptWaiter, hash common.Hash, confirmations uint64, timeout time.Duration) error {
 	if confirmations == 0 {
 		confirmations = 1
 	}
 	deadline := time.Now().Add(timeout)
 	var receiptBlock uint64
 	haveReceipt := false
+	failedStatus := uint64(0)
+	haveFailed := false
 	for time.Now().Before(deadline) {
 		rcpt, err := l1.TransactionReceipt(ctx, hash)
 		if err != nil || rcpt == nil {
 			if haveReceipt {
+				// Tip receipt (success or revert) vanished — treat as reorg and
+				// keep awaiting the same hash rather than clearing pending.
 				return fmt.Errorf("receipt for %s disappeared after reorg", hash.Hex())
 			}
 			if sleepCtx(ctx, 500*time.Millisecond) != nil {
@@ -358,11 +370,30 @@ func waitReceiptConfirmed(ctx context.Context, l1 *ethclient.Client, hash common
 			}
 			continue
 		}
-		if rcpt.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("tx failed status=%d", rcpt.Status)
-		}
 		receiptBlock = rcpt.BlockNumber.Uint64()
 		haveReceipt = true
+		if rcpt.Status != types.ReceiptStatusSuccessful {
+			// Do not clear pending on an unconfirmed revert: a tip status-0 can
+			// reorg out, re-enter the mempool, and succeed while we already
+			// submitted under the next nonce (duplicate propose on Sepolia).
+			haveFailed = true
+			failedStatus = rcpt.Status
+			head, herr := l1.BlockNumber(ctx)
+			if herr != nil {
+				if sleepCtx(ctx, 500*time.Millisecond) != nil {
+					return ctx.Err()
+				}
+				continue
+			}
+			if receiptConfirmed(head, receiptBlock, confirmations) {
+				return fmt.Errorf("tx failed status=%d", failedStatus)
+			}
+			if sleepCtx(ctx, 500*time.Millisecond) != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		haveFailed = false
 		head, err := l1.BlockNumber(ctx)
 		if err != nil {
 			if sleepCtx(ctx, 500*time.Millisecond) != nil {
@@ -379,6 +410,9 @@ func waitReceiptConfirmed(ctx context.Context, l1 *ethclient.Client, hash common
 	}
 	if !haveReceipt {
 		return fmt.Errorf("timeout waiting for receipt %s", hash.Hex())
+	}
+	if haveFailed {
+		return fmt.Errorf("timeout waiting for %d confirmations of failed tx %s (receipt block %d)", confirmations, hash.Hex(), receiptBlock)
 	}
 	return fmt.Errorf("timeout waiting for %d confirmations of %s (receipt block %d)", confirmations, hash.Hex(), receiptBlock)
 }
