@@ -18,11 +18,11 @@
     <key>PATH</key>
     <string>/Users/steveforte/.foundry/bin:/Users/steveforte/ForteL2/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-  <!-- Daily 23:00 local — stop sequencer/batcher/proposer + dApp/viewer HTTP -->
+  <!-- Daily 21:00 local — stop sequencer/batcher/proposer + dApp/viewer HTTP -->
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
-    <integer>23</integer>
+    <integer>21</integer>
     <key>Minute</key>
     <integer>0</integer>
   </dict>

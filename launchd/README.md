@@ -6,7 +6,7 @@ User agents only run while that user session is logged in (auto-login on the min
 | Label | When (local) | What |
 |---|---|---|
 | `com.steve.fortel2-health` | load + daily **05:05** | `refresh_health.sh` → `data/pipeline-health.json` |
-| `com.steve.fortel2-sleep` | daily **23:00** | `run_dev_sleep.sh` → Sepolia `dev-sleep sleep` |
+| `com.steve.fortel2-sleep` | daily **21:00** | `run_dev_sleep.sh` → Sepolia `dev-sleep sleep` |
 | `com.steve.fortel2-wake` | daily **08:00** | `run_dev_wake.sh` → Sepolia `dev-sleep wake` |
 
 **Logs** go to `~/Library/Logs/fortel2-{health,sleep,wake}.{out,err}.log` (not repo `data/`).  

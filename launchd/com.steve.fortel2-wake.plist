@@ -18,7 +18,7 @@
     <key>PATH</key>
     <string>/Users/steveforte/.foundry/bin:/Users/steveforte/ForteL2/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-  <!-- Daily 08:00 local — start Sepolia stack (after overnight sleep at 23:00) -->
+  <!-- Daily 08:00 local — start Sepolia stack (after overnight sleep at 21:00) -->
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
