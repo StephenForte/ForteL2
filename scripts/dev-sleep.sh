@@ -17,8 +17,8 @@
 #   • Once-daily launchd health snapshot (negligible credits)
 #
 # Mac mini schedule (checked-in LaunchAgents — see launchd/README.md):
-#   com.steve.fortel2-sleep  → run_dev_sleep.sh  daily 23:00 local
-#   com.steve.fortel2-wake   → run_dev_wake.sh   daily 08:00 local
+#   com.steve.fortel2-sleep  → run_dev_sleep.sh  daily 21:00 local
+#   com.steve.fortel2-wake   → run_dev_wake.sh   daily 05:00 local
 # Prefer launchd over crontab; user agents need a logged-in session.
 #
 # Does not edit start_bg/stop_bg. Does not wipe DATA_DIR.
