@@ -16,6 +16,11 @@
 #   • Datadir / deployments (not wiped)
 #   • Once-daily launchd health snapshot (negligible credits)
 #
+# Mac mini schedule (checked-in LaunchAgents — see launchd/README.md):
+#   com.steve.fortel2-sleep  → run_dev_sleep.sh  daily 23:00 local
+#   com.steve.fortel2-wake   → run_dev_wake.sh   daily 08:00 local
+# Prefer launchd over crontab; user agents need a logged-in session.
+#
 # Does not edit start_bg/stop_bg. Does not wipe DATA_DIR.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
