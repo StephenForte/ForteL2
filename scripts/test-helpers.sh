@@ -428,6 +428,26 @@ else
   echo "FAIL missing scripts/dev-sleep.sh sleep/wake helper" >&2
   fail=1
 fi
+# Checked-in LaunchAgents for overnight sleep / morning wake (Mac mini).
+LAUNCHD_DIR="$(cd "$SCRIPT_DIR/../launchd" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -x "$ROOT_DIR/run_dev_sleep.sh" ]] \
+  && [[ -x "$ROOT_DIR/run_dev_wake.sh" ]] \
+  && grep -q 'dev-sleep.sh sleep' "$ROOT_DIR/run_dev_sleep.sh" \
+  && grep -q 'dev-sleep.sh wake' "$ROOT_DIR/run_dev_wake.sh" \
+  && grep -q 'com.steve.fortel2-sleep' "$LAUNCHD_DIR/com.steve.fortel2-sleep.plist" \
+  && grep -q 'run_dev_sleep.sh' "$LAUNCHD_DIR/com.steve.fortel2-sleep.plist" \
+  && grep -q 'Library/Logs/fortel2-sleep' "$LAUNCHD_DIR/com.steve.fortel2-sleep.plist" \
+  && grep -q 'com.steve.fortel2-wake' "$LAUNCHD_DIR/com.steve.fortel2-wake.plist" \
+  && grep -q 'run_dev_wake.sh' "$LAUNCHD_DIR/com.steve.fortel2-wake.plist" \
+  && grep -q 'Library/Logs/fortel2-wake' "$LAUNCHD_DIR/com.steve.fortel2-wake.plist" \
+  && ! grep -q 'data/.*\.log' "$LAUNCHD_DIR/com.steve.fortel2-sleep.plist" \
+  && ! grep -q 'data/.*\.log' "$LAUNCHD_DIR/com.steve.fortel2-wake.plist"; then
+  echo "PASS launchd sleep/wake plists + run_dev_{sleep,wake}.sh wrappers"
+else
+  echo "FAIL launchd sleep/wake agents must wrap run_dev_*.sh and log under ~/Library/Logs" >&2
+  fail=1
+fi
 # smoke-transfer must assert balance movement, not only receipt success.
 if grep -q 'uint_gt "\$AFTER_B" "\$BEFORE_B"' "$SCRIPT_DIR/smoke-transfer.sh" \
   && grep -q 'uint_gt "\$BEFORE_A" "\$AFTER_A"' "$SCRIPT_DIR/smoke-transfer.sh"; then

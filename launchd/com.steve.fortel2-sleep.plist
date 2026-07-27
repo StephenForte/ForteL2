@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.steve.fortel2-sleep</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/steveforte/ForteL2/run_dev_sleep.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/steveforte/ForteL2</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FORTEL2_ENV</key>
+    <string>.env.sepolia</string>
+    <key>PATH</key>
+    <string>/Users/steveforte/.foundry/bin:/Users/steveforte/ForteL2/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <!-- Daily 23:00 local — stop sequencer/batcher/proposer + dApp/viewer HTTP -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>23</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <!--
+    Log under ~/Library/Logs (always present on macOS). Do NOT use repo data/:
+    launchd opens StandardOutPath/StandardErrorPath before the program runs.
+  -->
+  <key>StandardOutPath</key>
+  <string>/Users/steveforte/Library/Logs/fortel2-sleep.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/steveforte/Library/Logs/fortel2-sleep.err.log</string>
+</dict>
+</plist>
