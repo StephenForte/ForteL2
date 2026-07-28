@@ -38,6 +38,36 @@ class RedactRpcUrlTests(unittest.TestCase):
             self.assertNotIn(secret, redacted)
 
 
+class RequireHttpRpcUrlTests(unittest.TestCase):
+    def test_allows_http_and_https(self) -> None:
+        for url in (
+            "http://127.0.0.1:8545",
+            "https://rpc.example/path",
+            "HTTP://localhost:9545",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(pipeline_snapshot.require_http_rpc_url(url), url)
+
+    def test_rejects_file_and_other_schemes(self) -> None:
+        for url in (
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+            "gopher://example.com",
+            "data:text/plain,hi",
+            "javascript:alert(1)",
+            "/etc/passwd",
+            "",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError):
+                    pipeline_snapshot.require_http_rpc_url(url)
+
+    def test_rpc_rejects_file_url_before_urlopen(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            pipeline_snapshot.rpc("file:///etc/passwd", "eth_blockNumber")
+        self.assertIn("http(s)", str(ctx.exception))
+
+
 class QuantityTests(unittest.TestCase):
     def test_hexadecimal_quantity(self) -> None:
         self.assertEqual(pipeline_snapshot.hex_to_int("0x2a"), 42)

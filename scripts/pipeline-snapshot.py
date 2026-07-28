@@ -80,7 +80,26 @@ def redact_rpc_url(url: str) -> str:
     return f"{p.scheme}://{netloc}{path}"
 
 
+# urllib's default opener supports file://; only allow JSON-RPC over HTTP(S).
+_ALLOWED_RPC_SCHEMES = frozenset({"http", "https"})
+_HTTP_OPENER = urllib.request.build_opener(
+    urllib.request.HTTPHandler(),
+    urllib.request.HTTPSHandler(),
+)
+
+
+def require_http_rpc_url(url: str, label: str = "RPC URL") -> str:
+    """Reject non-http(s) URLs before urllib (blocks file:// and custom schemes)."""
+    if not url or not str(url).strip():
+        raise ValueError(f"{label} must be an http(s) URL, got: <empty>")
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in _ALLOWED_RPC_SCHEMES:
+        raise ValueError(f"{label} must be an http(s) URL, got scheme={scheme!r}")
+    return url
+
+
 def rpc(url: str, method: str, params: list[Any] | None = None, timeout: float = 30.0) -> Any:
+    url = require_http_rpc_url(url)
     body = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []}
     ).encode()
@@ -90,7 +109,8 @@ def rpc(url: str, method: str, params: list[Any] | None = None, timeout: float =
         headers={"content-type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    # Restricted opener: no FileHandler / unknown schemes (CWE-939 / dynamic-urllib-use).
+    with _HTTP_OPENER.open(req, timeout=timeout) as resp:
         payload = json.loads(resp.read().decode())
     if "error" in payload and payload["error"]:
         err = payload["error"]
