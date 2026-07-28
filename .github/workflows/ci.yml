@@ -10,10 +10,11 @@ jobs:
     name: forge test + script helpers + viewer unit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Pin to full commit SHAs so mutable tags cannot be silently retargeted.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: v1.7.1
 
@@ -45,7 +46,7 @@ jobs:
         run: node --test viewer/lib.test.js dapp/lib.test.js
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.26.5"
 
