@@ -331,6 +331,12 @@ FORTEL2_ENV=.env.sepolia USE_CUSTOM_PROPOSER=1 CONFIRM_CUSTOM_PROPOSER_SEPOLIA=1
 
 Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike-phase-5-proposer.md) (US-055). Operator switch details: [`proposer/README.md`](proposer/README.md).
 
+### Tracked dependency advisories (batcher / proposer)
+
+| Advisory | Module | Status | Notes |
+|---|---|---|---|
+| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. `batcher/` and `proposer/` do **not** import `openpgp` (confirmed with `govulncheck ./…` — clean). Indirect pin is `golang.org/x/crypto v0.54.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+
 Reproduce:
 
 ```bash
