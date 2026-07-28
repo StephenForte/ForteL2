@@ -121,3 +121,7 @@ This is a **learning rebuild**, not a production batcher. Target the specs; use 
 - Does the pinned chain’s fork schedule require span batches for new channels, or are singular batches still accepted?
 - Fjord channel encoding version byte / brotli — confirm against live `rollup.json` `l2_chain_id` 852 config before US-041
 - Should the custom batcher live as `batcher/` in this repo (yes, default) vs a separate repo?
+
+## Tracked dependency advisories
+
+- **GO-2026-5932** (`golang.org/x/crypto` / `openpgp`): no upstream module fix. Indirect via `go-ethereum`; this module does not import `openpgp`. Track + re-check on dep bumps — see `tasks/prd-l2-learning-chain.md` and `README.md`.

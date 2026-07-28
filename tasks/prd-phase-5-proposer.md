@@ -124,3 +124,7 @@ This is a **learning rebuild**, not a production proposer. Target the [dispute-g
 
 - Should v2 recompute output roots locally for learning (vs always fetching)? Deferred — fetch is enough for Phase 5 acceptance.
 - Permissioned game type `1` remains correct on the pinned deploy (yes — matches stock scripts).
+
+## Tracked dependency advisories
+
+- **GO-2026-5932** (`golang.org/x/crypto` / `openpgp`): no upstream module fix. Indirect via `go-ethereum`; this module does not import `openpgp`. Track + re-check on dep bumps — see `tasks/prd-l2-learning-chain.md` and `README.md`.
