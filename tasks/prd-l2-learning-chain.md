@@ -37,7 +37,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **2c** | Start L2 against Sepolia L1 (no Anvil); short batcher/proposer run; deposit dry-run; calldata DA | **Done** — operator dry-run: L2 tip advances, batcher L1 tx, deposit 0.01 ETH |
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap only; no redeploy). Render stays Phase 3 (L2 replica, not L1) | **Done** — runbook + `sepolia-rpc-check.sh` |
 | **3** | Deploy a **replica node on Render** — stock `op-geth` + `op-node` verifier deriving from Sepolia L1 (safe/finalized path). Sequencer peering / tunnel optional stretch. Containers OK **on Render only** | **Done** — [fortel2-replica](https://github.com/StephenForte/fortel2-replica); operator-verified matching block hashes after fresh 2b cutover |
-| **MR** | **Money rail (parallel):** SettlementOS onboards to chain **852** — see `tasks/prd-money-rail.md` + `deployments/rail-interface.json`. **SOS gate = now** (after 2c+3). Replica genesis republish still only on redeploy (Phase 7) | **Open** — infra ready; SOS F1+ |
+| **MR** | **Money rail (parallel):** SettlementOS onboards to chain **852** — see `tasks/prd-money-rail.md` + `deployments/rail-interface.json`. **SOS gate = now** (after 2c+3). Replica genesis republish still only on redeploy (Phase 7) | **MR-0 done** (2026-08-04) — rail interface published; SOS F1+ (deploy/settle in SOS repo) |
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `batcher/` + `USE_CUSTOM_BATCHER=1` opt-in; stock remains default (`tasks/prd-phase-4-batcher.md`) |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `proposer/` + `USE_CUSTOM_PROPOSER=1` opt-in; stock remains default (`tasks/prd-phase-5-proposer.md`) |
@@ -477,6 +477,7 @@ Before derivation implementation starts, either expand US-060–062 in-place **o
 
 ### Resolved decisions
 
+- **MR-0 closeout (2026-08-04):** `deployments/rail-interface.json` v1 + SOS/replica lifecycle docs verified; SettlementOS may integrate on chain **852** now. Remaining MR-1/MR-2 work (deploy + settle demo) lives in the SOS repo.
 - **Explorer path (Phase 1c):** DIY **pipeline viewer** on loopback after bridging (US-013 / US-014). Operator-verified on live stack.
 - **Phase 1d scope:** mempool signal + Sepolia funding/key gate only. Blockchair-style latest blocks/detail **deferred to Phase 6** (US-063), not 1d.
 - **Phase 6 block viewer (2026-07-24):** simple Blockchair-shaped UI — latest-blocks list + per-block detail — on loopback via RPC polls. **Blockscout** and full explorers stay **much later** (post–Phase 8 / non-loopback + containers).
