@@ -41,7 +41,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `batcher/` + `USE_CUSTOM_BATCHER=1` opt-in; stock remains default (`tasks/prd-phase-4-batcher.md`) |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `proposer/` + `USE_CUSTOM_PROPOSER=1` opt-in; stock remains default (`tasks/prd-phase-5-proposer.md`) |
-| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | **In progress** — US-060 spike done; **US-061 verifier done** (`derivation/` + `derivation-check.sh`); block viewer shipped (`blocks/` + `serve-blocks.sh`, US-063); US-062 gated |
+| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | **In progress** — US-060 spike done; **US-061 verifier done**; **US-062 sequencer stub done** (`derivation/cmd/sequencer-stub` + `sequencer-stub-demo.sh`); block viewer shipped (`blocks/` + `serve-blocks.sh`, US-063) |
 | **3a** | **(Deferred)** Native Mac mini Sepolia L1 (geth/reth + consensus client, no Docker) — disk/sync heavy; not required for calldata DA. Was briefly labeled 2e; scheduled **after** Phases 4–6 unless QuickNode fails earlier | Future (optional) |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal. **Precondition:** coordinated Sepolia redeploy with deliberately chosen immutables (fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — minutes-to-hours scale) + completed network reset across all replica operators | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
@@ -371,11 +371,11 @@ Before derivation implementation starts, either expand US-060–062 in-place **o
 **Description:** As the operator, I want an optional next step that builds L2 blocks (sequencer path) only after the verifier path is trustworthy, so sequencing complexity does not block derivation learning.
 
 **Acceptance Criteria:**
-- [ ] Sequencer stub is explicitly gated on US-061 acceptance
-- [ ] Engine API integration target named (`op-geth` or `op-reth`) with `--l2.enginekind` equivalent documented
-- [ ] Can produce at least N consecutive L2 blocks that the reference verifier (or US-061 tool) can follow
-- [ ] Clear kill switch: revert to stock `op-node` sequencer without re-genesis if possible; else documented reset procedure
-- [ ] Out of scope unless separately approved: full tx-pool policy parity, P2P block gossip, decentralized sequencing (Phase 8)
+- [x] Sequencer stub is explicitly gated on US-061 acceptance *(D-0009 operator approval; builds on merged US-061)*
+- [x] Engine API integration target named (`op-geth` or `op-reth`) with `--l2.enginekind` equivalent documented *(`op-geth` / `geth`; FCU V3 + getPayload V4/V3 + newPayload V4/V3)*
+- [x] Can produce at least N consecutive L2 blocks that the reference verifier (or US-061 tool) can follow *(N≥10 empty blocks on isolated EL; follow-validate via rebuilt attrs + L1-info match, D-T6-2)*
+- [x] Clear kill switch: revert to stock `op-node` sequencer without re-genesis if possible; else documented reset procedure *(reference never displaced — stop stub + wipe `$DATA_DIR/l2/sequencer-stub-op-geth`)*
+- [x] Out of scope unless separately approved: full tx-pool policy parity, P2P block gossip, decentralized sequencing (Phase 8)
 
 ### US-063: Simple Blockchair-style block viewer
 **Description:** As the operator, I want a small loopback **block viewer** so I can browse L2 blocks newest-first and open a single block’s detail page—enough to inspect height, hash, timestamp, tx count, and basic tx rows—without standing up Blockscout or a full Etherscan clone.

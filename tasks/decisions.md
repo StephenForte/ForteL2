@@ -102,6 +102,21 @@
 - **Decision:** T6 implements US-062 per `tasks/worker-prompts/T6-sequencer-stub.md`, branching from tag **`wave3-base`** (the commit adding that prompt, this entry, and the capture flag). Same isolation invariants as T4; T6 also upgrades the Sepolia golden-fixture test from existence-check to replay.
 - **Consequence:** After T6, Phase 6 is code-complete; remaining tracks are operator Sepolia runs and the Wave 3 hardening tasks (H1–H3), which branch from `wave3-base` or its successor.
 
+### D-T6-1 — Stub head-selection + isolated EL lifecycle
+- **Context:** US-062 must build blocks without `engine_*` against the reference stack; `lib.sh` `start_bg`/`stop_bg` remain privileged/out of allowlist.
+- **Decision:** Fresh isolated EL per demo (`$DATA_DIR/l2/sequencer-stub-op-geth`, HTTP `:19745`, auth `:19751`, P2P `:30324`, own JWT) started as a foreground-owned child (`&` + `trap`) like D-T4-1. Head = current tip of that EL (genesis after wipe). Empty blocks advance from that head with a fixed L1 origin (latest tip) and 2s timestamps. Reference sequencer is never stopped or displaced.
+- **Consequence:** Concurrent with `derivation-check.sh` (different ports/datadir). Kill switch = stop script + `rm -rf` stub datadir; stock op-node restart is a no-op.
+
+### D-T6-2 — Follow-validation via rebuilt payload attributes
+- **Context:** Acceptance requires the US-061 verifier (or reference derivation semantics) to “follow” stub-built blocks.
+- **Decision:** After sealing N blocks, re-run `BuildPayloadAttributes` for each built block against the same L1 origin and assert (a) parent-hash links and (b) first tx raw bytes equal the derived L1-info deposit. No second EL and no reference-hash compare (stub chain diverges by design).
+- **Consequence:** `sequencer-stub` exits non-zero if follow-validate fails; demo script prints per-block follow notes.
+
+### D-T6-3 — Engine API version pair
+- **Context:** Stub must document which Engine API methods and `--l2.enginekind` semantics it targets.
+- **Decision:** Same pair as US-061 sealing: `engine_forkchoiceUpdatedV3` + `engine_getPayloadV4` (fallback V3) + `engine_newPayloadV4` (fallback V3) + Isthmus `withdrawalsRoot` JSON patch (D-T4-2). Target EL is stock `op-geth` (`--l2.enginekind=geth` equivalent).
+- **Consequence:** README / module docs cite this constant (`EngineAPIVersions`); no op-reth path in v1.
+
 ---
 
 ## Escalations
