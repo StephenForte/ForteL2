@@ -29,6 +29,7 @@ scripts/bridge/node_modules/
 batcher/.gomodcache/
 derivation/.gomodcache/
 **/derivation-op-geth/
+**/derivation-anchor-op-geth/
 **/sequencer-stub-op-geth/
 
 # local tool/scan output (never commit)

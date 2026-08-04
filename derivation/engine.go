@@ -132,6 +132,31 @@ var isthmusEmptyWithdrawalsRoot = common.HexToHash("0x8ed4baae3a927be3dea54996b4
 
 // patchIsthmusWithdrawalsRoot injects withdrawalsRoot for op-geth Isthmus blocks.
 // Vanilla go-ethereum ExecutableData lacks the field; op-geth getPayload omits it but newPayload requires it.
+// SyncHeadFromLatest reads the sealing EL tip and updates the tracked forkchoice head.
+func (el *SealingEL) SyncHeadFromLatest(ctx context.Context) error {
+	hash, _, _, err := el.LoadLatestHead(ctx)
+	if err != nil {
+		return err
+	}
+	el.head = hash
+	return nil
+}
+
+// DebugSetHead rolls the sealing EL back to blockNum via debug_setHead (copy only).
+func (el *SealingEL) DebugSetHead(ctx context.Context, blockNum uint64) error {
+	tag := fmt.Sprintf("0x%x", blockNum)
+	var ok bool
+	if err := el.httpRPC.Call(ctx, "debug_setHead", []any{tag}, &ok); err != nil {
+		return fmt.Errorf("debug_setHead: %w", err)
+	}
+	hash, _, _, err := el.LoadLatestHead(ctx)
+	if err != nil {
+		return err
+	}
+	el.head = hash
+	return nil
+}
+
 func patchIsthmusWithdrawalsRoot(payload *engine.ExecutableData) (any, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -250,6 +275,38 @@ func (r *ReferenceClient) BlockHash(ctx context.Context, num uint64) (common.Has
 		return common.Hash{}, err
 	}
 	return blk.Hash, nil
+}
+
+func (r *ReferenceClient) BlockMeta(ctx context.Context, num uint64) (hash common.Hash, timestamp uint64, err error) {
+	var blk struct {
+		Hash      common.Hash    `json:"hash"`
+		Timestamp hexutil.Uint64 `json:"timestamp"`
+	}
+	tag := fmt.Sprintf("0x%x", num)
+	if err := r.l2.Call(ctx, "eth_getBlockByNumber", []any{tag, false}, &blk); err != nil {
+		return common.Hash{}, 0, err
+	}
+	return blk.Hash, uint64(blk.Timestamp), nil
+}
+
+func (r *ReferenceClient) BlockFirstTx(ctx context.Context, num uint64) ([]byte, error) {
+	var blk struct {
+		Transactions []struct {
+			Hash common.Hash `json:"hash"`
+		} `json:"transactions"`
+	}
+	tag := fmt.Sprintf("0x%x", num)
+	if err := r.l2.Call(ctx, "eth_getBlockByNumber", []any{tag, true}, &blk); err != nil {
+		return nil, err
+	}
+	if len(blk.Transactions) == 0 {
+		return nil, fmt.Errorf("block %d has no transactions", num)
+	}
+	var raw hexutil.Bytes
+	if err := r.l2.Call(ctx, "eth_getRawTransactionByHash", []any{blk.Transactions[0].Hash}, &raw); err != nil {
+		return nil, err
+	}
+	return []byte(raw), nil
 }
 
 type SyncStatus struct {

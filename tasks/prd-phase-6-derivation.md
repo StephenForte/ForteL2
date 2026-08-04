@@ -128,7 +128,7 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 ## Success metrics
 
 - US-061 exits 0 on local 901 default window against a running reference stack ✅ (2026-08-04, blocks 1–20)
-- Sepolia 852 window matches when operator runs `FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia` — **NOT MET; re-opened** (2026-08-04 operator run, D-0010): the pipeline numbers batches from 1 and seals from genesis state, so a mid-chain window cannot be anchored or executed. Requires the R2 window-anchoring work (timestamp-based numbering + a state anchor for the sealing EL).
+- Sepolia 852 window matches when operator runs `FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia` — **NOT MET; re-opened** (2026-08-04 operator run, D-0010): the pipeline numbers batches from 1 and seals from genesis state, so a mid-chain window cannot be anchored or executed. **Implementation landed (R2, 2026-08-04):** timestamp-based batch numbering + stopped-stack datadir anchor + `debug_setHead` on the sealing copy. Operator verification pending (anchored Sepolia run + `testdata/sepolia/window.json` capture).
 - No Sepolia redeploy; no edits to pinned `deployments/sepolia/` contracts tree
 
 ## Open questions (for T4)
@@ -148,6 +148,7 @@ Same as `batcher/` / `proposer/` — **GO-2026-5932** (`x/crypto/openpgp` indire
 - **Isthmus withdrawalsRoot:** op-geth `getPayload` omits `withdrawalsRoot`; verifier JSON-patches `0x8ed4baae…` before `engine_newPayloadV4`.
 - **Sepolia live window:** implemented (`--sepolia`); operator verification pending (no golden fixture in repo yet).
 - **US-062 (T6, 2026-08-04):** `derivation/cmd/sequencer-stub` + `scripts/sequencer-stub-demo.sh`. Isolated EL at `$DATA_DIR/l2/sequencer-stub-op-geth` (ports `:19745`/`:19751`, P2P `:30324`). Engine API: FCU V3 + getPayload/newPayload V4 (V3 fallback). Follow-validation: rebuild `BuildPayloadAttributes`, match L1-info deposit bytes + parent links (D-T6-2). Sepolia golden fixture test upgraded to replay-if-present.
+- **R2 window anchoring (2026-08-04):** batches numbered by `(timestamp − genesis.l2_time) / block_time` with drift/duplicate handling; mid-chain windows copy reference datadir while stopped (`--make-anchor`), roll sealing copy to `start−1` via `debug_setHead`, initialize derivation state from L1-info deposit in reference block `start−1`; L1 scan progress every 100 blocks; genesis scan guard at L1 tip > 1M unless `--scan-from-genesis`. Local 901 genesis replay (1–20) unchanged.
 
 ## References
 

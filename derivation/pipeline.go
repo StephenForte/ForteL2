@@ -26,6 +26,9 @@ func deriveBlockInputs(ctx context.Context, cfg *RollupConfig, l1 *L1Client, opt
 		}
 		from := opts.FromL1Block
 		if from == 0 {
+			if !opts.ScanFromGenesis && toBlock > 1_000_000 {
+				return nil, fmt.Errorf("refusing unbounded L1 inbox scan from genesis (tip=%d): pass -from-l1 or -scan-from-genesis", toBlock)
+			}
 			from = 1
 		}
 		batcherTxs, err = l1.ScanBatcherTxs(ctx, cfg.BatchInboxAddress, batcherAddr, from, toBlock)
@@ -34,9 +37,7 @@ func deriveBlockInputs(ctx context.Context, cfg *RollupConfig, l1 *L1Client, opt
 		}
 	}
 
-	var inputs []BlockInput
-	blockNum := uint64(1)
-	var lastSealed common.Hash
+	byNumber := map[uint64]BlockInput{}
 
 	for _, btx := range batcherTxs {
 		rawBatches, err := DecodeBatcherChannel(btx.Input)
@@ -44,15 +45,11 @@ func deriveBlockInputs(ctx context.Context, cfg *RollupConfig, l1 *L1Client, opt
 			return nil, fmt.Errorf("tx %s: %w", btx.Hash, err)
 		}
 		for _, raw := range rawBatches {
-			var parent [32]byte
-			if lastSealed != (common.Hash{}) {
-				parent = lastSealed
-			}
-			elems, err := DecodeTypedBatch(raw, cfg, chainID, parent)
+			elems, err := DecodeTypedBatch(raw, cfg, chainID, [32]byte{})
 			if err != nil {
 				return nil, err
 			}
-			for i, e := range elems {
+			for _, e := range elems {
 				if e.EpochHash == (common.Hash{}) {
 					hdr, err := l1.BlockHeader(ctx, e.EpochNumber)
 					if err != nil {
@@ -60,14 +57,29 @@ func deriveBlockInputs(ctx context.Context, cfg *RollupConfig, l1 *L1Client, opt
 					}
 					e.EpochHash = hdr.Hash
 				}
-				if i == 0 && e.ParentHash == (common.Hash{}) && lastSealed != (common.Hash{}) {
-					e.ParentHash = lastSealed
+
+				num, err := blockNumberFromTimestamp(cfg, e.Timestamp)
+				if err != nil {
+					return nil, fmt.Errorf("tx %s: %w", btx.Hash, err)
 				}
-				e.Number = blockNum
+				if num < opts.StartL2 || num > opts.EndL2 {
+					continue
+				}
+				e.Number = num
 				e.L1SourceTx = btx.Hash
-				inputs = append(inputs, e)
-				blockNum++
+
+				if prev, dup := byNumber[num]; dup {
+					logDuplicateBlock(num, prev, e)
+				}
+				byNumber[num] = e
 			}
+		}
+	}
+
+	var inputs []BlockInput
+	for n := opts.StartL2; n <= opts.EndL2; n++ {
+		if in, ok := byNumber[n]; ok {
+			inputs = append(inputs, in)
 		}
 	}
 	return inputs, nil

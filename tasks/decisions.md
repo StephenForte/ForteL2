@@ -126,6 +126,21 @@
 - **Decision:** R2 implements window anchoring per `tasks/worker-prompts/R2-window-anchoring.md`: timestamp-based batch numbering + sealing-EL state anchor via stopped-stack datadir copy + `debug_setHead` on the copy only. Base = tag **`wave4-base`** (the commit adding the prompt + this entry).
 - **Consequence:** After R2 merges, the operator runs the anchored Sepolia window + captures `testdata/sepolia/window.json` (unskips the golden replay test). Then only the hardening wave (H1–H3) remains.
 
+### D-R2-1 — Timestamp-based batch numbering replaces scan-position indexing
+- **Context:** D-0010: mid-chain Sepolia window failed because batches were numbered 1..N by L1 scan order.
+- **Decision:** Number every decoded batch by `(batch.timestamp − genesis.l2_time) / block_time`; validate `(ts − l2_time) % block_time == 0`; filter to the requested window; de-duplicate by block number (last write wins, log duplicates). Genesis replay (blocks 1–20) uses the same path.
+- **Consequence:** L1 inbox scan must cover enough history for the window; numbering no longer assumes scanning from genesis block 1.
+
+### D-R2-2 — Sealing EL state anchor via stopped-stack datadir copy
+- **Context:** Sealing block N requires EL state at N−1; genesis-init sealing EL cannot verify mid-chain windows.
+- **Decision:** `derivation-check.sh` gains `--anchor-datadir` / `--make-anchor`. Copy `$DATA_DIR/l2/op-geth` while reference EL is stopped (RPC probe + `geth/LOCK` guard). Sealing EL runs from the copy; `debug_setHead` to block `start−1` runs **only** against the copy. Derivation state (parent hash/time, L1 origin, seq number) initializes from reference block `start−1` L1-info deposit decode.
+- **Consequence:** Operator must refresh anchor copy after major chain resets. Sepolia runs require anchor copy before `--sepolia`.
+
+### D-R2-3 — L1 scan hardening: progress output + genesis-scan guard
+- **Context:** D-0010 hardening riders; Sepolia genesis scan is ~11M blocks.
+- **Decision:** Emit L1 scan progress every 100 blocks on stderr. Refuse `-from-l1 0` (genesis scan) when L1 tip > 1_000_000 unless `-scan-from-genesis` / `--scan-from-genesis`. Anchored windows derive `-from-l1` from anchor L1 origin minus `DERIVATION_L1_LOOKBACK` (default 300); Sepolia `--sepolia` keeps safe-head-based bound.
+- **Consequence:** Operators must pass explicit scan bounds or anchor metadata for large L1 chains.
+
 ---
 
 ## Escalations

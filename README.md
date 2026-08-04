@@ -465,16 +465,37 @@ Side-by-side **derivation verifier** that reads L1 batch data, derives a bounded
 ./scripts/derivation-check.sh --start-l2 1 --end-l2 20
 ./scripts/derivation-check.sh --channel-tx 0x64fa2834…   # single L1 batcher tx
 
-# Sepolia 852 — 50 blocks ending at reference safe_l2 (operator-run)
+# Mid-chain window (blocks 60–80) — requires anchor datadir copy (R2)
+./scripts/stop-all.sh
+./scripts/derivation-check.sh --make-anchor          # copy while stack stopped
+./scripts/start-all.sh
+./scripts/derivation-check.sh --start-l2 60 --end-l2 80
+
+# Sepolia 852 — 50 blocks ending at reference safe_l2 (operator-run; needs anchor)
+FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --make-anchor
+FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia
 ```
+
+### Window anchoring (R2 / mid-chain windows)
+
+Sealing block **N** needs EL state at **N−1**. Genesis replay (blocks 1–20) initializes a fresh sealing EL from `genesis.json`. Mid-chain windows copy the reference datadir **while the stack is stopped**, start the sealing EL from that copy, roll it back with `debug_setHead` to block `start−1`, then seal forward. The copy step refuses to run if the reference RPC responds or `geth/LOCK` is present — a live copy is corrupt.
+
+| Path | Role |
+|---|---|
+| `$DATA_DIR/l2/op-geth` | Reference EL (read-only at verify time) |
+| `$DATA_DIR/l2/derivation-anchor-op-geth` | Stopped-stack copy for mid-chain anchoring (gitignored) |
+| `$DATA_DIR/l2/derivation-op-geth` | Fresh genesis sealing EL (blocks 1–20 only) |
+
+Batch numbering uses L2 timestamps: `(batch.timestamp − genesis.l2_time) / block_time`. L1 inbox scan bound derives from the anchor block's L1 origin minus `DERIVATION_L1_LOOKBACK` (default 300). Unbounded genesis L1 scans are refused when L1 tip exceeds ~1M blocks unless `--scan-from-genesis` is passed.
 
 | Outcome | What you see |
 |---|---|
 | **PASS** | Per-block `derived=… expected=… OK` for every block in the window; `derivation-check: PASS`; exit 0 |
 | **FAIL** | First mismatch logs `derived` vs `expected` hash; exit 1 |
 
-The runbook starts a **separate** loopback `op-geth` for Engine API block sealing (`$DATA_DIR/l2/derivation-op-geth`, ports `:19645`/`:19651`). The live reference `op-geth` / `op-node` stay **read-only** — never send `engine_*` to them. **Kill switch:** simply don't run `derivation-check.sh`; stock derivation is unchanged.
+The runbook starts a **separate** loopback `op-geth` for Engine API block sealing (`$DATA_DIR/l2/derivation-op-geth` for genesis replay, or `$DATA_DIR/l2/derivation-anchor-op-geth` for mid-chain windows; ports `:19645`/`:19651`). The live reference `op-geth` / `op-node` stay **read-only** — never send `engine_*` or `debug_setHead` to them (only to the copy). **Kill switch:** simply don't run `derivation-check.sh`; stock derivation is unchanged.
 
 ### Sequencer stub (US-062)
 
