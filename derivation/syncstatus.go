@@ -12,7 +12,16 @@ import (
 // L2Ref is a lightweight L2 block reference from optimism_syncStatus.
 type L2Ref struct {
 	Hash   common.Hash `json:"hash"`
-	Number uint64      `json:"-"`
+	Number uint64      `json:"-"` // custom (un)marshal below: decimal out, hex/decimal/absent in
+}
+
+// MarshalJSON emits both fields — without this, JSON reports (e.g. the Sepolia
+// golden fixture) silently lose the block number.
+func (r L2Ref) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Hash   common.Hash `json:"hash"`
+		Number uint64      `json:"number"`
+	}{r.Hash, r.Number})
 }
 
 func (r *L2Ref) UnmarshalJSON(b []byte) error {
@@ -37,6 +46,9 @@ func (r *L2Ref) UnmarshalJSON(b []byte) error {
 			}
 		}
 		r.Number = n
+	case nil:
+		// Absent number (fixtures captured before MarshalJSON emitted it).
+		r.Number = 0
 	default:
 		return fmt.Errorf("unexpected number type %T", raw.Number)
 	}

@@ -156,6 +156,11 @@
 - **Decision:** Default origin = `rollup.json` `genesis.l1` (fresh head) or L1-info deposit on non-genesis head; advance L1 origin only when drift exceeded. `-l1-origin` override validated (rejected if `l2_ts < l1_ts` or past drift). Follow-validation independently asserts timestamp invariant (spec: sequencing window). Effective drift = 1800s with Fjord active (matches op-node README note).
 - **Consequence:** `sequencer-stub-demo.sh` builds valid empty blocks; old L1-tip default would fail validation at demo start.
 
+### D-0013 — Sepolia US-061 metric MET; Phase 6 complete
+- **Context:** Post-R3 operator runs still mismatched: diagnosis via field-diff of the sealed block in the anchor copy found `parentBeaconBlockRoot` zeroed (EIP-4788 state write → hash change; invisible on beacon-less Anvil). Integrator fix `06b87ac`. A fixture-capture defect followed: `L2Ref.Number` was `json:"-"` (marshal dropped it; unmarshal choked on absence) — fixed with explicit MarshalJSON + nil tolerance.
+- **Decision:** Sepolia anchored window **601219–601268** PASS (twice); golden fixture committed; replay test enforces in CI. Phase 6 marked **Done** in both PRDs.
+- **Consequence:** Program remainder: hardening wave (H1–H3 + operator drills). Accumulated H-findings: URL redaction sweep (start-script banners print unredacted L1 URL; Go tools fixed), scan guards/progress (done in derivation, pattern for batcher/proposer), CLI-mode dry-walk review habit, QuickNode token rotation (operator, post-debugging).
+
 ---
 
 ## Escalations
