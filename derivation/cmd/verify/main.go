@@ -27,6 +27,7 @@ func main() {
 	start := flag.Uint64("start-l2", 1, "first L2 block (inclusive)")
 	end := flag.Uint64("end-l2", 20, "last L2 block (inclusive)")
 	channelTx := flag.String("channel-tx", "", "derive single channel from L1 tx hash")
+	fromL1 := flag.Uint64("from-l1", 0, "first L1 block for inbox scan (0 = from block 1; REQUIRED in practice on Sepolia — scanning from genesis is ~11M blocks)")
 	jsonOut := flag.Bool("json", false, "emit JSON report")
 	flag.Parse()
 
@@ -57,6 +58,7 @@ func main() {
 		SealingHTTP: *sealHTTP,
 		StartL2:     *start,
 		EndL2:       *end,
+		FromL1Block: *fromL1,
 	}
 	if *channelTx != "" {
 		opts.ChannelTx = common.HexToHash(*channelTx)
