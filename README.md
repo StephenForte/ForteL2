@@ -75,7 +75,14 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 | [`tasks/coordination-settlementos.md`](tasks/coordination-settlementos.md) | Who owns what (no duplicate escrow/MMF) |
 | SOS handoff | `settlementos/tasks/prd-fortel2-integration.md` |
 
-**Replica reminder:** Phase 3 is done. Republish genesis/rollup to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only on a Sepolia **redeploy** (next expected: Phase 7). See `replica/README.md` and the Network reset procedure under Phase 3.
+**SOS onboarding (operator):**
+
+1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
+2. Fund the SOS deployer on L2 via L1→L2 deposit: `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh`.
+3. Point SettlementOS at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545` today) and deploy SOS contracts on chain **852**.
+4. **Writes** (tx submit, contract deploy) → Mac sequencer L2 RPC. **Reads** (explorer, heavy indexing) → Render replica RPC when reachable (see `replica/README.md`).
+
+**Replica reminder:** Phase 3 is done. Republish genesis/rollup to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only on a Sepolia **redeploy** (next expected: Phase 7). Do not pack/publish “just in case” while the deployment is pinned through Phase 6. See `replica/README.md` and the Network reset procedure under Phase 3.
 
 ---
 

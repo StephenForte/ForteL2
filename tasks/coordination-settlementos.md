@@ -1,6 +1,6 @@
 # ForteL2 ↔ SettlementOS coordination
 
-**Status:** living (updated 2026-07-24 for Phase 0–3 complete)  
+**Status:** living (updated 2026-08-04 for MR-0 closeout; Phase 0–3 complete)  
 **Sources:** SettlementOS PRD/README; ForteL2 learning-chain PRD; money-rail PRD
 
 ## Product split

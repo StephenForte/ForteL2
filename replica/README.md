@@ -22,6 +22,8 @@ This directory is a thin staging area for the Mac operator — not a second node
 
 Replica is **Phase 3 done**. Money-rail / SOS work does **not** require rebuilding it. It **does** require running the pack/publish/wipe checklist whenever L1 contracts are redeployed.
 
+After SOS-heavy demos, if Mac and replica tips diverge, run `./scripts/replica-sync-check.sh` (set `REPLICA_L2_RPC_URL` to a reachable replica endpoint).
+
 See `tasks/prd-money-rail.md` § “Replica — do we need to update it?” and README **Network reset procedure**.
 
 ## Pack (operator)
