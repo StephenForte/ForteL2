@@ -7,19 +7,49 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 )
 
 // RPCClient is a minimal JSON-RPC 2.0 HTTP client.
 type RPCClient struct {
-	url    string
-	client *http.Client
-	id     atomic.Uint64
+	url      string
+	redacted string
+	client   *http.Client
+	id       atomic.Uint64
 }
 
-func NewRPCClient(url string) *RPCClient {
-	return &RPCClient{url: strings.TrimSpace(url), client: http.DefaultClient}
+func NewRPCClient(rawURL string) *RPCClient {
+	rawURL = strings.TrimSpace(rawURL)
+	return &RPCClient{url: rawURL, redacted: redactRPCURL(rawURL), client: http.DefaultClient}
+}
+
+// redactRPCURL strips path, query, and userinfo — hosted RPC URLs carry API
+// tokens there (same policy as scripts/lib.sh redact_rpc_url).
+func redactRPCURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "rpc-endpoint"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// redactedError rewrites the message but unwraps to the original so
+// errors.Is/As (e.g. context.Canceled) still work.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+func (c *RPCClient) redactErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &redactedError{msg: strings.ReplaceAll(err.Error(), c.url, c.redacted), err: err}
 }
 
 type rpcRequest struct {
@@ -56,12 +86,12 @@ func (c *RPCClient) Call(ctx context.Context, method string, params []any, out a
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(reqBody))
 	if err != nil {
-		return err
+		return c.redactErr(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return err
+		return c.redactErr(err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
