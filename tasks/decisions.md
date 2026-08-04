@@ -121,6 +121,11 @@
 - **Decision:** Sepolia success metric in `prd-phase-6-derivation.md` marked NOT MET / re-opened. Local-901 US-061 acceptance stands. Follow-up task **R2 (window anchoring)** required: (a) number batches by timestamp — `(batch.timestamp − genesis.l2_time)/block_time` — instead of scan position; (b) give the sealing EL a state anchor for mid-chain windows (candidate: copy the reference datadir while the stack is stopped in the dev-sleep window, then `debug_setHead` on the copy; alternative: full genesis replay of ~595K blocks as a one-time overnight run).
 - **Consequence:** Sepolia golden-fixture capture is blocked on R2. T6 (sequencer stub, 901-only) is unaffected and may proceed. Findings for the hardening wave: unbounded scans need guards/progress output; Go tools must redact secret-bearing URLs (fixed in `derivation/rpc.go`; sweep `batcher/`/`proposer/` for the same class).
 
+### D-0011 — R2 window anchoring; Wave 4 base: tag `wave4-base`
+- **Context:** T6 merged (US-062 done). D-0010 left the Sepolia US-061 metric re-opened. Dependency bumps landed (pion/dtls CVE-2026-54908, klauspost/compress GO-2026-5841).
+- **Decision:** R2 implements window anchoring per `tasks/worker-prompts/R2-window-anchoring.md`: timestamp-based batch numbering + sealing-EL state anchor via stopped-stack datadir copy + `debug_setHead` on the copy only. Base = tag **`wave4-base`** (the commit adding the prompt + this entry).
+- **Consequence:** After R2 merges, the operator runs the anchored Sepolia window + captures `testdata/sepolia/window.json` (unskips the golden replay test). Then only the hardening wave (H1–H3) remains.
+
 ---
 
 ## Escalations
