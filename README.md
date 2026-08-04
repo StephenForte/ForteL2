@@ -530,7 +530,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/status.sh
 
 Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not required for 2d).
 
-**Credit budget (Build ~80M/mo):** Sepolia start scripts default to a slower cadence so a 24/7 learning stack stays nearer ~2.5–3M credits/day:
+**Credit budget (Build ~80M/mo):** Mac Sepolia start scripts default to a slower cadence so a learning stack stays nearer ~2M credits/day. **Render was the main burner** (L1 derivation `eth_getBlockByHash` / `eth_getBlockReceipts`) — do not leave the replica on QuickNode during catch-up without a tight rate limit.
 
 | Knob | Default | Env override |
 |---|---|---|
@@ -540,9 +540,14 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 | Proposer interval | `5m` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`) |
 | Proposer poll | `12s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
 | Proposer txmgr receipt / rebroadcast / resubmission | `36s` / `36s` / `72s` | `SEPOLIA_PROPOSER_TXMGR_*` / `SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT` |
-| op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
+| Mac op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
+| **Render** op-node poll / rate limit | `24s` / `5` rps | `L1_HTTP_POLL_INTERVAL` / `L1_RPC_RATE_LIMIT` in fortel2-replica |
+| **Render** daytime/night schedule | `L1_RPC_SCHEDULE=business` → QuickNode **09:00–17:00** `America/Los_Angeles`, publicnode overnight (in-container router) | Override with `L1_RPC_FORCE=public\|metered` or `L1_USE_PUBLIC_RPC=1` |
+| **Render** pin public always | `L1_USE_PUBLIC_RPC=1` or `L1_RPC_FORCE=public` | Keep QuickNode in `L1_RPC_URL` for later |
 
 For a short fast demo: set `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=2`, `SEPOLIA_BATCHER_POLL_INTERVAL=2s`, `SEPOLIA_PROPOSER_INTERVAL=12s` then restart. Prefer stopping the stack when idle over burning credits overnight.
+
+**Render L1 RPC schedule (observe):** keep the Render-only QuickNode URL in `L1_RPC_URL`, set `L1_RPC_SCHEDULE=business` + `TZ=America/Los_Angeles`. The replica’s JSON-RPC router switches upstream automatically at 09:00 / 17:00 Pacific — no redeploy. Emergency pin: `L1_RPC_FORCE=public` (or Suspend).
 
 **Sleep / wake (recommended overnight):**
 
@@ -571,7 +576,7 @@ Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **85
 
 **Batcher funding:** calldata posts burn Sepolia ETH on the batcher address. Keep a buffer (≥ ~0.15 ETH; more if you leave it running). Drip faucets into the **harvest** wallet, then top up batcher/proposer when `sepolia-fund-check.sh` shows NEED — not every day if the buffer is healthy. With the credit-budget batcher defaults (`max-channel-duration=30`), L1 posts are far less frequent than the old `=2` profile — gas spend drops with them.
 
-Set Render’s `L1_RPC_URL` secret to the **Render-only** QuickNode endpoint (not the Mac mini URL). See Phase 2d.
+Set Render’s `L1_RPC_URL` secret to the **Render-only** QuickNode endpoint (not the Mac mini URL). Near credit caps set `L1_USE_PUBLIC_RPC=1` so the replica uses publicnode without wiping the QuickNode secret (see Phase 2d).
 
 ```bash
 # Only after a Sepolia redeploy (not before Phase 7): pack genesis/rollup then publish into fortel2-replica
