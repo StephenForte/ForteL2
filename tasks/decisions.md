@@ -37,13 +37,30 @@
 ### D-0006 — Verifier module shape (placeholder)
 - **Status:** OPEN — to be closed by T2 spike (`D-T2-x`): new `derivation/` module (default assumption) vs extending `batcher/`. T4 ownership follows the answer.
 
----
-
 ### D-0007 — BASE_SHA re-pin to tag `wave1-base`
 - **Context:** The first pinned BASE_SHA (`d9f3c5f`) was the mid-PR-#58 commit: it lacked `tasks/decisions.md` (added in `8763f44`) and the plan/worker-prompt files (never committed), and main had moved (PR #58 merge `671a39f` + CI-workflow commits `be81133`/`e402de3`/`3dd5db8`/`386ffa1`).
 - **Decision:** Base = the commit that adds the plan + worker prompts on top of merged main, tagged **`wave1-base`** (a tag, because this file cannot contain its own commit's hash). D-0001's value field now points at the tag.
 - **Consequence:** All Wave 1 workers branch from `wave1-base` and diff against it in handoffs. Any future re-pin gets a new decision entry + a new tag (`wave2-base`, …), never a moved tag.
 
+### D-T2-1 — Verifier-only first (US-061 before US-062)
+- **Context:** Phase 6 PRD lists derivation verifier and optional sequencer stub; spike must confirm ordering.
+- **Decision:** **Verifier-only derivation tool first** — US-061 ships L1→payload-attributes (+ hash check via reference EL); US-062 sequencer stub stays gated.
+- **Consequence:** T4 implements `derivation/` verifier + `derivation-check.sh` only; no Engine API block production until US-062 is explicitly approved.
+
+### D-T2-2 — Module shape: new `derivation/` imports `batcher`
+- **Context:** D-0006 asked whether to extend `batcher/` or spin out; `batcher/` is encode/submit-oriented but already has decode helpers (`ParseBatcherTxPayload`, `DecompressChannelZlib`, `DecodeSingularBatch`, …).
+- **Decision:** **New `derivation/` Go module** (own `go.mod`); import `github.com/StephenForte/ForteL2/batcher` for frame/channel/singular decode; do **not** modify `batcher/*.go`.
+- **Consequence:** T4 owns `derivation/` exclusively; span decode, deposits, payload attributes, and diff logic live there. Closes D-0006.
+
+### D-T2-3 — US-061 comparison window
+- **Context:** Verifier must define “match” vs reference `op-node` for acceptance tests.
+- **Decision:** **Local 901:** default inclusive window blocks **1–20** (override via flags). **Sepolia 852:** **50 blocks** ending at reference `safe_l2.number`. **Match rule:** `derivedHash == eth_getBlockByNumber(n).hash` for every block in window; log `safe_l2`/`unsafe_l2` from `optimism_syncStatus`; first mismatch fails the run.
+- **Consequence:** Golden fixtures and `derivation-check.sh` defaults follow this table; metadata-only diffs are insufficient for US-061 acceptance.
+
+### D-0006-superseded — Verifier module shape (closed by T2)
+- **Context:** D-0006 left module shape open; T2 spike evaluated `batcher/` reuse vs new module (see D-T2-2).
+- **Decision:** Supersedes D-0006 — **`derivation/` Go module** imports `batcher` decode helpers; T4 owns `derivation/`.
+- **Consequence:** Do not extend `batcher/*.go` for derivation; US-061 implementation starts in `derivation/` per `tasks/prd-phase-6-derivation.md`.
 ### D-T1-1 — MR-0 doc closeout (2026-08-04)
 - **Context:** Money-rail artifacts (`rail-interface.json`, README/coordination/replica docs) predated PRD checkbox updates; MR-0 was marked “In progress.”
 - **Decision:** Verified US-MR-001..003 artifacts on disk; ticked acceptance criteria; set MR-0 status to **Done** in money-rail PRD and learning-chain MR row. No `rail-interface.json` address/chain/URL changes.

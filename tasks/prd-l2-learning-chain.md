@@ -41,7 +41,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `batcher/` + `USE_CUSTOM_BATCHER=1` opt-in; stock remains default (`tasks/prd-phase-4-batcher.md`) |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `proposer/` + `USE_CUSTOM_PROPOSER=1` opt-in; stock remains default (`tasks/prd-phase-5-proposer.md`) |
-| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | Future (stories scaffolded; expand or spin out PRD before start) |
+| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | **In progress** — US-060 spike done (`tasks/spike-phase-6-derivation.md`, `tasks/prd-phase-6-derivation.md`); US-061 ready for T4; US-063 parallel (T3) |
 | **3a** | **(Deferred)** Native Mac mini Sepolia L1 (geth/reth + consensus client, no Docker) — disk/sync heavy; not required for calldata DA. Was briefly labeled 2e; scheduled **after** Phases 4–6 unless QuickNode fails earlier | Future (optional) |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal. **Precondition:** coordinated Sepolia redeploy with deliberately chosen immutables (fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — minutes-to-hours scale) + completed network reset across all replica operators | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
@@ -352,10 +352,10 @@ Before derivation implementation starts, either expand US-060–062 in-place **o
 **Description:** As the operator, I want a timeboxed spike that reads L1 batches for this learning chain and derives a short L2 span offline, so Phase 6 scope is grounded in the real frame/channel format—not guesswork.
 
 **Acceptance Criteria:**
-- [ ] Spike notes cite ethereum-optimism/specs sections used (batch/frame/channel, derivation pipeline stages)
-- [ ] Tooling can decode at least one real batch from the Phase 1/2 L1 history and relate it to known L2 blocks from the reference `op-node`
-- [ ] Explicit decision: implement a **verifier-only** derivation tool first vs a **block-building sequencer** stub; recorded in spike notes
-- [ ] Non-goal for the spike: production performance, P2P, full EVM reimplementation
+- [x] Spike notes cite ethereum-optimism/specs sections used (batch/frame/channel, derivation pipeline stages)
+- [x] Tooling can decode at least one real batch from the Phase 1/2 L1 history and relate it to known L2 blocks from the reference `op-node`
+- [x] Explicit decision: implement a **verifier-only** derivation tool first vs a **block-building sequencer** stub; recorded in spike notes (`D-T2-1`)
+- [x] Non-goal for the spike: production performance, P2P, full EVM reimplementation
 
 ### US-061: Minimal derivation verifier (replace op-node verifier path for a demo window)
 **Description:** As the operator, I want a from-scratch (or substantially custom) derivation verifier that can advance a safe/unsafe head over a bounded window by reading L1, comparable to `optimism_syncStatus` from reference `op-node`.
