@@ -141,6 +141,11 @@
 - **Decision:** Emit L1 scan progress every 100 blocks on stderr. Refuse `-from-l1 0` (genesis scan) when L1 tip > 1_000_000 unless `-scan-from-genesis` / `--scan-from-genesis`. Anchored windows derive `-from-l1` from anchor L1 origin minus `DERIVATION_L1_LOOKBACK` (default 300); Sepolia `--sepolia` keeps safe-head-based bound.
 - **Consequence:** Operators must pass explicit scan bounds or anchor metadata for large L1 chains.
 
+### D-0012 — Codex round 2 triage; R3; Wave 5 base: tag `wave5-base`
+- **Context:** Codex reviewed PRs #63/#64/#65 (pre-R2 commits). Six findings: three already fixed (l1.go header decode — R2; genesis-anchored windows — D-0010/R2; unbounded scan — `1240943`+R2). Three live: blob base fee hard-coded to 1 in L1-info bytes (false Sepolia mismatches), stub L1-origin defaults to L1 tip (chain invalid under derivation timestamp rules), README SOS transfer step ran `cast send` without sourcing the env (integrator-fixed).
+- **Decision:** R3 fixes the two code findings per `tasks/worker-prompts/R3-codex-round2.md`, branching from tag **`wave5-base`**. The operator Sepolia anchored run + fixture capture wait for R3 (blob-fee bug would produce phantom mismatches).
+- **Consequence:** After R3 merges: operator Sepolia run → fixture capture → hardening wave (H1–H3) closes the program.
+
 ---
 
 ## Escalations
