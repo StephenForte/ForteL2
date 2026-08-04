@@ -100,8 +100,12 @@ func BuildPayloadAttributes(ctx context.Context, cfg *RollupConfig, l1 *L1Client
 		attrs.Withdrawals = []*types.Withdrawal{}
 	}
 	if cfg.IsEcotone(in.Timestamp) && !cfg.IsEcotoneActivationBlock(in.Timestamp) {
-		z := common.Hash{}
-		attrs.ParentBeaconBlockRoot = &z
+		// Ecotone+: the L1 origin's parentBeaconBlockRoot, written into the
+		// EIP-4788 beacon-roots contract at block start — a zero here changes
+		// the state root even with identical transactions. Zero-valued on
+		// beacon-less L1s (Anvil), preserving local-901 behavior.
+		root := l1Header.ParentBeaconRoot
+		attrs.ParentBeaconBlockRoot = &root
 	}
 	if cfg.IsHolocene(in.Timestamp) {
 		h := st.SysConfig.EIP1559Params.Bytes()

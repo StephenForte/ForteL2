@@ -16,13 +16,14 @@ import (
 
 // L1BlockHeader is a minimal L1 block header for derivation.
 type L1BlockHeader struct {
-	Number      uint64
-	Hash        common.Hash
-	ParentHash  common.Hash
-	Time        uint64
-	BaseFee     *big.Int
-	BlobBaseFee *big.Int // Ecotone+ L1-info; from eth_feeHistory (D-R3-1)
-	MixDigest   common.Hash
+	Number           uint64
+	Hash             common.Hash
+	ParentHash       common.Hash
+	Time             uint64
+	BaseFee          *big.Int
+	BlobBaseFee      *big.Int    // Ecotone+ L1-info; from eth_feeHistory (D-R3-1)
+	MixDigest        common.Hash
+	ParentBeaconRoot common.Hash // Ecotone+ payload attrs; zero on beacon-less L1s (Anvil)
 }
 
 // L1Client reads L1 data for batch inbox scanning and deposit derivation.
@@ -36,12 +37,13 @@ func NewL1Client(rpc *RPCClient) *L1Client {
 }
 
 type l1HeaderJSON struct {
-	Number        string         `json:"number"`
-	Hash          common.Hash    `json:"hash"`
-	ParentHash    common.Hash    `json:"parentHash"`
-	Timestamp     hexutil.Uint64 `json:"timestamp"`
-	BaseFeePerGas *hexutil.Big   `json:"baseFeePerGas"`
-	MixHash       common.Hash    `json:"mixHash"`
+	Number                string         `json:"number"`
+	Hash                  common.Hash    `json:"hash"`
+	ParentHash            common.Hash    `json:"parentHash"`
+	Timestamp             hexutil.Uint64 `json:"timestamp"`
+	BaseFeePerGas         *hexutil.Big   `json:"baseFeePerGas"`
+	MixHash               common.Hash    `json:"mixHash"`
+	ParentBeaconBlockRoot common.Hash    `json:"parentBeaconBlockRoot"`
 }
 
 type l1BlockJSON struct {
@@ -89,12 +91,13 @@ func headerFromJSON(blk l1HeaderJSON) (*L1BlockHeader, error) {
 		baseFee = (*big.Int)(blk.BaseFeePerGas)
 	}
 	return &L1BlockHeader{
-		Number:     n,
-		Hash:       blk.Hash,
-		ParentHash: blk.ParentHash,
-		Time:       uint64(blk.Timestamp),
-		BaseFee:    baseFee,
-		MixDigest:  blk.MixHash,
+		Number:           n,
+		Hash:             blk.Hash,
+		ParentHash:       blk.ParentHash,
+		Time:             uint64(blk.Timestamp),
+		BaseFee:          baseFee,
+		MixDigest:        blk.MixHash,
+		ParentBeaconRoot: blk.ParentBeaconBlockRoot,
 	}, nil
 }
 
