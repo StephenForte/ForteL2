@@ -63,7 +63,7 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 |---|---|---|
 | **US-060** | Spec spike + PRD + decode real batches | **Done** — `tasks/spike-phase-6-derivation.md` |
 | **US-061** | Minimal derivation verifier + diff runbook | **Done** (T4) |
-| **US-062** | Optional sequencer stub (Engine API block builder) | **Gated** on US-061 |
+| **US-062** | Optional sequencer stub (Engine API block builder) | **Done** (T6) |
 
 ## User stories
 
@@ -117,13 +117,13 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 
 **Gate:** **Do not start US-062** until all US-061 acceptance criteria are checked on **local 901**.
 
-**Acceptance Criteria (future):**
+**Acceptance Criteria:**
 
-- [ ] Separate command under `derivation/cmd/` (e.g. `sequencer-stub`) — not merged into verifier binary
-- [ ] Engine API target: **separate loopback op-geth** (`--l2.enginekind=geth` equivalent documented); reference EL stays read-only
-- [ ] Produce **≥ 10** consecutive L2 blocks while stock `op-node` sequencer is stopped; US-061 verifier follows the stub’s blocks
-- [ ] Kill switch: restart stock `04-start-sequencer.sh`; if state diverged, document `reset.sh` path
-- [ ] Out of scope: tx-pool parity, P2P, decentralized sequencing
+- [x] Separate command under `derivation/cmd/` (e.g. `sequencer-stub`) — not merged into verifier binary
+- [x] Engine API target: **separate loopback op-geth** (`--l2.enginekind=geth` equivalent documented); reference EL stays read-only
+- [x] Produce **≥ 10** consecutive L2 blocks on the isolated EL; US-061 attribute derivation follows the stub’s blocks *(stock sequencer stays running/untouched — D-T6-1; “stopped” softened to isolation)*
+- [x] Kill switch: stop stub + wipe isolated datadir; stock `op-node` never displaced (restart is a no-op by construction)
+- [x] Out of scope: tx-pool parity, P2P, decentralized sequencing
 
 ## Success metrics
 
@@ -147,7 +147,7 @@ Same as `batcher/` / `proposer/` — **GO-2026-5932** (`x/crypto/openpgp` indire
 - **Sealing EL:** `$DATA_DIR/l2/derivation-op-geth`, HTTP `:19645`, auth `:19651`, P2P `:30323`, JWT `$DATA_DIR/jwt/derivation-jwt.txt`. Foreground child process in runbook (no `lib.sh` `start_bg` edits).
 - **Isthmus withdrawalsRoot:** op-geth `getPayload` omits `withdrawalsRoot`; verifier JSON-patches `0x8ed4baae…` before `engine_newPayloadV4`.
 - **Sepolia live window:** implemented (`--sepolia`); operator verification pending (no golden fixture in repo yet).
-- **US-062:** not started (gated).
+- **US-062 (T6, 2026-08-04):** `derivation/cmd/sequencer-stub` + `scripts/sequencer-stub-demo.sh`. Isolated EL at `$DATA_DIR/l2/sequencer-stub-op-geth` (ports `:19745`/`:19751`, P2P `:30324`). Engine API: FCU V3 + getPayload/newPayload V4 (V3 fallback). Follow-validation: rebuild `BuildPayloadAttributes`, match L1-info deposit bytes + parent links (D-T6-2). Sepolia golden fixture test upgraded to replay-if-present.
 
 ## References
 

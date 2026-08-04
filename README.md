@@ -474,7 +474,25 @@ FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia
 | **PASS** | Per-block `derived=… expected=… OK` for every block in the window; `derivation-check: PASS`; exit 0 |
 | **FAIL** | First mismatch logs `derived` vs `expected` hash; exit 1 |
 
-The runbook starts a **separate** loopback `op-geth` for Engine API block sealing (`$DATA_DIR/l2/derivation-op-geth`, ports `:19645`/`:19651`). The live reference `op-geth` / `op-node` stay **read-only** — never send `engine_*` to them. **Kill switch:** simply don't run `derivation-check.sh`; stock derivation is unchanged. US-062 sequencer stub remains gated.
+The runbook starts a **separate** loopback `op-geth` for Engine API block sealing (`$DATA_DIR/l2/derivation-op-geth`, ports `:19645`/`:19651`). The live reference `op-geth` / `op-node` stay **read-only** — never send `engine_*` to them. **Kill switch:** simply don't run `derivation-check.sh`; stock derivation is unchanged.
+
+### Sequencer stub (US-062)
+
+Minimal **block-building** learning stub (`derivation/cmd/sequencer-stub`) that seals ≥10 consecutive empty L2 blocks on a **second** isolated `op-geth` via the Engine API (`forkchoiceUpdatedV3` → `getPayloadV4`/`V3` → `newPayloadV4`/`V3`). Equivalent to driving the EL as `--l2.enginekind=geth`. Empty user-tx sets are intentional (tx-pool parity is out of scope). Follow-validation re-runs US-061 `BuildPayloadAttributes` and checks L1-info deposit bytes + parent links (D-T6-2).
+
+```bash
+# Reference stack should be up (L1 RPC + rollup.json); stub never touches reference Engine API
+./scripts/sequencer-stub-demo.sh              # default --blocks 10
+./scripts/sequencer-stub-demo.sh --blocks 12
+```
+
+| Isolation | Value |
+|---|---|
+| Datadir | `$DATA_DIR/l2/sequencer-stub-op-geth` |
+| HTTP / auth / P2P | `:19745` / `:19751` / `:30324` (distinct from derivation-check) |
+| JWT | `$DATA_DIR/jwt/sequencer-stub-jwt.txt` |
+
+**Kill switch:** stop the demo (EXIT trap kills the stub EL) and `rm -rf "$DATA_DIR/l2/sequencer-stub-op-geth"`. The reference sequencer is **never displaced**, so “revert to stock op-node” is a no-op by construction. The demo prints a before/after reference-tip proof (historical block hash unchanged).
 
 ## Phase 2 funding gate (Phase 1d / US-016)
 

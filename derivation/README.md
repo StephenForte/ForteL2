@@ -1,6 +1,6 @@
-# derivation — Phase 6 derivation verifier (US-061)
+# derivation — Phase 6 derivation verifier (US-061) + sequencer stub (US-062)
 
-Minimal OP Stack derivation **verifier**: reads L1 batch inbox txs and Portal deposits, derives L2 payload attributes for a bounded window, seals block hashes via a **separate** loopback `op-geth` (Engine API), and diffs against the reference stack.
+Minimal OP Stack derivation **verifier**: reads L1 batch inbox txs and Portal deposits, derives L2 payload attributes for a bounded window, seals block hashes via a **separate** loopback `op-geth` (Engine API), and diffs against the reference stack. Optional **sequencer stub** builds empty L2 blocks on a second isolated EL.
 
 **Spec:** [Derivation pipeline](https://specs.optimism.io/protocol/derivation.html) · **PRD:** `tasks/prd-phase-6-derivation.md` · **Spike:** `tasks/spike-phase-6-derivation.md`
 
@@ -59,7 +59,21 @@ go run ./cmd/verify \
 cd derivation && go test ./...
 ```
 
-Fixtures: `testdata/local901/batcher_tx.hex` (15 singular batches from local 901). Sepolia golden slot: `testdata/sepolia/window.json` (load-if-present; skipped until operator capture).
+Fixtures: `testdata/local901/batcher_tx.hex` (15 singular batches from local 901). Sepolia golden slot: `testdata/sepolia/window.json` — when present, unmarshaled as `VerifyReport` and integrity-checked (contiguous numbers, every `Match`, derived==expected); skipped with notice when absent.
+
+## Sequencer stub (US-062)
+
+```bash
+./scripts/sequencer-stub-demo.sh --blocks 10
+```
+
+| Item | Detail |
+|---|---|
+| Binary | `derivation/cmd/sequencer-stub` (separate from `cmd/verify`) |
+| Engine API | `forkchoiceUpdatedV3` + `getPayloadV4`/`V3` + `newPayloadV4`/`V3` (`--l2.enginekind=geth`) |
+| Isolated EL | `$DATA_DIR/l2/sequencer-stub-op-geth` · `:19745`/`:19751` · P2P `:30324` |
+| Follow-validate | Rebuild `BuildPayloadAttributes`; match L1-info bytes + parent links (D-T6-2) |
+| Kill switch | EXIT trap stops stub EL; `rm -rf` stub datadir; reference op-node untouched |
 
 ## Module wiring
 
