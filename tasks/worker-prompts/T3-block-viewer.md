@@ -46,7 +46,9 @@ Forbidden: `viewer/`, `dapp/`, `scripts/lib.sh`, all other scripts, Go modules, 
 - Tests before done: `node --test blocks/lib.test.js viewer/lib.test.js dapp/lib.test.js` (yours green, existing untouched-but-verified) and `./scripts/test-helpers.sh`. If your VM has a runnable local stack, a manual smoke against 901 is welcome; otherwise list live verification for the operator.
 - No merging, no pushing to main.
 
-## Handoff report (final message, exactly these sections)
+## Handoff report — REQUIRED as your final chat message
+
+Your last message must BE the report: one copy-pasteable markdown block with exactly these numbered sections. Putting it only in a PR description or a repo file does not count — work without a final-message report is bounced unreviewed.
 
 1. Branch + base SHA; `git diff --stat`
 2. Allowlist compliance

@@ -116,7 +116,7 @@ Embedded in each worker prompt; the worker **reports compliance in its handoff**
 4. **Forbidden always:** committing `.env*` (non-example) or keys; editing `scripts/lib.sh` `start_bg`/`stop_bg`; anything under `deployments/sepolia/` except docs; Sepolia redeploy or spend; non-loopback binds; containers on the Mac host; CDN script tags.
 5. **Tests before done:** run the AGENTS.md suite relevant to touched areas (forge / `test-helpers.sh` / `node --test` / `go test`) and paste results in the handoff. Live-stack verification you cannot run → list explicitly as "operator verification needed," never claim it.
 6. **Docs rule:** behavior change → README section (yours only); roadmap/acceptance → PRD (your rows only); agent guardrails → flag for AGENTS.md via decisions doc (T1 owns AGENTS.md edits if any arise).
-7. **Handoff report** (final message, exactly this shape):
+7. **Handoff report — your final chat message must BE the report.** One copy-pasteable markdown block containing exactly the sections below, sent as the last message of your run. A PR description, a file in the repo, or "see the PR for details" does **not** satisfy this — the integrator reviews from the report and bounces work that arrives without it, regardless of code quality. Sections:
    - Branch + base SHA; `git diff --stat` vs base
    - Allowlist compliance: any file outside the list, with justification (expect: none)
    - Tests run + verbatim result lines; tests skipped + why

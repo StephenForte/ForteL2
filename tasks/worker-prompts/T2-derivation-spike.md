@@ -47,7 +47,9 @@ Ground Phase 6 derivation scope in the real wire format: decode at least one rea
 - Tests: if you added a `batcher/cmd/` tool, `cd batcher && go build ./... && go test ./...` must stay green; paste results.
 - No merging, no pushing to main.
 
-## Handoff report (final message, exactly these sections)
+## Handoff report — REQUIRED as your final chat message
+
+Your last message must BE the report: one copy-pasteable markdown block with exactly these numbered sections. Putting it only in a PR description or a repo file does not count — work without a final-message report is bounced unreviewed.
 
 1. Branch + base SHA; `git diff --stat`
 2. Allowlist compliance
