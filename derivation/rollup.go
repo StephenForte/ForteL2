@@ -13,10 +13,15 @@ import (
 // Spec: https://specs.optimism.io/protocol/configurability.html
 type RollupConfig struct {
 	Genesis struct {
+		L1 struct {
+			Hash   common.Hash `json:"hash"`
+			Number uint64      `json:"number"`
+		} `json:"l1"`
 		L2Time       uint64 `json:"l2_time"`
 		SystemConfig SystemConfig `json:"system_config"`
 	} `json:"genesis"`
 	BlockTime             uint64         `json:"block_time"`
+	MaxSequencerDrift     uint64         `json:"max_sequencer_drift"`
 	L1ChainID             uint64         `json:"l1_chain_id"`
 	L2ChainID             uint64         `json:"l2_chain_id"`
 	BatchInboxAddress     common.Address `json:"batch_inbox_address"`
@@ -90,6 +95,7 @@ func LoadRollupConfig(path string) (*RollupConfig, error) {
 func (c *RollupConfig) IsRegolith(ts uint64) bool   { return forkActive(c.RegolithTime, ts) }
 func (c *RollupConfig) IsCanyon(ts uint64) bool     { return forkActive(c.CanyonTime, ts) }
 func (c *RollupConfig) IsEcotone(ts uint64) bool    { return forkActive(c.EcotoneTime, ts) }
+func (c *RollupConfig) IsFjord(ts uint64) bool      { return forkActive(c.FjordTime, ts) }
 func (c *RollupConfig) IsHolocene(ts uint64) bool   { return forkActive(c.HoloceneTime, ts) }
 func (c *RollupConfig) IsIsthmus(ts uint64) bool    { return forkActive(c.IsthmusTime, ts) }
 func (c *RollupConfig) IsJovian(ts uint64) bool     { return forkActive(c.JovianTime, ts) }

@@ -16,21 +16,23 @@ import (
 
 // L1BlockHeader is a minimal L1 block header for derivation.
 type L1BlockHeader struct {
-	Number     uint64
-	Hash       common.Hash
-	ParentHash common.Hash
-	Time       uint64
-	BaseFee    *big.Int
-	MixDigest  common.Hash
+	Number      uint64
+	Hash        common.Hash
+	ParentHash  common.Hash
+	Time        uint64
+	BaseFee     *big.Int
+	BlobBaseFee *big.Int // Ecotone+ L1-info; from eth_feeHistory (D-R3-1)
+	MixDigest   common.Hash
 }
 
 // L1Client reads L1 data for batch inbox scanning and deposit derivation.
 type L1Client struct {
-	rpc *RPCClient
+	rpc      *RPCClient
+	blobFees *blobFeeCache
 }
 
 func NewL1Client(rpc *RPCClient) *L1Client {
-	return &L1Client{rpc: rpc}
+	return &L1Client{rpc: rpc, blobFees: newBlobFeeCache()}
 }
 
 type l1HeaderJSON struct {

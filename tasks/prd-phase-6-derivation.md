@@ -149,6 +149,7 @@ Same as `batcher/` / `proposer/` — **GO-2026-5932** (`x/crypto/openpgp` indire
 - **Sepolia live window:** implemented (`--sepolia`); operator verification pending (no golden fixture in repo yet).
 - **US-062 (T6, 2026-08-04):** `derivation/cmd/sequencer-stub` + `scripts/sequencer-stub-demo.sh`. Isolated EL at `$DATA_DIR/l2/sequencer-stub-op-geth` (ports `:19745`/`:19751`, P2P `:30324`). Engine API: FCU V3 + getPayload/newPayload V4 (V3 fallback). Follow-validation: rebuild `BuildPayloadAttributes`, match L1-info deposit bytes + parent links (D-T6-2). Sepolia golden fixture test upgraded to replay-if-present.
 - **R2 window anchoring (2026-08-04):** batches numbered by `(timestamp − genesis.l2_time) / block_time` with drift/duplicate handling; mid-chain windows copy reference datadir while stopped (`--make-anchor`), roll sealing copy to `start−1` via `debug_setHead`, initialize derivation state from L1-info deposit in reference block `start−1`; L1 scan progress every 100 blocks; genesis scan guard at L1 tip > 1M unless `--scan-from-genesis`. Local 901 genesis replay (1–20) unchanged.
+- **R3 Codex round 2 (2026-08-04):** L1-info Ecotone+ `blobBaseFee` sourced from `eth_feeHistory` with per-block cache (D-R3-1); sequencer stub default L1 origin is `genesis.l1` / head L1-info (not L1 tip) with `-l1-origin` validation; follow-validation asserts sequencing-window timestamp invariant (D-R3-2). Unblocks operator Sepolia anchored run + fixture capture.
 
 ## References
 

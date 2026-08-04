@@ -65,7 +65,10 @@ func marshalL1Info(cfg *RollupConfig, sys SystemConfig, seqNumber uint64, l1 *L1
 	if baseFee == nil {
 		baseFee = big.NewInt(0)
 	}
-	blobBaseFee := big.NewInt(1)
+	blobBaseFee := l1.BlobBaseFee
+	if blobBaseFee == nil {
+		blobBaseFee = new(big.Int).Set(blobBaseFeePreCancun)
+	}
 	baseFeeScalar, blobBaseFeeScalar, _ := sys.EcotoneScalars()
 	opScalar, opConstant := sys.OperatorFee()
 	daScalar := sys.DAFootprintGasScalar
