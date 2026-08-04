@@ -1,12 +1,14 @@
 package derivation
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/StephenForte/ForteL2/batcher"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestDecodeLocal901BatcherTx(t *testing.T) {
@@ -71,7 +73,64 @@ func TestDecodeSyntheticChannel(t *testing.T) {
 
 func TestSepoliaGoldenSkipped(t *testing.T) {
 	path := filepath.Join("testdata", "sepolia", "window.json")
-	if _, err := os.Stat(path); err != nil {
-		t.Skip("operator Sepolia golden fixture not present (expected until T2 handoff capture)")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Skip("operator Sepolia golden fixture not present (testdata/sepolia/window.json); skip-with-notice")
 	}
+
+	var report VerifyReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("unmarshal VerifyReport: %v", err)
+	}
+	assertVerifyReportIntegrity(t, &report)
+	t.Logf("sepolia golden replay: window %d–%d matched=%d mismatched=%d blocks=%d",
+		report.WindowStart, report.WindowEnd, report.Matched, report.Mismatched, len(report.Blocks))
+}
+
+// assertVerifyReportIntegrity checks contiguous numbers, every block Match,
+// and derived==expected (D-0009 fixture-replay upgrade).
+func assertVerifyReportIntegrity(t *testing.T, report *VerifyReport) {
+	t.Helper()
+	if report.WindowEnd < report.WindowStart {
+		t.Fatalf("invalid window %d–%d", report.WindowStart, report.WindowEnd)
+	}
+	wantLen := report.WindowEnd - report.WindowStart + 1
+	if uint64(len(report.Blocks)) != wantLen {
+		t.Fatalf("blocks len=%d want %d for window %d–%d", len(report.Blocks), wantLen, report.WindowStart, report.WindowEnd)
+	}
+	if report.Mismatched != 0 {
+		t.Fatalf("mismatched=%d want 0", report.Mismatched)
+	}
+	if uint64(report.Matched) != wantLen {
+		t.Fatalf("matched=%d want %d", report.Matched, wantLen)
+	}
+	for i, b := range report.Blocks {
+		wantNum := report.WindowStart + uint64(i)
+		if b.Number != wantNum {
+			t.Fatalf("blocks[%d].Number=%d want %d (contiguous)", i, b.Number, wantNum)
+		}
+		if !b.Match {
+			t.Fatalf("blocks[%d] number=%d Match=false", i, b.Number)
+		}
+		if b.DerivedHash != b.ExpectedHash {
+			t.Fatalf("blocks[%d] number=%d derived=%s expected=%s", i, b.Number, b.DerivedHash, b.ExpectedHash)
+		}
+		if b.DerivedHash == (common.Hash{}) {
+			t.Fatalf("blocks[%d] number=%d zero derived hash", i, b.Number)
+		}
+	}
+}
+
+func TestAssertVerifyReportIntegrityUnit(t *testing.T) {
+	rep := &VerifyReport{
+		Matched:     2,
+		Mismatched:  0,
+		WindowStart: 10,
+		WindowEnd:   11,
+		Blocks: []BlockResult{
+			{Number: 10, DerivedHash: [32]byte{1}, ExpectedHash: [32]byte{1}, Match: true},
+			{Number: 11, DerivedHash: [32]byte{2}, ExpectedHash: [32]byte{2}, Match: true},
+		},
+	}
+	assertVerifyReportIntegrity(t, rep)
 }

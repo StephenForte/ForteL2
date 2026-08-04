@@ -69,6 +69,65 @@ func (el *SealingEL) Close() {
 	}
 }
 
+// Head returns the sealing EL forkchoice head tracked by this client.
+func (el *SealingEL) Head() common.Hash { return el.head }
+
+// SetHead updates the tracked forkchoice head (additive helper for US-062 stub).
+func (el *SealingEL) SetHead(h common.Hash) { el.head = h }
+
+// LoadLatestHead reads the sealing EL tip via eth_getBlockByNumber("latest").
+func (el *SealingEL) LoadLatestHead(ctx context.Context) (hash common.Hash, number uint64, timestamp uint64, err error) {
+	var blk struct {
+		Hash      common.Hash    `json:"hash"`
+		Number    string         `json:"number"`
+		Timestamp hexutil.Uint64 `json:"timestamp"`
+	}
+	if err := el.httpRPC.Call(ctx, "eth_getBlockByNumber", []any{"latest", false}, &blk); err != nil {
+		return common.Hash{}, 0, 0, err
+	}
+	n, err := hexutil.DecodeUint64(blk.Number)
+	if err != nil {
+		return common.Hash{}, 0, 0, err
+	}
+	return blk.Hash, n, uint64(blk.Timestamp), nil
+}
+
+// BlockMeta returns hash/parent/time/txCount for a sealed block by number.
+func (el *SealingEL) BlockMeta(ctx context.Context, num uint64) (hash, parent common.Hash, timestamp uint64, txCount int, err error) {
+	var blk struct {
+		Hash         common.Hash    `json:"hash"`
+		ParentHash   common.Hash    `json:"parentHash"`
+		Timestamp    hexutil.Uint64 `json:"timestamp"`
+		Transactions []any          `json:"transactions"`
+	}
+	tag := fmt.Sprintf("0x%x", num)
+	if err := el.httpRPC.Call(ctx, "eth_getBlockByNumber", []any{tag, false}, &blk); err != nil {
+		return common.Hash{}, common.Hash{}, 0, 0, err
+	}
+	return blk.Hash, blk.ParentHash, uint64(blk.Timestamp), len(blk.Transactions), nil
+}
+
+// BlockFirstTx returns the raw first transaction bytes of a block.
+func (el *SealingEL) BlockFirstTx(ctx context.Context, num uint64) ([]byte, error) {
+	var blk struct {
+		Transactions []struct {
+			Hash common.Hash `json:"hash"`
+		} `json:"transactions"`
+	}
+	tag := fmt.Sprintf("0x%x", num)
+	if err := el.httpRPC.Call(ctx, "eth_getBlockByNumber", []any{tag, true}, &blk); err != nil {
+		return nil, err
+	}
+	if len(blk.Transactions) == 0 {
+		return nil, fmt.Errorf("block %d has no transactions", num)
+	}
+	var raw hexutil.Bytes
+	if err := el.httpRPC.Call(ctx, "eth_getRawTransactionByHash", []any{blk.Transactions[0].Hash}, &raw); err != nil {
+		return nil, err
+	}
+	return []byte(raw), nil
+}
+
 var isthmusEmptyWithdrawalsRoot = common.HexToHash("0x8ed4baae3a927be3dea54996b4d5899f8c01e7594bf50b17dc1e741388ce3d12")
 
 // patchIsthmusWithdrawalsRoot injects withdrawalsRoot for op-geth Isthmus blocks.
