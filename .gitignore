@@ -16,6 +16,8 @@ fortel2-replica/
 .replica-stage-tarball/
 viewer/config.js
 viewer/.csp-header
+blocks/config.js
+blocks/.csp-header
 *.log
 contracts/out/
 contracts/cache/

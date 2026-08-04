@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <!-- CSP is HTTP-only via serve-blocks.sh → blocks/.csp-header. -->
+  <title>ForteL2 Block viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600&family=Syne:wght@600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="hero">
+      <p class="brand">ForteL2</p>
+      <h1 class="headline">Block viewer</h1>
+      <p class="lede" id="lede">
+        Browse recent L2 blocks newest-first and open a single block for header
+        fields and transaction rows. Not a block explorer — no search, no address pages.
+      </p>
+      <div class="livebar" aria-live="polite">
+        <span id="live-pill" class="live-pill" data-state="idle">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="live-label">Idle</span>
+        </span>
+        <p id="status" class="status" role="status"></p>
+      </div>
+    </header>
+
+    <nav class="crumbs" aria-label="Navigation">
+      <a href="#/" id="nav-list" class="crumb-link">Latest blocks</a>
+      <span id="nav-sep" class="crumb-sep" hidden aria-hidden="true">/</span>
+      <span id="nav-detail" class="crumb-current" hidden></span>
+    </nav>
+
+    <section id="view-list" class="view" hidden>
+      <div class="table-wrap">
+        <table class="blocks-table">
+          <thead>
+            <tr>
+              <th scope="col">Height</th>
+              <th scope="col">Hash</th>
+              <th scope="col">Timestamp</th>
+              <th scope="col">Txs</th>
+            </tr>
+          </thead>
+          <tbody id="blocks-tbody"></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button type="button" id="load-more" class="btn">Load more</button>
+      </div>
+    </section>
+
+    <section id="view-detail" class="view" hidden>
+      <article class="panel">
+        <h2 class="panel-title" id="detail-title">Block</h2>
+        <p id="detail-err" class="panel-err" hidden></p>
+        <dl class="metrics" id="detail-header"></dl>
+      </article>
+      <article class="panel">
+        <h2 class="panel-title">Transactions</h2>
+        <div class="table-wrap">
+          <table class="tx-table">
+            <thead>
+              <tr>
+                <th scope="col">Hash</th>
+                <th scope="col">From</th>
+                <th scope="col">To</th>
+                <th scope="col">Value</th>
+                <th scope="col">Type</th>
+              </tr>
+            </thead>
+            <tbody id="tx-tbody"></tbody>
+          </table>
+        </div>
+        <p id="tx-empty" class="empty-note" hidden>No transactions in this block.</p>
+      </article>
+    </section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

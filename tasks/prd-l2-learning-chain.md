@@ -41,7 +41,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `batcher/` + `USE_CUSTOM_BATCHER=1` opt-in; stock remains default (`tasks/prd-phase-4-batcher.md`) |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `proposer/` + `USE_CUSTOM_PROPOSER=1` opt-in; stock remains default (`tasks/prd-phase-5-proposer.md`) |
-| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | **In progress** — US-060 spike done (`tasks/spike-phase-6-derivation.md`, `tasks/prd-phase-6-derivation.md`); US-061 ready for T4; US-063 parallel (T3) |
+| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | **In progress** — US-060 spike done (`tasks/spike-phase-6-derivation.md`, `tasks/prd-phase-6-derivation.md`); US-061 ready for T4; block viewer shipped (`blocks/` + `serve-blocks.sh`, US-063) |
 | **3a** | **(Deferred)** Native Mac mini Sepolia L1 (geth/reth + consensus client, no Docker) — disk/sync heavy; not required for calldata DA. Was briefly labeled 2e; scheduled **after** Phases 4–6 unless QuickNode fails earlier | Future (optional) |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal. **Precondition:** coordinated Sepolia redeploy with deliberately chosen immutables (fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — minutes-to-hours scale) + completed network reset across all replica operators | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
@@ -385,13 +385,13 @@ Before derivation implementation starts, either expand US-060–062 in-place **o
 - Detail view ≈ [blockchair.com/optimism/block/2](https://blockchair.com/optimism/block/2) — one block’s header fields + its transactions
 
 **Acceptance Criteria:**
-- [ ] Loopback-only static UI (same constraints as the pipeline viewer: client-side RPC polls, no indexer DB, no containers)
-- [ ] **Blocks list** page: recent L2 blocks newest-first (height, hash/short hash, timestamp, tx count at minimum); paginate or “load more” is enough — no search required
-- [ ] **Block detail** page/route: given a block number (or hash), show header fields + a simple list of txs in that block (hash, from/to if available, value or type)
-- [ ] Works against local L2 **901** and Sepolia L2 **852** via existing `FORTEL2_ENV` / viewer-config pattern
-- [ ] Documented as the **block viewer** (distinct from the Phase 1c **pipeline viewer**); README links both
-- [ ] Explicit non-goals for Phase 6: address pages, token/NFT views, full-text / advanced search, contract verification UI, hosted SaaS explorers
-- [ ] **Blockscout** (and any docker-compose explorer stack) remains **out of scope** for Phase 6 — deferred to a much later stage (post–Phase 8 / when non-loopback + containers are deliberately allowed)
+- [x] Loopback-only static UI (same constraints as the pipeline viewer: client-side RPC polls, no indexer DB, no containers)
+- [x] **Blocks list** page: recent L2 blocks newest-first (height, hash/short hash, timestamp, tx count at minimum); paginate or “load more” is enough — no search required
+- [x] **Block detail** page/route: given a block number (or hash), show header fields + a simple list of txs in that block (hash, from/to if available, value or type)
+- [ ] Works against local L2 **901** and Sepolia L2 **852** via existing `FORTEL2_ENV` / viewer-config pattern *(901/852 config generation implemented; operator live verification on running stacks pending)*
+- [x] Documented as the **block viewer** (distinct from the Phase 1c **pipeline viewer**); README links both
+- [x] Explicit non-goals for Phase 6: address pages, token/NFT views, full-text / advanced search, contract verification UI, hosted SaaS explorers
+- [x] **Blockscout** (and any docker-compose explorer stack) remains **out of scope** for Phase 6 — deferred to a much later stage (post–Phase 8 / when non-loopback + containers are deliberately allowed)
 
 ## Functional Requirements
 
