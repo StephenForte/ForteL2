@@ -12,7 +12,7 @@ Minimal OP Stack derivation **verifier**: reads L1 batch inbox txs and Portal de
 | Frames → channel → batches | `l1.go` | Imports `batcher` decode helpers (`ParseBatcherTxPayload`, zlib, singular `0x00`) |
 | Span batches (`0x01`) | `span.go`, `span_bits.go`, `span_txs.go` | Required decoder; local history is singular-only |
 | Portal deposits | `deposit.go`, `deposit_tx.go` | User deposit inclusion on L1-origin change |
-| L1-info deposit | `l1info.go` | Bedrock → Jovian calldata variants |
+| L1-info deposit | `l1info.go` | Bedrock → Jovian calldata variants; blob base fee from `eth_feeHistory` (D-R3-1) |
 | Payload attributes | `attrs.go`, `rollup.go` | Fork-aware attrs from rollup config |
 | Engine API sealing | `engine.go` | Separate EL only — never the reference stack |
 | Hash diff | `verify.go`, `cmd/verify/` | `derivedHash == eth_getBlockByNumber(n).hash` (D-T2-3) |
@@ -80,6 +80,7 @@ Fixtures: `testdata/local901/batcher_tx.hex` (15 singular batches from local 901
 | Engine API | `forkchoiceUpdatedV3` + `getPayloadV4`/`V3` + `newPayloadV4`/`V3` (`--l2.enginekind=geth`) |
 | Isolated EL | `$DATA_DIR/l2/sequencer-stub-op-geth` · `:19745`/`:19751` · P2P `:30324` |
 | Follow-validate | Rebuild `BuildPayloadAttributes`; match L1-info bytes + parent links (D-T6-2) |
+| L1 origin default | `genesis.l1` from `rollup.json` (or head L1-info when continuing); validated against [sequencing window](https://specs.optimism.io/protocol/derivation.html#sequencing-window) timestamp rules (D-R3-2) |
 | Kill switch | EXIT trap stops stub EL; `rm -rf` stub datadir; reference op-node untouched |
 
 ## Module wiring

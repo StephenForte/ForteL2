@@ -2,6 +2,7 @@ package derivation
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -64,6 +65,12 @@ func BuildPayloadAttributes(ctx context.Context, cfg *RollupConfig, l1 *L1Client
 		st.SeqNumber = 0
 	} else {
 		st.SeqNumber++
+	}
+
+	if cfg.IsEcotone(in.Timestamp) && !cfg.IsEcotoneActivationBlock(in.Timestamp) {
+		if err := l1.EnrichBlobBaseFee(ctx, l1Header); err != nil {
+			return nil, fmt.Errorf("l1 blob base fee block %d: %w", l1Header.Number, err)
+		}
 	}
 
 	l1Info, err := L1InfoDepositBytes(cfg, st.SysConfig, st.SeqNumber, l1Header, in.Timestamp)

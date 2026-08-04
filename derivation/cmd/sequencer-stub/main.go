@@ -22,7 +22,7 @@ func main() {
 	sealHTTP := flag.String("seal-http", "http://127.0.0.1:19745", "isolated EL HTTP RPC")
 	jwt := flag.String("jwt", "", "JWT secret file for isolated EL")
 	blocks := flag.Uint64("blocks", 10, "number of consecutive empty L2 blocks to build")
-	l1Origin := flag.Uint64("l1-origin", 0, "L1 origin block number (0 = latest tip)")
+	l1Origin := flag.Uint64("l1-origin", 0, "L1 origin block number (0 = auto from genesis.l1 or head L1-info; validated)")
 	jsonOut := flag.Bool("json", false, "emit JSON report on stdout")
 	flag.Parse()
 

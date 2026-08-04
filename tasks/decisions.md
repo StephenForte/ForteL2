@@ -146,6 +146,16 @@
 - **Decision:** R3 fixes the two code findings per `tasks/worker-prompts/R3-codex-round2.md`, branching from tag **`wave5-base`**. The operator Sepolia anchored run + fixture capture wait for R3 (blob-fee bug would produce phantom mismatches).
 - **Consequence:** After R3 merges: operator Sepolia run → fixture capture → hardening wave (H1–H3) closes the program.
 
+### D-R3-1 — L1 blob base fee via eth_feeHistory (RPC-authoritative)
+- **Context:** R3 F1: `marshalL1Info` hard-coded `blobBaseFee = 1`; Sepolia Ecotone+ origins with ≠1 fee produce wrong L1-info bytes → phantom hash mismatches. Spec-computed path needs fork-dependent BPO update fractions on 2026 L1.
+- **Decision:** **`eth_feeHistory`** (`baseFeePerBlobGas`) with per-L1-block cache + optional range prefetch; nil/missing → `1` (pre-Cancun / idle Anvil equivalence). Enriched in `BuildPayloadAttributes` for Ecotone+ blocks only.
+- **Consequence:** Sepolia verifier compares real blob fees; local 901 still passes (Anvil blob fee = 1). Other `marshalL1Info` fields audited: `baseFee` from origin header, scalars from `SystemConfig`, `MixDigest`/`PrevRandao` from origin — all spec-sourced; no other hard-code fixes needed.
+
+### D-R3-2 — Stub L1 origin from genesis.l1 / head L1-info + timestamp validation
+- **Context:** R3 F2: stub defaulted to L1 tip; fresh genesis EL block 1 has `l2_ts = genesis.l2_time + block_time` while tip timestamp is far ahead → invalid under sequencing-window rules; follow-validation missed it by re-deriving with the same wrong origin.
+- **Decision:** Default origin = `rollup.json` `genesis.l1` (fresh head) or L1-info deposit on non-genesis head; advance L1 origin only when drift exceeded. `-l1-origin` override validated (rejected if `l2_ts < l1_ts` or past drift). Follow-validation independently asserts timestamp invariant (spec: sequencing window). Effective drift = 1800s with Fjord active (matches op-node README note).
+- **Consequence:** `sequencer-stub-demo.sh` builds valid empty blocks; old L1-tip default would fail validation at demo start.
+
 ---
 
 ## Escalations

@@ -513,7 +513,7 @@ Minimal **block-building** learning stub (`derivation/cmd/sequencer-stub`) that 
 | HTTP / auth / P2P | `:19745` / `:19751` / `:30324` (distinct from derivation-check) |
 | JWT | `$DATA_DIR/jwt/sequencer-stub-jwt.txt` |
 
-**Kill switch:** stop the demo (EXIT trap kills the stub EL) and `rm -rf "$DATA_DIR/l2/sequencer-stub-op-geth"`. The reference sequencer is **never displaced**, so “revert to stock op-node” is a no-op by construction. The demo prints a before/after reference-tip proof (historical block hash unchanged).
+**Kill switch:** stop the demo (EXIT trap kills the stub EL) and `rm -rf "$DATA_DIR/l2/sequencer-stub-op-geth"`. The reference sequencer is **never displaced**, so “revert to stock op-node” is a no-op by construction. The demo prints a before/after reference-tip proof (historical block hash unchanged). Default L1 origin is `rollup.json` `genesis.l1` (not L1 tip); follow-validation also checks the sequencing-window timestamp invariant (R3).
 
 ## Phase 2 funding gate (Phase 1d / US-016)
 

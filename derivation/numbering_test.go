@@ -2,11 +2,17 @@ package derivation
 
 import (
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func testRollup901() *RollupConfig {
 	return &RollupConfig{
 		Genesis: struct {
+			L1 struct {
+				Hash   common.Hash `json:"hash"`
+				Number uint64      `json:"number"`
+			} `json:"l1"`
 			L2Time       uint64       `json:"l2_time"`
 			SystemConfig SystemConfig `json:"system_config"`
 		}{L2Time: 1_700_000_000},

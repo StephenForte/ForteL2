@@ -16,7 +16,7 @@ type StubOptions struct {
 	RollupPath  string
 	L1RPC       string
 	Blocks      uint64 // N consecutive empty blocks to build (must be >= 1)
-	L1OriginNum uint64 // 0 = use latest L1 tip at start
+	L1OriginNum uint64 // 0 = auto-select valid origin; non-zero must pass timestamp validation
 }
 
 // BuiltBlock is one L2 block produced by the sequencer stub.
@@ -79,23 +79,22 @@ func RunSequencerStub(ctx context.Context, opts StubOptions, sealer *SealingEL) 
 	}
 	l1 := NewL1Client(NewRPCClient(opts.L1RPC))
 
-	originNum := opts.L1OriginNum
-	if originNum == 0 {
-		originNum, err = l1.LatestBlockNumber(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("l1 tip: %w", err)
-		}
-	}
-	l1Origin, err := l1.BlockHeader(ctx, originNum)
-	if err != nil {
-		return nil, fmt.Errorf("l1 origin %d: %w", originNum, err)
-	}
-
 	parentHash, parentNum, parentTime, err := sealer.LoadLatestHead(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load sealing EL head: %w", err)
 	}
 	sealer.SetHead(parentHash)
+
+	bt := cfg.BlockTime
+	if bt == 0 {
+		bt = 2
+	}
+	firstL2Ts := parentTime + bt
+
+	l1Origin, err := ResolveStubL1Origin(ctx, cfg, l1, sealer, opts.L1OriginNum, firstL2Ts)
+	if err != nil {
+		return nil, err
+	}
 
 	st := NewDerivationState(cfg)
 	st.ParentHash = parentHash
@@ -163,7 +162,7 @@ func FollowValidateStub(ctx context.Context, cfg *RollupConfig, l1 *L1Client, se
 	if report == nil || len(report.Built) == 0 {
 		return nil, fmt.Errorf("no built blocks to follow-validate")
 	}
-	notes := []string{"mechanism=rebuild BuildPayloadAttributes + compare first tx (L1-info) + parent links"}
+	notes := []string{"mechanism=rebuild BuildPayloadAttributes + compare first tx (L1-info) + parent links + origin timestamp invariant (spec: sequencing window)"}
 
 	st := NewDerivationState(cfg)
 	st.ParentHash = report.StartParentHash
@@ -179,6 +178,11 @@ func FollowValidateStub(ctx context.Context, cfg *RollupConfig, l1 *L1Client, se
 
 	prev := report.StartParentHash
 	for _, b := range report.Built {
+		maxDrift := cfg.EffectiveMaxSequencerDrift(b.Timestamp)
+		if err := ValidateL2OriginTimestamp(b.Timestamp, l1Origin.Time, maxDrift); err != nil {
+			return notes, fmt.Errorf("origin timestamp invariant block %d (spec sequencing window): %w", b.Number, err)
+		}
+
 		in := BlockInput{
 			Number:      b.Number,
 			EpochNumber: l1Origin.Number,
