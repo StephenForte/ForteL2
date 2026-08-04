@@ -45,6 +45,9 @@ jobs:
       - name: Pipeline viewer + dApp unit tests
         run: node --test viewer/lib.test.js dapp/lib.test.js
 
+      - name: Block viewer unit tests
+        run: node --test blocks/lib.test.js
+
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
