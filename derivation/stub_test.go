@@ -146,6 +146,15 @@ func TestBuildPayloadAttributesEmptyStubPath(t *testing.T) {
 			}
 		case "eth_getBlockReceipts":
 			result = []any{}
+		case "eth_feeHistory":
+			// Behave like a pre-Cancun node: JSON-RPC method-not-found is the
+			// one error the blob-fee fetch may treat as "fall back to 1".
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"error":   map[string]any{"code": -32601, "message": "the method eth_feeHistory does not exist/is not available"},
+			})
+			return
 		default:
 			w.WriteHeader(http.StatusBadRequest)
 			return
