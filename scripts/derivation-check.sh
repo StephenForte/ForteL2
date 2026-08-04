@@ -102,9 +102,16 @@ refuse_live_anchor_copy() {
     echo "ERROR: reference op-geth RPC is up at $L2_RPC_URL — stop the stack before copying datadir" >&2
     exit 1
   fi
+  # RPC-down does not prove process-down (startup/shutdown/hung HTTP still hold
+  # the flock). Probe for a live process on the datadir; NEVER modify the
+  # reference tree — a leftover geth/LOCK on a stopped geth is normal, and the
+  # flock state does not survive the copy anyway (copy's LOCK removed below).
+  if pgrep -f -- "$REF_DATADIR" >/dev/null 2>&1; then
+    echo "ERROR: a process still references $REF_DATADIR (RPC down but op-geth may be starting/stopping) — stop the stack fully, then retry" >&2
+    exit 1
+  fi
   if reference_el_locked; then
-    echo "WARN: removing stale geth/LOCK at $REF_DATADIR (reference RPC is down)" >&2
-    rm -f "$REF_DATADIR/geth/LOCK"
+    echo "note: geth/LOCK present at $REF_DATADIR (normal for a stopped geth); leaving reference tree untouched" >&2
   fi
 }
 
@@ -117,6 +124,7 @@ if [[ "$MAKE_ANCHOR" -eq 1 ]]; then
   echo "Copying reference datadir to anchor path $ANCHOR_DATADIR ..."
   rm -rf "$ANCHOR_DATADIR"
   cp -a "$REF_DATADIR" "$ANCHOR_DATADIR"
+  rm -f "$ANCHOR_DATADIR/geth/LOCK"
   echo "Anchor datadir ready at $ANCHOR_DATADIR"
   if ! reference_el_responds; then
     echo "Reference stack is stopped — restart it, then re-run derivation-check without --make-anchor."
