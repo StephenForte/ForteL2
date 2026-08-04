@@ -41,7 +41,9 @@ Forbidden: everything else, especially `scripts/`, `deployments/sepolia/`, Go mo
 - Tests: none required for pure doc changes, but run `./scripts/test-helpers.sh` once to confirm you broke nothing by accident; paste the result.
 - No merging, no pushing to main.
 
-## Handoff report (your final message, exactly these sections)
+## Handoff report — REQUIRED as your final chat message
+
+Your last message must BE the report: one copy-pasteable markdown block with exactly these numbered sections. Putting it only in a PR description or a repo file does not count — work without a final-message report is bounced unreviewed.
 
 1. Branch + base SHA; `git diff --stat` output
 2. Allowlist compliance (expected: clean)
