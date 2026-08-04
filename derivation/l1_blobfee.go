@@ -2,6 +2,7 @@ package derivation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -70,8 +71,15 @@ func (c *L1Client) fetchBlobBaseFeeHistory(ctx context.Context, blockNum uint64)
 	tag := fmt.Sprintf("0x%x", blockNum)
 	var hist feeHistoryJSON
 	if err := c.rpc.Call(ctx, "eth_feeHistory", []any{1, tag, []float64{}}, &hist); err != nil {
-		// Pre-Cancun L1 or RPC without blob fee support — match legacy hard-code.
-		return new(big.Int).Set(blobBaseFeePreCancun), nil
+		// Only "method not found" (pre-Cancun / non-supporting node) may fall
+		// back to the legacy constant. Transient transport or rate-limit errors
+		// MUST propagate — a silent 1 here re-creates the phantom-mismatch bug
+		// this file exists to fix, intermittently.
+		var rpcErr *rpcError
+		if errors.As(err, &rpcErr) && rpcErr.Code == -32601 {
+			return new(big.Int).Set(blobBaseFeePreCancun), nil
+		}
+		return nil, fmt.Errorf("eth_feeHistory(%s): %w", tag, err)
 	}
 	if len(hist.BaseFeePerBlobGas) == 0 || hist.BaseFeePerBlobGas[0] == nil {
 		return new(big.Int).Set(blobBaseFeePreCancun), nil
