@@ -97,7 +97,7 @@ if [[ "$SEPOLIA" -eq 1 ]]; then
   END_L2="$SAFE_NUM"
   START_L2=$((SAFE_NUM - 49))
   if [[ "$START_L2" -lt 1 ]]; then START_L2=1; fi
-  echo "Sepolia window: blocks $START_L2–$END_L2 (safe_l2=$SAFE_NUM)"
+  echo "Sepolia window: blocks ${START_L2}-${END_L2} (safe_l2=$SAFE_NUM)"
   echo "reference safe_l2=$(echo "$SYNC_JSON" | jq -c '.safe_l2')"
   echo "reference unsafe_l2=$(echo "$SYNC_JSON" | jq -c '.unsafe_l2')"
 else
@@ -123,7 +123,7 @@ if [[ -n "$CHANNEL_TX" ]]; then
   VERIFY_ARGS+=(-channel-tx "$CHANNEL_TX")
 fi
 
-echo "Running derivation verifier blocks $START_L2–$END_L2 ..."
+echo "Running derivation verifier blocks ${START_L2}-${END_L2} ..."
 if [[ -n "$JSON_OUT" ]]; then
   # -json puts ONLY the report on stdout (human lines go to stderr) — safe to capture.
   mkdir -p "$(dirname "$JSON_OUT")"
