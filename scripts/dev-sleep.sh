@@ -91,8 +91,8 @@ cmd_sleep() {
   if (( IS_SEPOLIA )); then
     echo
     echo "Also recommended (saves Render QuickNode credits):"
-    echo "  Render → fortel2-replica → Suspend"
-    echo "  (or leave running if you need overnight L1-derived sync)"
+    echo "  Render → fortel2-replica → L1_RPC_SCHEDULE=business (QN 9–5 PT, public overnight)"
+    echo "  or L1_RPC_FORCE=public / Suspend if you need zero QuickNode burn"
     echo
     echo "Wake tomorrow:"
     echo "  FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/dev-sleep.sh wake"
