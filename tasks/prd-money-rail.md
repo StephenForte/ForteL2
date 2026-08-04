@@ -69,7 +69,7 @@ Give SOS the **integration PRD**, not this file alone.
 
 | Phase | Scope | Status |
 |---|---|---|
-| **MR-0** | Publish rail interface + SOS/Replica lifecycle gates (this PRD) | **In progress** |
+| **MR-0** | Publish rail interface + SOS/Replica lifecycle gates (this PRD) | **Done** (2026-08-04) |
 | **MR-1** | SOS can deploy + settle on **852** (Mac sequencer RPC) | Ready for SOS (infra done) |
 | **MR-2** | Document replica as preferred read path; optional read URL in rail interface | Ready (replica ✅) |
 | **MR-3** | Fee/paymaster spikes (only if SOS needs them) | Later |
@@ -92,24 +92,24 @@ Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in
 
 ## User stories — ForteL2
 
-### US-MR-001: Publish rail interface ✅ target for this slice
+### US-MR-001: Publish rail interface ✅
 **Acceptance Criteria:**
-- [ ] `deployments/rail-interface.json` committed with local (901) + Sepolia (852) entries
-- [ ] Documents OptimismPortal / L1StandardBridge proxies for Sepolia from `deployments/sepolia/deployments.json`
-- [ ] Reset policy: Phase 1 may reset freely; Sepolia pinned until Phase 7; Phase 7 = coordinated wipe including replica
-- [ ] Links to SOS integration PRD + coordination doc
-- [ ] `cast` health examples in README or rail-interface comments/README section
+- [x] `deployments/rail-interface.json` committed with local (901) + Sepolia (852) entries
+- [x] Documents OptimismPortal / L1StandardBridge proxies for Sepolia from `deployments/sepolia/deployments.json`
+- [x] Reset policy: Phase 1 may reset freely; Sepolia pinned until Phase 7; Phase 7 = coordinated wipe including replica
+- [x] Links to SOS integration PRD + coordination doc
+- [x] `cast` health examples in README or rail-interface comments/README section
 
 ### US-MR-002: SOS onboard checklist (operator)
 **Acceptance Criteria:**
-- [ ] README “SettlementOS” subsection: start Sepolia stack, fund deployer via bridge/deposit, point SOS at `L2_RPC_URL`, deploy
-- [ ] Explicit: SOS writes → sequencer RPC; SOS/explorer reads → replica when available
-- [ ] Replica update triggers listed (Phase 7 only for genesis republish)
+- [x] README “SettlementOS” subsection: start Sepolia stack, fund deployer via bridge/deposit, point SOS at `L2_RPC_URL`, deploy
+- [x] Explicit: SOS writes → sequencer RPC; SOS/explorer reads → replica when available
+- [x] Replica update triggers listed (Phase 7 only for genesis republish)
 
 ### US-MR-003: Replica consumer note
 **Acceptance Criteria:**
-- [ ] `replica/README.md` lists consumers: fortel2-replica operators, SOS reads, settlementos-explorer
-- [ ] Reminder: pack/publish only after redeploy; sync-check after SOS-heavy demos if tips look wrong
+- [x] `replica/README.md` lists consumers: fortel2-replica operators, SOS reads, settlementos-explorer
+- [x] Reminder: pack/publish only after redeploy; sync-check after SOS-heavy demos if tips look wrong
 
 ---
 
