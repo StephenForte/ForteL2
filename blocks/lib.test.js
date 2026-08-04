@@ -142,25 +142,30 @@ describe("formatEthValue", () => {
 });
 
 describe("summarizeTxRows", () => {
-  it("summarizes full tx objects", () => {
-    const rows = summarizeTxRows([
-      {
-        hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-        from: "0xfrom",
-        to: "0xto",
-        value: 1000000000000000000n,
-        type: 2,
-      },
-    ]);
+  const fullTx = {
+    hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    from: "0xfrom",
+    to: "0xto",
+    value: 1000000000000000000n,
+    type: 2,
+  };
+
+  it("summarizes full tx objects (prefetchedTransactions shape)", () => {
+    const rows = summarizeTxRows([fullTx]);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].from, "0xfrom");
+    assert.equal(rows[0].to, "0xto");
     assert.equal(rows[0].value, "1.0000 ETH");
     assert.equal(rows[0].type, "2");
   });
-  it("handles hash-only entries", () => {
+
+  it("hash-only entries yield — fallback (ethers Block.transactions shape)", () => {
     const rows = summarizeTxRows(["0xabc"]);
     assert.equal(rows[0].hash, "0xabc");
     assert.equal(rows[0].from, null);
+    assert.equal(rows[0].to, null);
+    assert.equal(rows[0].value, null);
+    assert.equal(rows[0].type, null);
   });
 });
 

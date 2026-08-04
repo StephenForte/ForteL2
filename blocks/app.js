@@ -45,7 +45,8 @@ let listBlocks = [];
 let listOldest = null;
 let listHasMore = false;
 let listLoading = false;
-let detailLoading = false;
+/** @type {number} Monotonic token; latest navigation wins over in-flight detail loads. */
+let detailLoadSeq = 0;
 
 function getProvider() {
   if (!provider) provider = new JsonRpcProvider(L2_RPC_URL);
@@ -218,9 +219,15 @@ function renderTxRows(txs) {
   }
 }
 
+function blockDetailTransactions(block) {
+  if (block?.prefetchedTransactions != null) {
+    return block.prefetchedTransactions;
+  }
+  return block?.transactions ?? [];
+}
+
 async function loadBlockDetail(blockParam) {
-  if (detailLoading) return;
-  detailLoading = true;
+  const loadToken = ++detailLoadSeq;
   els.detailErr.hidden = true;
   els.detailErr.textContent = "";
   els.viewDetail.classList.remove("is-stale");
@@ -231,10 +238,8 @@ async function loadBlockDetail(blockParam) {
       throw new Error(`Invalid block param: ${blockParam}`);
     }
     const l2 = getProvider();
-    const block =
-      parsed.kind === "number"
-        ? await l2.getBlock(parsed.value, true)
-        : await l2.getBlock(parsed.value, true);
+    const block = await l2.getBlock(parsed.value, true);
+    if (loadToken !== detailLoadSeq) return;
     if (!block) {
       throw new Error(`Block not found: ${blockParam}`);
     }
@@ -244,9 +249,10 @@ async function loadBlockDetail(blockParam) {
     els.navSep.hidden = false;
     els.navDetail.textContent = `#${header.number}`;
     renderDetailHeader(header);
-    renderTxRows(summarizeTxRows(block.transactions));
+    renderTxRows(summarizeTxRows(blockDetailTransactions(block)));
     setStatus(`Block #${header.number} · ${header.txCount} tx(s)`);
   } catch (err) {
+    if (loadToken !== detailLoadSeq) return;
     els.detailErr.hidden = false;
     els.detailErr.textContent = err?.message || String(err);
     els.viewDetail.classList.add("is-stale");
@@ -254,8 +260,6 @@ async function loadBlockDetail(blockParam) {
     clearChildren(els.txTbody);
     els.txEmpty.hidden = true;
     setStatus(err?.message || String(err), true);
-  } finally {
-    detailLoading = false;
   }
 }
 
