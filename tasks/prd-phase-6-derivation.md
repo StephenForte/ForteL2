@@ -127,8 +127,8 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 
 ## Success metrics
 
-- US-061 exits 0 on local 901 default window against a running reference stack
-- Sepolia 852 window matches when operator runs `FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia`
+- US-061 exits 0 on local 901 default window against a running reference stack ✅ (2026-08-04, blocks 1–20)
+- Sepolia 852 window matches when operator runs `FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia` — **NOT MET; re-opened** (2026-08-04 operator run, D-0010): the pipeline numbers batches from 1 and seals from genesis state, so a mid-chain window cannot be anchored or executed. Requires the R2 window-anchoring work (timestamp-based numbering + a state anchor for the sealing EL).
 - No Sepolia redeploy; no edits to pinned `deployments/sepolia/` contracts tree
 
 ## Open questions (for T4)

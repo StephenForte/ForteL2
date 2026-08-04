@@ -97,9 +97,16 @@ if [[ "$SEPOLIA" -eq 1 ]]; then
   END_L2="$SAFE_NUM"
   START_L2=$((SAFE_NUM - 49))
   if [[ "$START_L2" -lt 1 ]]; then START_L2=1; fi
-  echo "Sepolia window: blocks $START_L2–$END_L2 (safe_l2=$SAFE_NUM)"
+  echo "Sepolia window: blocks ${START_L2}-${END_L2} (safe_l2=$SAFE_NUM)"
   echo "reference safe_l2=$(echo "$SYNC_JSON" | jq -c '.safe_l2')"
   echo "reference unsafe_l2=$(echo "$SYNC_JSON" | jq -c '.unsafe_l2')"
+  # Bound the L1 inbox scan: channels for the window land within ~channel-duration
+  # of their L1 origin. Scanning from genesis (~11M blocks) would never finish.
+  SAFE_L1_ORIGIN="$(echo "$SYNC_JSON" | jq -r '.safe_l2.l1origin.number')"
+  L1_LOOKBACK="${DERIVATION_L1_LOOKBACK:-300}"
+  FROM_L1=$((SAFE_L1_ORIGIN - L1_LOOKBACK))
+  if [[ "$FROM_L1" -lt 1 ]]; then FROM_L1=1; fi
+  echo "L1 inbox scan from block $FROM_L1 (safe l1origin=$SAFE_L1_ORIGIN, lookback=$L1_LOOKBACK)"
 else
   SYNC_JSON="$(cast rpc optimism_syncStatus --rpc-url "$L2_NODE_RPC_URL" 2>/dev/null || echo '{}')"
   if [[ -n "$SYNC_JSON" && "$SYNC_JSON" != "{}" ]]; then
@@ -122,8 +129,11 @@ VERIFY_ARGS=(
 if [[ -n "$CHANNEL_TX" ]]; then
   VERIFY_ARGS+=(-channel-tx "$CHANNEL_TX")
 fi
+if [[ -n "${FROM_L1:-}" ]]; then
+  VERIFY_ARGS+=(-from-l1 "$FROM_L1")
+fi
 
-echo "Running derivation verifier blocks $START_L2–$END_L2 ..."
+echo "Running derivation verifier blocks ${START_L2}-${END_L2} ..."
 if [[ -n "$JSON_OUT" ]]; then
   # -json puts ONLY the report on stdout (human lines go to stderr) — safe to capture.
   mkdir -p "$(dirname "$JSON_OUT")"
