@@ -97,6 +97,11 @@
 - **Decision:** T4 verified **blocks 1–20 inclusive** on chain **901** in Cursor Cloud VM (`./scripts/derivation-check.sh`); all 20 derived hashes matched reference EL.
 - **Consequence:** US-061 local acceptance met; Sepolia 852 window remains operator-run.
 
+### D-0009 — US-062 approved; Wave 3 base: tag `wave3-base`
+- **Context:** US-061 merged and verified (blocks 1–20 hash-match on 901). Operator explicitly approved the gated US-062 sequencer stub (2026-08-04). Integrator added `--json-out` fixture capture to `derivation-check.sh` (+ `-json` stdout purity in `cmd/verify`).
+- **Decision:** T6 implements US-062 per `tasks/worker-prompts/T6-sequencer-stub.md`, branching from tag **`wave3-base`** (the commit adding that prompt, this entry, and the capture flag). Same isolation invariants as T4; T6 also upgrades the Sepolia golden-fixture test from existence-check to replay.
+- **Consequence:** After T6, Phase 6 is code-complete; remaining tracks are operator Sepolia runs and the Wave 3 hardening tasks (H1–H3), which branch from `wave3-base` or its successor.
+
 ---
 
 ## Escalations

@@ -10,14 +10,16 @@ SEPOLIA=0
 START_L2=1
 END_L2=20
 CHANNEL_TX=""
+JSON_OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sepolia) SEPOLIA=1; shift ;;
     --start-l2) START_L2="$2"; shift 2 ;;
     --end-l2) END_L2="$2"; shift 2 ;;
     --channel-tx) CHANNEL_TX="$2"; shift 2 ;;
+    --json-out) JSON_OUT="$2"; shift 2 ;;
     -h|--help)
-      echo "usage: derivation-check.sh [--sepolia] [--start-l2 N] [--end-l2 N] [--channel-tx HASH]"
+      echo "usage: derivation-check.sh [--sepolia] [--start-l2 N] [--end-l2 N] [--channel-tx HASH] [--json-out FILE]"
       exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -122,5 +124,13 @@ if [[ -n "$CHANNEL_TX" ]]; then
 fi
 
 echo "Running derivation verifier blocks $START_L2–$END_L2 ..."
-(cd "$FORTEL2_ROOT/derivation" && go run ./cmd/verify "${VERIFY_ARGS[@]}")
+if [[ -n "$JSON_OUT" ]]; then
+  # -json puts ONLY the report on stdout (human lines go to stderr) — safe to capture.
+  mkdir -p "$(dirname "$JSON_OUT")"
+  VERIFY_ARGS+=(-json)
+  (cd "$FORTEL2_ROOT/derivation" && go run ./cmd/verify "${VERIFY_ARGS[@]}") > "$JSON_OUT"
+  echo "JSON report written to $JSON_OUT"
+else
+  (cd "$FORTEL2_ROOT/derivation" && go run ./cmd/verify "${VERIFY_ARGS[@]}")
+fi
 echo "derivation-check: PASS"

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -62,31 +63,35 @@ func main() {
 	}
 
 	report, err := derivation.Verify(ctx, opts, sealer)
+	// With -json, stdout carries ONLY the JSON report (fixture-capture safe);
+	// human-readable lines move to stderr.
+	human := os.Stdout
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(report)
+		human = os.Stderr
 	}
-	printHeader(report)
+	printHeader(human, report)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("PASS: blocks %d–%d all match reference EL\n", *start, *end)
+	fmt.Fprintf(human, "PASS: blocks %d–%d all match reference EL\n", *start, *end)
 }
 
-func printHeader(r *derivation.VerifyReport) {
+func printHeader(w io.Writer, r *derivation.VerifyReport) {
 	if r == nil {
 		return
 	}
-	fmt.Printf("reference safe_l2=%d hash=%s\n", r.ReferenceSafeL2.Number, r.ReferenceSafeL2.Hash)
-	fmt.Printf("reference unsafe_l2=%d hash=%s\n", r.ReferenceUnsafeL2.Number, r.ReferenceUnsafeL2.Hash)
+	fmt.Fprintf(w, "reference safe_l2=%d hash=%s\n", r.ReferenceSafeL2.Number, r.ReferenceSafeL2.Hash)
+	fmt.Fprintf(w, "reference unsafe_l2=%d hash=%s\n", r.ReferenceUnsafeL2.Number, r.ReferenceUnsafeL2.Hash)
 	for _, b := range r.Blocks {
 		status := "OK"
 		if !b.Match {
 			status = "MISMATCH"
 		}
-		fmt.Printf("  block %d derived=%s expected=%s txs=%d source=%s %s\n",
+		fmt.Fprintf(w, "  block %d derived=%s expected=%s txs=%d source=%s %s\n",
 			b.Number, b.DerivedHash, b.ExpectedHash, b.TxCount, b.Source, status)
 	}
 }
