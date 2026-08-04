@@ -61,6 +61,10 @@ jobs:
         working-directory: proposer
         run: go test ./...
 
+      - name: Phase 6 derivation unit tests
+        working-directory: derivation
+        run: go test ./...
+
       - name: Bridge helper unit tests
         working-directory: scripts/bridge
         run: |

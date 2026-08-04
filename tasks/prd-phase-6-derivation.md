@@ -62,7 +62,7 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 | Story | Scope | Status |
 |---|---|---|
 | **US-060** | Spec spike + PRD + decode real batches | **Done** — `tasks/spike-phase-6-derivation.md` |
-| **US-061** | Minimal derivation verifier + diff runbook | **Ready** (this PRD) |
+| **US-061** | Minimal derivation verifier + diff runbook | **Done** (T4) |
 | **US-062** | Optional sequencer stub (Engine API block builder) | **Gated** on US-061 |
 
 ## User stories
@@ -73,14 +73,14 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 
 **Acceptance Criteria:**
 
-- [ ] **`derivation/` Go module** with own `go.mod`, README citing spec URLs, and `go test ./...` green
-- [ ] **Inputs** (flags or env, no committed secrets):
+- [x] **`derivation/` Go module** with own `go.mod`, README citing spec URLs, and `go test ./...` green
+- [x] **Inputs** (flags or env, no committed secrets):
   - L1 RPC URL (`assert_local_rpc_urls` or `assert_sepolia_rpc_urls` pattern in run script)
   - Rollup config path: `$DEPLOY_DIR/rollup.json` (`batch_inbox_address`, `l2_chain_id`, genesis/l1 anchors)
   - Deploy addresses: Portal, SystemConfig batcher hash check (from active `deployments.json` tree)
   - Reference rollup RPC: `$L2_NODE_RPC_URL` (loopback)
   - Window: `--start-l2` / `--end-l2` inclusive **or** `--channel-tx <L1 hash>` to derive the channel’s block span
-- [ ] **Pipeline stages implemented:**
+- [x] **Pipeline stages implemented:**
   1. Fetch + filter L1 txs to batch inbox from authorized batcher(s)
   2. Parse version-0 frames; reassemble channel; zlib decompress
   3. Decode **singular** batches (type `0x00`)
@@ -88,18 +88,18 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
   5. Include **user deposits** from L1 Portal in the derived sequence (spec deposit derivation)
   6. Emit payload attributes / L2 block metadata for each derived block in the window
   7. **Block hash check:** compare derived block hash to reference `op-geth` `eth_getBlockByNumber` — v1 **MAY** seal via Engine API on a **separate loopback EL instance** (same genesis, own datadir/ports/JWT; document in runbook). **Never** call `engine_*` on the live reference `op-geth` used for diffing.
-- [ ] **Outputs:** stdout + optional JSON report:
+- [x] **Outputs:** stdout + optional JSON report:
   - Per-block: `{number, hash, parentHash, timestamp, txCount, source}` (`batch` | `deposit`)
   - Summary: `{matched, mismatched, windowStart, windowEnd, referenceSafeL2, referenceUnsafeL2}`
   - On mismatch: log block number, expected hash, actual hash, and derivation source tx
-- [ ] **`scripts/derivation-check.sh`** runbook:
+- [x] **`scripts/derivation-check.sh`** runbook:
   1. Require reference stack running (`status.sh` or explicit RPC checks)
   2. Local default window: L2 blocks **1–20** on chain **901** **or** blocks covered by batch tx `0x5548fd9463208e10a1bbcc0f544f78cc789d02b8461fb8f5b6da8c2629e90495`
   3. Sepolia optional: `--sepolia` uses `FORTEL2_ENV=.env.sepolia`; default window = last **50** blocks at reference `safe_l2` (inclusive)
   4. Exit code **0** iff all hashes in window match; **1** on any mismatch or RPC/derivation error
-- [ ] **Safe alongside stock stack** — does not bind sequencer ports or replace `op-node`
-- [ ] **Golden tests:** at least one checked-in fixture (hex channel body or L1 tx input) from local 901; Sepolia fixture optional (operator-supplied, gitignored OK)
-- [ ] README Phase 6 subsection (T4): link spike notes, runbook, kill switch (simply don’t run the verifier)
+- [x] **Safe alongside stock stack** — does not bind sequencer ports or replace `op-node`
+- [x] **Golden tests:** at least one checked-in fixture (hex channel body or L1 tx input) from local 901; Sepolia fixture optional (operator-supplied, gitignored OK)
+- [x] README Phase 6 subsection (T4): link spike notes, runbook, kill switch (simply don’t run the verifier)
 
 **Comparison window (D-T2-3 — binding):**
 
@@ -140,6 +140,14 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 ## Tracked dependency advisories
 
 Same as `batcher/` / `proposer/` — **GO-2026-5932** (`x/crypto/openpgp` indirect); `govulncheck ./…` on `derivation/` module.
+
+## Implementation notes (T4, 2026-08-04)
+
+- **Verified local 901:** blocks **1–20** inclusive, all hashes match reference EL (Cursor Cloud VM, `./scripts/derivation-check.sh`).
+- **Sealing EL:** `$DATA_DIR/l2/derivation-op-geth`, HTTP `:19645`, auth `:19651`, P2P `:30323`, JWT `$DATA_DIR/jwt/derivation-jwt.txt`. Foreground child process in runbook (no `lib.sh` `start_bg` edits).
+- **Isthmus withdrawalsRoot:** op-geth `getPayload` omits `withdrawalsRoot`; verifier JSON-patches `0x8ed4baae…` before `engine_newPayloadV4`.
+- **Sepolia live window:** implemented (`--sepolia`); operator verification pending (no golden fixture in repo yet).
+- **US-062:** not started (gated).
 
 ## References
 

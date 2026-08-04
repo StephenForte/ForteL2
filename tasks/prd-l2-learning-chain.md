@@ -41,7 +41,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **3b** | **Friend-operated replica nodes**: recruit geographically distributed friends to run verifier nodes; onboard on **Sepolia testnet first**; proves distributed operation and shared infra ownership before any mainnet consideration | Future (tentative) |
 | **4** | **Reimplement the batcher** from scratch (read L2 blocks, compress, frame, submit to L1; swap out op-batcher) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `batcher/` + `USE_CUSTOM_BATCHER=1` opt-in; stock remains default (`tasks/prd-phase-4-batcher.md`) |
 | **5** | **Reimplement the proposer** from scratch (compute/fetch output roots, submit to the L2OutputOracle / DisputeGameFactory; swap out op-proposer) — against the **pinned** Sepolia deployment; no redeploy | **Done** — `proposer/` + `USE_CUSTOM_PROPOSER=1` opt-in; stock remains default (`tasks/prd-phase-5-proposer.md`) |
-| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | **In progress** — US-060 spike done (`tasks/spike-phase-6-derivation.md`, `tasks/prd-phase-6-derivation.md`); US-061 ready for T4; block viewer shipped (`blocks/` + `serve-blocks.sh`, US-063) |
+| **6** | **Derivation / minimal sequencer** (read batches from L1, derive L2 blocks) **plus a simple Blockchair-style block viewer** (latest-blocks list → per-block detail) — against the **pinned** Sepolia deployment; accumulated L1 batch history is the derivation test data. Blockscout stays much later | **In progress** — US-060 spike done; **US-061 verifier done** (`derivation/` + `derivation-check.sh`); block viewer shipped (`blocks/` + `serve-blocks.sh`, US-063); US-062 gated |
 | **3a** | **(Deferred)** Native Mac mini Sepolia L1 (geth/reth + consensus client, no Docker) — disk/sync heavy; not required for calldata DA. Was briefly labeled 2e; scheduled **after** Phases 4–6 unless QuickNode fails earlier | Future (optional) |
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal. **Precondition:** coordinated Sepolia redeploy with deliberately chosen immutables (fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — minutes-to-hours scale) + completed network reset across all replica operators | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
@@ -361,11 +361,11 @@ Before derivation implementation starts, either expand US-060–062 in-place **o
 **Description:** As the operator, I want a from-scratch (or substantially custom) derivation verifier that can advance a safe/unsafe head over a bounded window by reading L1, comparable to `optimism_syncStatus` from reference `op-node`.
 
 **Acceptance Criteria:**
-- [ ] Separate binary/crate/module with its own README; does not patch upstream `op-node` in place for the learning demo
-- [ ] Inputs: L1 RPC + rollup config / batch inbox / deposit contract addresses from the active deploy tree
-- [ ] Outputs: derived L2 block numbers / hashes for a documented window; mismatch vs reference `op-node` is detectable and logged
-- [ ] Runbook: how to start reference stack, run custom verifier, interpret diffs
-- [ ] Safe to run alongside Phase 1/2 stack on loopback without replacing sequencer until US-062
+- [x] Separate binary/crate/module with its own README; does not patch upstream `op-node` in place for the learning demo
+- [x] Inputs: L1 RPC + rollup config / batch inbox / deposit contract addresses from the active deploy tree
+- [x] Outputs: derived L2 block numbers / hashes for a documented window; mismatch vs reference `op-node` is detectable and logged
+- [x] Runbook: how to start reference stack, run custom verifier, interpret diffs
+- [x] Safe to run alongside Phase 1/2 stack on loopback without replacing sequencer until US-062
 
 ### US-062: Optional minimal sequencer stub (after verifier)
 **Description:** As the operator, I want an optional next step that builds L2 blocks (sequencer path) only after the verifier path is trustworthy, so sequencing complexity does not block derivation learning.

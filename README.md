@@ -453,6 +453,29 @@ FORTEL2_ENV=.env.sepolia ./scripts/serve-blocks.sh
 
 **Not an explorer:** no search, no address/token/NFT pages, no contract verification, no Blockscout. Works against L2 chain **901** (local) and **852** (Sepolia) via the same `FORTEL2_ENV` / generated-config pattern as the pipeline viewer.
 
+## Derivation verifier (Phase 6 / US-061)
+
+Side-by-side **derivation verifier** that reads L1 batch data, derives a bounded L2 window, and checks block hashes against the reference stack. Spike notes: `tasks/spike-phase-6-derivation.md`. Full spec: `tasks/prd-phase-6-derivation.md`. Module README: `derivation/README.md`.
+
+```bash
+# Reference stack must be running (local 901 default)
+./scripts/derivation-check.sh
+
+# Optional overrides
+./scripts/derivation-check.sh --start-l2 1 --end-l2 20
+./scripts/derivation-check.sh --channel-tx 0x64fa2834…   # single L1 batcher tx
+
+# Sepolia 852 — 50 blocks ending at reference safe_l2 (operator-run)
+FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia
+```
+
+| Outcome | What you see |
+|---|---|
+| **PASS** | Per-block `derived=… expected=… OK` for every block in the window; `derivation-check: PASS`; exit 0 |
+| **FAIL** | First mismatch logs `derived` vs `expected` hash; exit 1 |
+
+The runbook starts a **separate** loopback `op-geth` for Engine API block sealing (`$DATA_DIR/l2/derivation-op-geth`, ports `:19645`/`:19651`). The live reference `op-geth` / `op-node` stay **read-only** — never send `engine_*` to them. **Kill switch:** simply don't run `derivation-check.sh`; stock derivation is unchanged. US-062 sequencer stub remains gated.
+
 ## Phase 2 funding gate (Phase 1d / US-016)
 
 Do **not** start Sepolia cutover until keys and balances are ready. **Base Sepolia ≠ Ethereum Sepolia** — L2 testnet balances cannot pay L1 Sepolia deploy or batcher gas.
