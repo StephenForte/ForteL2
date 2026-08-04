@@ -72,6 +72,11 @@
 - **Decision:** F1–F3 code fixes in `blocks/` and `batcher/cmd/decode-full`; F4–F6 doc fixes in Phase 6 PRD, README SOS onboarding, `replica/README.md`. Reference stack is read-only for derivation; Engine API sealing requires a separate EL instance.
 - **Consequence:** T4 runbook must document isolated EL if sealing; operator verifies block viewer tx From/To/Value on live stack.
 
+### D-0008 — Wave 2 base: tag `wave2-base`
+- **Context:** Wave 1 (T1–T3) + R1 review fixes are merged; T4 executes against the amended `tasks/prd-phase-6-derivation.md`.
+- **Decision:** Wave 2 base = the commit adding `tasks/worker-prompts/T4-derivation-verifier.md` + this entry, tagged **`wave2-base`** (same tag mechanism as D-0007). T4 branches from it; any Wave 2 siblings (T5, hardening H-tasks) branch from the same tag.
+- **Consequence:** Handoffs diff against `wave2-base..HEAD`. Next re-pin gets `wave3-base`, never a moved tag.
+
 ---
 
 ## Escalations
