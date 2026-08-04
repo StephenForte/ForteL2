@@ -25,3 +25,7 @@ contracts/lib/forge-std/.git/
 dapp/node_modules/
 scripts/bridge/node_modules/
 batcher/.gomodcache/
+
+# local tool/scan output (never commit)
+semgrep-results.json
+tasks/.solomd/

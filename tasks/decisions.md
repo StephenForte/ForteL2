@@ -14,7 +14,7 @@
 ### D-0001 — Base SHA for Wave 1
 - **Context:** main had uncommitted changes (README, .env.sepolia.example, dev-sleep.sh) at planning time.
 - **Decision:** Operator commits them first (T0); Wave 1 branches from the resulting SHA.
-- **BASE_SHA:** `d9f3c5ff5b0c3f3e07b4462aaca4e419193e757e` (2026-08-04 — Render RPC schedule docs commit)
+- **BASE_SHA:** tag `wave1-base` — resolve with `git rev-parse wave1-base^{commit}`. (Re-pinned 2026-08-04 by D-0007; previous value `d9f3c5ff5b0c3f3e07b4462aaca4e419193e757e` was mid-PR-#58 and predates this file existing on main.)
 
 ### D-0002 — Branching model
 - **Context:** batch-merging ~3 agent branches caused rebase churn.
@@ -36,6 +36,13 @@
 
 ### D-0006 — Verifier module shape (placeholder)
 - **Status:** OPEN — to be closed by T2 spike (`D-T2-x`): new `derivation/` module (default assumption) vs extending `batcher/`. T4 ownership follows the answer.
+
+---
+
+### D-0007 — BASE_SHA re-pin to tag `wave1-base`
+- **Context:** The first pinned BASE_SHA (`d9f3c5f`) was the mid-PR-#58 commit: it lacked `tasks/decisions.md` (added in `8763f44`) and the plan/worker-prompt files (never committed), and main had moved (PR #58 merge `671a39f` + CI-workflow commits `be81133`/`e402de3`/`3dd5db8`/`386ffa1`).
+- **Decision:** Base = the commit that adds the plan + worker prompts on top of merged main, tagged **`wave1-base`** (a tag, because this file cannot contain its own commit's hash). D-0001's value field now points at the tag.
+- **Consequence:** All Wave 1 workers branch from `wave1-base` and diff against it in handoffs. Any future re-pin gets a new decision entry + a new tag (`wave2-base`, …), never a moved tag.
 
 ---
 
