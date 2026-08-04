@@ -77,6 +77,26 @@
 - **Decision:** Wave 2 base = the commit adding `tasks/worker-prompts/T4-derivation-verifier.md` + this entry, tagged **`wave2-base`** (same tag mechanism as D-0007). T4 branches from it; any Wave 2 siblings (T5, hardening H-tasks) branch from the same tag.
 - **Consequence:** Handoffs diff against `wave2-base..HEAD`. Next re-pin gets `wave3-base`, never a moved tag.
 
+### D-T4-1 — Separate sealing EL lifecycle (foreground child)
+- **Context:** US-061 requires Engine API hash sealing on an isolated EL (D-R1-1); `lib.sh` `start_bg`/`stop_bg` are privileged and out of allowlist.
+- **Decision:** `derivation-check.sh` starts/stops sealing `op-geth` as a **foreground-owned background child** (`&` + `trap` kill on exit), not via `start_bg`. Datadir `$DATA_DIR/l2/derivation-op-geth`; ports `19645`/`19651`; P2P `--port=30323`.
+- **Consequence:** Reference datadir untouched; operator may wipe derivation datadir freely. No edits to privileged process helpers.
+
+### D-T4-2 — Isthmus withdrawalsRoot JSON patch
+- **Context:** op-geth `engine_getPayloadV4` returns payloads without `withdrawalsRoot`; `engine_newPayloadV4` rejects Isthmus blocks with "nil withdrawalsRoot post-Isthmus". Vanilla `go-ethereum` `ExecutableData` lacks the field.
+- **Decision:** After `getPayload`, **JSON-patch** `withdrawalsRoot` to the empty-list constant (`0x8ed4baae…`) before `newPayload`. No `replace` to op-geth in `go.mod` (keeps CI portable).
+- **Consequence:** Sealing works against stock op-geth binary with upstream go-ethereum types in the verifier module.
+
+### D-T4-3 — Local 901 golden fixture format
+- **Context:** US-061 requires checked-in decode fixture; spike captured real batcher tx calldata.
+- **Decision:** `derivation/testdata/local901/batcher_tx.hex` — raw L1 tx input hex (15 singular batches, blocks 1–15). Sepolia slot `testdata/sepolia/window.json` is load-if-present / skip-with-notice.
+- **Consequence:** CI unit tests decode fixture without a live stack; Sepolia golden remains operator-supplied.
+
+### D-T4-4 — Verified comparison window (local 901)
+- **Context:** D-T2-3 binds acceptance to hash equality on blocks 1–20 local default.
+- **Decision:** T4 verified **blocks 1–20 inclusive** on chain **901** in Cursor Cloud VM (`./scripts/derivation-check.sh`); all 20 derived hashes matched reference EL.
+- **Consequence:** US-061 local acceptance met; Sepolia 852 window remains operator-run.
+
 ---
 
 ## Escalations

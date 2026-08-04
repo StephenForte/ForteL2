@@ -1,0 +1,230 @@
+package derivation
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/ethereum/go-ethereum/beacon/engine"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/node"
+	"github.com/ethereum/go-ethereum/rpc"
+)
+
+// SealingEL manages a separate loopback op-geth for Engine API block sealing.
+type SealingEL struct {
+	authRPC *rpc.Client
+	httpRPC *RPCClient
+	head    common.Hash
+}
+
+func StartSealingEL(ctx context.Context, authURL string, jwtPath string, httpURL string) (*SealingEL, error) {
+	secret, err := os.ReadFile(jwtPath)
+	if err != nil {
+		return nil, fmt.Errorf("read jwt: %w", err)
+	}
+	var jwtSecret [32]byte
+	b, err := decodeHexString(trimSpace(string(secret)))
+	if err != nil || len(b) != 32 {
+		return nil, fmt.Errorf("jwt secret must be 32 bytes hex")
+	}
+	copy(jwtSecret[:], b)
+
+	authClient, err := rpc.DialOptions(ctx, authURL, rpc.WithHTTPAuth(node.NewJWTAuth(jwtSecret)))
+	if err != nil {
+		return nil, fmt.Errorf("dial engine api: %w", err)
+	}
+
+	el := &SealingEL{authRPC: authClient, httpRPC: NewRPCClient(httpURL)}
+	var genesis struct {
+		Hash common.Hash `json:"hash"`
+	}
+	if err := el.httpRPC.Call(ctx, "eth_getBlockByNumber", []any{"0x0", false}, &genesis); err != nil {
+		authClient.Close()
+		return nil, err
+	}
+	el.head = genesis.Hash
+	return el, nil
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\n') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\n') {
+		s = s[:len(s)-1]
+	}
+	if len(s) >= 2 && s[0:2] == "0x" {
+		return s[2:]
+	}
+	return s
+}
+
+func (el *SealingEL) Close() {
+	if el.authRPC != nil {
+		el.authRPC.Close()
+	}
+}
+
+var isthmusEmptyWithdrawalsRoot = common.HexToHash("0x8ed4baae3a927be3dea54996b4d5899f8c01e7594bf50b17dc1e741388ce3d12")
+
+// patchIsthmusWithdrawalsRoot injects withdrawalsRoot for op-geth Isthmus blocks.
+// Vanilla go-ethereum ExecutableData lacks the field; op-geth getPayload omits it but newPayload requires it.
+func patchIsthmusWithdrawalsRoot(payload *engine.ExecutableData) (any, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	if _, ok := m["withdrawalsRoot"]; !ok && len(payload.Withdrawals) == 0 {
+		wr, err := json.Marshal(isthmusEmptyWithdrawalsRoot)
+		if err != nil {
+			return nil, err
+		}
+		m["withdrawalsRoot"] = wr
+	}
+	return m, nil
+}
+
+func (el *SealingEL) SealBlock(ctx context.Context, attrs *OpPayloadAttributes) (common.Hash, error) {
+	fc := engine.ForkchoiceStateV1{
+		HeadBlockHash:      el.head,
+		SafeBlockHash:      el.head,
+		FinalizedBlockHash: el.head,
+	}
+	var fcu engine.ForkChoiceResponse
+	if err := el.authRPC.CallContext(ctx, &fcu, "engine_forkchoiceUpdatedV3", fc, attrs); err != nil {
+		return common.Hash{}, fmt.Errorf("forkchoiceUpdated: %w", err)
+	}
+	if fcu.PayloadStatus.Status != engine.VALID {
+		return common.Hash{}, fmt.Errorf("forkchoiceUpdated status %s", fcu.PayloadStatus.Status)
+	}
+	if fcu.PayloadID == nil {
+		return common.Hash{}, fmt.Errorf("nil payload id")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	var envelope engine.ExecutionPayloadEnvelope
+	if err := el.authRPC.CallContext(ctx, &envelope, "engine_getPayloadV4", *fcu.PayloadID); err != nil {
+		if err2 := el.authRPC.CallContext(ctx, &envelope, "engine_getPayloadV3", *fcu.PayloadID); err2 != nil {
+			return common.Hash{}, fmt.Errorf("getPayload: %w", err)
+		}
+	}
+	if envelope.ExecutionPayload == nil {
+		return common.Hash{}, fmt.Errorf("nil execution payload")
+	}
+	execPayload, err := patchIsthmusWithdrawalsRoot(envelope.ExecutionPayload)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("patch execution payload: %w", err)
+	}
+
+	var status engine.PayloadStatusV1
+	if err := el.authRPC.CallContext(ctx, &status, "engine_newPayloadV4",
+		execPayload, []common.Hash{}, attrs.ParentBeaconBlockRoot, []hexutil.Bytes{}); err != nil {
+		if err2 := el.authRPC.CallContext(ctx, &status, "engine_newPayloadV3",
+			execPayload, []common.Hash{}, attrs.ParentBeaconBlockRoot); err2 != nil {
+			return common.Hash{}, fmt.Errorf("newPayload: %w", err)
+		}
+	}
+	if status.Status != engine.VALID && status.Status != engine.ACCEPTED {
+		msg := ""
+		if status.ValidationError != nil {
+			msg = *status.ValidationError
+		}
+		return common.Hash{}, fmt.Errorf("newPayload status %s validation=%q", status.Status, msg)
+	}
+
+	newHead := envelope.ExecutionPayload.BlockHash
+	fc2 := engine.ForkchoiceStateV1{HeadBlockHash: newHead, SafeBlockHash: newHead, FinalizedBlockHash: newHead}
+	var fcu2 engine.ForkChoiceResponse
+	if err := el.authRPC.CallContext(ctx, &fcu2, "engine_forkchoiceUpdatedV3", fc2, nil); err != nil {
+		return common.Hash{}, fmt.Errorf("finalize forkchoice: %w", err)
+	}
+	el.head = newHead
+	return newHead, nil
+}
+
+func InitSealingELDatadir(opGethBin, genesisPath, datadir string) error {
+	if _, err := os.Stat(datadir + "/geth/chaindata"); err == nil {
+		return nil
+	}
+	return runCmd("init-sealing-el", opGethBin, "init", "--datadir="+datadir, "--state.scheme=hash", genesisPath)
+}
+
+func RunSealingELProcess(opGethBin, datadir, jwtPath string, httpPort, authPort int) (*os.Process, error) {
+	args := []string{
+		"--datadir=" + datadir,
+		"--port=30323",
+		"--http", "--http.addr=127.0.0.1", fmt.Sprintf("--http.port=%d", httpPort),
+		"--http.api=eth,net,web3,debug",
+		"--authrpc.addr=127.0.0.1", fmt.Sprintf("--authrpc.port=%d", authPort),
+		"--authrpc.jwtsecret=" + jwtPath,
+		"--syncmode=full", "--gcmode=archive",
+		"--nodiscover", "--maxpeers=0",
+		"--rollup.disabletxpoolgossip=true",
+	}
+	return startCmd(opGethBin, args...)
+}
+
+type ReferenceClient struct {
+	l2   *RPCClient
+	node *RPCClient
+}
+
+func NewReferenceClient(l2URL, nodeURL string) *ReferenceClient {
+	return &ReferenceClient{l2: NewRPCClient(l2URL), node: NewRPCClient(nodeURL)}
+}
+
+func (r *ReferenceClient) BlockHash(ctx context.Context, num uint64) (common.Hash, error) {
+	var blk struct {
+		Hash common.Hash `json:"hash"`
+	}
+	tag := fmt.Sprintf("0x%x", num)
+	if err := r.l2.Call(ctx, "eth_getBlockByNumber", []any{tag, false}, &blk); err != nil {
+		return common.Hash{}, err
+	}
+	return blk.Hash, nil
+}
+
+type SyncStatus struct {
+	SafeL2   L2Ref `json:"safe_l2"`
+	UnsafeL2 L2Ref `json:"unsafe_l2"`
+}
+
+func (r *ReferenceClient) SyncStatus(ctx context.Context) (*SyncStatus, error) {
+	raw, err := r.node.CallRaw(ctx, "optimism_syncStatus", []any{})
+	if err != nil {
+		return nil, err
+	}
+	var status SyncStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+type BlockResult struct {
+	Number       uint64      `json:"number"`
+	DerivedHash  common.Hash `json:"derivedHash"`
+	ExpectedHash common.Hash `json:"expectedHash"`
+	TxCount      int         `json:"txCount"`
+	Source       string      `json:"source"`
+	Match        bool        `json:"match"`
+}
+
+type VerifyReport struct {
+	Matched           int           `json:"matched"`
+	Mismatched        int           `json:"mismatched"`
+	WindowStart       uint64        `json:"windowStart"`
+	WindowEnd         uint64        `json:"windowEnd"`
+	ReferenceSafeL2   L2Ref         `json:"referenceSafeL2"`
+	ReferenceUnsafeL2 L2Ref         `json:"referenceUnsafeL2"`
+	Blocks            []BlockResult `json:"blocks"`
+}
