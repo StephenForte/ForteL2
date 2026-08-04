@@ -388,7 +388,7 @@ Before derivation implementation starts, either expand US-060–062 in-place **o
 - [x] Loopback-only static UI (same constraints as the pipeline viewer: client-side RPC polls, no indexer DB, no containers)
 - [x] **Blocks list** page: recent L2 blocks newest-first (height, hash/short hash, timestamp, tx count at minimum); paginate or “load more” is enough — no search required
 - [x] **Block detail** page/route: given a block number (or hash), show header fields + a simple list of txs in that block (hash, from/to if available, value or type)
-- [ ] Works against local L2 **901** and Sepolia L2 **852** via existing `FORTEL2_ENV` / viewer-config pattern *(901/852 config generation implemented; operator live verification on running stacks pending)*
+- [x] Works against local L2 **901** and Sepolia L2 **852** via existing `FORTEL2_ENV` / viewer-config pattern *(operator-verified live on both chains 2026-08-04: list + block detail render, deposit-tx rows populated — closes the R1/F1 visual check too)*
 - [x] Documented as the **block viewer** (distinct from the Phase 1c **pipeline viewer**); README links both
 - [x] Explicit non-goals for Phase 6: address pages, token/NFT views, full-text / advanced search, contract verification UI, hosted SaaS explorers
 - [x] **Blockscout** (and any docker-compose explorer stack) remains **out of scope** for Phase 6 — deferred to a much later stage (post–Phase 8 / when non-loopback + containers are deliberately allowed)
