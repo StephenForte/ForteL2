@@ -63,6 +63,9 @@ func main() {
 	if err != nil {
 		fatal("join frames: %v", err)
 	}
+	if len(joined) < 2 {
+		fatal("channel data too short for zlib header: %d bytes", len(joined))
+	}
 	fmt.Printf("channel_bytes=%d zlib_header=0x%02x%02x\n", len(joined), joined[0], joined[1])
 
 	body, err := batcher.DecompressChannelZlib(joined)

@@ -78,7 +78,7 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 **SOS onboarding (operator):**
 
 1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
-2. Fund the SOS deployer on L2 via L1→L2 deposit: `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh`.
+2. Fund the SOS deployer on L2: deposit L1→L2 with `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` (credits `ADMIN_ADDRESS` on L2), then transfer to the SOS deployer, e.g. `cast send <SOS_DEPLOYER_ADDRESS> --value <amount> --rpc-url "$L2_RPC_URL" --private-key "$ADMIN_PRIVATE_KEY"`.
 3. Point SettlementOS at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545` today) and deploy SOS contracts on chain **852**.
 4. **Writes** (tx submit, contract deploy) → Mac sequencer L2 RPC. **Reads** (explorer, heavy indexing) → Render replica RPC when reachable (see `replica/README.md`).
 

@@ -61,10 +61,16 @@
 - **Context:** D-0006 left module shape open; T2 spike evaluated `batcher/` reuse vs new module (see D-T2-2).
 - **Decision:** Supersedes D-0006 — **`derivation/` Go module** imports `batcher` decode helpers; T4 owns `derivation/`.
 - **Consequence:** Do not extend `batcher/*.go` for derivation; US-061 implementation starts in `derivation/` per `tasks/prd-phase-6-derivation.md`.
+
 ### D-T1-1 — MR-0 doc closeout (2026-08-04)
 - **Context:** Money-rail artifacts (`rail-interface.json`, README/coordination/replica docs) predated PRD checkbox updates; MR-0 was marked “In progress.”
 - **Decision:** Verified US-MR-001..003 artifacts on disk; ticked acceptance criteria; set MR-0 status to **Done** in money-rail PRD and learning-chain MR row. No `rail-interface.json` address/chain/URL changes.
 - **Consequence:** T2/T3 may assume MR-0 is closed; SOS integration gate unchanged (`sosGate.mayStartIntegration` remains true).
+
+### D-R1-1 — Post-Wave-1 Codex review fixes (R1)
+- **Context:** External review of merged T1–T3 found six issues: block viewer tx rows used hash strings not prefetched objects; stale detail-load race; decode-full panic on short channel data; PRD permitted Engine API against reference EL; SOS onboarding misstated deposit recipient; replica sync-check omitted `FORTEL2_ENV`.
+- **Decision:** F1–F3 code fixes in `blocks/` and `batcher/cmd/decode-full`; F4–F6 doc fixes in Phase 6 PRD, README SOS onboarding, `replica/README.md`. Reference stack is read-only for derivation; Engine API sealing requires a separate EL instance.
+- **Consequence:** T4 runbook must document isolated EL if sealing; operator verifies block viewer tx From/To/Value on live stack.
 
 ---
 
