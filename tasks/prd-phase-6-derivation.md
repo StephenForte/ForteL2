@@ -20,7 +20,7 @@ This is a **learning rebuild**, not a production rollup node. Target [ethereum-o
 ## Non-goals
 
 - P2P, tx gossip, or replacing the sequencer in US-061
-- Full EVM implementation from scratch (use stock `op-geth` Engine API for block-hash oracle when needed)
+- Full EVM implementation from scratch (use a **separate** loopback `op-geth` Engine API instance for block-hash sealing when needed — never against the live reference EL)
 - Patching upstream `op-node` in place
 - Alt-DA, blob DA, batcher tx version ≠ 0
 - Sepolia redeploy, portal/immutables changes, replica genesis republish
@@ -34,6 +34,8 @@ This is a **learning rebuild**, not a production rollup node. Target [ethereum-o
 | Host | Native Go; no Docker on the workstation |
 | Keys | Never commit `.env.sepolia`; never ask operator to paste keys |
 | L2 RPC | Loopback only for reference stack |
+| Reference stack | **Read-only** — `eth_getBlockByNumber` + `optimism_syncStatus` only; **never** `engine_*` against live reference `op-geth` / `op-node` |
+| Engine API sealing | If used, **separate EL instance** (own datadir, ports, JWT) from same genesis; runbook documents isolation; kill/reset must not touch reference datadir |
 | Rollback | Verifier is additive; stop custom binary, keep stock stack |
 | Module boundaries | **Do not edit** `batcher/*.go` or `proposer/*.go`; import `batcher` decode helpers or copy with attribution + decision log |
 | Privileged | No `lib.sh` `start_bg` / `stop_bg` edits |
@@ -46,8 +48,8 @@ L1 RPC ──► derivation verifier
               ├─ frames → channel (zlib) → batches (singular + span)
               ├─ deposits (Portal) + L1-info deposit handling
               ├─ payload attributes per L2 block
-              └─ optional: op-geth Engine API to seal block hashes
-Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
+              └─ optional: separate loopback op-geth (Engine API) to seal block hashes — **not** the reference EL
+Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber (read-only)
               └─ diff tool logs first mismatch (number, expected hash, got hash)
 ```
 
@@ -85,7 +87,7 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
   4. Decode **span** batches (type `0x01`) — required even if ForteL2 history is singular-only today
   5. Include **user deposits** from L1 Portal in the derived sequence (spec deposit derivation)
   6. Emit payload attributes / L2 block metadata for each derived block in the window
-  7. **Block hash check:** compare derived block hash to reference `op-geth` `eth_getBlockByNumber` — v1 **MAY** use Engine API against loopback `op-geth` to seal blocks (document which path is used)
+  7. **Block hash check:** compare derived block hash to reference `op-geth` `eth_getBlockByNumber` — v1 **MAY** seal via Engine API on a **separate loopback EL instance** (same genesis, own datadir/ports/JWT; document in runbook). **Never** call `engine_*` on the live reference `op-geth` used for diffing.
 - [ ] **Outputs:** stdout + optional JSON report:
   - Per-block: `{number, hash, parentHash, timestamp, txCount, source}` (`batch` | `deposit`)
   - Summary: `{matched, mismatched, windowStart, windowEnd, referenceSafeL2, referenceUnsafeL2}`
@@ -118,7 +120,7 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 **Acceptance Criteria (future):**
 
 - [ ] Separate command under `derivation/cmd/` (e.g. `sequencer-stub`) — not merged into verifier binary
-- [ ] Engine API target: **op-geth** (`--l2.enginekind=geth` equivalent documented)
+- [ ] Engine API target: **separate loopback op-geth** (`--l2.enginekind=geth` equivalent documented); reference EL stays read-only
 - [ ] Produce **≥ 10** consecutive L2 blocks while stock `op-node` sequencer is stopped; US-061 verifier follows the stub’s blocks
 - [ ] Kill switch: restart stock `04-start-sequencer.sh`; if state diverged, document `reset.sh` path
 - [ ] Out of scope: tx-pool parity, P2P, decentralized sequencing
@@ -131,7 +133,7 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 
 ## Open questions (for T4)
 
-- Engine API vs header-only weak mode: default to Engine API hash check unless operator flag `--metadata-only`
+- Engine API vs header-only weak mode: default to Engine API hash check on a **separate EL instance** unless operator flag `--metadata-only`; reference stack remains read-only
 - Span batches: none in Aug 2026 Sepolia sample — still implement decoder before claiming Sepolia green
 - Fjord brotli: add when a live channel fails zlib inflate
 
