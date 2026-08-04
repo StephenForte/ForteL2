@@ -473,7 +473,7 @@ Side-by-side **derivation verifier** that reads L1 batch data, derives a bounded
 
 # Sepolia 852 — 50 blocks ending at reference safe_l2 (operator-run; needs anchor)
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
-FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --make-anchor
+FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia --make-anchor
 FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia
 ```

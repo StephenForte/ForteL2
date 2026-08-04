@@ -36,7 +36,9 @@ usage: derivation-check.sh [options]
   --channel-tx HASH         derive a single L1 batcher tx
   --json-out FILE           write JSON VerifyReport to FILE
   --anchor-datadir PATH     pre-made reference op-geth copy for mid-chain windows
-  --make-anchor             copy reference datadir (reference EL MUST be stopped)
+  --make-anchor             copy reference datadir, then exit (reference EL MUST be
+                            stopped; combine with --sepolia for the Sepolia env:
+                            FORTEL2_ENV=.env.sepolia $0 --sepolia --make-anchor)
   --scan-from-genesis       allow L1 inbox scan from block 1 on large L1 chains
 
 Mid-chain windows (start-l2 > 1) require --anchor-datadir or --make-anchor.
@@ -70,7 +72,9 @@ if [[ -z "$ANCHOR_DATADIR" ]]; then
 fi
 
 FROM_L1=""
-if [[ "$SEPOLIA" -eq 1 ]]; then
+# Window setup needs the live reference stack — skip it in --make-anchor mode,
+# where the stack is REQUIRED to be stopped (Codex r3716308161).
+if [[ "$SEPOLIA" -eq 1 && "$MAKE_ANCHOR" -eq 0 ]]; then
   wait_for_rpc "$L2_RPC_URL" "reference op-geth"
   SYNC_JSON="$(cast rpc optimism_syncStatus --rpc-url "$L2_NODE_RPC_URL")"
   SAFE_NUM="$(echo "$SYNC_JSON" | jq -r '.safe_l2.number')"
@@ -126,10 +130,14 @@ if [[ "$MAKE_ANCHOR" -eq 1 ]]; then
   cp -a "$REF_DATADIR" "$ANCHOR_DATADIR"
   rm -f "$ANCHOR_DATADIR/geth/LOCK"
   echo "Anchor datadir ready at $ANCHOR_DATADIR"
-  if ! reference_el_responds; then
-    echo "Reference stack is stopped — restart it, then re-run derivation-check without --make-anchor."
-    exit 0
+  # --make-anchor is copy-only: never continue into verification in the same
+  # invocation (the stack is down; the window math needs it up).
+  if reference_el_responds; then
+    echo "ERROR: reference RPC came up during the copy — the anchor is suspect. Stop the stack and re-run --make-anchor." >&2
+    exit 1
   fi
+  echo "Next: restart the stack, then run derivation-check without --make-anchor."
+  exit 0
 fi
 
 USE_ANCHOR=0

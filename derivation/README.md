@@ -32,7 +32,7 @@ Reference stack must be running (`./scripts/start-all.sh` or Sepolia equivalent)
 ./scripts/start-all.sh
 ./scripts/derivation-check.sh --start-l2 60 --end-l2 80
 
-FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia  # needs prior --make-anchor
+FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia  # needs prior: --sepolia --make-anchor (stack stopped)
 ```
 
 **Pass:** every block in the window prints `OK`; exit 0; summary `derivation-check: PASS`.
