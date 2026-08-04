@@ -13,16 +13,19 @@ import (
 
 // VerifyOptions configures a derivation verification run.
 type VerifyOptions struct {
-	RollupPath  string
-	L1RPC       string
-	RefL2RPC    string
-	RefNodeRPC  string
-	SealingAuth string
-	SealingHTTP string
-	StartL2     uint64
-	EndL2       uint64
-	ChannelTx   common.Hash
-	FromL1Block uint64
+	RollupPath      string
+	L1RPC           string
+	RefL2RPC        string
+	RefNodeRPC      string
+	SealingAuth     string
+	SealingHTTP     string
+	StartL2         uint64
+	EndL2           uint64
+	ChannelTx       common.Hash
+	FromL1Block     uint64
+	ScanFromGenesis bool
+	AnchoredHead    bool // sealing EL was reset to StartL2-1 via debug_setHead
+	L1Lookback      uint64 // inbox scan lookback from anchor/safe L1 origin (default 300)
 }
 
 // Verify runs the derivation pipeline and compares sealed hashes to reference EL.
@@ -41,17 +44,24 @@ func Verify(ctx context.Context, opts VerifyOptions, sealer *SealingEL) (*Verify
 		report.ReferenceUnsafeL2 = sync.UnsafeL2
 	}
 
+	if err := resolveFromL1Block(ctx, ref, &opts); err != nil {
+		return nil, err
+	}
+
 	blocks, err := deriveBlockInputs(ctx, cfg, l1, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	st := NewDerivationState(cfg)
-	genesisHash, err := ref.BlockHash(ctx, 0)
+	st, err := initDerivationState(ctx, cfg, ref, opts.StartL2)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("derivation state anchor: %w", err)
 	}
-	st.ParentHash = genesisHash
+	if opts.AnchoredHead {
+		if err := sealer.SyncHeadFromLatest(ctx); err != nil {
+			return nil, fmt.Errorf("sealing EL head sync: %w", err)
+		}
+	}
 
 	byNumber := map[uint64]BlockInput{}
 	for _, b := range blocks {
@@ -95,6 +105,66 @@ func Verify(ctx context.Context, opts VerifyOptions, sealer *SealingEL) (*Verify
 		st.ParentTime = in.Timestamp
 	}
 	return report, nil
+}
+
+func initDerivationState(ctx context.Context, cfg *RollupConfig, ref *ReferenceClient, startL2 uint64) (DerivationState, error) {
+	st := NewDerivationState(cfg)
+	if startL2 <= 1 {
+		genesisHash, err := ref.BlockHash(ctx, 0)
+		if err != nil {
+			return st, err
+		}
+		st.ParentHash = genesisHash
+		return st, nil
+	}
+
+	prev := startL2 - 1
+	parentHash, parentTime, err := ref.BlockMeta(ctx, prev)
+	if err != nil {
+		return st, fmt.Errorf("reference block %d meta: %w", prev, err)
+	}
+	rawTx, err := ref.BlockFirstTx(ctx, prev)
+	if err != nil {
+		return st, fmt.Errorf("reference block %d first tx: %w", prev, err)
+	}
+	info, err := ParseL1InfoDeposit(rawTx)
+	if err != nil {
+		return st, fmt.Errorf("reference block %d L1-info: %w", prev, err)
+	}
+
+	st.ParentHash = parentHash
+	st.ParentTime = parentTime
+	st.L1OriginNum = info.L1OriginNumber
+	st.L1OriginHash = info.L1OriginHash
+	st.SeqNumber = info.SeqNumber
+	return st, nil
+}
+
+func resolveFromL1Block(ctx context.Context, ref *ReferenceClient, opts *VerifyOptions) error {
+	if opts.FromL1Block != 0 || opts.StartL2 <= 1 {
+		return nil
+	}
+	lookback := opts.L1Lookback
+	if lookback == 0 {
+		lookback = 300
+	}
+	prev := opts.StartL2 - 1
+	rawTx, err := ref.BlockFirstTx(ctx, prev)
+	if err != nil {
+		return fmt.Errorf("anchor scan bound: block %d first tx: %w", prev, err)
+	}
+	info, err := ParseL1InfoDeposit(rawTx)
+	if err != nil {
+		return fmt.Errorf("anchor scan bound: block %d L1-info: %w", prev, err)
+	}
+	from := int64(info.L1OriginNumber) - int64(lookback)
+	if from < 1 {
+		from = 1
+	}
+	opts.FromL1Block = uint64(from)
+	fmt.Fprintf(os.Stderr, "L1 inbox scan from block %d (anchor l1origin=%d lookback=%d)\n",
+		opts.FromL1Block, info.L1OriginNumber, lookback)
+	return nil
 }
 
 func runCmd(name string, bin string, args ...string) error {

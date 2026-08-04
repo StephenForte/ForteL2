@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 
 	"github.com/StephenForte/ForteL2/batcher"
@@ -32,14 +33,23 @@ func NewL1Client(rpc *RPCClient) *L1Client {
 	return &L1Client{rpc: rpc}
 }
 
+type l1HeaderJSON struct {
+	Number        string         `json:"number"`
+	Hash          common.Hash    `json:"hash"`
+	ParentHash    common.Hash    `json:"parentHash"`
+	Timestamp     hexutil.Uint64 `json:"timestamp"`
+	BaseFeePerGas *hexutil.Big   `json:"baseFeePerGas"`
+	MixHash       common.Hash    `json:"mixHash"`
+}
+
 type l1BlockJSON struct {
-	Number       string        `json:"number"`
-	Hash         common.Hash   `json:"hash"`
-	ParentHash   common.Hash   `json:"parentHash"`
-	Timestamp    hexutil.Uint64 `json:"timestamp"`
-	BaseFeePerGas *hexutil.Big  `json:"baseFeePerGas"`
-	MixHash      common.Hash   `json:"mixHash"`
-	Transactions []txJSON      `json:"transactions"`
+	Number        string         `json:"number"`
+	Hash          common.Hash    `json:"hash"`
+	ParentHash    common.Hash    `json:"parentHash"`
+	Timestamp     hexutil.Uint64 `json:"timestamp"`
+	BaseFeePerGas *hexutil.Big   `json:"baseFeePerGas"`
+	MixHash       common.Hash    `json:"mixHash"`
+	Transactions  []txJSON       `json:"transactions"`
 }
 
 type txJSON struct {
@@ -51,34 +61,23 @@ type txJSON struct {
 }
 
 func (c *L1Client) BlockHeader(ctx context.Context, num uint64) (*L1BlockHeader, error) {
-	var blk l1BlockJSON
+	var blk l1HeaderJSON
 	tag := fmt.Sprintf("0x%x", num)
 	if err := c.rpc.Call(ctx, "eth_getBlockByNumber", []any{tag, false}, &blk); err != nil {
 		return nil, err
 	}
-	n, err := hexutil.DecodeUint64(blk.Number)
-	if err != nil {
-		return nil, err
-	}
-	var baseFee *big.Int
-	if blk.BaseFeePerGas != nil {
-		baseFee = (*big.Int)(blk.BaseFeePerGas)
-	}
-	return &L1BlockHeader{
-		Number:    n,
-		Hash:      blk.Hash,
-		ParentHash: blk.ParentHash,
-		Time:      uint64(blk.Timestamp),
-		BaseFee:   baseFee,
-		MixDigest: blk.MixHash,
-	}, nil
+	return headerFromJSON(blk)
 }
 
 func (c *L1Client) BlockHeaderByHash(ctx context.Context, hash common.Hash) (*L1BlockHeader, error) {
-	var blk l1BlockJSON
+	var blk l1HeaderJSON
 	if err := c.rpc.Call(ctx, "eth_getBlockByHash", []any{hash, false}, &blk); err != nil {
 		return nil, err
 	}
+	return headerFromJSON(blk)
+}
+
+func headerFromJSON(blk l1HeaderJSON) (*L1BlockHeader, error) {
 	n, err := hexutil.DecodeUint64(blk.Number)
 	if err != nil {
 		return nil, err
@@ -88,12 +87,12 @@ func (c *L1Client) BlockHeaderByHash(ctx context.Context, hash common.Hash) (*L1
 		baseFee = (*big.Int)(blk.BaseFeePerGas)
 	}
 	return &L1BlockHeader{
-		Number:    n,
-		Hash:      blk.Hash,
+		Number:     n,
+		Hash:       blk.Hash,
 		ParentHash: blk.ParentHash,
-		Time:      uint64(blk.Timestamp),
-		BaseFee:   baseFee,
-		MixDigest: blk.MixHash,
+		Time:       uint64(blk.Timestamp),
+		BaseFee:    baseFee,
+		MixDigest:  blk.MixHash,
 	}, nil
 }
 
@@ -123,6 +122,9 @@ type BatcherTx struct {
 func (c *L1Client) ScanBatcherTxs(ctx context.Context, inbox, batcher common.Address, fromBlock, toBlock uint64) ([]BatcherTx, error) {
 	var out []BatcherTx
 	for n := fromBlock; n <= toBlock; n++ {
+		if n == fromBlock || n%100 == 0 || n == toBlock {
+			fmt.Fprintf(os.Stderr, "L1 inbox scan: block %d / %d (%d batcher txs so far)\n", n, toBlock, len(out))
+		}
 		var blk l1BlockJSON
 		tag := fmt.Sprintf("0x%x", n)
 		if err := c.rpc.Call(ctx, "eth_getBlockByNumber", []any{tag, true}, &blk); err != nil {

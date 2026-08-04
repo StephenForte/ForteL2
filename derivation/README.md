@@ -22,10 +22,17 @@ Minimal OP Stack derivation **verifier**: reads L1 batch inbox txs and Portal de
 Reference stack must be running (`./scripts/start-all.sh` or Sepolia equivalent).
 
 ```bash
-./scripts/derivation-check.sh                    # local 901, blocks 1–20
+./scripts/derivation-check.sh                    # local 901, blocks 1–20 (genesis replay)
 ./scripts/derivation-check.sh --start-l2 1 --end-l2 20
 ./scripts/derivation-check.sh --channel-tx 0x…   # single L1 batcher tx window
-FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia
+
+# Mid-chain window (R2 anchor flow)
+./scripts/stop-all.sh
+./scripts/derivation-check.sh --make-anchor
+./scripts/start-all.sh
+./scripts/derivation-check.sh --start-l2 60 --end-l2 80
+
+FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia  # needs prior --make-anchor
 ```
 
 **Pass:** every block in the window prints `OK`; exit 0; summary `derivation-check: PASS`.
@@ -36,7 +43,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia
 
 ### Separate sealing EL (D-R1-1)
 
-The runbook starts its own `op-geth` under `$DATA_DIR/l2/derivation-op-geth` with dedicated ports (`DERIV_EL_HTTP_PORT=19645`, `DERIV_EL_AUTH_PORT=19651`, P2P `--port=30323`) and JWT (`$DATA_DIR/jwt/derivation-jwt.txt`). The reference `op-geth` / `op-node` are **read-only** oracles (`eth_getBlockByNumber`, `optimism_syncStatus`).
+The runbook starts its own `op-geth` under `$DATA_DIR/l2/derivation-op-geth` (genesis replay) or reuses `$DATA_DIR/l2/derivation-anchor-op-geth` (mid-chain copy) with dedicated ports (`DERIV_EL_HTTP_PORT=19645`, `DERIV_EL_AUTH_PORT=19651`, P2P `--port=30323`) and JWT (`$DATA_DIR/jwt/derivation-jwt.txt`). The reference `op-geth` / `op-node` are **read-only** oracles (`eth_getBlockByNumber`, `optimism_syncStatus`). `debug_setHead` is confined to the anchor copy only.
 
 ## CLI
 
