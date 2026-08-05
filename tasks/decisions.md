@@ -191,6 +191,11 @@
 - **Decision:** Dispatch H3a solo on pre-created branch `agent/h3a-stub-seq` off tag **`wave7-base`** (the commit adding this entry — same tag mechanism as D-0007/D-0008). Existing wave tags never move.
 - **Consequence:** After H3a merges, only the H4 operator drills remain in this program; handoff diffs against `wave7-base..HEAD`.
 
+### D-H3a-1 — Stub continuation seq preservation + follow-validation independence
+- **Context:** Codex r3716862854 (post-H3): stub head-recovery parsed parent L1-info but kept only `L1OriginNumber`, dropping `SeqNumber` and origin hash. `RunSequencerStub` initialized `DerivationState` from zero, so same-origin continuations built seq=0 instead of `parentSeq+1`; follow-validation seeded from the same zero state and validated its own mistake.
+- **Decision:** `SeedStubDerivationState` recovers full parent L1-info on non-genesis heads (same origin → `parentSeq+1`; `OriginForL2Timestamp` advance → seq=0 per [derivation spec L2 block seal](https://specs.optimism.io/protocol/derivation.html#l2-block-seal)). `PlanStubBlockInputs` resolves origin per block. Follow-validation seeds only from parent L1-info re-parse, not builder memory. Fresh-genesis path unchanged (`L1OriginNum=0` → first block origin-change seq=0).
+- **Consequence:** `sequencer-stub-demo.sh --no-wipe` reproduces continuation; unit tests pin same-origin seq increment, origin-advance reset, and wrong-builder detection.
+
 ---
 
 ## Escalations

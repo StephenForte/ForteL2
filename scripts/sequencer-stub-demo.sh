@@ -10,12 +10,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 BLOCKS=10
+NO_WIPE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --blocks) BLOCKS="$2"; shift 2 ;;
+    --no-wipe) NO_WIPE=1; shift ;;
     -h|--help)
-      echo "usage: sequencer-stub-demo.sh [--blocks N]"
+      echo "usage: sequencer-stub-demo.sh [--blocks N] [--no-wipe]"
       echo "  Builds N consecutive empty L2 blocks (default 10) on an isolated EL."
+      echo "  --no-wipe  reuse existing stub datadir (continuation repro; default wipes)."
       echo "  Proves reference tip hash is unchanged before/after."
       exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -66,15 +69,19 @@ REF_NUM_BEFORE="$(echo "$REF_TIP_BEFORE" | jq -r '.number')"
 REF_HASH_BEFORE="$(echo "$REF_TIP_BEFORE" | jq -r '.hash')"
 echo "reference tip BEFORE: num=$REF_NUM_BEFORE hash=$REF_HASH_BEFORE"
 
-# Fresh stub datadir each demo run (kill switch = wipe this tree).
-if [[ -d "$STUB_DATADIR/geth" ]]; then
+# Fresh stub datadir each demo run unless --no-wipe (continuation repro).
+if [[ "$NO_WIPE" -eq 0 && -d "$STUB_DATADIR/geth" ]]; then
   echo "Wiping prior stub EL datadir at $STUB_DATADIR"
   rm -rf "$STUB_DATADIR"
   mkdir -p "$STUB_DATADIR"
 fi
 
-echo "Initializing stub op-geth at $STUB_DATADIR"
-op-geth init --datadir="$STUB_DATADIR" --state.scheme=hash "$GENESIS"
+if [[ ! -d "$STUB_DATADIR/geth" ]]; then
+  echo "Initializing stub op-geth at $STUB_DATADIR"
+  op-geth init --datadir="$STUB_DATADIR" --state.scheme=hash "$GENESIS"
+else
+  echo "Continuing stub op-geth at $STUB_DATADIR (--no-wipe)"
+fi
 
 echo "Starting stub op-geth (http :$STUB_EL_HTTP_PORT auth :$STUB_EL_AUTH_PORT p2p :$STUB_EL_P2P_PORT)"
 op-geth \

@@ -67,6 +67,37 @@ func PlanEmptyBlockInputs(cfg *RollupConfig, parentNum, parentTime uint64, l1Ori
 	return out
 }
 
+// PlanStubBlockInputs plans N empty stub blocks, resolving the L1 origin per block via
+// OriginForL2Timestamp so origin advance (seq reset) is correct when drift is exceeded.
+func PlanStubBlockInputs(ctx context.Context, cfg *RollupConfig, l1 *L1Client, parentNum, parentTime, startOriginNum, n uint64) ([]BlockInput, error) {
+	bt := cfg.BlockTime
+	if bt == 0 {
+		bt = 2
+	}
+	out := make([]BlockInput, 0, n)
+	ts := parentTime
+	originNum := startOriginNum
+	for i := uint64(0); i < n; i++ {
+		ts += bt
+		hdr, err := cfg.OriginForL2Timestamp(ctx, l1, originNum, ts)
+		if err != nil {
+			return nil, fmt.Errorf("block %d origin: %w", parentNum+1+i, err)
+		}
+		var epochHash [32]byte
+		copy(epochHash[:], hdr.Hash[:])
+		out = append(out, BlockInput{
+			Number:       parentNum + 1 + i,
+			EpochNumber:  hdr.Number,
+			EpochHash:    epochHash,
+			Timestamp:    ts,
+			Transactions: nil,
+			Source:       "stub",
+		})
+		originNum = hdr.Number
+	}
+	return out, nil
+}
+
 // RunSequencerStub builds N consecutive empty L2 blocks on the isolated sealing EL
 // via the Engine API, starting from the sealer's current head.
 func RunSequencerStub(ctx context.Context, opts StubOptions, sealer *SealingEL) (*StubReport, error) {
@@ -96,14 +127,20 @@ func RunSequencerStub(ctx context.Context, opts StubOptions, sealer *SealingEL) 
 		return nil, err
 	}
 
-	st := NewDerivationState(cfg)
-	st.ParentHash = parentHash
-	st.ParentTime = parentTime
-	// L1OriginNum stays 0 so the first stub block is treated as an origin change
-	// (seq=0, optional user deposits from that L1 block). Subsequent blocks on the
-	// same origin increment SeqNumber via BuildPayloadAttributes.
+	st, err := SeedStubDerivationState(ctx, sealer, parentNum, parentHash, parentTime, cfg)
+	if err != nil {
+		return nil, err
+	}
 
-	inputs := PlanEmptyBlockInputs(cfg, parentNum, parentTime, l1Origin, opts.Blocks)
+	startOriginNum, err := StubStartOriginNum(ctx, cfg, l1, sealer, parentNum)
+	if err != nil {
+		return nil, err
+	}
+	inputs, err := PlanStubBlockInputs(ctx, cfg, l1, parentNum, parentTime, startOriginNum, opts.Blocks)
+	if err != nil {
+		return nil, err
+	}
+
 	report := &StubReport{
 		EngineAPI:       EngineAPIVersions,
 		StartParentHash: parentHash,
@@ -138,7 +175,7 @@ func RunSequencerStub(ctx context.Context, opts StubOptions, sealer *SealingEL) 
 			ParentHash: gotParent,
 			Timestamp:  gotTime,
 			TxCount:    txCount,
-			EpochNum:   l1Origin.Number,
+			EpochNum:   in.EpochNumber,
 			SeqNumber:  st.SeqNumber,
 		})
 		prevHash = hash
@@ -146,7 +183,7 @@ func RunSequencerStub(ctx context.Context, opts StubOptions, sealer *SealingEL) 
 		st.ParentTime = in.Timestamp
 	}
 
-	notes, err := FollowValidateStub(ctx, cfg, l1, sealer, report, l1Origin)
+	notes, err := FollowValidateStub(ctx, cfg, l1, sealer, report)
 	report.FollowNotes = notes
 	if err != nil {
 		report.FollowOK = false
@@ -158,14 +195,18 @@ func RunSequencerStub(ctx context.Context, opts StubOptions, sealer *SealingEL) 
 
 // FollowValidateStub re-runs US-061 attribute derivation against the stub-built
 // blocks and checks L1-info deposit bytes + parent links (D-T6-2).
-func FollowValidateStub(ctx context.Context, cfg *RollupConfig, l1 *L1Client, sealer *SealingEL, report *StubReport, l1Origin *L1BlockHeader) ([]string, error) {
+// Expected seq/epoch are seeded only from the start-parent L1-info re-parse (D-H3a-1),
+// not from the builder's in-memory state, so builder-state bugs are detectable.
+func FollowValidateStub(ctx context.Context, cfg *RollupConfig, l1 *L1Client, sealer *SealingEL, report *StubReport) ([]string, error) {
 	if report == nil || len(report.Built) == 0 {
 		return nil, fmt.Errorf("no built blocks to follow-validate")
 	}
-	notes := []string{"mechanism=rebuild BuildPayloadAttributes + compare first tx (L1-info) + parent links + origin timestamp invariant (spec: sequencing window)"}
+	notes := []string{"mechanism=rebuild BuildPayloadAttributes + compare first tx (L1-info) + parent links + origin timestamp invariant (spec: sequencing window); independent seed from parent L1-info re-parse (D-H3a-1)"}
 
-	st := NewDerivationState(cfg)
-	st.ParentHash = report.StartParentHash
+	st, err := SeedStubDerivationState(ctx, sealer, report.StartParentNum, report.StartParentHash, 0, cfg)
+	if err != nil {
+		return notes, err
+	}
 	if report.StartParentNum == 0 {
 		st.ParentTime = cfg.Genesis.L2Time
 	} else {
@@ -178,6 +219,10 @@ func FollowValidateStub(ctx context.Context, cfg *RollupConfig, l1 *L1Client, se
 
 	prev := report.StartParentHash
 	for _, b := range report.Built {
+		l1Origin, err := l1.BlockHeader(ctx, b.EpochNum)
+		if err != nil {
+			return notes, fmt.Errorf("follow l1 origin %d block %d: %w", b.EpochNum, b.Number, err)
+		}
 		maxDrift := cfg.EffectiveMaxSequencerDrift(b.Timestamp)
 		if err := ValidateL2OriginTimestamp(b.Timestamp, l1Origin.Time, maxDrift); err != nil {
 			return notes, fmt.Errorf("origin timestamp invariant block %d (spec sequencing window): %w", b.Number, err)
@@ -185,7 +230,7 @@ func FollowValidateStub(ctx context.Context, cfg *RollupConfig, l1 *L1Client, se
 
 		in := BlockInput{
 			Number:      b.Number,
-			EpochNumber: l1Origin.Number,
+			EpochNumber: b.EpochNum,
 			Timestamp:   b.Timestamp,
 			Source:      "stub",
 		}
@@ -215,7 +260,7 @@ func FollowValidateStub(ctx context.Context, cfg *RollupConfig, l1 *L1Client, se
 		if !bytesEqual(firstTx, want) {
 			return notes, fmt.Errorf("follow L1-info mismatch at block %d: sealed %d bytes vs derived %d bytes", b.Number, len(firstTx), len(want))
 		}
-		notes = append(notes, fmt.Sprintf("block %d parent-link OK; L1-info match; txs=%d", b.Number, txCount))
+		notes = append(notes, fmt.Sprintf("block %d parent-link OK; L1-info match; txs=%d seq=%d", b.Number, txCount, st.SeqNumber))
 		prev = b.Hash
 		st.ParentHash = b.Hash
 		st.ParentTime = b.Timestamp
