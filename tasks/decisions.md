@@ -196,6 +196,11 @@
 - **Decision:** `SeedStubDerivationState` recovers full parent L1-info on non-genesis heads (same origin → `parentSeq+1`; `OriginForL2Timestamp` advance → seq=0 per [derivation spec L2 block seal](https://specs.optimism.io/protocol/derivation.html#l2-block-seal)). `PlanStubBlockInputs` resolves origin per block. Follow-validation seeds only from parent L1-info re-parse, not builder memory. Fresh-genesis path unchanged (`L1OriginNum=0` → first block origin-change seq=0).
 - **Consequence:** `sequencer-stub-demo.sh --no-wipe` reproduces continuation; unit tests pin same-origin seq increment, origin-advance reset, and wrong-builder detection.
 
+### D-0016 — Replica sync-drill access model: Render Web Shell, not SSH tunnel
+- **Context:** H4 replica check. `fortel2-replica` is a Render **private service** (`type: pserv`, no public URL by design). SSH port-forwarding was attempted (operator SSH key registered, fingerprint-verified): auth succeeds but Render's gateway closes the session within seconds, with `-N` and with a keep-alive command — tunneling is not supported. `replica-sync-check.sh` therefore has no Mac-reachable `REPLICA_L2_RPC_URL`.
+- **Decision:** Drill mechanism is the Render dashboard **Web Shell** on the running instance: JSON-RPC via python3/urllib against `localhost:10000` (op-geth EL; op-node RPC is `:9545`; the image ships no curl). `.env.sepolia` carries a comment, not a URL. First capture (2026-08-04 ~22:05 PT, local stack asleep): chain **852**, head **609591** vs local pre-sleep head 609485 at 20:51 — replica deriving posted batches correctly.
+- **Consequence:** The scripted `replica-sync-check.sh` path stays valid for any future Mac-reachable replica (e.g. if the service is ever made public or Private Link is added); until then the H4 replica drill = simultaneous Web-Shell + local head capture with the script's lag rule (`REPLICA_MAX_SAFE_LAG`, default 50, judged against batch-posting delay).
+
 ---
 
 ## Escalations
