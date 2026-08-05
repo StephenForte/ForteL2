@@ -161,6 +161,9 @@ Rationale: T1 rewrites the doc surfaces others touch rows of — landing it firs
 9. Go tasks: `go build ./... && go test ./...` + `govulncheck ./...` in the touched module.
 10. Static-app tasks (T3): serve script asserts loopback; CSP header path used (no hard-coded hosts in `index.html`); vendored ethers, not CDN; `node --test` green.
 11. Skim for silent decisions: any "I chose X" in the diff that isn't in `decisions.md` → bounce.
+12. Dry-walk every new CLI flag combination end-to-end before merge (grep/static + behavioral twin where possible).
+13. Never pipe test output through `grep` in a gating chain — run tests directly and read exit codes.
+14. Fields excluded from a diff are fields you have not checked — expand comparisons or document the omission.
 
 ---
 

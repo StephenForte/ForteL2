@@ -64,6 +64,18 @@ func TestBlockNumberFromTimestampDefaultBlockTime(t *testing.T) {
 	}
 }
 
+func TestBlockNumberFromTimestampBlockOneBoundary(t *testing.T) {
+	cfg := testRollup901()
+	// First post-genesis block: exactly genesis.l2_time + block_time.
+	got, err := blockNumberFromTimestamp(cfg, cfg.Genesis.L2Time+cfg.BlockTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 1 {
+		t.Fatalf("got block %d want 1", got)
+	}
+}
+
 func TestDuplicateBatchLastWriteWins(t *testing.T) {
 	prev := BlockInput{Number: 10, Timestamp: 100, L1SourceTx: [32]byte{1}}
 	next := BlockInput{Number: 10, Timestamp: 100, L1SourceTx: [32]byte{2}}

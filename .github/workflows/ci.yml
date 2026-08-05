@@ -6,6 +6,20 @@ on:
   pull_request:
 
 jobs:
+  shell-syntax:
+    name: shell syntax (bash -n)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: bash -n scripts/*.sh
+        run: |
+          shopt -s nullglob
+          for f in scripts/*.sh; do
+            echo "checking $f"
+            bash -n "$f"
+          done
+
   guardrails:
     name: forge test + script helpers + viewer unit
     runs-on: ubuntu-latest

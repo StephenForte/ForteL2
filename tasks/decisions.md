@@ -176,6 +176,16 @@
 - **Decision:** Wrap all script echo/banner URL prints with `redact_rpc_url`; add `RedactRPCURL`/`RedactErr` to `batcher/` and `proposer/` (mirroring `derivation/rpc.go`); vendor Sora/Syne under each static app; tighten CSP to `font-src 'self'`.
 - **Consequence:** H3 regression tests can assume redacted operator logs; no external font fetches at serve time.
 
+### D-H3-1 — Regression guards for debugging-arc bug classes
+- **Context:** D-0010..D-0013 found seven real bugs via operator runs (beacon root, L2Ref JSON, timestamp numbering, seq continuation, CLI-mode flags). H3 must pin each class in tests without touching production code.
+- **Decision:** Unit tests in `derivation/attrs_test.go`, `derivation/syncstatus_test.go`, `derivation/numbering_test.go`; static dry-walk assertions for `derivation-check.sh` in `scripts/test-helpers.sh`.
+- **Consequence:** Future regressions in these paths fail CI before another Sepolia debugging arc.
+
+### D-H3-2 — CI shell-syntax job + golden-fixture replay confirmed
+- **Context:** Hardening wave called for `bash -n scripts/*.sh` and confirmation that derivation golden replay runs in CI.
+- **Decision:** New `shell-syntax` job in `.github/workflows/ci.yml`; existing `go test ./...` in `derivation/` already runs `TestDecodeLocal901BatcherTx` + `TestSepoliaGoldenSkipped` (confirmed, not duplicated). shellcheck omitted — not on CI runner. Actions remain SHA-pinned.
+- **Consequence:** Syntax errors in scripts fail CI independently; golden replay stays part of the derivation unit-test step.
+
 ---
 
 ## Escalations
