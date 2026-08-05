@@ -84,7 +84,7 @@ func main() {
 
 	l1, err := ethclient.DialContext(ctx, *l1RPC)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "l1 dial: %v\n", err)
+		fmt.Fprintf(os.Stderr, "l1 dial: %v\n", batcher.RedactErr(*l1RPC, "", err))
 		os.Exit(1)
 	}
 	defer l1.Close()

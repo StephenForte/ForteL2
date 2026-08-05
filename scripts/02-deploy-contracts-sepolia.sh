@@ -42,7 +42,7 @@ fi
 L2_ID_HEX=$(printf '0x%064x' "$L2_CHAIN_ID")
 
 echo "=== Phase 2b disposable Sepolia deploy ==="
-echo "L1 RPC:     $L1_RPC_URL"
+echo "L1 RPC:     $(redact_rpc_url "$L1_RPC_URL")"
 echo "DEPLOY_DIR: $DEPLOY_DIR"
 echo "L2 chain:   $L2_CHAIN_ID"
 echo "ADMIN:      $ADMIN_ADDRESS"
@@ -127,7 +127,7 @@ EOF
 echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameClockExtension=${FAULT_GAME_CLOCK_EXTENSION} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY}"
 echo "fundDevAccounts=false (fund L2 via bridge in Phase 2c)"
 echo
-echo "Applying op-deployer intent to live Sepolia at $L1_RPC_URL ..."
+echo "Applying op-deployer intent to live Sepolia at $(redact_rpc_url "$L1_RPC_URL") ..."
 echo "(This spends real Sepolia ETH from ADMIN — disposable learning deploy.)"
 
 ADMIN_BAL_BEFORE="$(cast balance "$ADMIN_ADDRESS" --rpc-url "$L1_RPC_URL")"

@@ -72,7 +72,7 @@ else
   echo "Batcher started. Known-good log: 'publishing transaction' or 'SubmitBatchTx'"
 fi
 
-echo "Inspect batches later: cast nonce ${BATCHER_ADDRESS} --rpc-url $L1_RPC_URL"
+echo "Inspect batches later: cast nonce ${BATCHER_ADDRESS} --rpc-url $(redact_rpc_url "$L1_RPC_URL")"
 if [[ -n "${BATCH_INBOX:-}" ]]; then
   echo "Batch inbox (from rollup.json): $BATCH_INBOX"
 fi

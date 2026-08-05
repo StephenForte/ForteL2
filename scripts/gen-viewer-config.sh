@@ -56,7 +56,7 @@ for origin in "$L1_ORIGIN" "$L2_ORIGIN" "$L2_NODE_ORIGIN"; do
   esac
 done
 
-CSP="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src ${CONNECT_SRC}; img-src 'self' data:;"
+CSP="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ${CONNECT_SRC}; img-src 'self' data:;"
 
 OUT_DIR="$FORTEL2_ROOT/viewer"
 OUT="$OUT_DIR/config.js"

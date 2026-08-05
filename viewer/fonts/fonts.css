@@ -1,0 +1,43 @@
+/* Vendored Sora + Syne (SIL Open Font License). No external font CDN. */
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./sora-400.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./sora-500.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./sora-600.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Syne";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./syne-600.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Syne";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./syne-700.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Syne";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("./syne-800.ttf") format("truetype");
+}

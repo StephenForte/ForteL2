@@ -40,7 +40,7 @@ print_row() {
 }
 
 echo "=== ForteL2 Sepolia fund check (L1=$(cast chain-id --rpc-url "$L1_RPC_URL")) ==="
-echo "RPC: $L1_RPC_URL"
+echo "RPC: $(redact_rpc_url "$L1_RPC_URL")"
 echo
 print_row "HARVEST" "$HARVEST_ADDRESS" "0.05" 0
 print_row "ADMIN" "$ADMIN_ADDRESS" "$ADMIN_MIN" 0

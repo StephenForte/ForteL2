@@ -166,11 +166,25 @@
 - **Decision:** Three parallel workers off tag **`wave6-base`** with disjoint allowlists (H1 security/redaction, H2 deps, H3 tests/CI); merge order H2 → H1 → H3. **Exception to the Phase 4/5 freeze:** H1 may make redaction-only edits (+tests) to `batcher/`/`proposer/` Go files; behavior changes remain forbidden. H3 owns `test-helpers.sh` and CI; H2 owns all go.mod/vendors.
 - **Consequence:** After H1–H3 merge + H4 operator drills, the parallel-integration program is complete; remaining roadmap items (3a/3b/7/8/9, MR triggers) are future phases outside this plan.
 
+### D-H1-1 — URL redaction sweep + vendored fonts (H1)
+- **Context:** D-0014 charter; live QuickNode tokens in `L1_RPC_URL` path; batcher/proposer Go tools echoed raw URLs on transport failure; Google Fonts CDN in static apps.
+- **Decision:** Wrap all script echo/banner URL prints with `redact_rpc_url`; add `RedactRPCURL`/`RedactErr` to `batcher/` and `proposer/` (mirroring `derivation/rpc.go`); vendor Sora/Syne under each static app; tighten CSP to `font-src 'self'`.
+- **Consequence:** H3 regression tests can assume redacted operator logs; no external font fetches at serve time.
+
 ---
 
 ## Escalations
 
-*(none yet)*
+### E-H1-1 — Add `proposer/.gomodcache/` to `.gitignore`
+- **Context:** H1 secrets-hygiene sweep; `batcher/.gomodcache/` and `derivation/.gomodcache/` are gitignored; `proposer/.gomodcache/` is not.
+- **Needed change:** Append `proposer/.gomodcache/` to root `.gitignore` (H2 or operator).
+- **Why not H1:** `.gitignore` outside H1 write allowlist.
+
+---
+
+## Escalations (historical)
+
+*(none before H1)*
 
 ---
 

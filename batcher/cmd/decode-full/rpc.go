@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/StephenForte/ForteL2/batcher"
 )
 
 type rpcReq struct {
@@ -25,6 +27,7 @@ type rpcResp struct {
 }
 
 func ethGetTransaction(rpcURL, txHash string) (to, from string, input []byte, err error) {
+	redacted := batcher.RedactRPCURL(rpcURL)
 	body, _ := json.Marshal(rpcReq{
 		JSONRPC: "2.0",
 		ID:      1,
@@ -33,13 +36,13 @@ func ethGetTransaction(rpcURL, txHash string) (to, from string, input []byte, er
 	})
 	req, err := http.NewRequest(http.MethodPost, rpcURL, bytes.NewReader(body))
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, batcher.RedactErr(rpcURL, redacted, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 30 * time.Second}
 	res, err := client.Do(req)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, batcher.RedactErr(rpcURL, redacted, err)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(res.Body)
