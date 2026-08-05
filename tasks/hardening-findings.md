@@ -1,6 +1,6 @@
 # Hardening findings — Wave 6 (H1 security audit)
 
-Audit date: 2026-08-05. Worker: H1 (`agent/h1-security-audit` off `wave6-base`).
+Audit date: 2026-08-04. Worker: H1 (`agent/h1-security-audit` off `wave6-base`).
 
 | ID | Finding | Severity | Status | Notes |
 |---|---|---|---|---|

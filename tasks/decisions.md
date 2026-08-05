@@ -182,12 +182,6 @@
 
 ---
 
-## Escalations (historical)
-
-*(none before H1)*
-
----
-
 ## Template
 
 ```
