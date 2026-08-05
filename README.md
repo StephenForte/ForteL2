@@ -665,7 +665,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh status
 
 Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clients is enough).
 
-**Scheduled on the Mac mini (launchd):** checked-in agents run Sepolia sleep at **21:00** and wake at **05:00** local (`launchd/com.steve.fortel2-sleep.plist`, `…-wake.plist`). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
+**Scheduled on the Mac mini (launchd):** checked-in agents run Sepolia sleep at **21:00** and wake at **04:00** local (`launchd/com.steve.fortel2-sleep.plist`, `…-wake.plist`). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
 
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 
