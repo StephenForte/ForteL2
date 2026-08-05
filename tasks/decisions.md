@@ -206,6 +206,11 @@
 - **Decision:** The program defined in `tasks/plan-parallel-integration.md` is closed. Both PRDs' in-scope work is done and operator-verified live. No further worker dispatches under this plan; the `wave*-base` tags remain as history and never move.
 - **Consequence:** Remaining roadmap (Phases 3a/3b/7/8/9, MR-3/4/5 triggers, any Sepolia redeploy = Phase 7 gate) is future work outside this plan and starts with a new plan + new decisions entries. Worker-prompt files stay as templates.
 
+### D-0018 — Go live on mainnet for pilot customer: stock OP Stack; custom modules retained
+- **Context:** Feasibility review (2026-08-05) for moving from learning chain to a real mainnet L2 — potential SEA bank acquisition + pilot customer running SettlementOS. Findings: batcher burn is a tuning artifact (calldata + 30-block channels + 5-min proposals) — blobs + span batches + relaxed cadence cut L1 cost to single-digit $/day; TPS is a non-issue for settlement (<1 TPS need vs ~200+ ceiling); QuickNode is replaceable by self-hosted L1 primary + paid fallback via the existing `l1_rpc_router.py` pattern; replicas = 2 operator-run + one per counterparty (derivation verifier = counterparty audit tool); scope = stablecoin transfers between institutions + lightweight defi + future RWA, with public-DA transparency flagged to the pilot early; SOS path = revive T5 write-tunnel decision → SOS on 852 staging → settle demo → MR-1 → mainnet.
+- **Decision:** Mainnet go-live runs **stock OP Stack releases** (op-batcher on blobs, tuned channel/proposal cadence). The custom `batcher/`/`proposer/` Go modules stay frozen as learning artifacts and emergency backup — not the production path. `derivation/` verifier is promoted to the institutional audit tool. Key custody (HSM/MPC, multisig admin + timelock, security audit) is a gating workstream, longest lead-time item. Sepolia 852 stays staging; mainnet deploy is the Phase 7 gate (fresh genesis + replica republish per D-0013).
+- **Consequence:** `tasks/prd-mainnet-pilot.md` (skeleton) seeds the next parallel plan, which expands it into spec/FRDs/user stories. MR-4 (canonical USDC) and MR-3 (paymaster) triggers fire inside that plan. Operator does SOS-side work in its repo first; this repo's next dispatch waits for the new plan.
+
 ---
 
 ## Escalations
