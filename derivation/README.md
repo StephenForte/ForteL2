@@ -79,8 +79,9 @@ Fixtures: `testdata/local901/batcher_tx.hex` (15 singular batches from local 901
 | Binary | `derivation/cmd/sequencer-stub` (separate from `cmd/verify`) |
 | Engine API | `forkchoiceUpdatedV3` + `getPayloadV4`/`V3` + `newPayloadV4`/`V3` (`--l2.enginekind=geth`) |
 | Isolated EL | `$DATA_DIR/l2/sequencer-stub-op-geth` · `:19745`/`:19751` · P2P `:30324` |
-| Follow-validate | Rebuild `BuildPayloadAttributes`; match L1-info bytes + parent links (D-T6-2) |
+| Follow-validate | Rebuild `BuildPayloadAttributes`; match L1-info bytes + parent links (D-T6-2); independent seed from parent L1-info re-parse (D-H3a-1) |
 | L1 origin default | `genesis.l1` from `rollup.json` (or head L1-info when continuing); validated against [sequencing window](https://specs.optimism.io/protocol/derivation.html#sequencing-window) timestamp rules (D-R3-2) |
+| Continuation | Non-genesis head: seq + origin hash recovered from parent L1-info; same origin → `parentSeq+1`, origin advance → `seq=0` (spec: L2 block seal) |
 | Kill switch | EXIT trap stops stub EL; `rm -rf` stub datadir; reference op-node untouched |
 
 ## Module wiring

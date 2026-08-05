@@ -96,3 +96,55 @@ func ResolveStubL1Origin(ctx context.Context, cfg *RollupConfig, l1 *L1Client, s
 
 	return cfg.OriginForL2Timestamp(ctx, l1, startOriginNum, firstL2Ts)
 }
+
+// ParentL1InfoFromBlock reads and parses the L1-info deposit from a sealed block.
+func ParentL1InfoFromBlock(ctx context.Context, sealer *SealingEL, blockNum uint64) (L1InfoFromDeposit, error) {
+	rawTx, err := sealer.BlockFirstTx(ctx, blockNum)
+	if err != nil {
+		return L1InfoFromDeposit{}, err
+	}
+	return ParseL1InfoDeposit(rawTx)
+}
+
+// StubStartOriginNum returns the L1 origin number to advance from when planning stub blocks.
+// Fresh genesis uses rollup genesis.l1; continuation uses the head block's L1-info deposit.
+func StubStartOriginNum(ctx context.Context, cfg *RollupConfig, l1 *L1Client, sealer *SealingEL, parentNum uint64) (uint64, error) {
+	startOriginNum := cfg.Genesis.L1.Number
+	if startOriginNum == 0 && cfg.Genesis.L1.Hash != (common.Hash{}) {
+		hdr, err := l1.BlockHeaderByHash(ctx, cfg.Genesis.L1.Hash)
+		if err != nil {
+			return 0, fmt.Errorf("genesis.l1 hash: %w", err)
+		}
+		startOriginNum = hdr.Number
+	}
+	if parentNum > 0 {
+		info, err := ParentL1InfoFromBlock(ctx, sealer, parentNum)
+		if err != nil {
+			return 0, fmt.Errorf("head block %d L1-info: %w", parentNum, err)
+		}
+		startOriginNum = info.L1OriginNumber
+	}
+	return startOriginNum, nil
+}
+
+// SeedStubDerivationState initializes derivation state for stub block building.
+// Fresh genesis (parentNum==0): L1OriginNum stays 0 so the first block is treated as
+// an origin change (seq=0). Continuation seeds L1 origin + seq from the parent block's
+// L1-info deposit per https://specs.optimism.io/protocol/derivation.html#l2-block-seal
+// (same origin as parent → next seq is parentSeq+1; origin advance → seq=0).
+func SeedStubDerivationState(ctx context.Context, sealer *SealingEL, parentNum uint64, parentHash common.Hash, parentTime uint64, cfg *RollupConfig) (DerivationState, error) {
+	st := NewDerivationState(cfg)
+	st.ParentHash = parentHash
+	st.ParentTime = parentTime
+	if parentNum == 0 {
+		return st, nil
+	}
+	info, err := ParentL1InfoFromBlock(ctx, sealer, parentNum)
+	if err != nil {
+		return st, fmt.Errorf("parent block %d L1-info: %w", parentNum, err)
+	}
+	st.L1OriginNum = info.L1OriginNumber
+	st.L1OriginHash = info.L1OriginHash
+	st.SeqNumber = info.SeqNumber
+	return st, nil
+}
