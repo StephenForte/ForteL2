@@ -1,6 +1,6 @@
 # Pipeline viewer vendor
 
-`ethers-6.13.5.min.js` is a **copy** of `dapp/vendor/ethers-6.13.5.min.js` (self-contained ESM).
+`ethers-6.13.7.min.js` is a **copy** of `dapp/vendor/ethers-6.13.7.min.js` (self-contained ESM).
 A symlink is not used: `serve-viewer.sh` roots HTTP at `viewer/`, and checkouts with
 `core.symlinks=false` would otherwise serve the symlink target path as a one-line text
 blob — invalid JavaScript that breaks `viewer/app.js` before any RPC polling.

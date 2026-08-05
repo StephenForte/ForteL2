@@ -166,6 +166,11 @@
 - **Decision:** Three parallel workers off tag **`wave6-base`** with disjoint allowlists (H1 security/redaction, H2 deps, H3 tests/CI); merge order H2 → H1 → H3. **Exception to the Phase 4/5 freeze:** H1 may make redaction-only edits (+tests) to `batcher/`/`proposer/` Go files; behavior changes remain forbidden. H3 owns `test-helpers.sh` and CI; H2 owns all go.mod/vendors.
 - **Consequence:** After H1–H3 merge + H4 operator drills, the parallel-integration program is complete; remaining roadmap items (3a/3b/7/8/9, MR triggers) are future phases outside this plan.
 
+### D-H2-1 — Wave 6 dependency refresh (H2)
+- **Context:** H2 off `wave6-base` (D-0014). `derivation/` already carried patched `klauspost/compress` (GO-2026-5841) and `pion/dtls/v3` (CVE-2026-54908); `batcher/`/`proposer/` indirect pins lagged. GO-2026-5932 (`x/crypto/openpgp`) still has no fix. Vendored ethers at 6.13.5; npm latest 6.13.x patch is 6.13.7.
+- **Decision:** Bump `batcher/` + `proposer/` indirect compress/dtls to match `derivation/`. Refresh GO-2026-5932 stance (still uncalled in all three modules). Bump vendored ethers to 6.13.7 in all three copies (integrator renamed the files to `ethers-6.13.7.min.js` and updated the three `app.js` imports — outside H2 allowlist). Skip ethers 6.17.0 (minor jump). `scripts/bridge` audit clean; `forge-std` v1.16.2 already at upstream latest — no bump.
+- **Consequence:** README advisories section updated (2026-08-04). H2 merges first per D-0014; H1/H3 rebase onto post-merge main only if needed.
+
 ---
 
 ## Escalations

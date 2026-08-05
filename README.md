@@ -338,11 +338,26 @@ FORTEL2_ENV=.env.sepolia USE_CUSTOM_PROPOSER=1 CONFIRM_CUSTOM_PROPOSER_SEPOLIA=1
 
 Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike-phase-5-proposer.md) (US-055). Operator switch details: [`proposer/README.md`](proposer/README.md).
 
-### Tracked dependency advisories (batcher / proposer)
+### Tracked dependency advisories (Go modules + frontend vendors)
+
+Last refresh: **2026-08-04** (Wave 6 / H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
-| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. `batcher/` and `proposer/` do **not** import `openpgp` (confirmed with `govulncheck ./…` — clean). Indirect pin is `golang.org/x/crypto v0.54.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep + `govulncheck -show verbose` on `derivation/` — symbol scan clean; module-level note only). Indirect pin is `golang.org/x/crypto v0.54.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+
+**H2 bumps (2026-08-04):**
+
+| Area | Dependency | From → To | Advisory / reason |
+|---|---|---|---|
+| `batcher/` | `github.com/klauspost/compress` | v1.17.11 → v1.18.7 | [GO-2026-5841](https://pkg.go.dev/vuln/GO-2026-5841) — aligned with `derivation/` |
+| `batcher/` | `github.com/pion/dtls/v3` | v3.1.2 → v3.1.4 | CVE-2026-54908 — aligned with `derivation/` |
+| `proposer/` | `github.com/klauspost/compress` | v1.17.11 → v1.18.7 | GO-2026-5841 — aligned with `derivation/` |
+| `proposer/` | `github.com/pion/dtls/v3` | v3.1.2 → v3.1.4 | CVE-2026-54908 — aligned with `derivation/` |
+| `derivation/` | *(no change)* | compress v1.18.7, dtls v3.1.4 already current | — |
+| `scripts/bridge` | `viem` / `ws` | unchanged | `npm audit`: 0 vulnerabilities |
+| vendored ethers | npm `ethers` | 6.13.5 → **6.13.7** (latest 6.13.x patch; 6.17.0 is latest 6.x minor — not taken) | three copies byte-identical; see `dapp/vendor/README.md` |
+| `contracts/` | `forge-std` | v1.16.2 (pinned) | matches upstream latest tag; no advisory — report only |
 
 Reproduce:
 

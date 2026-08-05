@@ -2,7 +2,7 @@
  * ForteL2 block viewer — Phase 6 (chain 901 local or 852 Sepolia).
  * Client-side L2 RPC polls only; ethers vendored under ./vendor/.
  */
-import { JsonRpcProvider } from "./vendor/ethers-6.13.5.min.js";
+import { JsonRpcProvider } from "./vendor/ethers-6.13.7.min.js";
 import { L1_CHAIN_ID, L2_CHAIN_ID, L2_RPC_URL } from "./config.js";
 import {
   blocksPageSize,

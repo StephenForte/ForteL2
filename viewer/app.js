@@ -2,7 +2,7 @@
  * ForteL2 pipeline viewer — Phase 1c/1d ops UI (chain 901 local or 852 Sepolia).
  * Client-side RPC polls only; ethers vendored under ./vendor/.
  */
-import { Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.5.min.js";
+import { Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.7.min.js";
 import {
   L1_CHAIN_ID,
   L2_CHAIN_ID,
