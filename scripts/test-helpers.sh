@@ -771,6 +771,39 @@ else
   fail=1
 fi
 
+# derivation-check.sh: CLI-mode guards (D-0013 / R2 debugging arc).
+DERIV_CHECK="$SCRIPT_DIR/derivation-check.sh"
+if grep -q '"$SEPOLIA" -eq 1 && "$MAKE_ANCHOR" -eq 0' "$DERIV_CHECK" \
+  && grep -q 'skip it in --make-anchor mode' "$DERIV_CHECK" \
+  && grep -q 'never continue into verification' "$DERIV_CHECK" \
+  && grep -q 'run derivation-check without --make-anchor' "$DERIV_CHECK" \
+  && awk '/"\$MAKE_ANCHOR" -eq 1/ { in_block=1 } in_block && /exit 0/ { found=1 } END { exit !found }' "$DERIV_CHECK"; then
+  echo "PASS derivation-check --make-anchor skips live-RPC window setup and exits"
+else
+  echo "FAIL derivation-check --make-anchor must guard Sepolia window setup and exit before verify" >&2
+  fail=1
+fi
+if grep -q 'VERIFY_ARGS+=(-json)' "$DERIV_CHECK" \
+  && awk '/"\$JSON_OUT"/ { in_json=1 } in_json && /VERIFY_ARGS\+=\(-json\)/ { found=1 } END { exit !found }' "$DERIV_CHECK"; then
+  echo "PASS derivation-check --json-out adds -json to verifier"
+else
+  echo "FAIL derivation-check --json-out must pass -json to cmd/verify" >&2
+  fail=1
+fi
+if grep -q 'start-l2=\$START_L2 requires anchor datadir' "$DERIV_CHECK" \
+  && awk '/"\$START_L2" -gt 1/ { mid=1 } mid && /requires anchor datadir/ { found=1 } END { exit !found }' "$DERIV_CHECK"; then
+  echo "PASS derivation-check mid-chain start requires anchor datadir"
+else
+  echo "FAIL derivation-check must error when start-l2>1 without anchor datadir" >&2
+  fail=1
+fi
+if grep -q 'FORTEL2_ENV=.env.sepolia \$0 --sepolia --make-anchor' "$DERIV_CHECK"; then
+  echo "PASS derivation-check usage documents --sepolia --make-anchor"
+else
+  echo "FAIL derivation-check usage must mention --sepolia --make-anchor" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
