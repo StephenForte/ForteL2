@@ -61,9 +61,9 @@ echo "Fund FROM harvest using MetaMask or cast offline — never paste the harve
 echo
 echo "Example cast sends (run in a shell that has HARVEST_PRIVATE_KEY; not stored in this repo):"
 cat <<EOF
-cast send ${ADMIN_ADDRESS} --value ${ADMIN_MIN}ether --private-key \$HARVEST_PRIVATE_KEY --rpc-url ${L1_RPC_URL}
-cast send ${BATCHER_ADDRESS} --value ${BATCHER_MIN}ether --private-key \$HARVEST_PRIVATE_KEY --rpc-url ${L1_RPC_URL}
-cast send ${PROPOSER_ADDRESS} --value ${PROPOSER_MIN}ether --private-key \$HARVEST_PRIVATE_KEY --rpc-url ${L1_RPC_URL}
+cast send ${ADMIN_ADDRESS} --value ${ADMIN_MIN}ether --private-key \$HARVEST_PRIVATE_KEY --rpc-url \$L1_RPC_URL
+cast send ${BATCHER_ADDRESS} --value ${BATCHER_MIN}ether --private-key \$HARVEST_PRIVATE_KEY --rpc-url \$L1_RPC_URL
+cast send ${PROPOSER_ADDRESS} --value ${PROPOSER_MIN}ether --private-key \$HARVEST_PRIVATE_KEY --rpc-url \$L1_RPC_URL
 EOF
 echo
 echo "When ADMIN shows OK, run:"
