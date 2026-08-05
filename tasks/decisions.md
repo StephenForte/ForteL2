@@ -161,6 +161,11 @@
 - **Decision:** Sepolia anchored window **601219–601268** PASS (twice); golden fixture committed; replay test enforces in CI. Phase 6 marked **Done** in both PRDs.
 - **Consequence:** Program remainder: hardening wave (H1–H3 + operator drills). Accumulated H-findings: URL redaction sweep (start-script banners print unredacted L1 URL; Go tools fixed), scan guards/progress (done in derivation, pattern for batcher/proposer), CLI-mode dry-walk review habit, QuickNode token rotation (operator, post-debugging).
 
+### D-0014 — Hardening wave (H1–H3); Wave 6 base: tag `wave6-base`; batcher/proposer redaction exception
+- **Context:** Phase 6 + money rail complete (D-0013). Final wave = hardening, carrying the program's accumulated findings: unredacted-URL echo sites across `scripts/` and the same error-leak class in `batcher`/`proposer` Go; Google Fonts self-containment gap; regression-guard backfill for the seven operator-found bug classes; CI shell checks.
+- **Decision:** Three parallel workers off tag **`wave6-base`** with disjoint allowlists (H1 security/redaction, H2 deps, H3 tests/CI); merge order H2 → H1 → H3. **Exception to the Phase 4/5 freeze:** H1 may make redaction-only edits (+tests) to `batcher/`/`proposer/` Go files; behavior changes remain forbidden. H3 owns `test-helpers.sh` and CI; H2 owns all go.mod/vendors.
+- **Consequence:** After H1–H3 merge + H4 operator drills, the parallel-integration program is complete; remaining roadmap items (3a/3b/7/8/9, MR triggers) are future phases outside this plan.
+
 ---
 
 ## Escalations
