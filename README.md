@@ -432,7 +432,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/demo-checklist.sh   # or --sepolia
 python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json  # one-shot JSON mini-viewer
 ```
 
-Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from the active env + `deployments.json` + `rollup.json`. `viewer/config.js` and `viewer/.csp-header` are **gitignored** (Sepolia `config.js` embeds your L1 RPC URL). Use `./scripts/serve-viewer.sh` so the CSP header allows the L1 origin without committing it into `index.html`. Typography (Sora/Syne) is **vendored** under `viewer/fonts/` — no Google Fonts CDN at runtime.
+Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from the active env + `deployments.json` + `rollup.json`. `viewer/config.js` and `viewer/.csp-header` are **gitignored** (Sepolia `config.js` embeds your L1 RPC URL). Use `./scripts/serve-viewer.sh` so the CSP header allows the L1 origin without committing it into `index.html`. Typography (Inter/JetBrains Mono, per `DESIGN.md`) is **vendored** under `viewer/fonts/` — no Google Fonts CDN at runtime.
 
 | Panel | RPCs | What it shows |
 |---|---|---|

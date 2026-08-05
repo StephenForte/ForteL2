@@ -1,43 +1,17 @@
-/* Vendored Sora + Syne (SIL Open Font License). No external font CDN. */
+/* Vendored variable fonts — DESIGN.md substitutes for figmaSans/figmaMono
+   (Inter v4.1, JetBrains Mono v2.304; both SIL OFL). No external font CDN. */
 @font-face {
-  font-family: "Sora";
+  font-family: "InterVariable";
   font-style: normal;
-  font-weight: 400;
+  font-weight: 100 900;
   font-display: swap;
-  src: url("./sora-400.ttf") format("truetype");
+  src: url("./inter-var.ttf") format("truetype-variations");
 }
+
 @font-face {
-  font-family: "Sora";
+  font-family: "JetBrains Mono";
   font-style: normal;
-  font-weight: 500;
+  font-weight: 100 800;
   font-display: swap;
-  src: url("./sora-500.ttf") format("truetype");
-}
-@font-face {
-  font-family: "Sora";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("./sora-600.ttf") format("truetype");
-}
-@font-face {
-  font-family: "Syne";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("./syne-600.ttf") format("truetype");
-}
-@font-face {
-  font-family: "Syne";
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("./syne-700.ttf") format("truetype");
-}
-@font-face {
-  font-family: "Syne";
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url("./syne-800.ttf") format("truetype");
+  src: url("./jetbrains-mono-var.ttf") format("truetype-variations");
 }

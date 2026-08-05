@@ -1,14 +1,23 @@
+/* ForteL2 block viewer — styled per DESIGN.md (Figma-design-analysis).
+   Monochrome editorial chrome; the block-detail header sits on a cream color
+   block, tables stay on white with hairline strokes (pricing-card pattern). */
+
 :root {
-  --ink: #070a08;
-  --fog: #d2ddd4;
-  --mist: #7f9186;
-  --panel: rgba(14, 22, 17, 0.72);
-  --panel-edge: rgba(196, 240, 66, 0.14);
-  --line: rgba(200, 212, 204, 0.12);
-  --signal: #c4f042;
-  --signal-ink: #12180e;
-  --warn: #f0b429;
-  --ok: #7ddea0;
+  --ink: #000000;
+  --canvas: #ffffff;
+  --hairline: #e6e6e6;
+  --hairline-soft: #f1f1f1;
+  --surface-soft: #f7f7f5;
+  --block-lime: #dceeb1;
+  --block-cream: #f4ecd6;
+  --inverse-ink: #ffffff;
+  --accent-magenta: #ff3d8b;
+  --success: #1ea64a;
+  --sans: "InterVariable", "Inter", "SF Pro Display", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", menlo, monospace;
+  --r-md: 8px;
+  --r-lg: 24px;
+  --r-pill: 50px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -19,36 +28,30 @@
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Sora", system-ui, sans-serif;
-  color: var(--fog);
-  background: var(--ink);
+  font-family: var(--sans);
+  font-weight: 330;
+  font-kerning: normal;
+  color: var(--ink);
+  background: var(--canvas);
   overflow-x: hidden;
 }
 
 .atmosphere {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 80% 50% at 8% -5%, rgba(196, 240, 66, 0.2), transparent 55%),
-    radial-gradient(ellipse 55% 45% at 95% 10%, rgba(45, 110, 80, 0.35), transparent 50%),
-    radial-gradient(ellipse 50% 40% at 50% 110%, rgba(28, 55, 42, 0.5), transparent 55%),
-    linear-gradient(165deg, #050806 0%, #0c1410 42%, #08100c 100%);
+  display: none;
 }
 
 .shell {
   position: relative;
   z-index: 1;
-  max-width: 68rem;
+  max-width: 80rem;
   margin: 0 auto;
-  padding: clamp(2rem, 6vw, 3.75rem) 1.25rem 4rem;
+  padding: clamp(2rem, 6vw, 3.75rem) clamp(1.25rem, 4vw, 3rem) 6rem;
 }
 
 .hero {
@@ -56,30 +59,32 @@ body {
 }
 
 .brand {
-  margin: 0 0 0.35rem;
-  font-family: "Syne", system-ui, sans-serif;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
+  margin: 0 0 1rem;
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 400;
+  letter-spacing: 0.54px;
   text-transform: uppercase;
-  color: var(--signal);
+  color: var(--ink);
 }
 
 .headline {
-  margin: 0 0 0.75rem;
-  font-family: "Syne", system-ui, sans-serif;
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
-  font-weight: 800;
+  margin: 0 0 1rem;
+  font-family: var(--sans);
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 340;
   line-height: 1.1;
-  color: var(--fog);
+  letter-spacing: -0.015em;
+  color: var(--ink);
 }
 
 .lede {
-  margin: 0 0 1.25rem;
-  max-width: 42rem;
-  font-size: 0.95rem;
-  line-height: 1.55;
-  color: var(--mist);
+  margin: 0 0 1.5rem;
+  max-width: 44rem;
+  font-size: 1.25rem;
+  font-weight: 330;
+  letter-spacing: -0.14px;
+  line-height: 1.4;
 }
 
 .livebar {
@@ -87,56 +92,75 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--hairline);
 }
 
 .live-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.35rem 0.75rem;
-  border-radius: 999px;
+  padding: 0.4rem 1rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: var(--canvas);
+  font-family: var(--mono);
   font-size: 0.75rem;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
+  font-weight: 400;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
 }
 
 .live-dot {
   width: 0.45rem;
   height: 0.45rem;
   border-radius: 50%;
-  background: var(--mist);
+  background: var(--hairline);
+}
+
+.live-pill[data-state="live"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--inverse-ink);
 }
 
 .live-pill[data-state="live"] .live-dot {
-  background: var(--ok);
-  box-shadow: 0 0 8px rgba(125, 222, 160, 0.5);
+  background: var(--success);
+}
+
+.live-pill[data-state="error"] {
+  border-color: var(--accent-magenta);
+  color: var(--accent-magenta);
 }
 
 .live-pill[data-state="error"] .live-dot {
-  background: var(--warn);
+  background: var(--accent-magenta);
 }
 
 .status {
   margin: 0;
-  font-size: 0.85rem;
-  color: var(--mist);
+  font-size: 1rem;
+  font-weight: 330;
 }
 
 .status.is-error {
-  color: var(--warn);
+  color: var(--accent-magenta);
+  font-weight: 480;
 }
 
 .crumbs {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 1.25rem;
-  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+  font-size: 1rem;
 }
 
+/* Inline link emphasis = weight 480, same size as body */
 .crumb-link {
-  color: var(--signal);
+  color: var(--ink);
+  font-weight: 480;
+  letter-spacing: -0.1px;
   text-decoration: none;
 }
 
@@ -145,100 +169,115 @@ body {
 }
 
 .crumb-sep {
-  color: var(--mist);
+  color: var(--ink);
+  opacity: 0.4;
 }
 
 .crumb-current {
-  color: var(--fog);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  letter-spacing: 0.3px;
 }
 
 .view[hidden] {
   display: none !important;
 }
 
+/* Detail panels: block header on cream color block; tx list stays a white
+   hairline card so only one color block sits in the viewport. */
 .panel {
   margin-bottom: 1.5rem;
-  padding: 1.25rem 1.35rem;
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  border-radius: 0.75rem;
-  backdrop-filter: blur(8px);
+  padding: 2rem;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+}
+
+.panel:first-of-type {
+  background: var(--block-cream);
+  border: none;
 }
 
 .panel.is-stale {
-  opacity: 0.65;
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
 }
 
 .panel-title {
-  margin: 0 0 1rem;
-  font-family: "Syne", system-ui, sans-serif;
-  font-size: 1.05rem;
-  font-weight: 700;
+  margin: 0 0 1.25rem;
+  font-family: var(--sans);
+  font-size: 1.375rem;
+  font-weight: 540;
+  letter-spacing: -0.26px;
 }
 
 .panel-err {
   margin: 0 0 0.75rem;
-  font-size: 0.85rem;
-  color: var(--warn);
+  font-size: 0.9375rem;
+  font-weight: 480;
+  color: var(--accent-magenta);
 }
 
 .metrics {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
-  gap: 0.75rem 1.25rem;
+  gap: 0.85rem 1.25rem;
   margin: 0;
 }
 
 .metrics div {
   display: grid;
-  gap: 0.2rem;
+  gap: 0.25rem;
 }
 
 .metrics dt {
   margin: 0;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--mist);
 }
 
 .metrics dd {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.9375rem;
+  font-weight: 480;
   word-break: break-all;
 }
 
 .table-wrap {
   overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--canvas);
 }
 
 .blocks-table,
 .tx-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 0.9375rem;
 }
 
 .blocks-table th,
 .tx-table th {
-  padding: 0.65rem 0.85rem;
+  padding: 0.75rem 1rem;
   text-align: left;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--mist);
-  background: rgba(0, 0, 0, 0.25);
-  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .blocks-table td,
 .tx-table td {
-  padding: 0.6rem 0.85rem;
-  border-bottom: 1px solid var(--line);
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--hairline-soft);
   vertical-align: top;
 }
 
@@ -248,43 +287,49 @@ body {
 }
 
 .blocks-table tbody tr:hover {
-  background: rgba(196, 240, 66, 0.04);
+  background: var(--surface-soft);
 }
 
 .row-link {
   color: inherit;
+  font-weight: 480;
   text-decoration: none;
 }
 
 .row-link:hover {
-  color: var(--signal);
+  text-decoration: underline;
 }
 
 .mono {
-  font-family: ui-monospace, "Cascadia Code", monospace;
-  font-size: 0.82rem;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0.2px;
 }
 
 .actions {
-  margin-top: 1rem;
+  margin-top: 1.5rem;
   display: flex;
   justify-content: center;
 }
 
+/* Primary CTA: the black pill (DESIGN.md button-primary) */
 .btn {
-  padding: 0.55rem 1.25rem;
-  font-family: inherit;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--signal-ink);
-  background: var(--signal);
+  padding: 10px 20px;
+  font-family: var(--sans);
+  font-size: 1.125rem;
+  font-weight: 480;
+  letter-spacing: -0.1px;
+  line-height: 1.4;
+  color: var(--inverse-ink);
+  background: var(--ink);
   border: none;
-  border-radius: 0.4rem;
+  border-radius: var(--r-pill);
   cursor: pointer;
+  transition: transform 0.18s var(--ease);
 }
 
-.btn:hover {
-  filter: brightness(1.05);
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn:disabled {
@@ -294,6 +339,13 @@ body {
 
 .empty-note {
   margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-  color: var(--mist);
+  font-size: 0.9375rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn:active:not(:disabled) {
+    transition: none;
+    transform: none;
+  }
 }
