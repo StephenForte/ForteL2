@@ -186,6 +186,11 @@
 - **Decision:** New `shell-syntax` job in `.github/workflows/ci.yml`; existing `go test ./...` in `derivation/` already runs `TestDecodeLocal901BatcherTx` + `TestSepoliaGoldenSkipped` (confirmed, not duplicated). shellcheck omitted — not on CI runner. Actions remain SHA-pinned.
 - **Consequence:** Syntax errors in scripts fail CI independently; golden replay stays part of the derivation unit-test step.
 
+### D-0015 — H3a dispatch; Wave 7 base: tag `wave7-base`
+- **Context:** Hardening wave merged (D-H2-1 `058de63`, D-H1-1 `f449795`, D-H3-1/2 `a755e52`; CI green on each). Codex r3716862854 confirmed the US-062 stub continuation path drops `SeqNumber` + origin hash on non-genesis head recovery, and follow-validation seeds from the same in-memory state (validates its own mistake). Prompt: `tasks/worker-prompts/H3a-stub-seq-continuation.md`.
+- **Decision:** Dispatch H3a solo on pre-created branch `agent/h3a-stub-seq` off tag **`wave7-base`** (the commit adding this entry — same tag mechanism as D-0007/D-0008). Existing wave tags never move.
+- **Consequence:** After H3a merges, only the H4 operator drills remain in this program; handoff diffs against `wave7-base..HEAD`.
+
 ---
 
 ## Escalations

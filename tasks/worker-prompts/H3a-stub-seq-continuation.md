@@ -26,7 +26,7 @@ Do NOT touch: `batcher/`, `proposer/`, `scripts/lib.sh`, other scripts, CI, veri
 
 ## Contract
 
-- Branch `agent/h3a-stub-seq` off the tag named in the dispatch header (pinned post-H-wave).
+- Branch `agent/h3a-stub-seq` (pre-created) off tag **`wave7-base`** (pinned post-H-wave, D-0015).
 - Commits: `fix(derivation): …` / `test(derivation): …`; squash-merged later.
 - Tests before done (paste verbatim, watch exit codes — no grep pipelines): `cd derivation && go build ./... && go test ./... && govulncheck ./...`; `./scripts/test-helpers.sh`; the double-run demo output; a `derivation-check.sh` 901 window PASS proving the verifier is untouched.
 - No merging, no pushing to main.
