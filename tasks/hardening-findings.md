@@ -35,7 +35,7 @@ Audit date: 2026-08-04. Worker: H1 (`agent/h1-security-audit` off `wave6-base`).
 | `sepolia-fund-check.sh` | **PASS** (exit 0) | All roles ≥ floors; found + fixed H4-002 |
 | Replica sync check | **PASS** | Web Shell method per D-0016: replica chain 852, head=safe=629995 == local safe 629995; lag vs local unsafe 630036 = 41 ≤ 50 (08:16 PT) |
 | Dev-sleep/wake cycle | **PASS** (observed) | 21:00 sleep + 04:00 wake both fired via launchd; sequencer backfilled the sleep gap; wake-hour doc drift fixed (`859803a`) |
-| Cold-start-under-30-min runbook | **Operator-only** | Not run by integrator per plan §3 |
+| Cold-start-under-30-min runbook | **PASS (~15 min)** | Operator-run 2026-08-05: stop 10:53:06 → `demo-checklist --sepolia` green ≤11:08 (log-verified from op-geth interrupt/start lines; operator-reported clock times were a paste error and were discarded) |
 
 Drill-found fixes (post-wave, committed to main):
 
@@ -44,3 +44,4 @@ Drill-found fixes (post-wave, committed to main):
 | H4-001 | `test-helpers.sh` gen-viewer-config fixture failed under inherited `FORTEL2_ENV` (only visible via `demo-checklist --sepolia`) | `env -u FORTEL2_ENV` for the fixture run (`902c3aa`) |
 | H4-002 | `sepolia-fund-check.sh` example `cast send` hints expanded the raw tokenized L1 URL (missed by H1's sweep — same class as H1-001) | Print literal `$L1_RPC_URL` (`d9713eb`) |
 | H4-003 | Repo said wake=05:00; installed LaunchAgent fires 04:00 | Docs + checked-in plist trued up (`859803a`) |
+| H4-004 | Wake actually fired 05:00:07 on 2026-08-05 despite plist file saying Hour=4 — launchd still runs the previously **loaded** definition; plist edits require `launchctl bootout` + `bootstrap` to take effect | Operator action: reload `com.steve.fortel2-wake` (one-liner provided); verify next-morning wake at 04:00 |

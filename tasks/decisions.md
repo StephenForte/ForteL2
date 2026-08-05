@@ -201,6 +201,11 @@
 - **Decision:** Drill mechanism is the Render dashboard **Web Shell** on the running instance: JSON-RPC via python3/urllib against `localhost:10000` (op-geth EL; op-node RPC is `:9545`; the image ships no curl). `.env.sepolia` carries a comment, not a URL. First capture (2026-08-04 ~22:05 PT, local stack asleep): chain **852**, head **609591** vs local pre-sleep head 609485 at 20:51 — replica deriving posted batches correctly.
 - **Consequence:** The scripted `replica-sync-check.sh` path stays valid for any future Mac-reachable replica (e.g. if the service is ever made public or Private Link is added); until then the H4 replica drill = simultaneous Web-Shell + local head capture with the script's lag rule (`REPLICA_MAX_SAFE_LAG`, default 50, judged against batch-posting delay).
 
+### D-0017 — Parallel-integration program COMPLETE
+- **Context:** All waves merged and verified: T1–T3 (Wave 1), T4, T6, R1–R3, Sepolia US-061 window PASS + golden fixture (D-0013), hardening H2→H1→H3 (`058de63`/`f449795`/`a755e52`), H3a (`141acfe`, live double-run verified). H4 operator drills all PASS (see `hardening-findings.md` H4 section): local 901 redeploy, stub continuation, derivation-check, `demo-checklist --sepolia`, fund check, replica sync (lag 41≤50 via D-0016 Web Shell), dev-sleep/wake cycle, cold start **~15 min** (10:53:06→≤11:08, 2026-08-05, log-verified). Drills found and fixed H4-001..003; H4-004 (launchd reload) pending operator click.
+- **Decision:** The program defined in `tasks/plan-parallel-integration.md` is closed. Both PRDs' in-scope work is done and operator-verified live. No further worker dispatches under this plan; the `wave*-base` tags remain as history and never move.
+- **Consequence:** Remaining roadmap (Phases 3a/3b/7/8/9, MR-3/4/5 triggers, any Sepolia redeploy = Phase 7 gate) is future work outside this plan and starts with a new plan + new decisions entries. Worker-prompt files stay as templates.
+
 ---
 
 ## Escalations
