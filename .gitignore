@@ -28,6 +28,7 @@ dapp/node_modules/
 scripts/bridge/node_modules/
 batcher/.gomodcache/
 derivation/.gomodcache/
+proposer/.gomodcache/
 **/derivation-op-geth/
 **/derivation-anchor-op-geth/
 **/sequencer-stub-op-geth/
