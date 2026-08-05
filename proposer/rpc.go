@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -31,21 +32,51 @@ type rpcResp struct {
 	} `json:"error"`
 }
 
+// RedactRPCURL strips path, query, and userinfo — hosted RPC URLs carry API
+// tokens there (same policy as scripts/lib.sh redact_rpc_url).
+func RedactRPCURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "rpc-endpoint"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// RedactErr replaces raw RPC URLs in transport error text with RedactRPCURL.
+func RedactErr(rawURL, redacted string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if redacted == "" {
+		redacted = RedactRPCURL(rawURL)
+	}
+	return &redactedError{msg: strings.ReplaceAll(err.Error(), rawURL, redacted), err: err}
+}
+
 // RPCCall performs a JSON-RPC call against an HTTP endpoint.
 func RPCCall(ctx context.Context, rpcURL, method string, params []interface{}) (json.RawMessage, error) {
+	redacted := RedactRPCURL(rpcURL)
 	body, err := json.Marshal(rpcReq{JSONRPC: "2.0", ID: 1, Method: method, Params: params})
 	if err != nil {
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rpcURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, RedactErr(rpcURL, redacted, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 30 * time.Second}
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, RedactErr(rpcURL, redacted, err)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(res.Body)

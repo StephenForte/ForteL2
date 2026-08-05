@@ -29,7 +29,7 @@ require_min_balance_eth "$BATCHER_ADDRESS" "${SEPOLIA_BATCHER_MIN_ETH:-0.15}" "B
 require_min_balance_eth "$PROPOSER_ADDRESS" "${SEPOLIA_PROPOSER_MIN_ETH:-0.15}" "PROPOSER"
 
 echo "=== ForteL2 Phase 2c — Sepolia-backed L2 ==="
-echo "L1 RPC:  $L1_RPC_URL"
+echo "L1 RPC:  $(redact_rpc_url "$L1_RPC_URL")"
 echo "DATA_DIR: $DATA_DIR"
 echo "DEPLOY:  $DEPLOY_DIR"
 echo "(Phase 1 Anvil/datadir not started or modified)"
@@ -51,6 +51,6 @@ trap - ERR
 
 echo
 echo "=== Sepolia L2 stack is up ==="
-echo "L2 RPC:  $L2_RPC_URL  (chain $L2_CHAIN_ID)"
+echo "L2 RPC:  $(redact_rpc_url "$L2_RPC_URL")  (chain $L2_CHAIN_ID)"
 echo "Status:  FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/status.sh"
 echo "Stop:    FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/stop-all-sepolia.sh"

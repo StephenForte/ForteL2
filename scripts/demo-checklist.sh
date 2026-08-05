@@ -270,10 +270,10 @@ run_auto() {
     elif [[ -n "$l2_chain" ]]; then
       fail_item "L2 chain-id=$l2_chain expected ${L2_CHAIN_ID}"
     else
-      fail_item "L2 chain-id unread at $L2_RPC_URL"
+      fail_item "L2 chain-id unread at $(redact_rpc_url "$L2_RPC_URL")"
     fi
   else
-    fail_item "L2 RPC unreachable at $L2_RPC_URL"
+    fail_item "L2 RPC unreachable at $(redact_rpc_url "$L2_RPC_URL")"
   fi
 
   echo

@@ -94,7 +94,7 @@ else
   echo "Sepolia batcher started (DA=${BATCHER_DA_TYPE}, confs=${BATCHER_CONFS}, poll=${BATCHER_POLL}, max-channel-duration=${BATCHER_CHANNEL_DURATION})."
 fi
 
-echo "Inspect: cast nonce ${BATCHER_ADDRESS} --rpc-url $L1_RPC_URL"
+echo "Inspect: cast nonce ${BATCHER_ADDRESS} --rpc-url $(redact_rpc_url "$L1_RPC_URL")"
 if [[ -n "${BATCH_INBOX:-}" ]]; then
   echo "Batch inbox: $BATCH_INBOX"
 fi

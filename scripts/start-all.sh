@@ -24,7 +24,7 @@ sleep 3
 
 echo
 echo "=== ForteL2 Phase 1 stack is up ==="
-echo "L1 RPC:  $L1_RPC_URL  (chain $L1_CHAIN_ID)"
-echo "L2 RPC:  $L2_RPC_URL  (chain $L2_CHAIN_ID)"
+echo "L1 RPC:  $(redact_rpc_url "$L1_RPC_URL")  (chain $L1_CHAIN_ID)"
+echo "L2 RPC:  $(redact_rpc_url "$L2_RPC_URL")  (chain $L2_CHAIN_ID)"
 echo "Logs:    $LOG_DIR"
 echo "Status:  $SCRIPT_DIR/status.sh"

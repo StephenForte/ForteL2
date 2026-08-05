@@ -102,7 +102,7 @@ EOF
 
 echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameClockExtension=${FAULT_GAME_CLOCK_EXTENSION} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY} preimageOracleChallengePeriod=${PREIMAGE_ORACLE_CHALLENGE_PERIOD}"
 
-echo "Applying op-deployer intent to live L1 at $L1_RPC_URL ..."
+echo "Applying op-deployer intent to live L1 at $(redact_rpc_url "$L1_RPC_URL") ..."
 op-deployer apply \
   --workdir "$DEPLOY_DIR" \
   --deployment-target live \

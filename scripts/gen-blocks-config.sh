@@ -25,7 +25,7 @@ case " $CONNECT_SRC " in
   *) CONNECT_SRC+=" $L2_ORIGIN" ;;
 esac
 
-CSP="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src ${CONNECT_SRC}; img-src 'self' data:;"
+CSP="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ${CONNECT_SRC}; img-src 'self' data:;"
 
 OUT_DIR="$FORTEL2_ROOT/blocks"
 OUT="$OUT_DIR/config.js"

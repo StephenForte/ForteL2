@@ -171,11 +171,20 @@
 - **Decision:** Bump `batcher/` + `proposer/` indirect compress/dtls to match `derivation/`. Refresh GO-2026-5932 stance (still uncalled in all three modules). Bump vendored ethers to 6.13.7 in all three copies (integrator renamed the files to `ethers-6.13.7.min.js` and updated the three `app.js` imports — outside H2 allowlist). Skip ethers 6.17.0 (minor jump). `scripts/bridge` audit clean; `forge-std` v1.16.2 already at upstream latest — no bump.
 - **Consequence:** README advisories section updated (2026-08-04). H2 merges first per D-0014; H1/H3 rebase onto post-merge main only if needed.
 
+### D-H1-1 — URL redaction sweep + vendored fonts (H1)
+- **Context:** D-0014 charter; live QuickNode tokens in `L1_RPC_URL` path; batcher/proposer Go tools echoed raw URLs on transport failure; Google Fonts CDN in static apps.
+- **Decision:** Wrap all script echo/banner URL prints with `redact_rpc_url`; add `RedactRPCURL`/`RedactErr` to `batcher/` and `proposer/` (mirroring `derivation/rpc.go`); vendor Sora/Syne under each static app; tighten CSP to `font-src 'self'`.
+- **Consequence:** H3 regression tests can assume redacted operator logs; no external font fetches at serve time.
+
 ---
 
 ## Escalations
 
-*(none yet)*
+### E-H1-1 — Add `proposer/.gomodcache/` to `.gitignore`
+- **Context:** H1 secrets-hygiene sweep; `batcher/.gomodcache/` and `derivation/.gomodcache/` are gitignored; `proposer/.gomodcache/` is not.
+- **Needed change:** Append `proposer/.gomodcache/` to root `.gitignore` (H2 or operator).
+- **Why not H1:** `.gitignore` outside H1 write allowlist.
+- **Status:** applied to main by integrator (`61f7fce`, 2026-08-04).
 
 ---
 

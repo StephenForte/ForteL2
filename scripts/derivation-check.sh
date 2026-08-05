@@ -103,7 +103,7 @@ reference_el_locked() {
 
 refuse_live_anchor_copy() {
   if reference_el_responds; then
-    echo "ERROR: reference op-geth RPC is up at $L2_RPC_URL — stop the stack before copying datadir" >&2
+    echo "ERROR: reference op-geth RPC is up at $(redact_rpc_url "$L2_RPC_URL") — stop the stack before copying datadir" >&2
     exit 1
   fi
   # RPC-down does not prove process-down (startup/shutdown/hung HTTP still hold
@@ -201,7 +201,7 @@ wait_for_rpc "$SEAL_HTTP" "sealing op-geth"
 # Reference stack health (read-only)
 wait_for_rpc "$L2_RPC_URL" "reference op-geth"
 if ! cast rpc optimism_syncStatus --rpc-url "$L2_NODE_RPC_URL" >/dev/null 2>&1; then
-  echo "ERROR: reference op-node not responding at $L2_NODE_RPC_URL" >&2
+  echo "ERROR: reference op-node not responding at $(redact_rpc_url "$L2_NODE_RPC_URL")" >&2
   exit 1
 fi
 echo "reference op-node is up"

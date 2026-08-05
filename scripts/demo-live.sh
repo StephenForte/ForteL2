@@ -124,7 +124,7 @@ run_health() {
       fail=1
     fi
   else
-    echo "  FAIL  L2 RPC unreachable at $L2_RPC_URL" >&2
+    echo "  FAIL  L2 RPC unreachable at $(redact_rpc_url "$L2_RPC_URL")" >&2
     fail=1
   fi
 
@@ -140,7 +140,7 @@ run_health() {
       fail=1
     fi
   else
-    echo "  FAIL  optimism_syncStatus at $L2_NODE_RPC_URL" >&2
+    echo "  FAIL  optimism_syncStatus at $(redact_rpc_url "$L2_NODE_RPC_URL")" >&2
     fail=1
   fi
 
