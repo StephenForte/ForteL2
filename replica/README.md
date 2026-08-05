@@ -10,7 +10,7 @@ This directory is a thin staging area for the Mac operator — not a second node
 |---|---|
 | Friends / Render | Clone `fortel2-replica` — root `Dockerfile`, `docker compose`, no keys |
 | Operator (this repo) | `./scripts/pack-replica-artifacts.sh` → publish `replica/config/{genesis,rollup}.json` into fortel2-replica after a Sepolia redeploy |
-| Sync check | `./scripts/replica-sync-check.sh` (needs reachable replica RPC) |
+| Sync check | `./scripts/replica-sync-check.sh` (needs reachable replica RPC). The Render deploy is a **private service** with no Mac-reachable URL and no SSH tunneling — use the dashboard **Web Shell** on the running instance instead: python3/urllib JSON-RPC against `localhost:10000` (EL) / `:9545` (op-node); no curl in the image. See `tasks/decisions.md` D-0016. |
 
 ## Consumers (do not forget)
 
@@ -22,7 +22,7 @@ This directory is a thin staging area for the Mac operator — not a second node
 
 Replica is **Phase 3 done**. Money-rail / SOS work does **not** require rebuilding it. It **does** require running the pack/publish/wipe checklist whenever L1 contracts are redeployed.
 
-After SOS-heavy demos, if Mac and replica tips diverge, run `FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh` (set `REPLICA_L2_RPC_URL` to a reachable replica endpoint).
+After SOS-heavy demos, if Mac and replica tips diverge, run `FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh` (set `REPLICA_L2_RPC_URL` to a reachable replica endpoint). For the current private-service Render deploy there is no such endpoint — compare heads via the Web Shell per D-0016 instead.
 
 See `tasks/prd-money-rail.md` § “Replica — do we need to update it?” and README **Network reset procedure**.
 
