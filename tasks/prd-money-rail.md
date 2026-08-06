@@ -44,7 +44,7 @@ Give SOS the **integration PRD**, not this file alone.
 |---|---|---|
 | SOS first deploy on 852 | **No** genesis change | Document SOS/explorer as **read consumers**; prefer replica RPC for reads if reachable |
 | Routine Mac sequencer restart | **No** | Replica derives from L1; verify with `replica-sync-check.sh` if tips diverge |
-| Phase **7** Sepolia redeploy / network wipe | **YES — mandatory** | Announce → redeploy → `pack-replica-artifacts.sh` → push genesis/rollup to fortel2-replica → wipe Mac **and** Render `/data` → hash cross-check (see README Network reset procedure) |
+| redeploy gate (Phase 7 / mainnet-pilot entry) Sepolia redeploy / network wipe | **YES — mandatory** | Announce → redeploy → `pack-replica-artifacts.sh` → push genesis/rollup to fortel2-replica → wipe Mac **and** Render `/data` → hash cross-check (see README Network reset procedure) |
 | Accidental one-sided wipe | **Recover** | Never leave Mac and Render on different genesis under chain 852 |
 | Opening public replica RPC later | Config only | fortel2-replica service exposure; keep keys out of this repo |
 
@@ -85,7 +85,7 @@ Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in
 - **FR-1:** Remain OP Stack / EVM.
 - **FR-2:** Versioned `deployments/rail-interface.json` with chain IDs, RPCs, bridge proxies, fee token, reset policy, replica notes.
 - **FR-3:** SOS deploys existing contracts via CREATE — no ForteL2 Solidity required for MR-1.
-- **FR-4:** Sepolia deployment stays **pinned through Phase 6**; SOS warned that Phase 7 wipes require redeploy.
+- **FR-4:** Sepolia deployment stays **pinned through Phase 6**; SOS warned that redeploy gate (Phase 7 / mainnet-pilot entry) wipes require redeploy.
 - **FR-5:** Replica update checklist stays in README + `replica/README.md` + this PRD (never orphaned).
 
 ---

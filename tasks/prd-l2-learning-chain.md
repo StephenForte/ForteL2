@@ -14,6 +14,11 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 - **Proposer** — posts L2 state output roots to L1 (op-proposer)
 - **Replica / verifier node** — syncs the L2 by deriving it from L1 data (op-node + execution client in non-sequencer mode)
 
+**Phase glossary (used throughout):**
+- **Phase 7 (learning)** — fault proofs / op-challenger, per the roadmap table.
+- **Redeploy gate** — the coordinated Sepolia (or mainnet) contract redeploy + network-wide wipe. An *event*, not a phase; it is the precondition for Phase 7 and for the mainnet pilot.
+- **Mainnet pilot (Phase 9 track)** — the D-0018 program in `tasks/prd-mainnet-pilot.md`.
+
 ## Goals
 
 - Stand up a fully functioning OP Stack devnet (L1 + L2) on a single Mac mini using **native processes** (no containers on this host)
@@ -46,6 +51,7 @@ Build and operate a personal Ethereum L2 modeled on Base's architecture (the OP 
 | **7** | **Fault proofs**: run op-challenger, exercise a dispute game manually against a deliberately bad proposal. **Precondition:** coordinated Sepolia redeploy with deliberately chosen immutables (fault-game clocks, `proofMaturityDelaySeconds`, `disputeGameFinalityDelaySeconds` — minutes-to-hours scale) + completed network reset across all replica operators | Future |
 | **8** | **Decentralized sequencer** exploration (multiple sequencer candidates, leader election) | Future |
 | **9** | **Mainnet production (tentative)**: graduate the L2 to Ethereum mainnet as L1; real ETH for batcher/proposer gas; production key management; requires successful completion of earlier phases + committed friend-operated node network | Future (tentative — decision not locked) |
+| **Pilot** | **Mainnet pilot (Phase 9 track)** — D-0018; see `tasks/prd-mainnet-pilot.md` | Skeleton — next plan expands |
 
 Decision recorded: fault proofs deferred (Q4 = A). On a solo devnet with one trusted proposer there is no adversary; the challenge game is best learned after Phase 5, when output roots are understood from the inside.
 

@@ -221,6 +221,11 @@
 - **Decision:** Options and dependency map are documented in `tasks/spike-t5-write-path.md` (recommend Tailscale after D1 narrow-to-`eth,net,web3`); **loopback stands for now**; US-012 non-loopback go/no-go remains the operator’s.
 - **Consequence:** No ports, binds, or `rail-interface.json` URL changes in this wave; R-02 may truth-up the file without publishing a write URL; transport work waits on operator go after D1.
 
+### D-0021 — Phase-7 vocabulary settled
+- **Context:** "Phase 7" collided across fault-proof learning phase, redeploy wipe event, and mainnet-pilot program (P1-6 / R-06).
+- **Decision:** Glossary in `prd-l2-learning-chain.md`: Phase 7 (learning) = fault proofs; Redeploy gate = wipe event; Mainnet pilot = Phase 9 track (D-0018). Pilot PRD and money-rail FR-4/replica row use that vocabulary.
+- **Consequence:** Readers treat bare "Phase 7" as the learning fault-proof phase; wipe/mainnet entry is always "redeploy gate".
+
 ---
 
 ## Escalations

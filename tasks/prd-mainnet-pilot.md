@@ -1,4 +1,4 @@
-# PRD — Mainnet pilot L2 (Phase 7 "go-live") — SKELETON
+# PRD — Mainnet pilot — Phase 9 track; entered via the redeploy gate — SKELETON
 
 **Status:** skeleton (2026-08-05) · **Owner:** VP Eng · **Charter:** D-0018
 **Expand via:** the next parallel plan turns each `P7-x` block into full spec + FRDs + user stories (US-P7-xxx) using the D-0001..D-0017 program's contract template (`tasks/plan-parallel-integration.md` §5).
@@ -25,11 +25,13 @@ the bank settles stablecoin transfers on this rail (or builds its own SOS-like a
 | 2 | DA = **blobs** (EIP-4844); span batches; relaxed channel + proposal cadence (cost over latency — time-to-safe target set in P7-0). |
 | 3 | `derivation/` verifier is the **counterparty audit tool** — every institutional counterparty gets replica pack + verifier. |
 | 4 | L1 access: **self-hosted primary + paid fallback**, router pattern generalized from `replica/l1_rpc_router.py`. QuickNode demoted to fallback. |
-| 5 | Sepolia 852 remains **staging**; mainnet deploy is the Phase 7 gate (fresh genesis, replica republish, pack/publish/wipe checklist). |
+| 5 | Sepolia 852 remains **staging**; mainnet deploy goes through the **redeploy gate** (fresh genesis, replica republish, pack/publish/wipe checklist). |
 | 6 | Key custody is **gating**: HSM/MPC for hot keys, multisig admin + timelock, external security audit before pilot funds. |
 | 7 | Public-DA transparency is **disclosed to the pilot up front**; any mitigation (netting, omnibus structuring) is app-layer, not chain-layer. |
 
 ## 3. Phase blocks (each becomes a wave in the next plan)
+
+P7 block IDs below are stable identifiers, not a phase number.
 
 ### P7-0 — Decision spikes (sequential, before infra spend)
 - [ ] **T5 revival:** stable off-box write URL for SOS (the deliberately-parked money-rail open question). Deliverable: go/no-go + rail-interface v2 draft.
