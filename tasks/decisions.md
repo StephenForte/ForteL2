@@ -246,6 +246,11 @@
 - **Decision:** Wave 4 = **R-10** alone (consumer-facing availability + write-path docs) off tag **`wave12-base`** (the commit adding this entry), prompt `tasks/worker-prompts/R-10-consumer-docs.md`. R-10 additionally closes **E-R02-1** (the `rail-interface.json` `notes` sentence contradicting `replica.readRpcUrl: null`) as a sanctioned scope extension, wording-only, no version bump. Its own decisions entry is **D-0025**; this entry is the dispatch note and is superseded in numbering by R-10's append.
 - **Consequence:** After R-10 merges, the review's §4 Final QA runs in full (automated by integrator; live/host section by operator). Then the R-programme is closed and the next plan is the mainnet-pilot expansion per D-0018. Outstanding operator items carried forward: US-012 write-path go/no-go (D-0019), H4-004 wake confirmation, and batcher gas runway (P1-5, first live burn recorded in `hardening-findings.md`).
 
+### D-0025 — Consumer docs carry availability + write-path status; E-R02-1 closed
+- **Context:** P0-3(b) — nightly downtime and loopback-only writes were true in the repo (R-01…R-03) but invisible to a SettlementOS integrator reading only consumer docs; `fortel2-sepolia.notes` still said prefer replica reads when reachable despite `replica.readRpcUrl: null`.
+- **Decision:** README SOS onboarding step 0, coordination onboarding gate, and money-rail FR-2 now state availability (**23:00–04:00** local) and write-path status (loopback today; US-012 go/no-go outstanding; link `tasks/spike-t5-write-path.md`). E-R02-1 closed by rewriting the one `notes` sentence — reads today land on the sequencer; no reachable replica URL (D-0016); no version/`updated` bump.
+- **Consequence:** SOS can plan retry/backoff and colocation from README alone; off-box writes remain blocked on the operator US-012 go/no-go from D-0019.
+
 ---
 
 ## Escalations

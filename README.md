@@ -77,10 +77,11 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 
 **SOS onboarding (operator):**
 
+0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:00–04:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are loopback-only today (`http://127.0.0.1:9545`); no off-box tunnel is approved — operator US-012 go/no-go is outstanding (options + Tailscale recommendation in [`tasks/spike-t5-write-path.md`](tasks/spike-t5-write-path.md)).
 1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
 2. Fund the SOS deployer on L2: deposit L1→L2 with `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` (credits `ADMIN_ADDRESS` on L2), then transfer to the SOS deployer — note the env file must be sourced in *this* shell (the `FORTEL2_ENV=…` prefix only reaches the script's subprocess): `( set -a; source .env.sepolia; set +a; cast send <SOS_DEPLOYER_ADDRESS> --value <amount> --rpc-url "$L2_RPC_URL" --private-key "$ADMIN_PRIVATE_KEY" )`.
 3. Point SettlementOS at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545` today) and deploy SOS contracts on chain **852**.
-4. **Writes** (tx submit, contract deploy) → Mac sequencer L2 RPC. **Reads** (explorer, heavy indexing) → Render replica RPC when reachable (see `replica/README.md`).
+4. **Writes** (tx submit, contract deploy) → Mac sequencer L2 RPC (loopback; see step 0). **Reads** today land on the same sequencer endpoint — the replica has no Mac-reachable URL (D-0016; Render Web Shell only; see `replica/README.md`).
 
 **Replica reminder:** Phase 3 is done. Republish genesis/rollup to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only on a Sepolia **redeploy** (next expected: Phase 7). Do not pack/publish “just in case” while the deployment is pinned through Phase 6. See `replica/README.md` and the Network reset procedure under Phase 3.
 

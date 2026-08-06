@@ -74,7 +74,7 @@
         "rollupConfig": "deployments/sepolia/.deployer/rollup.json"
       },
       "sosRecommended": true,
-      "notes": "Primary SOS target. Writes: Mac sequencer L2 RPC (loopback today). Reads: prefer replica when reachable. Do not share QuickNode L1 URL/token with Render."
+      "notes": "Primary SOS target. Writes: Mac sequencer L2 RPC (loopback today). Reads today land on the sequencer endpoint; the replica has no reachable URL (D-0016). Do not share QuickNode L1 URL/token with Render."
     }
   },
   "availability": {

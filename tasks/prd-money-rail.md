@@ -85,7 +85,7 @@ Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in
 ## Functional requirements
 
 - **FR-1:** Remain OP Stack / EVM.
-- **FR-2:** Versioned `deployments/rail-interface.json` with chain IDs, RPCs, bridge proxies, fee token, reset policy, replica notes.
+- **FR-2:** Versioned `deployments/rail-interface.json` with chain IDs, RPCs, bridge proxies, fee token, reset policy, replica notes, availability (nightly sleep/wake window).
 - **FR-3:** SOS deploys existing contracts via CREATE — no ForteL2 Solidity required for MR-1.
 - **FR-4:** Sepolia deployment stays **pinned through Phase 6**; SOS warned that redeploy gate (Phase 7 / mainnet-pilot entry) wipes require redeploy.
 - **FR-5:** Replica update checklist stays in README + `replica/README.md` + this PRD (never orphaned).
