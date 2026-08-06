@@ -45,3 +45,27 @@ Drill-found fixes (post-wave, committed to main):
 | H4-002 | `sepolia-fund-check.sh` example `cast send` hints expanded the raw tokenized L1 URL (missed by H1's sweep — same class as H1-001) | Print literal `$L1_RPC_URL` (`d9713eb`) |
 | H4-003 | Repo said wake=05:00; installed LaunchAgent fires 04:00 | Docs + checked-in plist trued up (`859803a`) |
 | H4-004 | Wake actually fired 05:00:07 on 2026-08-05 despite plist file saying Hour=4 — launchd still runs the previously **loaded** definition; plist edits require `launchctl bootout` + `bootstrap` to take effect | Operator action: reload `com.steve.fortel2-wake` (one-liner provided); verify next-morning wake at 04:00 |
+
+---
+
+## R-wave (2026-08-05) — gas runway first live measurement
+
+`scripts/gas-runway.sh` (R-05) went live the same day the review flagged P1-5 ("floors answer
+*above the line?*, nobody answers *for how long?*"). Its first two real samples, 65 min apart on
+2026-08-05 evening:
+
+| Role | Balance | Floor | Burn | Runway |
+|---|---|---|---|---|
+| BATCHER | 0.1395 ETH | 0.15 | **0.169 ETH/day** | **below floor** (exit 2) |
+| PROPOSER | 0.500 ETH | 0.15 | ~0 over the interval | n/a |
+
+So P1-5 was not hypothetical: the batcher crossed under its floor on the day the meter shipped,
+with roughly 20 h of runway left at that rate (less the nightly 23:00–04:00 sleep, which pauses
+the burn). 0.169 ETH/day is the calldata + 30-block-channel + 5-min-proposal profile D-0018
+already diagnosed as a tuning artifact — blobs + span batches + relaxed cadence are the P7-0 fix,
+not a staging-time change. Operator response: a self-funding cron test was already in flight;
+verification scheduled post-wake (~04:05) rather than mid-sleep-window.
+
+Samples land in `$DATA_DIR/gas-samples.jsonl` (gitignored `data-sepolia/`), **not** repo `data/`
+as the R-05 card assumed — accepted deviation: `$DATA_DIR` is where the Sepolia stack already
+keeps state, and it keeps samples out of the repo tree entirely.
