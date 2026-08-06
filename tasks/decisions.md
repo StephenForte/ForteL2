@@ -241,6 +241,11 @@
 - **Decision:** Wave 3 = R-04 (rail-interface drift guard) then R-09 (small fixes), run **one at a time, not in parallel**, off tag **`wave10-base`** (the commit adding this entry). R-04 merges before R-09 starts. Rationale: they are the only two remaining pre-R-10 tasks, both small, and serial execution removes both the `test-helpers.sh` append collision and the folder ambiguity entirely — parallelism buys minutes here and costs clarity.
 - **Consequence:** R-09's prompt tells it to confirm its base tag at branch time (it may be a post-R-04 tag). Wave 4 (R-10, consumer docs) follows from `wave11-base` and closes the R-programme; the review's §4 Final QA runs in full after it. Integrator-found items folded into Wave 3: stale `21:00` in `prd-mainnet-pilot.md:48` → R-09.
 
+### D-0025-pending — Wave 3 merged; Wave 4 dispatched (R-10, final task); base: tag `wave12-base`
+- **Context:** Wave 3 ran **serially** per D-0024 and it worked cleanly: R-04 (`805395c`, offline drift guard + CI step, 20 PASS, E-R04-1 scoping `l2Metadata.rollupConfig` out because `deployments/sepolia/.deployer/` is gitignored and absent on CI) then R-09 (`41c5941`, router reference, D-0016 env comment, `TestSepoliaGoldenReplay` rename, stale 21:00). Nine of ten R-tasks are merged; suites green at each step.
+- **Decision:** Wave 4 = **R-10** alone (consumer-facing availability + write-path docs) off tag **`wave12-base`** (the commit adding this entry), prompt `tasks/worker-prompts/R-10-consumer-docs.md`. R-10 additionally closes **E-R02-1** (the `rail-interface.json` `notes` sentence contradicting `replica.readRpcUrl: null`) as a sanctioned scope extension, wording-only, no version bump. Its own decisions entry is **D-0025**; this entry is the dispatch note and is superseded in numbering by R-10's append.
+- **Consequence:** After R-10 merges, the review's §4 Final QA runs in full (automated by integrator; live/host section by operator). Then the R-programme is closed and the next plan is the mainnet-pilot expansion per D-0018. Outstanding operator items carried forward: US-012 write-path go/no-go (D-0019), H4-004 wake confirmation, and batcher gas runway (P1-5, first live burn recorded in `hardening-findings.md`).
+
 ---
 
 ## Escalations
