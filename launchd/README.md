@@ -6,8 +6,10 @@ User agents only run while that user session is logged in (auto-login on the min
 | Label | When (local) | What |
 |---|---|---|
 | `com.steve.fortel2-health` | load + daily **05:05** | `refresh_health.sh` → `data/pipeline-health.json` |
-| `com.steve.fortel2-sleep` | daily **21:00** | `run_dev_sleep.sh` → Sepolia `dev-sleep sleep` |
+| `com.steve.fortel2-sleep` | daily **23:00** | `run_dev_sleep.sh` → Sepolia `dev-sleep sleep` |
 | `com.steve.fortel2-wake` | daily **04:00** | `run_dev_wake.sh` → Sepolia `dev-sleep wake` |
+
+Checked-in plists under `launchd/` are the **source of truth**. Editing a plist (or copying an updated one into `~/Library/LaunchAgents/`) does nothing until you `bootout` + `bootstrap` that agent — launchd keeps the previously loaded job (H4-004). Run `./scripts/check-launchd.sh` to verify installed agents match the repo schedule and script paths (read-only; it never mutates launchd state).
 
 **Logs** go to `~/Library/Logs/fortel2-{health,sleep,wake}.{out,err}.log` (not repo `data/`).  
 launchd opens those paths *before* starting the script, so the parent directory must already exist — `~/Library/Logs` always does on macOS; gitignored `data/` does not on a fresh clone.
