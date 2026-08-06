@@ -236,6 +236,11 @@
 - **Decision:** Bump to `"version": "2"`, `"updated": "2026-08-05"`: rewrite `resetPolicy` (Phase 6 done; 2026-07-22 deploy remains pinned per D-0018), set `replica.readRpcUrl` to `null` with Web Shell `accessModel` (D-0016), add top-level `availability` (23:00–04:00 America/Los_Angeles), `l2Metadata`, and `openQuestions`. No bridge proxy, chain ID, or sequencer/L1 RPC URL values changed; no write URL published.
 - **Consequence:** SOS/consumers treat v2 as the contract; R-04 may add a drift guard against `deployments/sepolia/deployments.json`; post–US-012 go write URL is a later bump per `tasks/spike-t5-write-path.md` §5.
 
+### D-0024 — Wave 2 merged; Wave 3 dispatched (R-04, R-09) **serially**; base: tag `wave10-base`
+- **Context:** Wave 2 squash-merged R-02 (`58945d5`) → R-07 (`3450042`) → R-08 (`801e434`), plus the first live gas-runway record (`5cec454`). All suites green post-merge; pushed `cac380d..5cec454`. Running three workers concurrently through one working folder made the app's branch label unreliable (it showed the last-selected branch while another session wrote); git showed **no cross-contamination** — each branch held exactly its allowlisted files — but the operator lost real time to the ambiguity.
+- **Decision:** Wave 3 = R-04 (rail-interface drift guard) then R-09 (small fixes), run **one at a time, not in parallel**, off tag **`wave10-base`** (the commit adding this entry). R-04 merges before R-09 starts. Rationale: they are the only two remaining pre-R-10 tasks, both small, and serial execution removes both the `test-helpers.sh` append collision and the folder ambiguity entirely — parallelism buys minutes here and costs clarity.
+- **Consequence:** R-09's prompt tells it to confirm its base tag at branch time (it may be a post-R-04 tag). Wave 4 (R-10, consumer docs) follows from `wave11-base` and closes the R-programme; the review's §4 Final QA runs in full after it. Integrator-found items folded into Wave 3: stale `21:00` in `prd-mainnet-pilot.md:48` → R-09.
+
 ---
 
 ## Escalations
