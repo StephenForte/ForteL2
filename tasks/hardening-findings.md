@@ -69,3 +69,32 @@ verification scheduled post-wake (~04:05) rather than mid-sleep-window.
 Samples land in `$DATA_DIR/gas-samples.jsonl` (gitignored `data-sepolia/`), **not** repo `data/`
 as the R-05 card assumed — accepted deviation: `$DATA_DIR` is where the Sepolia stack already
 keeps state, and it keeps samples out of the repo tree entirely.
+
+### H4-004 — CLOSED (2026-08-06)
+
+The wake agent fired at **04:00** as configured: `~/Library/Logs/fortel2-wake.out.log` last written
+`Aug 6 04:00`, run reaching `=== Sepolia L2 stack is up ===` with L2 block 652942 on chain 852.
+This was the proof outstanding since 2026-08-05, when wake fired 05:00 despite `Hour=4` in the
+plist file — launchd runs the *loaded* definition, so plist edits need `bootout` + `bootstrap`
+(the operator reloaded it, and `scripts/check-launchd.sh` now verifies repo-vs-installed on demand).
+Full nightly cycle is therefore confirmed end to end: sleep 23:00, wake 04:00, stack self-restarts.
+
+### Batcher self-funding — first observed top-up
+
+| Time (PT) | BATCHER | Δ | L2 block |
+|---|---|---|---|
+| 2026-08-05 18:15 | 0.1472 ETH | — | 648006 |
+| 2026-08-05 19:20 | 0.1395 ETH | −0.0077 (65 min → **0.169 ETH/day**) | 649967 |
+| 2026-08-06 04:05 | 0.3958 ETH | **+0.2563** (operator self-fund cron) | 653608 |
+
+The cron works. `gas-runway.sh` correctly skipped the top-up interval rather than reporting a
+negative burn — the R-05 edge case, confirmed against real data — and kept the last genuine burn
+measurement, so it still reports `0.169 ETH/day` and now `days_to_floor=1.452`, exit **2**
+(under the 3-day `GAS_RUNWAY_MIN_DAYS` default).
+
+**Standing implication:** a ~0.256 ETH top-up buys roughly 1.5 days at the measured evening burn
+rate (less in practice, since the nightly 23:00–04:00 sleep pauses the burn — call it ~1.8 days).
+The cron must therefore run at least daily, or top up a larger amount, to keep the batcher off the
+floor. This is a staging-economics artifact of the current calldata + 30-block-channel + 5-minute-
+proposal profile; the structural fix (blobs + span batches + relaxed cadence) is P7-0 in
+`tasks/prd-mainnet-pilot.md`, not a change to make on 852.
