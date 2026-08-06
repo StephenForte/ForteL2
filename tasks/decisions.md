@@ -231,9 +231,20 @@
 - **Decision:** Wave 2 = R-02 (rail-interface v2), R-07 (PRD hygiene + Phase-7 wording sweep R-06 escalated), R-08 (verification-limitation doc + E-R06-1 one-liner) on branches off tag **`wave9-base`** (the commit adding this entry). Prompts: `tasks/worker-prompts/R-02-rail-interface-v2.md`, `R-07-prd-hygiene.md`, `R-08-verify-limitation.md`. Merge order R-02 → R-07 → R-08. D-0020 remains reserved for R-02.
 - **Consequence:** Wave 3 (R-04, R-09) branches from `wave10-base` after Wave 2 merges; H4-004 closes on the first post-reconcile 04:00 wake log; second gas sample due ≥1 h after the first.
 
+### D-0020 — `rail-interface.json` v2 truth-up (addresses unchanged)
+- **Context:** P0-2 / P0-3(b) — v1 (`updated` 2026-07-24) still said Phase 6 pin, advertised a non-existent replica read URL, and omitted nightly downtime; R-01 (D-0019) left loopback / no published write URL.
+- **Decision:** Bump to `"version": "2"`, `"updated": "2026-08-05"`: rewrite `resetPolicy` (Phase 6 done; 2026-07-22 deploy remains pinned per D-0018), set `replica.readRpcUrl` to `null` with Web Shell `accessModel` (D-0016), add top-level `availability` (23:00–04:00 America/Los_Angeles), `l2Metadata`, and `openQuestions`. No bridge proxy, chain ID, or sequencer/L1 RPC URL values changed; no write URL published.
+- **Consequence:** SOS/consumers treat v2 as the contract; R-04 may add a drift guard against `deployments/sepolia/deployments.json`; post–US-012 go write URL is a later bump per `tasks/spike-t5-write-path.md` §5.
+
 ---
 
 ## Escalations
+
+### E-R02-1 — `fortel2-sepolia.notes` still says prefer replica reads when reachable
+- **Context:** R-02 set `replica.readRpcUrl` to `null` (D-0016); `notes` still says "Reads: prefer replica when reachable."
+- **Needed change:** Align the notes sentence with null read URL / sequencer interim reads (D8 in T5 spike); card steps did not authorize a notes rewrite.
+- **Why not R-02:** Outside the nine instruction steps; left for integrator or R-10 consumer-doc pass.
+- **Status:** open.
 
 ### E-H1-1 — Add `proposer/.gomodcache/` to `.gitignore`
 - **Context:** H1 secrets-hygiene sweep; `batcher/.gomodcache/` and `derivation/.gomodcache/` are gitignored; `proposer/.gomodcache/` is not.

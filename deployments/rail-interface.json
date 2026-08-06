@@ -1,7 +1,7 @@
 {
   "$schema_note": "ForteL2 rail interface for SettlementOS and explorers. Version bumps when chain ID, bridge proxies, or reset policy change.",
-  "version": "1",
-  "updated": "2026-07-24",
+  "version": "2",
+  "updated": "2026-08-05",
   "docs": {
     "moneyRailPrd": "tasks/prd-money-rail.md",
     "coordination": "tasks/coordination-settlementos.md",
@@ -52,8 +52,10 @@
         "status": "phase3-done",
         "repo": "https://github.com/StephenForte/fortel2-replica",
         "syncMode": "derive-from-sepolia-l1",
-        "readRpcUrl": "operator-configured (Render private service / shell; not committed)",
+        "readRpcUrl": null,
         "writeRpcUrl": null,
+        "accessModel": "render-private-service-web-shell",
+        "note": "No Mac-reachable replica RPC URL exists (D-0016). Access is Render private-service Web Shell only — see tasks/decisions.md D-0016 and replica/README.md.",
         "updateTriggers": [
           "Phase 7 Sepolia redeploy / network-wide wipe only while deployment pinned through Phase 6",
           "After redeploy: pack-replica-artifacts.sh → publish genesis+rollup → wipe Mac data-sepolia AND Render /data → hash cross-check"
@@ -64,10 +66,23 @@
           "settlementos-explorer (optional)"
         ]
       },
-      "resetPolicy": "Sepolia L1 contracts + genesis pinned through learning Phase 6. Next redeploy is Phase 7 entry gate — coordinated wipe for Mac sequencer, Render replica, and all SOS contract deployments.",
+      "resetPolicy": "Phase 6 completed 2026-08-04. The 2026-07-22 deployment remains pinned — 852 is the staging chain per D-0018. The next redeploy is the Phase 7 / mainnet-pilot gate and is a coordinated network-wide wipe.",
+      "l2Metadata": {
+        "blockTime": 2,
+        "nativeCurrency": "ETH",
+        "deploymentsJson": "deployments/sepolia/deployments.json",
+        "rollupConfig": "deployments/sepolia/.deployer/rollup.json"
+      },
       "sosRecommended": true,
       "notes": "Primary SOS target. Writes: Mac sequencer L2 RPC (loopback today). Reads: prefer replica when reachable. Do not share QuickNode L1 URL/token with Render."
     }
+  },
+  "availability": {
+    "model": "operator-scheduled",
+    "sleepLocal": "23:00",
+    "wakeLocal": "04:00",
+    "timezone": "America/Los_Angeles",
+    "note": "Personal L2 on a Mac mini. No uptime commitment. The sequencer RPC is stopped nightly; writes and reads against the sequencer will fail during the window. Replica derivation resumes automatically from L1 after wake."
   },
   "healthChecks": {
     "localOrSepoliaL2": [
@@ -76,7 +91,7 @@
       "cast gas-price --rpc-url http://127.0.0.1:9545"
     ],
     "replica": [
-      "FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=<url> ./scripts/replica-sync-check.sh"
+      "Current deploy is a Render private service checked via the Render Web Shell (python3/urllib against localhost:10000 EL, :9545 op-node). scripts/replica-sync-check.sh applies only if a Mac-reachable replica endpoint ever exists."
     ]
   },
   "sosGate": {
@@ -90,5 +105,8 @@
       "paymaster",
       "canonical-usdc"
     ]
-  }
+  },
+  "openQuestions": [
+    "networkId string not yet confirmed by SettlementOS (fortel2-sepolia vs forte-l2) — must match the SOS network registry entry"
+  ]
 }
