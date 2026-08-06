@@ -24,7 +24,7 @@ the bank settles stablecoin transfers on this rail (or builds its own SOS-like a
 | 1 | **Stock OP Stack releases** for sequencer/batcher/proposer. Custom `batcher/`/`proposer/` modules stay frozen: learning artifacts + emergency backup only. |
 | 2 | DA = **blobs** (EIP-4844); span batches; relaxed channel + proposal cadence (cost over latency — time-to-safe target set in P7-0). |
 | 3 | `derivation/` verifier is the **counterparty audit tool** — every institutional counterparty gets replica pack + verifier. |
-| 4 | L1 access: **self-hosted primary + paid fallback**, router pattern generalized from `replica/l1_rpc_router.py`. QuickNode demoted to fallback. |
+| 4 | L1 access: **self-hosted primary + paid fallback**, router pattern generalized from the L1 RPC router in the `fortel2-replica` repo (`l1_rpc_router.py`, not in this tree). QuickNode demoted to fallback. |
 | 5 | Sepolia 852 remains **staging**; mainnet deploy goes through the **redeploy gate** (fresh genesis, replica republish, pack/publish/wipe checklist). |
 | 6 | Key custody is **gating**: HSM/MPC for hot keys, multisig admin + timelock, external security audit before pilot funds. |
 | 7 | Public-DA transparency is **disclosed to the pilot up front**; any mitigation (netting, omnibus structuring) is app-layer, not chain-layer. |
@@ -45,7 +45,7 @@ P7 block IDs below are stable identifiers, not a phase number.
 - [ ] Self-hosted L1 full node + consensus client (blob sidecar retention); paid fallback; primary/fallback router.
 - [ ] Mainnet deploy: fresh contract set + genesis (redeploy gate); stock op-node/op-geth/op-batcher (blobs)/op-proposer at pinned release tags.
 - [ ] Fee config: L2 basefee floor, L1-fee scalars, per-transfer cost measured against P7-0 target.
-- [ ] Monitoring/alerting to replace dev-sleep-era habits (the chain no longer sleeps at 21:00).
+- [ ] Monitoring/alerting to replace dev-sleep-era habits (the chain no longer sleeps at 23:00).
 
 ### P7-2 — Replicas + audit distribution
 - [ ] Operator standby verifier (second provider/region; Render replica pattern).

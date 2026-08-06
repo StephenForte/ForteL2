@@ -71,7 +71,7 @@ func TestDecodeSyntheticChannel(t *testing.T) {
 	}
 }
 
-func TestSepoliaGoldenSkipped(t *testing.T) {
+func TestSepoliaGoldenReplay(t *testing.T) {
 	path := filepath.Join("testdata", "sepolia", "window.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
