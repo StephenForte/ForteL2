@@ -216,6 +216,11 @@
 - **Decision:** Dispatch Wave 1 (R-01, R-03, R-05, R-06) in parallel on branches off tag **`wave8-base`** (the commit adding this entry). Wave 2 (R-02, R-07, R-08) starts only after Wave 1 merges and retags `wave9-base`; Wave 3 (R-04, R-09) after `wave10-base`; Wave 4 (R-10) after `wave11-base`. Wave tags never move. R-01's operator go/no-go (US-012 non-loopback review) is a human decision after Wave 1, not a worker deliverable.
 - **Consequence:** IDs D-0019 (R-01), D-0020 (R-02), D-0021 (R-06) are pre-reserved per `tasks/plan-parallel-review-fixes.md` §5 and will append out of numeric order relative to this entry — append order, not ID order, reflects merge order. Handoff reports are reviewed against `tasks/plan-parallel-review-fixes.md` §7 before merge.
 
+### D-0019 — SOS write-path options recorded (T5 revival)
+- **Context:** P0-1 / money-rail open question — SOS has no documented off-box write path to chain 852; sequencer RPC is loopback-only with a wide `eth,net,web3,debug,txpool,admin,miner` surface (`scripts/04-start-sequencer-sepolia.sh`).
+- **Decision:** Options and dependency map are documented in `tasks/spike-t5-write-path.md` (recommend Tailscale after D1 narrow-to-`eth,net,web3`); **loopback stands for now**; US-012 non-loopback go/no-go remains the operator’s.
+- **Consequence:** No ports, binds, or `rail-interface.json` URL changes in this wave; R-02 may truth-up the file without publishing a write URL; transport work waits on operator go after D1.
+
 ---
 
 ## Escalations
