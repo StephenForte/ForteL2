@@ -226,6 +226,11 @@
 - **Decision:** Glossary in `prd-l2-learning-chain.md`: Phase 7 (learning) = fault proofs; Redeploy gate = wipe event; Mainnet pilot = Phase 9 track (D-0018). Pilot PRD and money-rail FR-4/replica row use that vocabulary.
 - **Consequence:** Readers treat bare "Phase 7" as the learning fault-proof phase; wipe/mainnet entry is always "redeploy gate".
 
+### D-0023 — Wave 1 merged; Wave 2 dispatched (R-02, R-07, R-08); base: tag `wave9-base`
+- **Context:** Wave 1 squash-merged in order R-01 (`7d9ec0d`) → R-03 (`d07102b`, incl. E-R03-1 wake-comment fix by integrator) → R-06 (`3bc8472`, decisions append conflict resolved in merge order) → R-05 (`0964b2d`). Full `test-helpers.sh` green post-merge incl. five new gas-runway cases; `check-launchd.sh` live run OK (1 WARN: fdautil wrapper) after operator removed the stale `dev-wake` plist; first gas sample recorded (samples live in `$DATA_DIR`, not repo `data/` — accepted deviation, safer than the card's location).
+- **Decision:** Wave 2 = R-02 (rail-interface v2), R-07 (PRD hygiene + Phase-7 wording sweep R-06 escalated), R-08 (verification-limitation doc + E-R06-1 one-liner) on branches off tag **`wave9-base`** (the commit adding this entry). Prompts: `tasks/worker-prompts/R-02-rail-interface-v2.md`, `R-07-prd-hygiene.md`, `R-08-verify-limitation.md`. Merge order R-02 → R-07 → R-08. D-0020 remains reserved for R-02.
+- **Consequence:** Wave 3 (R-04, R-09) branches from `wave10-base` after Wave 2 merges; H4-004 closes on the first post-reconcile 04:00 wake log; second gas sample due ≥1 h after the first.
+
 ---
 
 ## Escalations
