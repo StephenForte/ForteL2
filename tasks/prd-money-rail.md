@@ -25,10 +25,10 @@ Give SOS the **integration PRD**, not this file alone.
 |---|---|---|---|
 | **G0 — blocked** | Before Phase 1 blocks | Nothing | — |
 | **G1 — earliest code** | Phase 1 local L2 (901) up | Optional offline adapter against `fortel2-local` | Ephemeral; resets freely |
-| **G2 — recommended start (NOW)** | Phase **2c+** Sepolia L2 **852** + batcher/proposer | **F1–F5**: registry, deploy contracts, single-chain settle, MMF | Pin: no Sepolia redeploy until Phase 7 |
+| **G2 — recommended start (NOW)** | Phase **2c+** Sepolia L2 **852** + batcher/proposer | **F1–F5**: registry, deploy contracts, single-chain settle, MMF | Pin: no Sepolia redeploy until the redeploy gate (Phase 7 / mainnet-pilot entry) |
 | **G3 — preferred reads** | Phase **3** Render replica ✅ | Point explorer / heavy reads at replica RPC | Writes still go to Mac sequencer (loopback or future tunnel) |
 | **G4 — partner-facing** | Replica stable + SOS settle demo green | Demo to partners on 852 | Best-effort uptime; personal L2 |
-| **G5 — after wipe** | Phase **7** redeploy | Redeploy SOS contracts; update explorer address book | Coordinated with replica pack/publish |
+| **G5 — after wipe** | redeploy gate (Phase 7 / mainnet-pilot entry) | Redeploy SOS contracts; update explorer address book | Coordinated with replica pack/publish |
 
 **Do not wait for:** Phase 3b (friends), Phase 4–6 client rebuilds, paymaster, or canonical USDC before SOS starts.
 
@@ -48,7 +48,7 @@ Give SOS the **integration PRD**, not this file alone.
 | Accidental one-sided wipe | **Recover** | Never leave Mac and Render on different genesis under chain 852 |
 | Opening public replica RPC later | Config only | fortel2-replica service exposure; keep keys out of this repo |
 
-**Pinned through Phase 6:** do not pack/publish “just in case.” Packing without a redeploy republishes the same genesis. Next expected replica artifact update = **Phase 7**.
+**Pinned through Phase 6:** do not pack/publish “just in case.” Packing without a redeploy republishes the same genesis. Next expected replica artifact update = the **redeploy gate** (Phase 7 / mainnet-pilot entry).
 
 ---
 
@@ -71,12 +71,14 @@ Give SOS the **integration PRD**, not this file alone.
 |---|---|---|
 | **MR-0** | Publish rail interface + SOS/Replica lifecycle gates (this PRD) | **Done** (2026-08-04) |
 | **MR-1** | SOS can deploy + settle on **852** (Mac sequencer RPC) | Ready for SOS (infra done) |
-| **MR-2** | Document replica as preferred read path; optional read URL in rail interface | Ready (replica ✅) |
+| **MR-2** | Document replica as preferred read path; optional read URL in rail interface | **Blocked — no reachable replica read URL (D-0016); rail interface documents the Web Shell access model instead** |
 | **MR-3** | Fee/paymaster spikes (only if SOS needs them) | Later |
 | **MR-4** | Canonical USDC path | Later |
 | **MR-5** | Optional predeploy / AuditAnchor | After SOS stable on 852 |
 
-Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in parallel and **must not** redeploy L1 or break SOS addresses before Phase 7.
+Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in parallel and **must not** redeploy L1 or break SOS addresses before the redeploy gate (Phase 7 / mainnet-pilot entry).
+
+**Program closeout (D-0017):** ForteL2 in-scope work for the parallel-integration program is closed and operator-verified; remaining MR-1/MR-2 delivery depends on SOS and the D-0016 access model.
 
 ---
 
@@ -96,7 +98,7 @@ Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in
 **Acceptance Criteria:**
 - [x] `deployments/rail-interface.json` committed with local (901) + Sepolia (852) entries
 - [x] Documents OptimismPortal / L1StandardBridge proxies for Sepolia from `deployments/sepolia/deployments.json`
-- [x] Reset policy: Phase 1 may reset freely; Sepolia pinned until Phase 7; Phase 7 = coordinated wipe including replica
+- [x] Reset policy: Phase 1 may reset freely; Sepolia pinned until the redeploy gate (Phase 7 / mainnet-pilot entry); that gate = coordinated wipe including replica
 - [x] Links to SOS integration PRD + coordination doc
 - [x] `cast` health examples in README or rail-interface comments/README section
 
@@ -104,7 +106,7 @@ Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in
 **Acceptance Criteria:**
 - [x] README “SettlementOS” subsection: start Sepolia stack, fund deployer via bridge/deposit, point SOS at `L2_RPC_URL`, deploy
 - [x] Explicit: SOS writes → sequencer RPC; SOS/explorer reads → replica when available
-- [x] Replica update triggers listed (Phase 7 only for genesis republish)
+- [x] Replica update triggers listed (redeploy gate (Phase 7 / mainnet-pilot entry) only for genesis republish)
 
 ### US-MR-003: Replica consumer note
 **Acceptance Criteria:**
@@ -123,7 +125,7 @@ Payment APIs, compliance, `PaymentSettlement` features, `TokenizedMMF` rules, FX
 
 - SOS settles one ACME→Tokyo-style payment on chain 852 with audit hashes
 - Rail interface readable without a meeting
-- Phase 7 reset runbook still mentions replica **before** anyone wipes Mac-only
+- Redeploy-gate (Phase 7 / mainnet-pilot entry) reset runbook still mentions replica **before** anyone wipes Mac-only
 - Zero duplicate escrow/MMF implementations
 
 ## Open questions
