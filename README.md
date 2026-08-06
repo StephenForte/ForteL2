@@ -681,6 +681,8 @@ Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **85
 
 **Batcher funding:** calldata posts burn Sepolia ETH on the batcher address. Keep a buffer (≥ ~0.15 ETH; more if you leave it running). Drip faucets into the **harvest** wallet, then top up batcher/proposer when `sepolia-fund-check.sh` shows NEED — not every day if the buffer is healthy. With the credit-budget batcher defaults (`max-channel-duration=30`), L1 posts are far less frequent than the old `=2` profile — gas spend drops with them.
 
+**Gas runway:** `FORTEL2_ENV=.env.sepolia ./scripts/gas-runway.sh` appends one L1 balance sample (batcher + proposer) to gitignored `$DATA_DIR/gas-samples.jsonl` each run; once ≥2 samples span ≥1 hour it reports burn/day and days-to-floor (same 0.15 ETH floors as `sepolia-fund-check.sh`, skipping top-up intervals). The first run only records a sample and prints `INSUFFICIENT SAMPLES` (exit 0); exit 2 means either role is under `GAS_RUNWAY_MIN_DAYS` (default 3) days of runway; exit 0 with a burn readout means the buffer looks healthy at the current rate.
+
 Set Render’s `L1_RPC_URL` secret to the **Render-only** QuickNode endpoint (not the Mac mini URL). Near credit caps set `L1_USE_PUBLIC_RPC=1` so the replica uses publicnode without wiping the QuickNode secret (see Phase 2d).
 
 ```bash

@@ -806,6 +806,99 @@ else
   fail=1
 fi
 
+# gas-runway.sh: analyze-only fixtures (no RPC / cast / Sepolia env).
+GAS_RUNWAY="$SCRIPT_DIR/gas-runway.sh"
+GAS_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-gas-runway.XXXXXX")"
+cleanup_gas_fixtures() { rm -rf "$GAS_FIXTURE_DIR"; }
+trap cleanup_gas_fixtures EXIT
+
+# Two samples 1 h apart, 0.01 ETH consumed → ~0.24 ETH/day; ~3.5 days to 0.15 floor.
+cat >"$GAS_FIXTURE_DIR/burn.jsonl" <<'EOF'
+{"ts":1000000000,"batcher_wei":"1000000000000000000","proposer_wei":"1000000000000000000","l2_block":100}
+{"ts":1000003600,"batcher_wei":"990000000000000000","proposer_wei":"990000000000000000","l2_block":200}
+EOF
+GAS_BURN_OUT="$(
+  GAS_RUNWAY_SAMPLES_FILE="$GAS_FIXTURE_DIR/burn.jsonl" \
+    "$GAS_RUNWAY" --analyze-only 2>&1
+)" && GAS_BURN_EC=0 || GAS_BURN_EC=$?
+if [[ "$GAS_BURN_EC" -eq 0 ]] \
+  && echo "$GAS_BURN_OUT" | grep -q 'burn_eth_per_day=0.240000' \
+  && echo "$GAS_BURN_OUT" | grep -q 'role=BATCHER' \
+  && echo "$GAS_BURN_OUT" | grep -q 'days_to_floor=3.500'; then
+  echo "PASS gas-runway burn/day ~0.24 ETH and days-to-floor"
+else
+  echo "FAIL gas-runway burn fixture (ec=$GAS_BURN_EC)" >&2
+  echo "$GAS_BURN_OUT" >&2
+  fail=1
+fi
+
+# Top-up: balance rises → no negative burn rate.
+cat >"$GAS_FIXTURE_DIR/topup.jsonl" <<'EOF'
+{"ts":1000000000,"batcher_wei":"100000000000000000","proposer_wei":"100000000000000000","l2_block":100}
+{"ts":1000003600,"batcher_wei":"200000000000000000","proposer_wei":"200000000000000000","l2_block":200}
+EOF
+GAS_TOPUP_OUT="$(
+  GAS_RUNWAY_SAMPLES_FILE="$GAS_FIXTURE_DIR/topup.jsonl" \
+    "$GAS_RUNWAY" --analyze-only 2>&1
+)" && GAS_TOPUP_EC=0 || GAS_TOPUP_EC=$?
+if [[ "$GAS_TOPUP_EC" -eq 0 ]] \
+  && echo "$GAS_TOPUP_OUT" | grep -q 'burn_eth_per_day=0.000000' \
+  && ! echo "$GAS_TOPUP_OUT" | grep -qE 'burn_eth_per_day=-'; then
+  echo "PASS gas-runway top-up skips negative burn"
+else
+  echo "FAIL gas-runway top-up fixture (ec=$GAS_TOPUP_EC)" >&2
+  echo "$GAS_TOPUP_OUT" >&2
+  fail=1
+fi
+
+# Single sample → INSUFFICIENT SAMPLES, exit 0.
+cat >"$GAS_FIXTURE_DIR/one.jsonl" <<'EOF'
+{"ts":1000000000,"batcher_wei":"1000000000000000000","proposer_wei":"1000000000000000000","l2_block":100}
+EOF
+GAS_ONE_OUT="$(
+  GAS_RUNWAY_SAMPLES_FILE="$GAS_FIXTURE_DIR/one.jsonl" \
+    "$GAS_RUNWAY" --analyze-only 2>&1
+)" && GAS_ONE_EC=0 || GAS_ONE_EC=$?
+if [[ "$GAS_ONE_EC" -eq 0 ]] && echo "$GAS_ONE_OUT" | grep -q 'INSUFFICIENT SAMPLES'; then
+  echo "PASS gas-runway single sample → INSUFFICIENT SAMPLES"
+else
+  echo "FAIL gas-runway single-sample fixture (ec=$GAS_ONE_EC)" >&2
+  echo "$GAS_ONE_OUT" >&2
+  fail=1
+fi
+
+# Below min days → exit 2 (0.20→0.19 ETH in 1 h ≈ 0.17 days to 0.15 floor).
+cat >"$GAS_FIXTURE_DIR/short.jsonl" <<'EOF'
+{"ts":1000000000,"batcher_wei":"200000000000000000","proposer_wei":"200000000000000000","l2_block":100}
+{"ts":1000003600,"batcher_wei":"190000000000000000","proposer_wei":"190000000000000000","l2_block":200}
+EOF
+GAS_SHORT_OUT="$(
+  GAS_RUNWAY_SAMPLES_FILE="$GAS_FIXTURE_DIR/short.jsonl" \
+    "$GAS_RUNWAY" --analyze-only 2>&1
+)" && GAS_SHORT_EC=0 || GAS_SHORT_EC=$?
+if [[ "$GAS_SHORT_EC" -eq 2 ]]; then
+  echo "PASS gas-runway below-min-days exits 2"
+else
+  echo "FAIL gas-runway below-min-days expected exit 2 (ec=$GAS_SHORT_EC)" >&2
+  echo "$GAS_SHORT_OUT" >&2
+  fail=1
+fi
+
+# Capture fixture-run output for redaction check (burn case is representative).
+GAS_LEAK_COUNT="$(
+  printf '%s' "$GAS_BURN_OUT$GAS_TOPUP_OUT$GAS_ONE_OUT$GAS_SHORT_OUT" \
+    | grep -icE 'private|quiknode' || true
+)"
+if [[ "$GAS_LEAK_COUNT" -eq 0 ]]; then
+  echo "PASS gas-runway fixture output has no private/quiknode"
+else
+  echo "FAIL gas-runway fixture output leaked private/quiknode" >&2
+  fail=1
+fi
+
+cleanup_gas_fixtures
+trap - EXIT
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
