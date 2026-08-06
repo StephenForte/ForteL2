@@ -899,6 +899,51 @@ fi
 cleanup_gas_fixtures
 trap - EXIT
 
+# rail-interface-check.sh: corrupted proxy address fails; clean repo file passes.
+RAIL_CHECK="$SCRIPT_DIR/rail-interface-check.sh"
+RAIL_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-rail-iface.XXXXXX")"
+cleanup_rail_fixtures() { rm -rf "$RAIL_FIXTURE_DIR"; }
+trap cleanup_rail_fixtures EXIT
+
+cp "$SCRIPT_DIR/../deployments/rail-interface.json" "$RAIL_FIXTURE_DIR/rail-interface.json"
+# Flip one hex digit in optimismPortalProxy (…c624 → …c625).
+python3 -c '
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+bridge = data["networks"]["fortel2-sepolia"]["bridge"]
+addr = bridge["optimismPortalProxy"]
+bridge["optimismPortalProxy"] = addr[:-1] + ("5" if addr[-1].lower() != "5" else "4")
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+' "$RAIL_FIXTURE_DIR/rail-interface.json"
+
+RAIL_BAD_OUT="$(
+  RAIL_INTERFACE_JSON="$RAIL_FIXTURE_DIR/rail-interface.json" \
+    "$RAIL_CHECK" 2>&1
+)" && RAIL_BAD_EC=0 || RAIL_BAD_EC=$?
+if [[ "$RAIL_BAD_EC" -ne 0 ]] && echo "$RAIL_BAD_OUT" | grep -q 'optimismPortalProxy'; then
+  echo "PASS rail-interface-check rejects corrupted optimismPortalProxy"
+else
+  echo "FAIL rail-interface-check should exit non-zero naming optimismPortalProxy (ec=$RAIL_BAD_EC)" >&2
+  echo "$RAIL_BAD_OUT" >&2
+  fail=1
+fi
+
+RAIL_OK_OUT="$("$RAIL_CHECK" 2>&1)" && RAIL_OK_EC=0 || RAIL_OK_EC=$?
+if [[ "$RAIL_OK_EC" -eq 0 ]]; then
+  echo "PASS rail-interface-check exits 0 on unmodified repo file"
+else
+  echo "FAIL rail-interface-check should exit 0 on repo file (ec=$RAIL_OK_EC)" >&2
+  echo "$RAIL_OK_OUT" >&2
+  fail=1
+fi
+
+cleanup_rail_fixtures
+trap - EXIT
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
