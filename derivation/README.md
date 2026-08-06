@@ -60,6 +60,14 @@ go run ./cmd/verify \
   -start-l2 1 -end-l2 20
 ```
 
+## Limitations — independent verification
+
+`cmd/verify` always needs `-ref-l2` and `-ref-node` — the operator's own L2 / op-node — as the comparison oracle. Mid-chain windows also need an **anchor datadir** copied from that same operator node while it is stopped (D-R2-2).
+
+A third party running this today is checking the operator's chain against the operator's own answers, which proves consistency, not honesty.
+
+Independent verification would need either a self-derived state root from genesis, or an anchor taken from the counterparty's own replica — not a copy of the operator's datadir.
+
 ## Tests
 
 ```bash

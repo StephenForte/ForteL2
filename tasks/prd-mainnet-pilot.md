@@ -43,13 +43,14 @@ P7 block IDs below are stable identifiers, not a phase number.
 
 ### P7-1 — L1 + chain infrastructure
 - [ ] Self-hosted L1 full node + consensus client (blob sidecar retention); paid fallback; primary/fallback router.
-- [ ] Mainnet deploy: fresh contract set + genesis (Phase 7 gate); stock op-node/op-geth/op-batcher (blobs)/op-proposer at pinned release tags.
+- [ ] Mainnet deploy: fresh contract set + genesis (redeploy gate); stock op-node/op-geth/op-batcher (blobs)/op-proposer at pinned release tags.
 - [ ] Fee config: L2 basefee floor, L1-fee scalars, per-transfer cost measured against P7-0 target.
 - [ ] Monitoring/alerting to replace dev-sleep-era habits (the chain no longer sleeps at 21:00).
 
 ### P7-2 — Replicas + audit distribution
 - [ ] Operator standby verifier (second provider/region; Render replica pattern).
 - [ ] Counterparty replica pack: genesis/rollup publish + Docker runbook + derivation-verifier handoff doc ("audit your rail" as product surface).
+  - Gap today: `derivation/` proves consistency against the operator's own node, not independent honesty — see [`derivation/README.md` § Limitations — independent verification](../derivation/README.md#limitations--independent-verification). Next plan must scope self-derived roots or counterparty-owned anchors before promising this to a pilot.
 - [ ] Replica sync-check path that works for private deployments (extend D-0016 pattern or make the pilot replica reachable).
 
 ### P7-3 — Money-rail triggers fire
