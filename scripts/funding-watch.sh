@@ -21,10 +21,20 @@
 # gives ~24 h. Runway/days-to-floor stays gas-runway.sh's job; this script only answers
 # "is the external funder still doing its job?".
 #
+# Optionally corroborates against ChainBank's own /health/funding endpoint when
+# CHAINBANK_FUNDING_HEALTH_URL + FUNDING_HEALTH_TOKEN are set (they live in .env.sepolia,
+# never committed). That endpoint is authoritative about the funder's liveness, but it is
+# a THIRD-PARTY dependency: if it is unreachable or erroring, this script says so and falls
+# back to local sample inference. A broken ChainBank must never break ForteL2's own check.
+#
 # Usage: funding-watch.sh [--json <path>]
-#   FUNDING_POLICY_MIN_ETH   default 0.6   level the external funder maintains
-#   FUNDING_STALE_HOURS      default 12    two 6-hour funder cycles
-#   GAS_RUNWAY_SAMPLES_FILE  default $DATA_DIR/gas-samples.jsonl
+#   FUNDING_POLICY_MIN_ETH        default 0.6   level the external funder maintains
+#   FUNDING_STALE_HOURS           default 12    two 6-hour funder cycles
+#   GAS_RUNWAY_SAMPLES_FILE       default $DATA_DIR/gas-samples.jsonl
+#   CHAINBANK_FUNDING_HEALTH_URL  optional      funder health endpoint
+#   FUNDING_HEALTH_TOKEN          optional      bearer token for it (secret)
+#   FUNDING_HEALTH_JSON           optional      read a local file instead of HTTP (tests)
+#   FUNDING_HEALTH_TIMEOUT        default 10    seconds
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,13 +59,34 @@ POLICY_MIN="${FUNDING_POLICY_MIN_ETH:-0.6}"
 STALE_HOURS="${FUNDING_STALE_HOURS:-12}"
 FLOOR_ETH="${BATCHER_FLOOR_ETH:-0.15}"
 
-python3 - "$SAMPLES_FILE" "$POLICY_MIN" "$STALE_HOURS" "$FLOOR_ETH" "$JSON_OUT" <<'PY'
+# --- optional: corroborate with the funder's own health endpoint ---------------
+# Never fatal, never blocking beyond the timeout, and the token is never printed.
+EP_BODY=""
+EP_CODE="skipped"
+if [ -n "${FUNDING_HEALTH_JSON:-}" ]; then
+  EP_BODY="$FUNDING_HEALTH_JSON"
+  EP_CODE="200"
+elif [ -n "${CHAINBANK_FUNDING_HEALTH_URL:-}" ] && [ -n "${FUNDING_HEALTH_TOKEN:-}" ]; then
+  if command -v curl >/dev/null 2>&1; then
+    EP_BODY="$(mktemp "${TMPDIR:-/tmp}/fortel2-funding-ep.XXXXXX")"
+    trap 'rm -f "$EP_BODY"' EXIT
+    EP_CODE="$(curl -s -o "$EP_BODY" -w '%{http_code}' \
+                 --max-time "${FUNDING_HEALTH_TIMEOUT:-10}" \
+                 -H "Authorization: Bearer ${FUNDING_HEALTH_TOKEN}" \
+                 "$CHAINBANK_FUNDING_HEALTH_URL" 2>/dev/null)" || EP_CODE="unreachable"
+    [ -n "$EP_CODE" ] || EP_CODE="unreachable"
+  else
+    EP_CODE="no-curl"
+  fi
+fi
+
+python3 - "$SAMPLES_FILE" "$POLICY_MIN" "$STALE_HOURS" "$FLOOR_ETH" "$JSON_OUT" "$EP_BODY" "$EP_CODE" <<'PY'
 import json, sys, os, datetime
 
 def ts_utc(ts, fmt="%Y-%m-%dT%H:%MZ"):
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime(fmt)
 
-samples_file, policy_min, stale_hours, floor_eth, json_out = sys.argv[1:6]
+samples_file, policy_min, stale_hours, floor_eth, json_out, ep_body, ep_code = sys.argv[1:8]
 policy_min = float(policy_min); stale_hours = float(stale_hours)
 floor_eth = float(floor_eth)
 
@@ -63,12 +94,34 @@ FUNDER = "chainbank-wallet-reconciler (ChainBank repo, Render cron, 0 */6 * * *)
 print("=== ForteL2 funding watch ===")
 print("external funder: %s" % FUNDER)
 
+# Endpoint corroboration. Authoritative when it answers cleanly; advisory otherwise.
+# It can escalate the verdict (it knows things local samples cannot) but never de-escalate:
+# a local balance breach is evidence in its own right.
+endpoint = {"queried": ep_code != "skipped", "http": ep_code, "status": None, "note": None}
+if ep_code == "200" and ep_body and os.path.exists(ep_body):
+    try:
+        doc = json.load(open(ep_body))
+        endpoint["status"] = doc.get("status")
+        endpoint["last_run"] = doc.get("lastRun")
+        print("funder endpoint: status=%s" % endpoint["status"])
+    except (ValueError, OSError) as exc:
+        endpoint["note"] = "unparseable response: %s" % exc.__class__.__name__
+        print("funder endpoint: UNPARSEABLE (%s) — falling back to local samples"
+              % exc.__class__.__name__)
+elif ep_code == "skipped":
+    pass
+else:
+    endpoint["note"] = "endpoint unavailable (%s)" % ep_code
+    print("funder endpoint: UNAVAILABLE (%s) — falling back to local samples; "
+          "funder liveness is unconfirmed from its own side" % ep_code)
+
 def emit(verdict, reason, extra=None):
     print("VERDICT: %s — %s" % (verdict, reason))
     if json_out:
         doc = {"verdict": verdict, "reason": reason, "funder": FUNDER,
                "policy_min_eth": policy_min, "tooling_floor_eth": floor_eth,
-               "stale_hours": stale_hours, "samples_file": samples_file}
+               "stale_hours": stale_hours, "samples_file": samples_file,
+               "funder_endpoint": endpoint}
         if extra:
             doc.update(extra)
         tmp = json_out + ".tmp"
@@ -125,7 +178,16 @@ extra = {"batcher_eth": round(latest_bal, 6), "samples": len(rows),
                                      if last_topup else None),
          "last_topup_eth": round(last_topup[2], 6) if last_topup else None}
 
+# The funder declaring itself broken outranks a healthy-looking local balance: the wallet
+# can sit above policy for hours after the job dies.
+if endpoint.get("status") == "failing":
+    emit("FAIL", "the funder's own health endpoint reports status=failing — %s has stopped "
+         "or is erroring; check its recent runs" % FUNDER, extra)
+
 if latest_bal >= policy_min:
+    if endpoint.get("status") == "degraded":
+        emit("WARN", "balance is above policy, but the funder's endpoint reports "
+             "status=degraded", extra)
     emit("OK", "balance at or above the funding policy minimum", extra)
 
 # Below policy: how long has it been continuously below?

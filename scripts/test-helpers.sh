@@ -998,6 +998,31 @@ else
   fail=1
 fi
 
+# A funder that declares itself broken outranks a healthy-looking local balance:
+# the wallet sits above policy for hours after the job dies.
+printf '{"ts":%d,"batcher_wei":"700000000000000000","proposer_wei":"500000000000000000","l2_block":1}\n' \
+  "$FW_NOW" > "$FW_FIXTURE_DIR/rich.jsonl"
+echo '{"status":"failing","lastRun":{"finishedAt":"2026-08-01T00:00:00Z"}}' > "$FW_FIXTURE_DIR/ep-failing.json"
+FW_EP_OUT="$(GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-failing.json" "$FW_CHECK" 2>&1)" && FW_EP_EC=0 || FW_EP_EC=$?
+if [[ "$FW_EP_EC" -ne 0 && "$FW_EP_OUT" == *"status=failing"* ]]; then
+  echo "PASS funding-watch fails on funder endpoint status=failing despite healthy balance"
+else
+  echo "FAIL funding-watch should fail when the endpoint reports failing (ec=$FW_EP_EC)" >&2
+  echo "$FW_EP_OUT" >&2
+  fail=1
+fi
+
+# An unreachable/erroring endpoint must degrade to local inference, never invent a failure.
+echo 'this is not json' > "$FW_FIXTURE_DIR/ep-garbage.json"
+FW_EPBAD_OUT="$(GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-garbage.json" "$FW_CHECK" 2>&1)" && FW_EPBAD_EC=0 || FW_EPBAD_EC=$?
+if [[ "$FW_EPBAD_EC" -eq 0 && "$FW_EPBAD_OUT" == *"UNPARSEABLE"* && "$FW_EPBAD_OUT" == *"OK"* ]]; then
+  echo "PASS funding-watch falls back to local samples when the endpoint is unusable"
+else
+  echo "FAIL funding-watch should fall back on an unusable endpoint (ec=$FW_EPBAD_EC)" >&2
+  echo "$FW_EPBAD_OUT" >&2
+  fail=1
+fi
+
 cleanup_fw_fixtures
 trap - EXIT
 
