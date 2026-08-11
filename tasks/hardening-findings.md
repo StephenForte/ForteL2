@@ -98,3 +98,42 @@ The cron must therefore run at least daily, or top up a larger amount, to keep t
 floor. This is a staging-economics artifact of the current calldata + 30-block-channel + 5-minute-
 proposal profile; the structural fix (blobs + span batches + relaxed cadence) is P7-0 in
 `tasks/prd-mainnet-pilot.md`, not a change to make on 852.
+
+### Batcher funding automation (2026-08-11) — supersedes the standing implication above
+
+The note above ("the cron must therefore run at least daily, or top up a larger amount") is
+**answered and superseded**: the operator increased both the amount sent and the trigger policy.
+Observed state after the change:
+
+| | Before | After |
+|---|---|---|
+| BATCHER balance | 0.3958 ETH | **0.6727 ETH** |
+| `days_to_floor` (vs 0.15) | 1.45 | **3.09** |
+| `gas-runway.sh` exit | **2** (under `GAS_RUNWAY_MIN_DAYS`) | **0** |
+
+**Two floors now exist and must not be conflated.** `0.15 ETH` is the *tooling* floor, inherited
+from `sepolia-fund-check.sh`, and is what `days_to_floor` measures against — time until batching
+actually breaks. `~0.6 ETH` is the *funding policy* minimum the automation maintains — the level
+at which a top-up fires. A reader seeing `days_to_floor=3.089` should not read 0.15 as the policy.
+
+**Measurement caveat (matters for P7-0).** `gas-runway.sh` skips any interval where the balance
+rose, so each automated top-up destroys a burn-measurement window. Four samples now span five days
+and the burn figure still rests on a single 65-minute pre-top-up interval (0.169 ETH/day, measured
+awake-hours and extrapolated to 24 h; the real rate on the 23:45–03:00 schedule is nearer 0.146).
+Good automation therefore *hides* the signal the mainnet cost model needs. Fix either by letting
+the balance draw down across an uninterrupted stretch, or by having the funding job emit its
+transfers so the script can subtract them instead of skipping.
+
+**Mechanism NOT verified — open question.** The operator reports the top-up automation runs "on
+Render" with a ~0.6 ETH minimum. That could not be confirmed from the Render account on
+2026-08-11: the workspace contains six cron jobs (four `crown-tracker-*`, plus
+`chainbank-treasury-monitor` and `chainbank-wallet-reconciler`) and **none reference the ForteL2
+batcher address, `fortel2`, or `batcher`** in their logs. `chainbank-treasury-monitor`
+(`0 13 * * *`) was inspected directly and is read-only — it records a treasury observation and
+evaluates alerts; it does not transfer. The top-up itself is real and observed (+0.2563 ETH between
+03:00 and 03:05 local on 2026-08-11, outside either ChainBank cron's schedule).
+
+So: funding works, but **this repo cannot name what performs it.** Before the mainnet pilot treats
+auto-funding as a dependency (P7-0/P7-1), identify the service and repo, record them here, and give
+it a health signal — an unattended, unidentified process holding the rail's liveness is the same
+class of risk as the launchd drift this document already tracks twice (H4-003, H4-004).
