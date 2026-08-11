@@ -944,6 +944,63 @@ fi
 cleanup_rail_fixtures
 trap - EXIT
 
+# --- funding-watch.sh: external funder (chainbank-wallet-reconciler) liveness ---------
+FW_CHECK="$SCRIPT_DIR/funding-watch.sh"
+FW_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-funding-watch.XXXXXX")"
+cleanup_fw_fixtures() { rm -rf "$FW_FIXTURE_DIR"; }
+trap cleanup_fw_fixtures EXIT
+FW_NOW="$(date +%s)"
+
+# Below the 0.6 policy for a full day with no top-up => funder presumed dead.
+printf '{"ts":%d,"batcher_wei":"500000000000000000","proposer_wei":"500000000000000000","l2_block":1}\n{"ts":%d,"batcher_wei":"400000000000000000","proposer_wei":"500000000000000000","l2_block":2}\n' \
+  "$((FW_NOW - 86400))" "$FW_NOW" > "$FW_FIXTURE_DIR/stale.jsonl"
+FW_STALE_OUT="$(GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/stale.jsonl" "$FW_CHECK" 2>&1)" && FW_STALE_EC=0 || FW_STALE_EC=$?
+if [[ "$FW_STALE_EC" -ne 0 && "$FW_STALE_OUT" == *"FAIL"* && "$FW_STALE_OUT" == *"chainbank-wallet-reconciler"* ]]; then
+  echo "PASS funding-watch flags a stalled external funder and names it"
+else
+  echo "FAIL funding-watch should exit non-zero naming the funder (ec=$FW_STALE_EC)" >&2
+  echo "$FW_STALE_OUT" >&2
+  fail=1
+fi
+
+# Below policy but a top-up landed inside the tolerance window => funder alive, WARN only.
+printf '{"ts":%d,"batcher_wei":"400000000000000000","proposer_wei":"500000000000000000","l2_block":1}\n{"ts":%d,"batcher_wei":"450000000000000000","proposer_wei":"500000000000000000","l2_block":2}\n' \
+  "$((FW_NOW - 90000))" "$((FW_NOW - 3600))" > "$FW_FIXTURE_DIR/recent.jsonl"
+FW_WARN_OUT="$(GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/recent.jsonl" "$FW_CHECK" 2>&1)" && FW_WARN_EC=0 || FW_WARN_EC=$?
+if [[ "$FW_WARN_EC" -eq 0 && "$FW_WARN_OUT" == *"WARN"* ]]; then
+  echo "PASS funding-watch stays non-fatal when a top-up is inside the tolerance window"
+else
+  echo "FAIL funding-watch should WARN + exit 0 after a recent top-up (ec=$FW_WARN_EC)" >&2
+  echo "$FW_WARN_OUT" >&2
+  fail=1
+fi
+
+# Above policy => OK, and --json writes a parseable verdict document.
+printf '{"ts":%d,"batcher_wei":"700000000000000000","proposer_wei":"500000000000000000","l2_block":1}\n' \
+  "$FW_NOW" > "$FW_FIXTURE_DIR/ok.jsonl"
+FW_OK_OUT="$(GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/ok.jsonl" "$FW_CHECK" --json "$FW_FIXTURE_DIR/out.json" 2>&1)" && FW_OK_EC=0 || FW_OK_EC=$?
+if [[ "$FW_OK_EC" -eq 0 && "$FW_OK_OUT" == *"OK"* ]] \
+   && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d['verdict']=='OK' else 1)" "$FW_FIXTURE_DIR/out.json"; then
+  echo "PASS funding-watch reports OK above policy and writes valid --json"
+else
+  echo "FAIL funding-watch OK/--json path broken (ec=$FW_OK_EC)" >&2
+  echo "$FW_OK_OUT" >&2
+  fail=1
+fi
+
+# Missing samples file must never be fatal (fresh clone, first run).
+FW_NONE_OUT="$(GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/absent.jsonl" "$FW_CHECK" 2>&1)" && FW_NONE_EC=0 || FW_NONE_EC=$?
+if [[ "$FW_NONE_EC" -eq 0 && "$FW_NONE_OUT" == *"INSUFFICIENT"* ]]; then
+  echo "PASS funding-watch is non-fatal with no samples file"
+else
+  echo "FAIL funding-watch should exit 0 INSUFFICIENT with no samples (ec=$FW_NONE_EC)" >&2
+  echo "$FW_NONE_OUT" >&2
+  fail=1
+fi
+
+cleanup_fw_fixtures
+trap - EXIT
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

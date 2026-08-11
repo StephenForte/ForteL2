@@ -17,3 +17,14 @@ else
   rm -f data/pipeline-health.json.tmp
   exit 1
 fi
+
+# --- Gas sample + external-funder watch -------------------------------------
+# Records one L1 balance sample, then checks whether the EXTERNAL funder
+# (chainbank-wallet-reconciler, ChainBank repo, Render cron) is still doing its
+# job. Both are strictly additive: a failure here must never fail the pipeline
+# health snapshot above, which the Morning Briefing depends on.
+if [ -f .env.sepolia ]; then
+  FORTEL2_ENV=.env.sepolia ./scripts/gas-runway.sh > data/gas-runway.out 2>&1 || true
+  FORTEL2_ENV=.env.sepolia ./scripts/funding-watch.sh --json data/funding-health.json \
+    > data/funding-watch.out 2>&1 || true
+fi
