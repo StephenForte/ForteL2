@@ -1,6 +1,6 @@
 {
   "$schema_note": "ForteL2 rail interface for SettlementOS and explorers. Version bumps when chain ID, bridge proxies, or reset policy change. The networkId values are SettlementOS registry keys, not ForteL2 labels: they are fixed, live on their side, and survive re-genesis (a wipe changes addresses, never the id). Do not reopen a networkId as an openQuestion when regenerating this file.",
-  "version": "3",
+  "version": "4",
   "updated": "2026-08-11",
   "docs": {
     "moneyRailPrd": "tasks/prd-money-rail.md",
@@ -66,7 +66,7 @@
           "settlementos-explorer (optional)"
         ]
       },
-      "resetPolicy": "Phase 6 completed 2026-08-04. The 2026-07-22 deployment remains pinned — 852 is the staging chain per D-0018. The next redeploy is the Phase 7 / mainnet-pilot gate and is a coordinated network-wide wipe. SettlementOS is a notified party, not just replica operators: give them at least one day of advance notice and the new contract addresses once they exist. A re-genesis expires every ForteL2 address they hold (escrow, three mock tokens, TokenizedMMF), kills cited tx hashes, and invalidates the ForteL2 rows in their public explorer address book — their recovery is redeploy-or-adopt, re-seed wallets, re-verify a settlement, republish the address book. Where the schedule allows, land the re-genesis and the off-box write-URL publish in the same beat: separately they cost SOS that cycle twice.",
+      "resetPolicy": "Phase 6 completed 2026-08-04. The 2026-07-22 deployment remains pinned — 852 is the staging chain per D-0018. The next redeploy is the Phase 7 / mainnet-pilot gate and is a coordinated network-wide wipe. SettlementOS is a notified party, not just replica operators: give them at least one day of advance notice and the new contract addresses once they exist. A re-genesis expires every ForteL2 address they hold (escrow, three mock tokens, TokenizedMMF), kills cited tx hashes, and invalidates the ForteL2 rows in their explorer address book — their recovery is redeploy-or-adopt, re-seed wallets, re-verify a settlement, republish the address book. The redeploy is NOT coupled to the off-box write-URL publish: SOS withdrew that request 2026-08-11 (D-0029) and the write URL ships whenever the operator go/no-go clears.",
       "l2Metadata": {
         "blockTime": 2,
         "nativeCurrency": "ETH",
