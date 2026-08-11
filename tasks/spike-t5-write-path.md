@@ -110,7 +110,7 @@ US-012’s four review items = exposed / to-whom / auth / rollback (also columns
 | **2. D2** | Operator US-012 README go/no-go using the four items from the chosen row (exposed / to-whom / auth / rollback), plus D5 availability and D7 unattended-uptime notes. | **Yes** — a “no-go” leaves loopback; a later “go” can still pick a different row. | **Operator** |
 | **3. Transport** | Implement the approved option (recommended: Tailscale → D1 port). Apply D4 secrets hygiene. Still no change to committed `L2_RPC_URL` if the daemon dials loopback. | **Yes** for opts 2–4 (disable tunnel/proxy). Opt 5 relocate is only weakly reversible. | ForteL2 ops |
 | **4. R-02 publish** | After go: version-bump `rail-interface.json` with the write URL keys (§5). (R-02’s imminent v2 truth-up does **not** publish a non-loopback URL while loopback stands.) | URL publish is reversible by bumping again to loopback/`null` + SOS notice; chain state unchanged. | R-02 / follow-on |
-| **5. SOS registry entry** | SOS confirms `networkId` and points their fortel2-sepolia (or chosen id) write RPC at the published URL; settle demo path unblocked for MR-1. | SOS-side config revert. | SettlementOS |
+| **5. SOS registry entry** | No id coordination left (D-0028): SOS points `FORTEL2_SEPOLIA_RPC_URL` at the published URL; settle demo path unblocked for MR-1. | SOS-side config revert. | SettlementOS |
 
 **Invariant:** never run step 3 before steps 1–2. Publishing a URL (step 4) before D1 is a security regression on the current API surface.
 
@@ -131,7 +131,7 @@ Do **not** edit the file in this task (R-02 owns the next edit). After an operat
 | `networks.fortel2-sepolia.replica.readRpcUrl` | Remains `null` per D-0016 until a real replica URL exists; optional note that interim reads may use `writeRpcUrl`’s D1 surface (D8). |
 | `networks.fortel2-sepolia.replica.writeRpcUrl` | Stay `null` (replica must not accept writes). |
 | `availability` (top-level or per-network; R-02 shape) | Must already state sleep/wake; write-path publish does not remove it. |
-| `openQuestions[]` | Keep/resolve `networkId` string confirmation with SOS. |
+| `openQuestions[]` | `networkId` confirmation is **closed** (D-0028, v3) — do not reopen it on regeneration; the id survives re-genesis. |
 | `sosGate` | Unchanged unless SOS onboarding text needs a write-path pointer. |
 
 Exact string values are operator-local after go — never commit tunnel tokens or keyed URLs.

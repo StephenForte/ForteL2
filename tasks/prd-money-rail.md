@@ -132,4 +132,4 @@ Payment APIs, compliance, `PaymentSettlement` features, `TokenizedMMF` rules, FX
 
 - Expose a stable tunnel/URL for SOS writes off-box, or keep SOS colocated with Mac sequencer for now?
 - Public vs private Render replica RPC for explorer
-- Network registry id string: `fortel2-sepolia` vs `forte-l2` (SOS chooses; must match rail-interface `networkId`)
+- ~~Network registry id string: `fortel2-sepolia` vs `forte-l2`~~ — **resolved 2026-08-11 (D-0028)**: `fortel2-sepolia`, already live on the SOS side and fixed across re-genesis. Not a choice that was ever open to us.

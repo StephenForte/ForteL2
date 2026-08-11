@@ -28,6 +28,7 @@ Full table: `tasks/prd-money-rail.md` § “When SettlementOS may come on the L2
 |---|---|
 | SOS/explorer reads | Prefer Render replica RPC if reachable |
 | Phase 7 redeploy | **Mandatory** pack → publish fortel2-replica → wipe Mac + Render together |
+| Phase 7 redeploy | **Notify SOS ≥1 day ahead**, and send new contract addresses once they exist — re-genesis expires every ForteL2 address they hold and breaks their live explorer address book (D-0028) |
 | Before Phase 7 | Do not republish genesis “for fun” — deployment is pinned |
 
 Details: `replica/README.md`, README “Network reset procedure”, money-rail PRD.
@@ -38,7 +39,7 @@ Details: `replica/README.md`, README “Network reset procedure”, money-rail P
 |---|---|
 | Payment lifecycle, quotes, FX, compliance, audit DB | **SOS** |
 | `PaymentSettlement`, `MockERC20`, `TokenizedMMF` | **SOS** (deploy on ForteL2) |
-| Network registry entry for ForteL2 | **SOS** |
+| Network registry entry for ForteL2 | **SOS** — id settled: `fortel2-sepolia` / `fortel2-local`, fixed across re-genesis (D-0028) |
 | Sequencer / batcher / proposer / L1 contracts | **ForteL2** |
 | Render replica + artifact pack on redeploy | **ForteL2** |
 | `rail-interface.json` | **ForteL2** |
