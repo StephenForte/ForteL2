@@ -1023,6 +1023,46 @@ else
   fail=1
 fi
 
+# The funder's rollup labels are known to under-report severity (ChainBank confirmed two
+# Bugbot findings: blocked/failed reported as below_policy; a new wallet reading degraded
+# instead of failing). These two cases pin that we derive from facts, not labels.
+FW_ADDR="0x3D54FD6353cd66D143fb94D178c9eEB1aE98a31d"
+FW_OLD_RUN="$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))")"
+FW_NEW_RUN="$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")"
+
+printf '{"status":"ok","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"%s","status":"ok"}]}\n' \
+  "$FW_OLD_RUN" "$FW_ADDR" > "$FW_FIXTURE_DIR/ep-stalerun.json"
+FW_SR_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-stalerun.json" "$FW_CHECK" 2>&1)" && FW_SR_EC=0 || FW_SR_EC=$?
+if [[ "$FW_SR_EC" -ne 0 && "$FW_SR_OUT" == *"last finished run"* ]]; then
+  echo "PASS funding-watch fails on a stale last-run timestamp even when the label says ok"
+else
+  echo "FAIL funding-watch must not trust an ok label over a stale run (ec=$FW_SR_EC)" >&2
+  echo "$FW_SR_OUT" >&2
+  fail=1
+fi
+
+printf '{"status":"degraded","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"%s","status":"blocked"}]}\n' \
+  "$FW_NEW_RUN" "$FW_ADDR" > "$FW_FIXTURE_DIR/ep-blocked.json"
+FW_BL_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-blocked.json" "$FW_CHECK" 2>&1)" && FW_BL_EC=0 || FW_BL_EC=$?
+if [[ "$FW_BL_EC" -ne 0 && "$FW_BL_OUT" == *"blocked"* ]]; then
+  echo "PASS funding-watch fails when our own wallet entry is blocked, whatever the rollup says"
+else
+  echo "FAIL funding-watch must escalate a blocked wallet entry (ec=$FW_BL_EC)" >&2
+  echo "$FW_BL_OUT" >&2
+  fail=1
+fi
+
+printf '{"status":"ok","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"0xdead","status":"ok"}]}\n' \
+  "$FW_NEW_RUN" > "$FW_FIXTURE_DIR/ep-absent.json"
+FW_AB_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-absent.json" "$FW_CHECK" 2>&1)" && FW_AB_EC=0 || FW_AB_EC=$?
+if [[ "$FW_AB_EC" -eq 0 && "$FW_AB_OUT" == *"absent from the funder"* ]]; then
+  echo "PASS funding-watch warns (without inventing failure) when our address is not listed"
+else
+  echo "FAIL funding-watch should warn but not fail on an absent address (ec=$FW_AB_EC)" >&2
+  echo "$FW_AB_OUT" >&2
+  fail=1
+fi
+
 cleanup_fw_fixtures
 trap - EXIT
 

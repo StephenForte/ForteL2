@@ -116,6 +116,28 @@ wall-clock now** — not "a row exists", not `startedAt`, not `outgoingScanStatu
 Second, smaller trap: `weiTransferred` values exceed `Number.MAX_SAFE_INTEGER`. Keep wei as
 strings or BigInt end to end; a stray `Number()` in the serializer will quietly corrupt amounts.
 
+## Confirmed defects to fix in this task (2026-08-11)
+
+Cursor Bugbot raised two findings on the PR and the ChainBank side has **confirmed both are
+real**. They are in scope here, and both bias the same way — a genuinely bad state is reported
+with a milder label, which produces false comfort rather than false alarm:
+
+1. **Per-wallet status can under-report `blocked`/`failed` as `below_policy`.** A wallet the
+   funder tried and failed to fund is not the same as one merely under its threshold; a consumer
+   reading `below_policy` will wait for a balance to drain instead of alerting.
+2. **A newly-added wallet can read `degraded` when it should read `failing`.** A wallet that has
+   never been funded is the case where getting it wrong is most expensive.
+
+Add a regression test per finding, named for the property (*"a wallet whose funding attempt was
+blocked never reports below_policy"*), not the file.
+
+**A third requirement that follows from them:** every entry in `wallets[]` must carry an
+identifiable `address`, and the array must include every wallet the policy covers. ForteL2's
+consumer matches its batcher by address and derives its own verdict from `lastRun.finishedAt`
+plus that entry — deliberately not from the rollup `status`, precisely because of these two
+bugs. If a covered wallet is missing from the array, the consumer reports that it may not be
+covered at all. Do not rely on consumers reading the rollup label.
+
 ## What must not change
 
 - **Do not remove or rename any field in the existing run-completed summary line** —

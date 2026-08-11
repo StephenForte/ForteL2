@@ -34,7 +34,16 @@
 #   CHAINBANK_FUNDING_HEALTH_URL  optional      funder health endpoint
 #   FUNDING_HEALTH_TOKEN          optional      bearer token for it (secret)
 #   FUNDING_HEALTH_JSON           optional      read a local file instead of HTTP (tests)
+#   FUNDING_WATCH_ADDRESS         optional      address to match in the wallet list;
+#                                               defaults to BATCHER_ADDRESS from the env file
 #   FUNDING_HEALTH_TIMEOUT        default 10    seconds
+#
+# Endpoint trust model: derive from FACTS the endpoint reports (last-run timestamp, our
+# wallet's own entry) rather than its rollup labels. The rollup covers four wallets, three
+# of which belong to ChainBank — a global "failing" may be about someone else's wallet, and
+# a global "ok" cannot vouch for ours. ChainBank has also confirmed two label bugs that
+# under-report severity (blocked/failed reported as below_policy; a new wallet reading
+# degraded instead of failing), so labels are treated as advisory only.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,6 +67,11 @@ SAMPLES_FILE="${GAS_RUNWAY_SAMPLES_FILE:-$DATA_DIR/gas-samples.jsonl}"
 POLICY_MIN="${FUNDING_POLICY_MIN_ETH:-0.6}"
 STALE_HOURS="${FUNDING_STALE_HOURS:-12}"
 FLOOR_ETH="${BATCHER_FLOOR_ETH:-0.15}"
+# lib.sh sources the env file with `set -a`, so it OVERRIDES a caller-supplied
+# BATCHER_ADDRESS (with no FORTEL2_ENV that means the local-901 Anvil address).
+# FUNDING_WATCH_ADDRESS is never present in env files, so it survives as an explicit
+# override — required for tests, and a guard against silently watching the wrong chain.
+WATCH_ADDR="${FUNDING_WATCH_ADDRESS:-${BATCHER_ADDRESS:-}}"
 
 # --- optional: corroborate with the funder's own health endpoint ---------------
 # Never fatal, never blocking beyond the timeout, and the token is never printed.
@@ -80,13 +94,13 @@ elif [ -n "${CHAINBANK_FUNDING_HEALTH_URL:-}" ] && [ -n "${FUNDING_HEALTH_TOKEN:
   fi
 fi
 
-python3 - "$SAMPLES_FILE" "$POLICY_MIN" "$STALE_HOURS" "$FLOOR_ETH" "$JSON_OUT" "$EP_BODY" "$EP_CODE" <<'PY'
+python3 - "$SAMPLES_FILE" "$POLICY_MIN" "$STALE_HOURS" "$FLOOR_ETH" "$JSON_OUT" "$EP_BODY" "$EP_CODE" "$WATCH_ADDR" <<'PY'
 import json, sys, os, datetime
 
 def ts_utc(ts, fmt="%Y-%m-%dT%H:%MZ"):
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime(fmt)
 
-samples_file, policy_min, stale_hours, floor_eth, json_out, ep_body, ep_code = sys.argv[1:8]
+samples_file, policy_min, stale_hours, floor_eth, json_out, ep_body, ep_code, watch_addr = sys.argv[1:9]
 policy_min = float(policy_min); stale_hours = float(stale_hours)
 floor_eth = float(floor_eth)
 
@@ -97,13 +111,51 @@ print("external funder: %s" % FUNDER)
 # Endpoint corroboration. Authoritative when it answers cleanly; advisory otherwise.
 # It can escalate the verdict (it knows things local samples cannot) but never de-escalate:
 # a local balance breach is evidence in its own right.
-endpoint = {"queried": ep_code != "skipped", "http": ep_code, "status": None, "note": None}
+def parse_iso(v):
+    if not isinstance(v, str):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+endpoint = {"queried": ep_code != "skipped", "http": ep_code, "status": None, "note": None,
+            "run_stale": None, "our_wallet_status": None, "our_wallet_found": None}
+# Facts we derive ourselves, immune to their label bugs.
+ep_run_stale_h = None
+ep_our_status = None
 if ep_code == "200" and ep_body and os.path.exists(ep_body):
     try:
         doc = json.load(open(ep_body))
         endpoint["status"] = doc.get("status")
         endpoint["last_run"] = doc.get("lastRun")
-        print("funder endpoint: status=%s" % endpoint["status"])
+
+        # (a) Is the job itself still running? Computed from the timestamp, not the label.
+        fin = parse_iso(((doc.get("lastRun") or {}).get("finishedAt")))
+        if fin is not None:
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            ep_run_stale_h = (now_utc - fin).total_seconds() / 3600.0
+            endpoint["run_stale"] = round(ep_run_stale_h, 2)
+
+        # (b) Our wallet's own entry, matched by address. The rollup covers other wallets.
+        if watch_addr:
+            for w in (doc.get("wallets") or []):
+                if str(w.get("address", "")).lower() == watch_addr.lower():
+                    ep_our_status = str(w.get("status", "")).lower() or None
+                    endpoint["our_wallet_status"] = ep_our_status
+                    endpoint["our_wallet_found"] = True
+                    break
+            else:
+                endpoint["our_wallet_found"] = False
+
+        bits = ["status=%s" % endpoint["status"]]
+        if ep_run_stale_h is not None:
+            bits.append("last run %.1f h ago" % ep_run_stale_h)
+        if endpoint["our_wallet_found"] is True:
+            bits.append("our wallet=%s" % ep_our_status)
+        elif endpoint["our_wallet_found"] is False:
+            bits.append("OUR WALLET ABSENT from its wallet list")
+        print("funder endpoint: %s" % ", ".join(bits))
     except (ValueError, OSError) as exc:
         endpoint["note"] = "unparseable response: %s" % exc.__class__.__name__
         print("funder endpoint: UNPARSEABLE (%s) — falling back to local samples"
@@ -180,6 +232,26 @@ extra = {"batcher_eth": round(latest_bal, 6), "samples": len(rows),
 
 # The funder declaring itself broken outranks a healthy-looking local balance: the wallet
 # can sit above policy for hours after the job dies.
+# Derived fact 1: the job has not finished a run in longer than the tolerance. This is a
+# global condition — if the cron is dead, our wallet stops being funded regardless of labels.
+if ep_run_stale_h is not None and ep_run_stale_h > stale_hours:
+    emit("FAIL", "the funder's last finished run was %.1f h ago (tolerance %.0f h) — %s has "
+         "stopped or is erroring" % (ep_run_stale_h, stale_hours, FUNDER), extra)
+
+# Derived fact 2: our specific wallet was attempted and could not be funded. `blocked` and
+# `failed` both mean the funder tried and did not succeed, which no balance reading shows
+# until the wallet has already drained.
+if ep_our_status in ("blocked", "failed"):
+    emit("FAIL", "the funder reports our batcher wallet as '%s' — funding is being attempted "
+         "and not succeeding; check %s" % (ep_our_status, FUNDER), extra)
+
+# Our wallet missing entirely from a wallet list we believe covers it means we are not
+# actually being watched — surface it rather than reading silence as health.
+if endpoint.get("our_wallet_found") is False:
+    print("WARNING: batcher address is absent from the funder's wallet list — "
+          "it may not be covered by the funding policy at all")
+
+# Their rollup label is advisory: it aggregates four wallets and is known to under-report.
 if endpoint.get("status") == "failing":
     emit("FAIL", "the funder's own health endpoint reports status=failing — %s has stopped "
          "or is erroring; check its recent runs" % FUNDER, extra)
