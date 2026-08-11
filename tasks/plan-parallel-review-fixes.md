@@ -1,6 +1,6 @@
 # Parallel-worker plan — R-01..R-10 review fixes
 
-**Status:** proposed (2026-08-05) · **Owner:** VP Eng · **Source of truth for task content:** `tasks/review-2026-08-05.md` (the task cards; this plan does not restate them)
+**Status:** **COMPLETE (2026-08-11)** — all ten tasks merged in four waves; review §4 automated QA green; CI green; see `tasks/decisions.md` D-0026. Originally proposed 2026-08-05 · **Owner:** VP Eng · **Source of truth for task content:** `tasks/review-2026-08-05.md` (the task cards; this plan does not restate them)
 **Companion:** `tasks/decisions.md` (shared decisions log), `tasks/worker-prompts/R-0*.md` (ready-to-run prompts)
 **Baseline:** `7d7c847` (review committed), working tree clean, all suites green — re-verified 2026-08-05 by this plan's author, not taken from the review on faith.
 
