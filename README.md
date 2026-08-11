@@ -77,7 +77,7 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 
 **SOS onboarding (operator):**
 
-0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:00–04:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are loopback-only today (`http://127.0.0.1:9545`); no off-box tunnel is approved — operator US-012 go/no-go is outstanding (options + Tailscale recommendation in [`tasks/spike-t5-write-path.md`](tasks/spike-t5-write-path.md)).
+0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:45–03:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are loopback-only today (`http://127.0.0.1:9545`); no off-box tunnel is approved — operator US-012 go/no-go is outstanding (options + Tailscale recommendation in [`tasks/spike-t5-write-path.md`](tasks/spike-t5-write-path.md)).
 1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
 2. Fund the SOS deployer on L2: deposit L1→L2 with `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` (credits `ADMIN_ADDRESS` on L2), then transfer to the SOS deployer — note the env file must be sourced in *this* shell (the `FORTEL2_ENV=…` prefix only reaches the script's subprocess): `( set -a; source .env.sepolia; set +a; cast send <SOS_DEPLOYER_ADDRESS> --value <amount> --rpc-url "$L2_RPC_URL" --private-key "$ADMIN_PRIVATE_KEY" )`.
 3. Point SettlementOS at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545` today) and deploy SOS contracts on chain **852**.
@@ -666,7 +666,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh status
 
 Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clients is enough).
 
-**Scheduled on the Mac mini (launchd):** checked-in agents run Sepolia sleep at **23:00** and wake at **04:00** local (`launchd/com.steve.fortel2-sleep.plist`, `…-wake.plist`). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
+**Scheduled on the Mac mini (launchd):** checked-in agents run Sepolia sleep at **23:45** and wake at **03:00** local (`launchd/com.steve.fortel2-sleep.plist`, `…-wake.plist`). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
 
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 

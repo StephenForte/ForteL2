@@ -1,7 +1,7 @@
 {
   "$schema_note": "ForteL2 rail interface for SettlementOS and explorers. Version bumps when chain ID, bridge proxies, or reset policy change.",
   "version": "2",
-  "updated": "2026-08-05",
+  "updated": "2026-08-11",
   "docs": {
     "moneyRailPrd": "tasks/prd-money-rail.md",
     "coordination": "tasks/coordination-settlementos.md",
@@ -79,8 +79,8 @@
   },
   "availability": {
     "model": "operator-scheduled",
-    "sleepLocal": "23:00",
-    "wakeLocal": "04:00",
+    "sleepLocal": "23:45",
+    "wakeLocal": "03:00",
     "timezone": "America/Los_Angeles",
     "note": "Personal L2 on a Mac mini. No uptime commitment. The sequencer RPC is stopped nightly; writes and reads against the sequencer will fail during the window. Replica derivation resumes automatically from L1 after wake."
   },

@@ -17,7 +17,7 @@ RWA           = SOS later — L2 only hosts contracts
 
 **SettlementOS may start now on Sepolia ForteL2 (chain 852).**  
 Do not wait for Phase 3b/4–6/paymaster/USDC.  
-**Availability:** sequencer RPC is down **23:00–04:00** local (`America/Los_Angeles`) every night — SOS retry/backoff must assume that window. No uptime commitment (personal Mac mini L2).  
+**Availability:** sequencer RPC is down **23:45–03:00** local (`America/Los_Angeles`) every night — SOS retry/backoff must assume that window. No uptime commitment (personal Mac mini L2).  
 **Writes:** Mac sequencer L2 RPC, **loopback only** today; no off-box write path is approved — operator US-012 go/no-go is outstanding (options in `tasks/spike-t5-write-path.md`, D-0019). Per D-0016 there is no Mac-reachable replica read URL; interim reads use the same sequencer endpoint.
 
 Full table: `tasks/prd-money-rail.md` § “When SettlementOS may come on the L2”.
