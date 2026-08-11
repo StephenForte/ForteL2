@@ -1063,6 +1063,42 @@ else
   fail=1
 fi
 
+# `not_reconciled` (CB-03) means a policy-holding wallet is excluded from the reconciler.
+# Harmless for ChainBank's own wallets; for ours it means auto-funding is switched off.
+printf '{"ts":%d,"batcher_wei":"400000000000000000","proposer_wei":"500000000000000000","l2_block":1}\n' \
+  "$FW_NOW" > "$FW_FIXTURE_DIR/poor.jsonl"
+printf '{"status":"ok","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"%s","status":"not_reconciled"}]}\n' \
+  "$FW_NEW_RUN" "$FW_ADDR" > "$FW_FIXTURE_DIR/ep-notrec.json"
+
+FW_NR1_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-notrec.json" "$FW_CHECK" 2>&1)" && FW_NR1_EC=0 || FW_NR1_EC=$?
+if [[ "$FW_NR1_EC" -eq 0 && "$FW_NR1_OUT" == *"not_reconciled"* && "$FW_NR1_OUT" == *"WARNING"* ]]; then
+  echo "PASS funding-watch warns when our own wallet is excluded from the reconciler"
+else
+  echo "FAIL funding-watch should warn on our wallet not_reconciled (ec=$FW_NR1_EC)" >&2
+  echo "$FW_NR1_OUT" >&2
+  fail=1
+fi
+
+FW_NR2_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/poor.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-notrec.json" "$FW_CHECK" 2>&1)" && FW_NR2_EC=0 || FW_NR2_EC=$?
+if [[ "$FW_NR2_EC" -ne 0 && "$FW_NR2_OUT" == *"draining with no automation"* ]]; then
+  echo "PASS funding-watch fails when our wallet is excluded AND below policy"
+else
+  echo "FAIL funding-watch should fail on not_reconciled + below policy (ec=$FW_NR2_EC)" >&2
+  echo "$FW_NR2_OUT" >&2
+  fail=1
+fi
+
+printf '{"status":"ok","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"0xFfa06ef7c43a66BC1203C5f154371Ac21B8f969f","status":"not_reconciled"},{"address":"%s","status":"ok"}]}\n' \
+  "$FW_NEW_RUN" "$FW_ADDR" > "$FW_FIXTURE_DIR/ep-othernr.json"
+FW_NR3_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-othernr.json" "$FW_CHECK" 2>&1)" && FW_NR3_EC=0 || FW_NR3_EC=$?
+if [[ "$FW_NR3_EC" -eq 0 && "$FW_NR3_OUT" != *"WARNING"* ]]; then
+  echo "PASS funding-watch ignores not_reconciled on wallets that are not ours"
+else
+  echo "FAIL another wallet's not_reconciled must not affect us (ec=$FW_NR3_EC)" >&2
+  echo "$FW_NR3_OUT" >&2
+  fail=1
+fi
+
 cleanup_fw_fixtures
 trap - EXIT
 

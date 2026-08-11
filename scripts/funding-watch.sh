@@ -43,7 +43,9 @@
 # of which belong to ChainBank — a global "failing" may be about someone else's wallet, and
 # a global "ok" cannot vouch for ours. ChainBank has also confirmed two label bugs that
 # under-report severity (blocked/failed reported as below_policy; a new wallet reading
-# degraded instead of failing), so labels are treated as advisory only.
+# degraded instead of failing), so labels are treated as advisory only. The wallet list
+# covers every policy-holding wallet, including ones excluded from the reconciler
+# (status `not_reconciled`) — harmless for others, serious for ours; see below.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -244,6 +246,21 @@ if ep_run_stale_h is not None and ep_run_stale_h > stale_hours:
 if ep_our_status in ("blocked", "failed"):
     emit("FAIL", "the funder reports our batcher wallet as '%s' — funding is being attempted "
          "and not succeeding; check %s" % (ep_our_status, FUNDER), extra)
+
+# `not_reconciled` means a policy-holding wallet is EXCLUDED from the reconciler
+# (reconciliationEnabled=false, or a disabled wallet/project/environment). ChainBank's
+# guidance is to treat it as inventory rather than a funding failure — correct for their
+# own wallets. It is NOT correct for ours: if our batcher is excluded, auto-funding is off
+# and the balance will never be replenished, which is exactly the silent death this script
+# exists to catch. Proportionate response: loud warning while the balance still holds,
+# FAIL once it is also under policy (draining with nothing coming).
+if ep_our_status == "not_reconciled":
+    if latest_bal < policy_min:
+        emit("FAIL", "our batcher is marked 'not_reconciled' (excluded from the funder) AND "
+             "is below the %.2f ETH policy — it is draining with no automation behind it"
+             % policy_min, extra)
+    print("WARNING: our batcher reads 'not_reconciled' — it holds a funding policy but is "
+          "excluded from the reconciler, so this balance will NOT be topped up automatically")
 
 # Our wallet missing entirely from a wallet list we believe covers it means we are not
 # actually being watched — surface it rather than reading silence as health.
