@@ -124,16 +124,37 @@ Good automation therefore *hides* the signal the mainnet cost model needs. Fix e
 the balance draw down across an uninterrupted stretch, or by having the funding job emit its
 transfers so the script can subtract them instead of skipping.
 
-**Mechanism NOT verified — open question.** The operator reports the top-up automation runs "on
-Render" with a ~0.6 ETH minimum. That could not be confirmed from the Render account on
-2026-08-11: the workspace contains six cron jobs (four `crown-tracker-*`, plus
-`chainbank-treasury-monitor` and `chainbank-wallet-reconciler`) and **none reference the ForteL2
-batcher address, `fortel2`, or `batcher`** in their logs. `chainbank-treasury-monitor`
-(`0 13 * * *`) was inspected directly and is read-only — it records a treasury observation and
-evaluates alerts; it does not transfer. The top-up itself is real and observed (+0.2563 ETH between
-03:00 and 03:05 local on 2026-08-11, outside either ChainBank cron's schedule).
+**Mechanism — IDENTIFIED 2026-08-11** (supersedes the "not verified" note first written here).
+The funder is the Render cron **`chainbank-wallet-reconciler`** (`crn-d9n89om417fc73cs30g0`), built
+from the **ChainBank** repo (`npm run cron:wallet-reconciler` -> `dist/src/jobs/wallet-reconciler.js`),
+schedule **`0 */6 * * *`** (00/06/12/18 UTC = 17/23/05/11 local). Each run assesses **4 wallets** and
+funds those under policy. Verified funding history since 2026-08-05:
 
-So: funding works, but **this repo cannot name what performs it.** Before the mainnet pilot treats
-auto-funding as a dependency (P7-0/P7-1), identify the service and repo, record them here, and give
-it a health signal — an unattended, unidentified process holding the rail's liveness is the same
-class of risk as the launchd drift this document already tracks twice (H4-003, H4-004).
+| Run (UTC) | walletsFunded | weiTransferred |
+|---|---|---|
+| 2026-08-06 06:00 | 1 | 0.2722 ETH |
+| 2026-08-06 18:00 | 1 | 0.600 ETH |
+| 2026-08-08 18:00 | 1 | 0.600 ETH |
+| every other run | 0 | 0 |
+
+The 06:00 send of 0.2722 ETH matches the +0.2563 ETH observed on BATCHER across the surrounding
+samples (the ~0.016 gap is burn inside the window), which is what ties this job to this wallet. The
+last two sends are a flat **0.600 ETH**, consistent with the operator's "bumped the ETH sent"; no
+funding has fired since 2026-08-08, consistent with the balance sitting above policy.
+
+**Correction to the measurement note above:** the job *already* logs its transfers — `walletsFunded`,
+`weiTransferred`, `walletsAssessed` per run. So subtracting top-ups from the burn calculation needs
+no new instrumentation on the ChainBank side; the data exists and is queryable via the Render MCP or
+dashboard. Wiring it into `gas-runway.sh` is the only missing piece.
+
+**Residual observability gap.** The run summary reports *how many* wallets were funded and the total
+wei, but not *which* address. With four wallets in scope, ForteL2's batcher cannot be distinguished
+from ChainBank's own wallets by log inspection alone — the correlation above relies on amount and
+timing. If the mainnet pilot is going to depend on this job (P7-0/P7-1), it should log the funded
+address, and ForteL2 should treat the job as an external dependency with its own health signal:
+today a silent failure of a cron in *another* project's repo takes the rail down with no alert on
+this side.
+
+**Unrelated pre-existing warning** seen while inspecting: the reconciler reports one aborted prior
+run (`startedAt 2026-08-02`, `finished_at IS NULL`). ChainBank's issue, noted only so it is not
+rediscovered as a ForteL2 symptom.
