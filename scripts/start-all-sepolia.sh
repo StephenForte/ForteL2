@@ -8,6 +8,35 @@ source "$SCRIPT_DIR/lib.sh"
 require_sepolia_env
 assert_block_times
 assert_l2_ports_free
+# T5-D1: L2_WRITE_RPC_PORT is not in assert_l2_ports_free (lib.sh CODEOWNERS).
+# Check it here — before the ERR trap — so a squat on :9555 fails closed
+# without starting the sequencer and then tearing it down mid-start.
+# Also refuse collisions with the six ports assert_l2_ports_free already covers
+# (filter binding first would otherwise leave batcher/proposer absent while
+# start-all reports success — D-0027 failure mode).
+WRITE_PORT="${L2_WRITE_RPC_PORT:-9555}"
+require_http_port "$WRITE_PORT" "L2_WRITE_RPC_PORT"
+for occupied in \
+  "${L2_EL_HTTP_PORT}" \
+  "${L2_EL_WS_PORT}" \
+  "${L2_EL_AUTH_PORT}" \
+  "${L2_NODE_RPC_PORT}" \
+  "${BATCHER_RPC_PORT}" \
+  "${PROPOSER_RPC_PORT}"
+do
+  if [[ "$WRITE_PORT" == "$occupied" ]]; then
+    echo "ERROR: L2_WRITE_RPC_PORT ($WRITE_PORT) collides with an L2 stack port ($occupied)" >&2
+    exit 1
+  fi
+done
+if ! command -v lsof >/dev/null 2>&1; then
+  echo "ERROR: lsof is required to verify L2 write filter port is free (install lsof)" >&2
+  exit 1
+fi
+if lsof -nP -iTCP:"${WRITE_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "ERROR: port ${WRITE_PORT} already in use — stop Phase 1 (./scripts/stop-all.sh) or free the port" >&2
+  exit 1
+fi
 warn_if_missing_env_file
 
 DEPLOYMENTS="$(deployments_json_path)"
@@ -45,12 +74,16 @@ trap sepolia_start_cleanup ERR
 
 "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"
 sleep 3
+# T5-D1: narrow write-facing door (eth/net/web3 allowlist). Full op-geth stays on L2_RPC_URL.
+"$SCRIPT_DIR/07-start-rpc-filter-sepolia.sh"
 "$SCRIPT_DIR/05-start-batcher-sepolia.sh"
 "$SCRIPT_DIR/06-start-proposer-sepolia.sh"
 trap - ERR
 
+WRITE_PORT="${L2_WRITE_RPC_PORT:-9555}"
 echo
 echo "=== Sepolia L2 stack is up ==="
-echo "L2 RPC:  $(redact_rpc_url "$L2_RPC_URL")  (chain $L2_CHAIN_ID)"
+echo "L2 RPC (full/operator):  $(redact_rpc_url "$L2_RPC_URL")  (chain $L2_CHAIN_ID)"
+echo "L2 write filter:         http://127.0.0.1:${WRITE_PORT}  (eth/net/web3 only; tunnel target)"
 echo "Status:  FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/status.sh"
 echo "Stop:    FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/stop-all-sepolia.sh"

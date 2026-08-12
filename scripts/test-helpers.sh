@@ -1102,6 +1102,70 @@ fi
 cleanup_fw_fixtures
 trap - EXIT
 
+# --- T5-D1: write-facing JSON-RPC method filter (eth/net/web3 allowlist) ---
+FILTER_PY="$SCRIPT_DIR/rpc-method-filter.py"
+FILTER_START="$SCRIPT_DIR/07-start-rpc-filter-sepolia.sh"
+
+# Wiring: start/stop/status + env example mention the filter port; lib.sh untouched.
+if [[ -f "$FILTER_PY" && -x "$FILTER_START" ]] \
+  && grep -q '07-start-rpc-filter-sepolia' "$SCRIPT_DIR/start-all-sepolia.sh" \
+  && grep -q 'l2-rpc-filter' "$SCRIPT_DIR/stop-all-sepolia.sh" \
+  && grep -q 'l2-rpc-filter' "$SCRIPT_DIR/status.sh" \
+  && grep -q 'L2_WRITE_RPC_PORT' "$FORTEL2_ROOT/.env.sepolia.example" \
+  && ! grep -q 'L2_WRITE_RPC_PORT' "$SCRIPT_DIR/lib.sh"; then
+  echo "PASS T5-D1 filter wired (start/stop/status/env; lib.sh untouched)"
+else
+  echo "FAIL T5-D1 filter must be wired without editing lib.sh" >&2
+  fail=1
+fi
+
+# Filter must hard-require loopback listen + upstream (fail closed off-box).
+if grep -q 'require_loopback_listen' "$FILTER_PY" \
+  && grep -q 'require_loopback_upstream' "$FILTER_PY" \
+  && grep -q 'ALLOWED_METHODS' "$FILTER_PY"; then
+  echo "PASS T5-D1 filter requires loopback listen/upstream + explicit allowlist"
+else
+  echo "FAIL T5-D1 filter must bind/upstream loopback and use ALLOWED_METHODS" >&2
+  fail=1
+fi
+
+# Property tests (prefix trap, batch, chunked, empty-batch, mixed-batch 503, loopback).
+FILTER_PROP_OUT="$(python3 "$FILTER_PY" --self-test 2>&1)" && FILTER_PROP_EC=0 || FILTER_PROP_EC=$?
+if [[ "$FILTER_PROP_EC" -eq 0 && "$FILTER_PROP_OUT" == *"self-test ok"* ]]; then
+  echo "PASS T5-D1 allowlist properties (prefix/batch/chunked/empty/503/loopback)"
+else
+  echo "FAIL T5-D1 allowlist property tests (ec=$FILTER_PROP_EC)" >&2
+  echo "$FILTER_PROP_OUT" >&2
+  fail=1
+fi
+
+# Start script must force 127.0.0.1 listen (not remodel op-geth --http.api).
+if grep -q 'L2_RPC_FILTER_LISTEN="127.0.0.1:' "$FILTER_START" \
+  && ! grep -q '\-\-http.api=eth,net,web3$' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -q 'eth,net,web3,debug,txpool,admin,miner' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
+  echo "PASS T5-D1 keeps full op-geth :9545; filter listens on 127.0.0.1"
+else
+  echo "FAIL T5-D1 must not narrow op-geth --http.api; filter must bind 127.0.0.1" >&2
+  fail=1
+fi
+
+# start-all must preflight L2_WRITE_RPC_PORT (free + distinct) before the ERR trap
+# and before starting the sequencer — lib.sh assert_l2_ports_free does not cover it.
+if awk '
+    /trap sepolia_start_cleanup ERR/ { exit (write_check && collide_check) ? 0 : 1 }
+    /lsof.*WRITE_PORT|lsof.*L2_WRITE_RPC_PORT/ { write_check = 1 }
+    /L2_WRITE_RPC_PORT.*collides|collides with an L2 stack port/ { collide_check = 1 }
+  ' "$SCRIPT_DIR/start-all-sepolia.sh" \
+  && awk '
+    /04-start-sequencer-sepolia/ { exit write_check ? 0 : 1 }
+    /lsof.*WRITE_PORT|lsof.*L2_WRITE_RPC_PORT/ { write_check = 1 }
+  ' "$SCRIPT_DIR/start-all-sepolia.sh"; then
+  echo "PASS T5-D1 start-all preflights WRITE_PORT before trap/sequencer"
+else
+  echo "FAIL T5-D1 start-all must preflight WRITE_PORT before ERR trap and sequencer" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

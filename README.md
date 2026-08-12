@@ -77,7 +77,7 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 
 **SOS onboarding (operator):**
 
-0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:45–03:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are loopback-only today (`http://127.0.0.1:9545`). US-012 is now a **GO** for an authenticated off-box write tunnel (see [the go/no-go](#us-012-non-loopback-gono-go--sepolia-sequencer-write-path-2026-08-11)), but it takes effect only after the sequencer RPC surface is narrowed to `eth,net,web3` — until then loopback still stands and no URL is published.
+0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:45–03:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are still loopback-only today — full operator RPC at `http://127.0.0.1:9545`, D1 allowlist filter at `http://127.0.0.1:9555` (see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist)). US-012 is a **GO** for an authenticated Cloudflare tunnel to **:9555 only** (see [the go/no-go](#us-012-non-loopback-gono-go--sepolia-sequencer-write-path-2026-08-11)); no off-box URL is published until the tunnel step lands.
 1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
 2. Fund the SOS deployer on L2: deposit L1→L2 with `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` (credits `ADMIN_ADDRESS` on L2), then transfer to the SOS deployer — note the env file must be sourced in *this* shell (the `FORTEL2_ENV=…` prefix only reaches the script's subprocess): `( set -a; source .env.sepolia; set +a; cast send <SOS_DEPLOYER_ADDRESS> --value <amount> --rpc-url "$L2_RPC_URL" --private-key "$ADMIN_PRIVATE_KEY" )`.
 3. Point SettlementOS at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545` today) and deploy SOS contracts on chain **852**.
@@ -609,10 +609,40 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 | Script | Role |
 |---|---|
-| `start-all-sepolia.sh` | Sequencer + batcher + proposer (calldata DA, beacon ignored) |
-| `stop-all-sepolia.sh` | Stops Sepolia PIDs only — no Anvil |
+| `start-all-sepolia.sh` | Sequencer + **write RPC filter** + batcher + proposer (calldata DA, beacon ignored) |
+| `stop-all-sepolia.sh` | Stops Sepolia PIDs only (incl. `l2-rpc-filter`) — no Anvil |
+| `07-start-rpc-filter-sepolia.sh` | Start the eth/net/web3 allowlist proxy alone (upstream must already be up) |
 | `deposit-eth-sepolia.sh` | L1→L2 via Sepolia `deployments.json` |
 | `reset-sepolia.sh` | Wipes `data-sepolia` only |
+
+### Write RPC filter (T5-D1 — eth/net/web3 allowlist)
+
+op-geth cannot run a second HTTP listener, so the narrow write surface is a **loopback JSON-RPC proxy** (`scripts/rpc-method-filter.py`), not a second geth.
+
+| Port | Process | Surface | Who uses it |
+|---|---|---|---|
+| **9545** (`L2_EL_HTTP_PORT` / `L2_RPC_URL`) | op-geth | Full `eth,net,web3,debug,txpool,admin,miner` | Operator tooling on the mini |
+| **9555** (`L2_WRITE_RPC_PORT`) | `l2-rpc-filter` | Explicit eth/net/web3 **method allowlist** only | Future Cloudflare tunnel / SOS (not published yet) |
+
+**Availability:** the sequencer (and therefore this filter’s upstream) is stopped nightly **23:45–03:00** `America/Los_Angeles` (D-0026). There is no uptime commitment.
+
+**Log/block filters and nightly restart:** the allowlist includes `eth_newFilter`, `eth_newBlockFilter`, `eth_getFilterChanges`, `eth_getFilterLogs`, and `eth_uninstallFilter` (not `eth_newPendingTransactionFilter` — mempool). Filter IDs are per-node and in-memory; every sequencer restart invalidates them. After the nightly window (or any stack bounce), `eth_getFilterChanges` returning “filter not found” is **expected** — consumers must re-create filters and must not treat that as an outage.
+
+```bash
+# Started automatically by start-all-sepolia.sh after the sequencer is up.
+# Standalone (sequencer already running):
+FORTEL2_ENV=.env.sepolia ./scripts/07-start-rpc-filter-sepolia.sh
+
+# Smoke the filter (allowed):
+cast block-number --rpc-url http://127.0.0.1:9555
+cast chain-id --rpc-url http://127.0.0.1:9555
+
+# Disallowed methods return JSON-RPC errors on :9555 but still work on :9545.
+# Stop with the rest of the Sepolia stack:
+FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+```
+
+Do **not** point `cloudflared` at `:9545`. Do not publish a URL in `deployments/rail-interface.json` until spike step 3 + Access are ready.
 
 ## Phase 2d — QuickNode L1 RPC (US-025)
 
@@ -812,7 +842,7 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 | **Auth model** | Cloudflare Access service token, held as a Render environment variable and sent as a header on outbound JSON-RPC. The token is a US-022 secret: gitignored, never in `.env.sepolia.example`, redacted in logs (`redact_rpc_url`). |
 | **Rollback** | Revoke the service token, or stop `cloudflared`. Sequencer bind, chain state, and `L2_RPC_URL` are all untouched, so rollback is immediate and has no on-chain effect. |
 
-**Hard precondition — the GO has no effect until D1 ships.** Today [`scripts/04-start-sequencer-sepolia.sh`](scripts/04-start-sequencer-sepolia.sh) serves `eth,net,web3,debug,txpool,admin,miner` with `--http.vhosts=*` and `--http.corsdomain=*`. That is safe on loopback and a critical exposure the instant anything off-box reaches the port. Narrow first, tunnel second. Never the reverse.
+**Hard precondition — D1 (narrow write surface) has shipped.** [`scripts/04-start-sequencer-sepolia.sh`](scripts/04-start-sequencer-sepolia.sh) still serves the full `eth,net,web3,debug,txpool,admin,miner` surface on loopback `:9545` for operator tooling. The write-facing door is a separate loopback filter on **`L2_WRITE_RPC_PORT` (default 9555)** — see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist) below. Tunnel (spike step 3) must dial **:9555 only**, never :9545. Narrow first, tunnel second. Never the reverse.
 
 **Writes stay authenticated even though reads are public — this is deliberate and must not be "fixed" later.** Every transaction becomes batcher calldata burning L1 ETH that an external funder refills (D-0027). An unauthenticated write endpoint is therefore a stranger's lever on your L1 spend, and it gets *worse* as L2 fees are tuned down (P7-0), because cheap transactions make spam cheap while leaving the cost with the operator. Publicly readable and permissioned to write is also the correct posture for a settlement rail.
 

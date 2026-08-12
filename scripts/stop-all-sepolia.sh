@@ -8,7 +8,8 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_sepolia_env
 
-for name in op-proposer op-batcher op-node op-geth; do
+# l2-rpc-filter first — it only dials loopback op-geth; stop before tearing EL down.
+for name in l2-rpc-filter op-proposer op-batcher op-node op-geth; do
   stop_bg "$name"
 done
 echo "Sepolia L2 processes stopped (DATA_DIR=$DATA_DIR)."
