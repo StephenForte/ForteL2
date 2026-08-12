@@ -5,9 +5,9 @@
 > Host: **Mac mini only** — items 1 and 2 need the live filter and a real start-all run.
 > Directory: operator's main checkout.
 
-Five verified defects from review of #71. **Fix in severity order**; 1 and 2 are the ones that matter. All evidence below was reproduced by the reviewer — you should not have to re-derive it, but do confirm each before fixing.
+Five verified defects from review of #71, plus one operator decision (item 6). **Fix in severity order**; 1 and 2 are the ones that matter. All evidence below was reproduced by the reviewer — you should not have to re-derive it, but do confirm each before fixing.
 
-Your original work was sound and the allowlist held under adversarial probing, including a duplicate-key parser-differential attempt. Items 3–5 are edge cases; item 1 was invisible without a raw-socket test and item 2 without reading the trap ordering.
+Your original work was sound and the allowlist held under adversarial probing, including a duplicate-key parser-differential attempt. Items 3–5 are edge cases; item 1 was invisible without a raw-socket test and item 2 without reading the trap ordering. Item 6 is not a defect at all — it is a scope addition the operator has since decided.
 
 ## 1. BLOCKING — chunked request bodies are silently rejected
 
@@ -55,9 +55,25 @@ Fix it in `classify_body`/`handle_jsonrpc_body` so the reject actually reaches t
 
 Responses carry `Server: BaseHTTP/0.6 Python/3.14.6`. Override `server_version` and `sys_version` on the handler. One line; this endpoint is about to be tunnel-facing.
 
-## Not in scope
+## 6. Add the `eth` filter methods to the allowlist (operator decision, 2026-08-12)
 
-- Filter methods (`eth_newFilter` / `eth_getFilterChanges` / `getFilterLogs` / `uninstallFilter`) are currently rejected. That is an **operator decision** pending, not a defect — do not add them to the allowlist in this task.
+Not a defect — a decision. The operator wants event-watching to work for SettlementOS, so add these five to `ALLOWED_METHODS`:
+
+- `eth_newFilter`
+- `eth_newBlockFilter`
+- `eth_getFilterChanges`
+- `eth_getFilterLogs`
+- `eth_uninstallFilter`
+
+**Deliberately NOT added: `eth_newPendingTransactionFilter`.** It exposes mempool contents, which is the same reason the `txpool` namespace was excluded in the first place. Adding the other five while omitting this one is intentional, not an oversight — do not "complete the set." If you think that is wrong, argue it in the handoff rather than adding it.
+
+**The trap — this one bites nightly.** Filters are per-node, in-memory, and idle-expiring (geth's default is five minutes). They work correctly behind this proxy because there is exactly one upstream node and no load balancing, so a filter ID the client holds always resolves to the node that issued it. But **every sequencer restart invalidates every filter ID, and the sequencer restarts nightly at 23:45–03:00** (D-0026). So `eth_getFilterChanges` returning "filter not found" is a normal once-a-day event here, not a fault.
+
+That has to be written down where a consumer will read it, or it will be reported as an outage. Add it to the README "Write RPC filter" section next to the availability window: consumers must re-create filters on filter-not-found and must not treat it as an error condition.
+
+Tests: each of the five added methods is allowed; `eth_newPendingTransactionFilter` is still rejected; and the prefix trap still holds — `eth_newFilterEvil` must be rejected, proving the additions did not quietly turn the check into a prefix match.
+
+## Not in scope
 - cloudflared, Access, `rail-interface.json` — still spike steps 3–4.
 - Rate limiting — still edge, not proxy.
 - Notification (`id`-less) response semantics — known minor deviation, deliberately left.
@@ -77,8 +93,8 @@ Note: a filter instance from the previous round may still be running (pid 79016 
 
 ## Disagreement
 
-If you think any of these five is wrong — particularly the chunked diagnosis, which rests on an assumption about cloudflared's behaviour rather than an observed tunnel — argue it with evidence rather than implementing around it.
+If you think any of these six is wrong — particularly the chunked diagnosis, which rests on an assumption about cloudflared's behaviour rather than an observed tunnel — argue it with evidence rather than implementing around it.
 
 ## Hand back
 
-Same format as before, plus one line per item 1–5 stating fixed / not-fixed and why.
+Same format as before, plus one line per item 1–6 stating fixed / not-fixed and why.
