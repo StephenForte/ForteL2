@@ -291,6 +291,11 @@
 - **Decision:** Port MAX_LINE_BYTES=8192, MAX_TRAILER_LINES=64, body budget includes size lines/trailers, ValueError → 400 Connection: close. Allowlist unchanged (writes still allowed).
 - **Consequence:** T5-TUNNEL (D-0034) may proceed.
 
+### D-0034 — Authenticated Cloudflare tunnel to L2_WRITE_RPC_PORT (:9555)
+- **Context:** D-0030 GO; D1 filter on loopback :9555; SOS reads use the replica (D-0032).
+- **Decision:** cloudflared origin is http://127.0.0.1:9555 only. Access service token; audience = settlementos Render. L2_RPC_URL stays loopback. rail-interface write URL not published in this change.
+- **Consequence:** SOS FORTEL2_SEPOLIA_RPC_URL + CF Access headers are a follow-up. Rollback = stop cloudflared / revoke token.
+
 ---
 
 ## Escalations

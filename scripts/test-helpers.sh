@@ -1166,6 +1166,83 @@ else
   fail=1
 fi
 
+# --- T5 step 3 / D-0034: cloudflared dials the write filter (:9555) only ---
+CF_HELPER="$SCRIPT_DIR/08-run-cloudflared-write.sh"
+CF_TEMPLATE="$FORTEL2_ROOT/config/cloudflared-write.yml.example"
+CF_PLIST="$LAUNCHD_DIR/com.steve.fortel2-cloudflared.plist"
+CF_CHECK="$SCRIPT_DIR/check-launchd.sh"
+
+# Template origin is the write filter; helper + plist exist; start-all does not own the tunnel.
+if [[ -x "$CF_HELPER" && -f "$CF_TEMPLATE" && -f "$CF_PLIST" ]] \
+  && grep -q 'service: http://127.0.0.1:9555' "$CF_TEMPLATE" \
+  && ! grep -E '^[[:space:]]*service:.*:9545' "$CF_TEMPLATE" \
+  && ! grep -E '^[[:space:]]*service:.*:9547' "$CF_TEMPLATE" \
+  && grep -q 'com.steve.fortel2-cloudflared' "$CF_PLIST" \
+  && grep -q 'KeepAlive' "$CF_PLIST" \
+  && grep -q '08-run-cloudflared-write.sh' "$CF_PLIST" \
+  && ! grep -q '<key>StartCalendarInterval</key>' "$CF_PLIST" \
+  && grep -q 'check_keepalive_agent fortel2-cloudflared' "$CF_CHECK" \
+  && ! grep -q '08-run-cloudflared-write' "$SCRIPT_DIR/start-all-sepolia.sh" \
+  && ! grep -q '08-run-cloudflared-write' "$SCRIPT_DIR/stop-all-sepolia.sh" \
+  && grep -q 'config/cloudflared-write.yml' "$FORTEL2_ROOT/.gitignore"; then
+  echo "PASS D-0034 cloudflared template/plist/helper independent of start-all; origin :9555"
+else
+  echo "FAIL D-0034 must commit KeepAlive agent + :9555 template; not wired into start/stop-all" >&2
+  fail=1
+fi
+
+# --check-config accepts the committed template origin.
+if CF_OK="$("$CF_HELPER" --check-config "$CF_TEMPLATE" 2>&1)" && [[ "$CF_OK" == *"OK origin http://127.0.0.1:9555"* ]]; then
+  echo "PASS D-0034 --check-config accepts template origin :9555"
+else
+  echo "FAIL D-0034 --check-config must accept config/cloudflared-write.yml.example" >&2
+  echo "${CF_OK:-}" >&2
+  fail=1
+fi
+
+# --check-config refuses the full EL port (the trap).
+CF_BAD="$(mktemp "${TMPDIR:-/tmp}/cf-write-bad.XXXXXX.yml")"
+printf 'ingress:\n  - service: http://127.0.0.1:9545\n  - service: http_status:404\n' > "$CF_BAD"
+if "$CF_HELPER" --check-config "$CF_BAD" >/dev/null 2>&1; then
+  echo "FAIL D-0034 --check-config must reject origin :9545" >&2
+  fail=1
+else
+  echo "PASS D-0034 --check-config rejects origin :9545"
+fi
+rm -f "$CF_BAD"
+
+# --check-config refuses op-node admin RPC.
+CF_NODE="$(mktemp "${TMPDIR:-/tmp}/cf-write-node.XXXXXX.yml")"
+printf 'ingress:\n  - service: http://127.0.0.1:9547\n  - service: http_status:404\n' > "$CF_NODE"
+if "$CF_HELPER" --check-config "$CF_NODE" >/dev/null 2>&1; then
+  echo "FAIL D-0034 --check-config must reject origin :9547" >&2
+  fail=1
+else
+  echo "PASS D-0034 --check-config rejects origin :9547"
+fi
+rm -f "$CF_NODE"
+
+# L2_WRITE_RPC_PORT=9545 is refused even if the yaml matches that port.
+CF_FAKE="$(mktemp "${TMPDIR:-/tmp}/cf-write-fake.XXXXXX.yml")"
+printf 'ingress:\n  - service: http://127.0.0.1:9545\n  - service: http_status:404\n' > "$CF_FAKE"
+if L2_WRITE_RPC_PORT=9545 "$CF_HELPER" --check-config "$CF_FAKE" >/dev/null 2>&1; then
+  echo "FAIL D-0034 must refuse L2_WRITE_RPC_PORT=9545" >&2
+  fail=1
+else
+  echo "PASS D-0034 refuses L2_WRITE_RPC_PORT=9545"
+fi
+rm -f "$CF_FAKE"
+
+# rail-interface write URL stays unpublished (loopback l2RpcUrl; no Cloudflare hostname).
+RAIL_JSON="$FORTEL2_ROOT/deployments/rail-interface.json"
+if grep -q '"l2RpcUrl": "http://127.0.0.1:9545"' "$RAIL_JSON" \
+  && ! grep -qiE 'cloudflare|trycloudflare|cf-access' "$RAIL_JSON"; then
+  echo "PASS D-0034 rail-interface write URL unpublished"
+else
+  echo "FAIL D-0034 must not publish a Cloudflare write URL in rail-interface.json" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

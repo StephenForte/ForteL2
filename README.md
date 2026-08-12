@@ -77,7 +77,7 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 
 **SOS onboarding (operator):**
 
-0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:45–03:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are still loopback-only today — full operator RPC at `http://127.0.0.1:9545`, D1 allowlist filter at `http://127.0.0.1:9555` (see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist)). US-012 is a **GO** for an authenticated Cloudflare tunnel to **:9555 only** (see [the go/no-go](#us-012-non-loopback-gono-go--sepolia-sequencer-write-path-2026-08-11)); no off-box URL is published until the tunnel step lands.
+0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:45–03:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** on the mini: full operator RPC at `http://127.0.0.1:9545`, D1 allowlist filter at `http://127.0.0.1:9555` (see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist)). US-012 is a **GO**; `cloudflared` dials **:9555 only** (see [Authenticated Cloudflare tunnel](#authenticated-cloudflare-tunnel-t5-step-3--d-0034) and [the go/no-go](#us-012-non-loopback-gono-go--sepolia-sequencer-write-path-2026-08-11)). No write URL is published in `rail-interface.json` until Access is proven.
 1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
 2. Fund the SOS deployer on L2: deposit L1→L2 with `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` (credits `ADMIN_ADDRESS` on L2), then transfer to the SOS deployer — note the env file must be sourced in *this* shell (the `FORTEL2_ENV=…` prefix only reaches the script's subprocess): `( set -a; source .env.sepolia; set +a; cast send <SOS_DEPLOYER_ADDRESS> --value <amount> --rpc-url "$L2_RPC_URL" --private-key "$ADMIN_PRIVATE_KEY" )`.
 3. Point SettlementOS at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545` today) and deploy SOS contracts on chain **852**.
@@ -622,7 +622,7 @@ op-geth cannot run a second HTTP listener, so the narrow write surface is a **lo
 | Port | Process | Surface | Who uses it |
 |---|---|---|---|
 | **9545** (`L2_EL_HTTP_PORT` / `L2_RPC_URL`) | op-geth | Full `eth,net,web3,debug,txpool,admin,miner` | Operator tooling on the mini |
-| **9555** (`L2_WRITE_RPC_PORT`) | `l2-rpc-filter` | Explicit eth/net/web3 **method allowlist** only | Future Cloudflare tunnel / SOS (not published yet) |
+| **9555** (`L2_WRITE_RPC_PORT`) | `l2-rpc-filter` | Explicit eth/net/web3 **method allowlist** only | `cloudflared` origin (LaunchAgent `com.steve.fortel2-cloudflared`). Never publish `:9545`. |
 
 **Availability:** the sequencer (and therefore this filter’s upstream) is stopped nightly **23:45–03:00** `America/Los_Angeles` (D-0026). There is no uptime commitment.
 
@@ -642,7 +642,26 @@ cast chain-id --rpc-url http://127.0.0.1:9555
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 ```
 
-Do **not** point `cloudflared` at `:9545`. Do not publish a URL in `deployments/rail-interface.json` until spike step 3 + Access are ready.
+Do **not** point `cloudflared` at `:9545`. Do not publish a write URL in `deployments/rail-interface.json` in this step (D-0034) — Access must be proven first.
+
+### Authenticated Cloudflare tunnel (T5 step 3 — D-0034)
+
+`cloudflared` is a **KeepAlive LaunchAgent**, not part of `start-all-sepolia.sh`. Nightly sleep/wake stop the sequencer; the tunnel process stays up and the origin goes dark for **23:45–03:00** `America/Los_Angeles` (D-0026). That window is expected, not an outage of the tunnel daemon.
+
+| Item | Value |
+|---|---|
+| **Origin** | `http://127.0.0.1:9555` only (`L2_WRITE_RPC_PORT`). Never `:9545`, never op-node `:9547`. |
+| **Audience** | `settlementos` Render service only (Access service token). Not the public internet. |
+| **`L2_RPC_URL`** | Stays loopback (`http://127.0.0.1:9545`). Do not point it at the tunnel hostname (`lib.sh` loopback asserts). |
+| **Rollback** | Stop `cloudflared` (unload the LaunchAgent) and/or revoke the Access service token. Sequencer bind and chain state are untouched. |
+| **rail-interface** | Write URL **unpublished** until Access is proven (spike step 4). |
+
+**Operator dashboard (do not invent a hostname or paste secrets into git/chat/`.env.sepolia.example`):**
+
+1. **Tunnel.** Cloudflare Zero Trust → Networks → Tunnels → Create a Cloudflared tunnel (name is operator-local). On the mini, prefer a locally-managed tunnel so the committed config is source of truth: `cloudflared tunnel login` then `cloudflared tunnel create <name>`. Credentials land in `~/.cloudflared/<uuid>.json` (gitignored). Copy [`config/cloudflared-write.yml.example`](config/cloudflared-write.yml.example) → `config/cloudflared-write.yml` (gitignored); set `tunnel:` and `credentials-file:` to that UUID. Public hostname: the tunnel → Public Hostname → **service `http://127.0.0.1:9555`** (must match the yaml).
+2. **Access application.** Zero Trust → Access → Applications → Add an application → Self-hosted. Application domain = that hostname. Policy: **Service Auth** (include the service token). Do not use Bypass or Everyone.
+3. **Service token.** Access → Service credentials → Create. Audience = the `settlementos` Render service only. Put `CF-Access-Client-Id` / `CF-Access-Client-Secret` in the **settlementos** Render env — never in this repo. SOS `FORTEL2_SEPOLIA_RPC_URL` + those headers are a follow-up (spike step 4 / Render env).
+4. **LaunchAgent** (after the live yaml has no `REPLACE_WITH_` placeholders): copy `launchd/com.steve.fortel2-cloudflared.plist` into `~/Library/LaunchAgents/` and `bootout` + `bootstrap` per [`launchd/README.md`](launchd/README.md). `./scripts/08-run-cloudflared-write.sh --check-config` refuses any origin other than `http://127.0.0.1:9555`.
 
 ## Phase 2d — QuickNode L1 RPC (US-025)
 
@@ -696,7 +715,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh status
 
 Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clients is enough).
 
-**Scheduled on the Mac mini (launchd):** checked-in agents run Sepolia sleep at **23:45** and wake at **03:00** local (`launchd/com.steve.fortel2-sleep.plist`, `…-wake.plist`). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
+**Scheduled on the Mac mini (launchd):** checked-in agents run Sepolia sleep at **23:45** and wake at **03:00** local (`launchd/com.steve.fortel2-sleep.plist`, `…-wake.plist`). `com.steve.fortel2-cloudflared` is KeepAlive (not on that calendar) and dials the write filter at `:9555` — see [Authenticated Cloudflare tunnel](#authenticated-cloudflare-tunnel-t5-step-3--d-0034). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
 
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 
@@ -833,16 +852,16 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 
 ### US-012 non-loopback go/no-go — Sepolia sequencer write path (2026-08-11)
 
-**Verdict: GO**, superseding the Phase 1b no-go above, for **authenticated write access only**, and **not in effect until the D1 precondition below ships**. Options considered and rejected: [`tasks/spike-t5-write-path.md`](tasks/spike-t5-write-path.md). Rationale: `tasks/decisions.md` D-0030.
+**Verdict: GO**, superseding the Phase 1b no-go above, for **authenticated write access only**. D1 has shipped; the tunnel LaunchAgent dials **:9555 only** (D-0034). The write URL stays unpublished until Access is proven. Options considered and rejected: [`tasks/spike-t5-write-path.md`](tasks/spike-t5-write-path.md). Rationale: `tasks/decisions.md` D-0030 / D-0034.
 
 | US-012 item | Answer |
 |---|---|
-| **What is exposed** | One op-geth HTTP listener limited to **`eth,net,web3`**, reached through a Cloudflare tunnel that dials `127.0.0.1`. op-geth itself stays bound to `127.0.0.1`; no raw bind leaves loopback and `scripts/lib.sh` loopback asserts are unchanged. op-node's RPC is admin-enabled and is **never** published. |
+| **What is exposed** | The D1 write filter (`eth,net,web3` allowlist) on **`L2_WRITE_RPC_PORT` (default 9555)**, reached through a Cloudflare tunnel that dials `http://127.0.0.1:9555` only. op-geth itself stays bound to `127.0.0.1`; no raw bind leaves loopback and `scripts/lib.sh` loopback asserts are unchanged. Full `admin/debug/miner/txpool` stays on `:9545`. op-node's RPC is admin-enabled and is **never** published. |
 | **To whom** | The `settlementos` Render service only (`srv-d9tafn3m8hqs73cks7cg`). **Not** the public internet. Everyone else reads from the replica — see the public read path below. |
 | **Auth model** | Cloudflare Access service token, held as a Render environment variable and sent as a header on outbound JSON-RPC. The token is a US-022 secret: gitignored, never in `.env.sepolia.example`, redacted in logs (`redact_rpc_url`). |
-| **Rollback** | Revoke the service token, or stop `cloudflared`. Sequencer bind, chain state, and `L2_RPC_URL` are all untouched, so rollback is immediate and has no on-chain effect. |
+| **Rollback** | Revoke the service token, or stop `cloudflared` (unload `com.steve.fortel2-cloudflared`). Sequencer bind, chain state, and `L2_RPC_URL` are all untouched, so rollback is immediate and has no on-chain effect. |
 
-**Hard precondition — D1 (narrow write surface) has shipped.** [`scripts/04-start-sequencer-sepolia.sh`](scripts/04-start-sequencer-sepolia.sh) still serves the full `eth,net,web3,debug,txpool,admin,miner` surface on loopback `:9545` for operator tooling. The write-facing door is a separate loopback filter on **`L2_WRITE_RPC_PORT` (default 9555)** — see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist) below. Tunnel (spike step 3) must dial **:9555 only**, never :9545. Narrow first, tunnel second. Never the reverse.
+**D1 (narrow write surface) has shipped.** [`scripts/04-start-sequencer-sepolia.sh`](scripts/04-start-sequencer-sepolia.sh) still serves the full `eth,net,web3,debug,txpool,admin,miner` surface on loopback `:9545` for operator tooling. The write-facing door is a separate loopback filter on **`L2_WRITE_RPC_PORT` (default 9555)** — see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist). `cloudflared` must dial **:9555 only**, never :9545. Narrow first, tunnel second. Never the reverse.
 
 **Writes stay authenticated even though reads are public — this is deliberate and must not be "fixed" later.** Every transaction becomes batcher calldata burning L1 ETH that an external funder refills (D-0027). An unauthenticated write endpoint is therefore a stranger's lever on your L1 spend, and it gets *worse* as L2 fees are tuned down (P7-0), because cheap transactions make spam cheap while leaving the cost with the operator. Publicly readable and permissioned to write is also the correct posture for a settlement rail.
 

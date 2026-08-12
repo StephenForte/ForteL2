@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.steve.fortel2-cloudflared</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/steveforte/ForteL2/scripts/08-run-cloudflared-write.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/steveforte/ForteL2</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FORTEL2_ENV</key>
+    <string>.env.sepolia</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/Users/steveforte/.foundry/bin:/Users/steveforte/ForteL2/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <!--
+    KeepAlive + RunAtLoad: independent of start-all-sepolia.sh and of the
+    nightly sleep/wake agents. Sleep stops the sequencer; this process stays
+    up and the origin (127.0.0.1:9555) goes dark for 23:45–03:00 America/Los_Angeles.
+    Do not add StartCalendarInterval — that would couple the tunnel to sleep.
+    Bootstrap only after config/cloudflared-write.yml is filled (no placeholders);
+    otherwise KeepAlive will restart-loop.
+  -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <!--
+    Log under ~/Library/Logs (always present on macOS). Do NOT use repo data/:
+    launchd opens StandardOutPath/StandardErrorPath before the program runs.
+  -->
+  <key>StandardOutPath</key>
+  <string>/Users/steveforte/Library/Logs/fortel2-cloudflared.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/steveforte/Library/Logs/fortel2-cloudflared.err.log</string>
+</dict>
+</plist>
