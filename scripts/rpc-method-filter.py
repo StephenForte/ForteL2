@@ -72,6 +72,13 @@ ALLOWED_METHODS: frozenset[str] = frozenset(
         "eth_protocolVersion",
         "eth_sendRawTransaction",
         "eth_syncing",
+        # eth — log/block filters (operator decision 2026-08-12).
+        # Deliberately omitted: eth_newPendingTransactionFilter (mempool surface).
+        "eth_newFilter",
+        "eth_newBlockFilter",
+        "eth_getFilterChanges",
+        "eth_getFilterLogs",
+        "eth_uninstallFilter",
     }
 )
 
@@ -375,6 +382,16 @@ def self_test() -> None:
 
     assert is_method_allowed("eth_blockNumber") is True
     assert is_method_allowed("eth_sendRawTransaction") is True
+    for m in (
+        "eth_newFilter",
+        "eth_newBlockFilter",
+        "eth_getFilterChanges",
+        "eth_getFilterLogs",
+        "eth_uninstallFilter",
+    ):
+        assert is_method_allowed(m) is True, m
+    assert is_method_allowed("eth_newPendingTransactionFilter") is False  # mempool
+    assert is_method_allowed("eth_newFilterEvil") is False  # prefix trap after #6
     assert is_method_allowed("admin_peers") is False
     assert is_method_allowed("debug_traceBlockByNumber") is False
     assert is_method_allowed("miner_start") is False
