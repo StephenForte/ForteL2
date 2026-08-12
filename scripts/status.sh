@@ -6,7 +6,9 @@ source "$SCRIPT_DIR/lib.sh"
 
 echo "=== Process status ==="
 procs=(op-geth op-node op-batcher op-proposer)
-if [[ "${L2_CHAIN_ID:-}" != "852" ]]; then
+if [[ "${L2_CHAIN_ID:-}" == "852" ]]; then
+  procs+=(l2-rpc-filter)
+else
   procs=(anvil "${procs[@]}")
 fi
 for name in "${procs[@]}"; do
@@ -32,4 +34,13 @@ if cast block-number --rpc-url "$L2_RPC_URL" >/dev/null 2>&1; then
   echo "  L2 block=$(cast block-number --rpc-url "$L2_RPC_URL") chain=$(cast chain-id --rpc-url "$L2_RPC_URL")"
 else
   echo "  L2: unreachable"
+fi
+if [[ "${L2_CHAIN_ID:-}" == "852" ]]; then
+  WRITE_PORT="${L2_WRITE_RPC_PORT:-9555}"
+  WRITE_URL="http://127.0.0.1:${WRITE_PORT}"
+  if cast block-number --rpc-url "$WRITE_URL" >/dev/null 2>&1; then
+    echo "  L2 write filter :${WRITE_PORT} block=$(cast block-number --rpc-url "$WRITE_URL") (eth/net/web3 only)"
+  else
+    echo "  L2 write filter :${WRITE_PORT}: unreachable"
+  fi
 fi

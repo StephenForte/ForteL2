@@ -45,12 +45,16 @@ trap sepolia_start_cleanup ERR
 
 "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"
 sleep 3
+# T5-D1: narrow write-facing door (eth/net/web3 allowlist). Full op-geth stays on L2_RPC_URL.
+"$SCRIPT_DIR/07-start-rpc-filter-sepolia.sh"
 "$SCRIPT_DIR/05-start-batcher-sepolia.sh"
 "$SCRIPT_DIR/06-start-proposer-sepolia.sh"
 trap - ERR
 
+WRITE_PORT="${L2_WRITE_RPC_PORT:-9555}"
 echo
 echo "=== Sepolia L2 stack is up ==="
-echo "L2 RPC:  $(redact_rpc_url "$L2_RPC_URL")  (chain $L2_CHAIN_ID)"
+echo "L2 RPC (full/operator):  $(redact_rpc_url "$L2_RPC_URL")  (chain $L2_CHAIN_ID)"
+echo "L2 write filter:         http://127.0.0.1:${WRITE_PORT}  (eth/net/web3 only; tunnel target)"
 echo "Status:  FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/status.sh"
 echo "Stop:    FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/stop-all-sepolia.sh"
