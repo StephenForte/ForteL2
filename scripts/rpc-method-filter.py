@@ -88,7 +88,10 @@ JSONRPC_PARSE_ERROR = -32700
 JSONRPC_SERVER_ERROR = -32000
 
 # Cap request bodies — cloudflared may deliver chunked; never read unbounded.
+# Size lines and trailers share this budget; a payload-only cap is not enough.
 MAX_BODY_BYTES = 1_048_576  # 1 MiB
+MAX_LINE_BYTES = 8192  # chunk-size lines and trailer lines
+MAX_TRAILER_LINES = 64
 
 
 def _env(name: str, default: str = "") -> str:
@@ -178,19 +181,38 @@ def _transfer_encoding_is_chunked(te_header: str) -> bool:
     return bool(parts) and parts[-1] == "chunked"
 
 
+def _readline_bounded(rfile, max_line: int = MAX_LINE_BYTES) -> bytes:
+    """Read one line; reject if it exceeds max_line (including CRLF)."""
+    line = rfile.readline(max_line + 1)
+    if not line:
+        return b""
+    if b"\n" not in line or len(line) > max_line:
+        raise ValueError(f"header line exceeds max {max_line} bytes")
+    return line
+
+
 def read_chunked_body(rfile, max_bytes: int = MAX_BODY_BYTES) -> bytes:
-    """Decode an HTTP/1.1 chunked body; reject if total exceeds max_bytes."""
+    """Decode an HTTP/1.1 chunked body; reject if total exceeds max_bytes.
+
+    Size lines, chunk payloads, chunk CRLFs, and trailers all count toward
+    max_bytes. Line length and trailer count are capped separately so a
+    missing newline cannot grow RSS without bound.
+    """
     chunks: list[bytes] = []
     total = 0
+    trailer_count = 0
     while True:
-        size_line = rfile.readline()
+        size_line = _readline_bounded(rfile)
         if not size_line:
             raise ValueError("truncated chunked body")
-        size_line = size_line.strip()
-        if b";" in size_line:
-            size_line = size_line.split(b";", 1)[0].strip()
+        total += len(size_line)
+        if total > max_bytes:
+            raise ValueError(f"body exceeds max {max_bytes} bytes")
+        size_field = size_line.strip()
+        if b";" in size_field:
+            size_field = size_field.split(b";", 1)[0].strip()
         try:
-            size = int(size_line, 16)
+            size = int(size_field, 16)
         except ValueError as exc:
             raise ValueError("bad chunk size") from exc
         if size < 0:
@@ -198,11 +220,19 @@ def read_chunked_body(rfile, max_bytes: int = MAX_BODY_BYTES) -> bytes:
         if size == 0:
             # Consume optional trailers until the terminating blank line.
             while True:
-                trailer = rfile.readline()
-                if trailer in (b"\r\n", b"\n", b""):
+                trailer = _readline_bounded(rfile)
+                if not trailer:
+                    raise ValueError("truncated chunked trailers")
+                total += len(trailer)
+                if total > max_bytes:
+                    raise ValueError(f"body exceeds max {max_bytes} bytes")
+                if trailer in (b"\r\n", b"\n"):
                     break
+                trailer_count += 1
+                if trailer_count > MAX_TRAILER_LINES:
+                    raise ValueError(f"too many trailer lines (max {MAX_TRAILER_LINES})")
             break
-        if total + size > max_bytes:
+        if total + size + 2 > max_bytes:
             raise ValueError(f"body exceeds max {max_bytes} bytes")
         data = rfile.read(size)
         if len(data) < size:
@@ -212,6 +242,7 @@ def read_chunked_body(rfile, max_bytes: int = MAX_BODY_BYTES) -> bytes:
         crlf = rfile.read(2)
         if crlf != b"\r\n":
             raise ValueError("missing chunk CRLF")
+        total += 2
     return b"".join(chunks)
 
 
@@ -277,8 +308,20 @@ def _forward(body: bytes, content_type: str) -> tuple[int, bytes, str]:
         return err.code, payload, ctype
 
 
-def _write_json(handler: BaseHTTPRequestHandler, status: int, payload: bytes, ctype: str = "application/json") -> None:
+def _write_json(
+    handler: BaseHTTPRequestHandler,
+    status: int,
+    payload: bytes,
+    ctype: str = "application/json",
+    close: bool = False,
+) -> None:
     handler.send_response(status)
+    if close:
+        # RFC 9112 §9.6: a server that does not consume the entire request
+        # body MUST close rather than reuse the connection. Keep-alive after
+        # an unread oversize/chunked error desyncs the next request (smuggle).
+        handler.send_header("Connection", "close")
+        handler.close_connection = True
     handler.send_header("Content-Type", ctype)
     handler.send_header("Content-Length", str(len(payload)))
     handler.end_headers()
@@ -352,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
             body = read_http_body(self.headers, self.rfile)
         except ValueError as exc:
             msg = reject_response(None, f"bad request body: {exc}", JSONRPC_INVALID_REQUEST)
-            _write_json(self, 400, json.dumps(msg).encode())
+            _write_json(self, 400, json.dumps(msg).encode(), close=True)
             return
         ctype = self.headers.get("Content-Type", "application/json")
         try:
@@ -437,6 +480,23 @@ def self_test() -> None:
     assert (
         read_http_body(_Hdr({"Transfer-Encoding": "chunked"}), io.BytesIO(chunked)) == raw
     )
+
+    # Unbounded chunk-size line (no newline) must reject without slurping the rest.
+    long_line = io.BytesIO(b"a" * (MAX_LINE_BYTES + 64))
+    try:
+        read_chunked_body(long_line)
+        raise AssertionError("oversize chunk-size line should have failed")
+    except ValueError as exc:
+        assert "header line exceeds" in str(exc)
+        assert long_line.tell() <= MAX_LINE_BYTES + 1
+
+    # Trailer flood: many short lines stay under MAX_BODY_BYTES but must still cap.
+    flood = b"0\r\n" + b"x:1\r\n" * (MAX_TRAILER_LINES + 5) + b"\r\n"
+    try:
+        read_chunked_body(io.BytesIO(flood))
+        raise AssertionError("trailer flood should have failed")
+    except ValueError as exc:
+        assert "trailer" in str(exc).lower()
 
     seen: list[Any] = []
     upstream_status = {"code": 200}
@@ -524,6 +584,28 @@ def self_test() -> None:
     filt_port = filt.server_address[1]
     threading.Thread(target=filt.serve_forever, daemon=True).start()
 
+    def _recv_http_response(sock: socket.socket) -> bytes:
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return buf
+            buf += chunk
+        hdr, body = buf.split(b"\r\n\r\n", 1)
+        cl = None
+        for line in hdr.split(b"\r\n"):
+            if line.lower().startswith(b"content-length:"):
+                cl = int(line.split(b":", 1)[1].strip())
+                break
+        if cl is None:
+            return buf
+        while len(body) < cl:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            body += chunk
+        return hdr + b"\r\n\r\n" + body[:cl]
+
     def _raw_post(port: int, headers: bytes, body_payload: bytes) -> tuple[bytes, bytes]:
         s = socket.create_connection(("127.0.0.1", port), timeout=5)
         s.sendall(
@@ -532,22 +614,7 @@ def self_test() -> None:
             + b"\r\n"
             + body_payload
         )
-        data = b""
-        while b"\r\n\r\n" not in data or (
-            b"Content-Length:" in data
-            and len(data.split(b"\r\n\r\n", 1)[1])
-            < int(
-                [
-                    l.split(b":", 1)[1].strip()
-                    for l in data.split(b"\r\n\r\n", 1)[0].split(b"\r\n")
-                    if l.lower().startswith(b"content-length:")
-                ][0]
-            )
-        ):
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            data += chunk
+        data = _recv_http_response(s)
         s.close()
         hdr, body = data.split(b"\r\n\r\n", 1)
         return hdr, body
@@ -567,6 +634,59 @@ def self_test() -> None:
     _hdr, body = _raw_post(filt_port, b"Transfer-Encoding: chunked\r\n", deny_chunk)
     assert json.loads(body)["error"]["code"] == JSONRPC_METHOD_NOT_FOUND
     assert seen == []  # must still filter after reading chunked body
+
+    # Write door must still allow eth_sendRawTransaction (do not copy replica deny).
+    seen.clear()
+    send_body = b'{"jsonrpc":"2.0","id":1,"method":"eth_sendRawTransaction","params":["0x00"]}'
+    send_chunk = f"{len(send_body):x}\r\n".encode() + send_body + b"\r\n0\r\n\r\n"
+    _hdr, body = _raw_post(filt_port, b"Transfer-Encoding: chunked\r\n", send_chunk)
+    assert json.loads(body).get("result") == "0x1"
+    assert len(seen) == 1 and seen[0]["method"] == "eth_sendRawTransaction"
+
+    # Two successful POSTs on one socket still keep-alive.
+    ka_body = b'{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+    ka_req = (
+        b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+        + f"Content-Length: {len(ka_body)}\r\n\r\n".encode()
+        + ka_body
+    )
+    seen.clear()
+    ka = socket.create_connection(("127.0.0.1", filt_port), timeout=5)
+    ka.sendall(ka_req)
+    r1 = _recv_http_response(ka)
+    assert b"200" in r1.split(b"\r\n", 1)[0]
+    assert b"Connection: close" not in r1
+    assert json.loads(r1.split(b"\r\n\r\n", 1)[1]).get("result") == "0x1"
+    ka.sendall(ka_req)
+    r2 = _recv_http_response(ka)
+    assert b"200" in r2.split(b"\r\n", 1)[0]
+    assert json.loads(r2.split(b"\r\n\r\n", 1)[1]).get("result") == "0x1"
+    assert len(seen) == 2
+    ka.close()
+
+    # Keep-alive desync: oversize Content-Length 400 must close; a pipelined
+    # second POST on the same socket must not be handled as another request.
+    seen.clear()
+    second = b'{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+    smuggle = socket.create_connection(("127.0.0.1", filt_port), timeout=5)
+    smuggle.sendall(
+        b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+        + f"Content-Length: {MAX_BODY_BYTES + 1}\r\n\r\n".encode()
+        + b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+        + f"Content-Length: {len(second)}\r\n\r\n".encode()
+        + second
+    )
+    smuggled = b""
+    while True:
+        chunk = smuggle.recv(4096)
+        if not chunk:
+            break
+        smuggled += chunk
+    smuggle.close()
+    assert smuggled.count(b"HTTP/1.1 ") == 1, smuggled[:200]
+    assert b"400" in smuggled.split(b"\r\n", 1)[0]
+    assert b"Connection: close" in smuggled
+    assert seen == []  # second POST must not reach upstream
 
     filt.shutdown()
     up.shutdown()
