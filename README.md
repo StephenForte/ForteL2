@@ -77,7 +77,7 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 
 **SOS onboarding (operator):**
 
-0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:45–03:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are loopback-only today (`http://127.0.0.1:9545`); no off-box tunnel is approved — operator US-012 go/no-go is outstanding (options + Tailscale recommendation in [`tasks/spike-t5-write-path.md`](tasks/spike-t5-write-path.md)).
+0. **Availability + write path:** the Sepolia sequencer RPC is stopped nightly **23:45–03:00** local (`America/Los_Angeles`); SOS retry/backoff must assume that outage. There is no uptime commitment (personal L2 on a Mac mini). **Writes** are loopback-only today (`http://127.0.0.1:9545`). US-012 is now a **GO** for an authenticated off-box write tunnel (see [the go/no-go](#us-012-non-loopback-gono-go--sepolia-sequencer-write-path-2026-08-11)), but it takes effect only after the sequencer RPC surface is narrowed to `eth,net,web3` — until then loopback still stands and no URL is published.
 1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
 2. Fund the SOS deployer on L2: deposit L1→L2 with `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` (credits `ADMIN_ADDRESS` on L2), then transfer to the SOS deployer — note the env file must be sourced in *this* shell (the `FORTEL2_ENV=…` prefix only reaches the script's subprocess): `( set -a; source .env.sepolia; set +a; cast send <SOS_DEPLOYER_ADDRESS> --value <amount> --rpc-url "$L2_RPC_URL" --private-key "$ADMIN_PRIVATE_KEY" )`.
 3. Point SettlementOS at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545` today) and deploy SOS contracts on chain **852**.
@@ -797,6 +797,27 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 
 - [x] **Fresh keys / Foundry tripwire:** scripts that broadcast call `refuse_foundry_defaults_unless_local_l2` and fail closed when `L2_CHAIN_ID != 901` if a Foundry/Anvil default private key is still configured. Before Sepolia: generate **new** keys (never fund or reuse the `.env.example` mnemonic accounts on a public net).
 - [x] **Separate deploy tree (documented):** Phase 2 must **not** reuse the Phase 1 `.env` + `deployments/.deployer/` tree. Use `.env.sepolia` and `deployments/sepolia/.deployer/`. Replaced artifacts: L1 contracts, L2 genesis/`rollup.json`, RPC URLs, chain IDs (`L2=852`), funded accounts, JWT/engine secrets. Do not copy Phase 1 `deployments.json` to Sepolia.
-- [x] **Non-loopback policy review (go/no-go):** **No-go for now.** All L2 RPCs, batcher/proposer HTTP, and the dApp/viewer stay on `127.0.0.1` / `localhost`. Sepolia **L1** may be a remote HTTPS URL (`assert_sepolia_rpc_urls`). Exposing L2 binds an unauthenticated JSON-RPC surface — unacceptable until a later review.
+- [x] **Non-loopback policy review (go/no-go):** was **no-go** through Phase 1b–6 — all L2 RPCs, batcher/proposer HTTP, and the dApp/viewer on `127.0.0.1` / `localhost`; Sepolia **L1** may be a remote HTTPS URL (`assert_sepolia_rpc_urls`). **Superseded 2026-08-11 by the go/no-go below**, which authorizes one authenticated write listener and nothing else. The original reasoning still governs everything not named there: an *unauthenticated* JSON-RPC surface remains unacceptable.
 - [x] **Sandbox / dry-run gate (prerequisite, execution in 2b/2c):** Phase 2 cutover requires a **disposable Sepolia** deploy + dry-run of deposit/withdraw scripts. Guestbook has **no** shadow/dual-write mode. Scaffold is 2a; spend starts in 2b.
 - [x] **Agent-permission / tool-access audit:** see Phase 2a US-022 checklist above (complete before funded keys land in `.env.sepolia`).
+
+### US-012 non-loopback go/no-go — Sepolia sequencer write path (2026-08-11)
+
+**Verdict: GO**, superseding the Phase 1b no-go above, for **authenticated write access only**, and **not in effect until the D1 precondition below ships**. Options considered and rejected: [`tasks/spike-t5-write-path.md`](tasks/spike-t5-write-path.md). Rationale: `tasks/decisions.md` D-0030.
+
+| US-012 item | Answer |
+|---|---|
+| **What is exposed** | One op-geth HTTP listener limited to **`eth,net,web3`**, reached through a Cloudflare tunnel that dials `127.0.0.1`. op-geth itself stays bound to `127.0.0.1`; no raw bind leaves loopback and `scripts/lib.sh` loopback asserts are unchanged. op-node's RPC is admin-enabled and is **never** published. |
+| **To whom** | The `settlementos` Render service only (`srv-d9tafn3m8hqs73cks7cg`). **Not** the public internet. Everyone else reads from the replica — see the public read path below. |
+| **Auth model** | Cloudflare Access service token, held as a Render environment variable and sent as a header on outbound JSON-RPC. The token is a US-022 secret: gitignored, never in `.env.sepolia.example`, redacted in logs (`redact_rpc_url`). |
+| **Rollback** | Revoke the service token, or stop `cloudflared`. Sequencer bind, chain state, and `L2_RPC_URL` are all untouched, so rollback is immediate and has no on-chain effect. |
+
+**Hard precondition — the GO has no effect until D1 ships.** Today [`scripts/04-start-sequencer-sepolia.sh`](scripts/04-start-sequencer-sepolia.sh) serves `eth,net,web3,debug,txpool,admin,miner` with `--http.vhosts=*` and `--http.corsdomain=*`. That is safe on loopback and a critical exposure the instant anything off-box reaches the port. Narrow first, tunnel second. Never the reverse.
+
+**Writes stay authenticated even though reads are public — this is deliberate and must not be "fixed" later.** Every transaction becomes batcher calldata burning L1 ETH that an external funder refills (D-0027). An unauthenticated write endpoint is therefore a stranger's lever on your L1 spend, and it gets *worse* as L2 fees are tuned down (P7-0), because cheap transactions make spam cheap while leaving the cost with the operator. Publicly readable and permissioned to write is also the correct posture for a settlement rail.
+
+**Public read path is a separate decision on a separate host.** US-012 governs the mini. Public reads belong on `fortel2-replica`, which holds no keys, produces no blocks, and cannot accept writes — the only component here whose failure is not a rail incident. It needs the same namespace narrowing first (it currently serves `debug`) and must expose the EL only, never op-node. Tracked in [`tasks/worker-prompts/MR-2-public-read-path.md`](tasks/worker-prompts/MR-2-public-read-path.md).
+
+**The replica is ~3 minutes behind and cannot serve read-your-own-write.** It derives from L1 batches rather than following the sequencer, so its latency floor is batcher cadence, not block time (measured 2026-08-11: 94 blocks / ~3m10s, corroborated by the node's own `age=` field). SOS must poll `eth_getTransactionReceipt` on the **write** endpoint. Pointing a settle-and-confirm loop at the public replica will look like failed transactions.
+
+**Availability is unchanged by any of this:** the sequencer RPC is stopped nightly **23:45–03:00** `America/Los_Angeles` (D-0026). A published URL does not imply uptime.
