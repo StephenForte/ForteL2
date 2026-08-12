@@ -1,0 +1,20 @@
+# ForteL2 write-RPC tunnel template (D-0034 / T5 step 3).
+#
+# Copy to config/cloudflared-write.yml (gitignored) and replace placeholders.
+# Never commit the live copy, tunnel UUID, credentials.json, or a tunnel token.
+#
+# Origin MUST be the T5-D1 write filter. Match L2_WRITE_RPC_PORT (default 9555).
+# Never point this at op-geth :9545 (admin/debug/miner/txpool), WS :9546,
+# auth :9551, or op-node :9547.
+#
+# Hostname is operator-local (Cloudflare dashboard). Do not invent one here.
+# Access (service token, audience = settlementos Render) sits in front of that
+# hostname — see README "Authenticated Cloudflare tunnel".
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /Users/steveforte/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: REPLACE_WITH_TUNNEL_HOSTNAME
+    service: http://127.0.0.1:9555
+  - service: http_status:404

@@ -36,3 +36,9 @@ proposer/.gomodcache/
 # local tool/scan output (never commit)
 semgrep-results.json
 tasks/.solomd/
+
+# D-0034 — live Cloudflare tunnel config + any in-tree credentials (template *.example is committed)
+config/cloudflared-write.yml
+.cloudflared/
+**/cloudflared*.json
+**/*.tunnel-token

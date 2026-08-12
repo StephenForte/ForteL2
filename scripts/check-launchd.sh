@@ -57,6 +57,23 @@ sys.stdout.write("\x01".join(args))
 '
 }
 
+# Print KeepAlive as "true" / "false" / "dict" / empty.
+plist_keepalive() {
+  plist_xml "$1" | python3 -c '
+import sys, plistlib
+data = plistlib.loads(sys.stdin.buffer.read())
+ka = data.get("KeepAlive")
+if ka is True:
+    print("true")
+elif ka is False:
+    print("false")
+elif isinstance(ka, dict):
+    print("dict")
+else:
+    print("")
+'
+}
+
 label_base() {
   # fortel2-sleep -> com.steve.fortel2-sleep
   echo "com.steve.$1"
@@ -150,6 +167,97 @@ check_agent() {
   fi
 }
 
+# KeepAlive daemon (no StartCalendarInterval) — cloudflared write tunnel (D-0034).
+check_keepalive_agent() {
+  local short="$1"
+  local label
+  label="$(label_base "$short")"
+  local repo_plist="$LAUNCHD_DIR/${label}.plist"
+  local host_plist="$AGENTS_DIR/${label}.plist"
+
+  if [[ ! -f "$repo_plist" ]]; then
+    echo "FAIL  ${label}  repo plist missing: ${repo_plist}"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  if [[ ! -d "$AGENTS_DIR" ]]; then
+    echo "FAIL  ${label}  not installed (${AGENTS_DIR} missing — CI/VM or fresh account?)"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  if [[ ! -f "$host_plist" ]]; then
+    echo "FAIL  ${label}  not installed (expected ${host_plist})"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  local repo_ka host_ka repo_cal host_cal
+  repo_ka="$(plist_keepalive "$repo_plist")"
+  host_ka="$(plist_keepalive "$host_plist")"
+  repo_cal="$(plist_calendar "$repo_plist")"
+  host_cal="$(plist_calendar "$host_plist")"
+
+  local repo_args host_args
+  repo_args="$(plist_prog_args "$repo_plist")"
+  host_args="$(plist_prog_args "$host_plist")"
+
+  local repo_script host_script
+  repo_script="${repo_args##*$'\x01'}"
+  if [[ "$repo_args" != *$'\x01'* ]]; then
+    repo_script="$repo_args"
+  fi
+  host_script="${host_args##*$'\x01'}"
+  if [[ "$host_args" != *$'\x01'* ]]; then
+    host_script="$host_args"
+  fi
+
+  local status="OK"
+  local detail=""
+  local agent_fail=0
+
+  if [[ "$repo_ka" != "true" ]]; then
+    status="FAIL"
+    detail="repo KeepAlive must be true (got ${repo_ka:-empty})"
+    agent_fail=1
+  elif [[ "$host_ka" != "true" ]]; then
+    status="FAIL"
+    detail="installed KeepAlive mismatch: repo=${repo_ka} installed=${host_ka}"
+    agent_fail=1
+  fi
+
+  if [[ -n "$repo_cal" || -n "$host_cal" ]]; then
+    status="FAIL"
+    detail="${detail:+$detail; }KeepAlive agent must not have StartCalendarInterval (repo=${repo_cal:-empty} host=${host_cal:-empty})"
+    agent_fail=1
+  fi
+
+  if [[ -z "$repo_script" ]]; then
+    status="FAIL"
+    detail="${detail:+$detail; }repo ProgramArguments empty"
+    agent_fail=1
+  elif [[ "$host_script" != "$repo_script" ]]; then
+    status="FAIL"
+    detail="${detail:+$detail; }script path mismatch: repo=${repo_script} installed=${host_script}"
+    agent_fail=1
+  elif [[ "$agent_fail" -eq 0 && "$host_args" != "$repo_args" ]]; then
+    status="WARN"
+    detail="ProgramArguments wrapper-prefixed (ends in same repo script); LaunchControl fdautil is a third-party dependency"
+    WARNS=$((WARNS + 1))
+  fi
+
+  if [[ "$agent_fail" -eq 1 ]]; then
+    FAILS=$((FAILS + 1))
+  fi
+
+  if [[ -n "$detail" ]]; then
+    echo "${status}  ${label}  keepalive=${repo_ka}  script=${repo_script}  ${detail}"
+  else
+    echo "${status}  ${label}  keepalive=${repo_ka}  script=${repo_script}"
+  fi
+}
+
 echo "=== ForteL2 launchd drift check (repo vs ~/Library/LaunchAgents) ==="
 echo "repo: $LAUNCHD_DIR"
 echo
@@ -163,6 +271,8 @@ fi
 for short in fortel2-health fortel2-sleep fortel2-wake; do
   check_agent "$short"
 done
+
+check_keepalive_agent fortel2-cloudflared
 
 echo
 echo "--- STALE host plists (no counterpart under launchd/) ---"
