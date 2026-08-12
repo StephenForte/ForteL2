@@ -1129,10 +1129,10 @@ else
   fail=1
 fi
 
-# Property tests (prefix trap, batch isolation, default-deny, loopback) — no live node.
+# Property tests (prefix trap, batch, chunked, empty-batch, mixed-batch 503, loopback).
 FILTER_PROP_OUT="$(python3 "$FILTER_PY" --self-test 2>&1)" && FILTER_PROP_EC=0 || FILTER_PROP_EC=$?
 if [[ "$FILTER_PROP_EC" -eq 0 && "$FILTER_PROP_OUT" == *"self-test ok"* ]]; then
-  echo "PASS T5-D1 allowlist properties (prefix trap, batch, foo_bar, loopback)"
+  echo "PASS T5-D1 allowlist properties (prefix/batch/chunked/empty/503/loopback)"
 else
   echo "FAIL T5-D1 allowlist property tests (ec=$FILTER_PROP_EC)" >&2
   echo "$FILTER_PROP_OUT" >&2
@@ -1146,6 +1146,23 @@ if grep -q 'L2_RPC_FILTER_LISTEN="127.0.0.1:' "$FILTER_START" \
   echo "PASS T5-D1 keeps full op-geth :9545; filter listens on 127.0.0.1"
 else
   echo "FAIL T5-D1 must not narrow op-geth --http.api; filter must bind 127.0.0.1" >&2
+  fail=1
+fi
+
+# start-all must preflight L2_WRITE_RPC_PORT (free + distinct) before the ERR trap
+# and before starting the sequencer — lib.sh assert_l2_ports_free does not cover it.
+if awk '
+    /trap sepolia_start_cleanup ERR/ { exit (write_check && collide_check) ? 0 : 1 }
+    /lsof.*WRITE_PORT|lsof.*L2_WRITE_RPC_PORT/ { write_check = 1 }
+    /L2_WRITE_RPC_PORT.*collides|collides with an L2 stack port/ { collide_check = 1 }
+  ' "$SCRIPT_DIR/start-all-sepolia.sh" \
+  && awk '
+    /04-start-sequencer-sepolia/ { exit write_check ? 0 : 1 }
+    /lsof.*WRITE_PORT|lsof.*L2_WRITE_RPC_PORT/ { write_check = 1 }
+  ' "$SCRIPT_DIR/start-all-sepolia.sh"; then
+  echo "PASS T5-D1 start-all preflights WRITE_PORT before trap/sequencer"
+else
+  echo "FAIL T5-D1 start-all must preflight WRITE_PORT before ERR trap and sequencer" >&2
   fail=1
 fi
 

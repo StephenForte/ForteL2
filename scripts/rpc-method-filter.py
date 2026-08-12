@@ -80,6 +80,9 @@ JSONRPC_INVALID_REQUEST = -32600
 JSONRPC_PARSE_ERROR = -32700
 JSONRPC_SERVER_ERROR = -32000
 
+# Cap request bodies — cloudflared may deliver chunked; never read unbounded.
+MAX_BODY_BYTES = 1_048_576  # 1 MiB
+
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
@@ -115,13 +118,18 @@ def classify_body(parsed: Any) -> tuple[str, list[Any], list[Optional[dict]]]:
     """
     Classify a parsed JSON-RPC body.
 
-    Returns (kind, items, rejects) where kind is 'single' or 'batch',
-    items are the request objects (same length as rejects), and rejects[i]
-    is an error response if that item must not be forwarded, else None.
+    Returns (kind, items, rejects) where kind is 'single', 'batch', or 'empty_batch'.
+    For 'empty_batch', items is [] and rejects holds a single error Response object
+    (JSON-RPC 2.0: empty array → one Response, not []).
+    For 'batch'/'single', items and rejects are the same length.
     """
     if isinstance(parsed, list):
         if len(parsed) == 0:
-            return "batch", [], [reject_response(None, "empty batch", JSONRPC_INVALID_REQUEST)]
+            return (
+                "empty_batch",
+                [],
+                [reject_response(None, "empty batch", JSONRPC_INVALID_REQUEST)],
+            )
         rejects = [filter_single(item) for item in parsed]
         return "batch", parsed, rejects
     if isinstance(parsed, dict):
@@ -155,6 +163,79 @@ def require_loopback_upstream(url: str) -> str:
             f"(got host {host!r})"
         )
     return url
+
+
+def _transfer_encoding_is_chunked(te_header: str) -> bool:
+    # RFC 7230: if Transfer-Encoding is present, chunked is the final encoding.
+    parts = [p.strip().lower() for p in te_header.split(",") if p.strip()]
+    return bool(parts) and parts[-1] == "chunked"
+
+
+def read_chunked_body(rfile, max_bytes: int = MAX_BODY_BYTES) -> bytes:
+    """Decode an HTTP/1.1 chunked body; reject if total exceeds max_bytes."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        size_line = rfile.readline()
+        if not size_line:
+            raise ValueError("truncated chunked body")
+        size_line = size_line.strip()
+        if b";" in size_line:
+            size_line = size_line.split(b";", 1)[0].strip()
+        try:
+            size = int(size_line, 16)
+        except ValueError as exc:
+            raise ValueError("bad chunk size") from exc
+        if size < 0:
+            raise ValueError("bad chunk size")
+        if size == 0:
+            # Consume optional trailers until the terminating blank line.
+            while True:
+                trailer = rfile.readline()
+                if trailer in (b"\r\n", b"\n", b""):
+                    break
+            break
+        if total + size > max_bytes:
+            raise ValueError(f"body exceeds max {max_bytes} bytes")
+        data = rfile.read(size)
+        if len(data) < size:
+            raise ValueError("truncated chunk")
+        chunks.append(data)
+        total += size
+        crlf = rfile.read(2)
+        if crlf != b"\r\n":
+            raise ValueError("missing chunk CRLF")
+    return b"".join(chunks)
+
+
+def read_http_body(headers, rfile, max_bytes: int = MAX_BODY_BYTES) -> bytes:
+    """
+    Read a request body supporting Content-Length and Transfer-Encoding: chunked.
+
+    cloudflared (HTTP/1.1 to origin) often emits chunked when the inbound length
+    is unknown — that is the normal SOS path once the tunnel is up.
+    """
+    te = headers.get("Transfer-Encoding", "") or ""
+    if _transfer_encoding_is_chunked(te):
+        return read_chunked_body(rfile, max_bytes=max_bytes)
+    if te.strip():
+        # Non-chunked TE (e.g. gzip alone) is not supported on this door.
+        raise ValueError(f"unsupported Transfer-Encoding: {te!r}")
+    raw_len = headers.get("Content-Length", "0") or "0"
+    try:
+        length = int(raw_len)
+    except ValueError as exc:
+        raise ValueError("bad Content-Length") from exc
+    if length < 0:
+        raise ValueError("negative Content-Length")
+    if length > max_bytes:
+        raise ValueError(f"body exceeds max {max_bytes} bytes")
+    if length == 0:
+        return b""
+    data = rfile.read(length)
+    if len(data) < length:
+        raise ValueError("truncated body")
+    return data
 
 
 STATE: Optional["FilterState"] = None
@@ -207,6 +288,10 @@ def handle_jsonrpc_body(body: bytes, content_type: str) -> tuple[int, bytes, str
 
     kind, items, rejects = classify_body(parsed)
 
+    if kind == "empty_batch":
+        # Do not zip([], [err]) — that silently drops the synthesised error.
+        return 200, json.dumps(rejects[0]).encode(), "application/json"
+
     if kind == "single":
         reject = rejects[0]
         if reject is not None:
@@ -221,11 +306,17 @@ def handle_jsonrpc_body(body: bytes, content_type: str) -> tuple[int, bytes, str
     # Forward allowed calls one-by-one; synthesise errors for the rest.
     # Preserve request order in the response array.
     out: list[Any] = []
+    http_status = 200
     for item, reject in zip(items, rejects):
         if reject is not None:
             out.append(reject)
             continue
         status, payload, _ctype = _forward(json.dumps(item).encode(), "application/json")
+        # Propagate the first non-2xx upstream status (matches single-call
+        # passthrough). Later differing codes are ignored so clients still see
+        # *a* failure rather than a silent HTTP 200 wrapping upstream 429/5xx.
+        if not (200 <= status < 300) and http_status == 200:
+            http_status = status
         try:
             out.append(json.loads(payload.decode("utf-8")))
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -237,18 +328,25 @@ def handle_jsonrpc_body(body: bytes, content_type: str) -> tuple[int, bytes, str
                     JSONRPC_SERVER_ERROR,
                 )
             )
-    return 200, json.dumps(out).encode(), "application/json"
+    return http_status, json.dumps(out).encode(), "application/json"
 
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # Suppress "Server: BaseHTTP/0.6 Python/x.y" on a tunnel-facing door.
+    server_version = "fortel2-rpc-filter/1"
+    sys_version = ""
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     def do_POST(self) -> None:  # noqa: N802
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        body = self.rfile.read(length) if length > 0 else b""
+        try:
+            body = read_http_body(self.headers, self.rfile)
+        except ValueError as exc:
+            msg = reject_response(None, f"bad request body: {exc}", JSONRPC_INVALID_REQUEST)
+            _write_json(self, 400, json.dumps(msg).encode())
+            return
         ctype = self.headers.get("Content-Type", "application/json")
         try:
             status, payload, out_ctype = handle_jsonrpc_body(body, ctype)
@@ -269,7 +367,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def self_test() -> None:
     """Property checks for test-helpers.sh (no live op-geth required)."""
+    import io
     import json
+    import socket
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -296,9 +396,38 @@ def self_test() -> None:
     assert rejects[1] is not None and rejects[1]["error"]["code"] == JSONRPC_METHOD_NOT_FOUND
     assert "admin_peers" in rejects[1]["error"]["message"]
 
+    # Empty batch → single -32600 object (not []).
+    kind, items, rejects = classify_body([])
+    assert kind == "empty_batch" and items == []
+    status, payload, _ctype = handle_jsonrpc_body(b"[]", "application/json")
+    assert status == 200
+    empty_resp = json.loads(payload)
+    assert isinstance(empty_resp, dict)
+    assert empty_resp["error"]["code"] == JSONRPC_INVALID_REQUEST
+
+    # Chunked body decoding (unit).
+    raw = b'{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+    chunked = f"{len(raw):x}\r\n".encode() + raw + b"\r\n0\r\n\r\n"
+    assert read_chunked_body(io.BytesIO(chunked)) == raw
+
+    class _Hdr(dict):
+        def get(self, k, default=None):  # noqa: A003
+            for key, val in self.items():
+                if key.lower() == k.lower():
+                    return val
+            return default
+
+    assert (
+        read_http_body(_Hdr({"Transfer-Encoding": "chunked"}), io.BytesIO(chunked)) == raw
+    )
+
     seen: list[Any] = []
+    upstream_status = {"code": 200}
 
     class Upstream(BaseHTTPRequestHandler):
+        server_version = "test-upstream/1"
+        sys_version = ""
+
         def log_message(self, *_args) -> None:  # noqa: A003
             return
 
@@ -306,8 +435,12 @@ def self_test() -> None:
             n = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(n)
             seen.append(json.loads(body.decode()))
-            payload = b'{"jsonrpc":"2.0","id":1,"result":"0x1"}'
-            self.send_response(200)
+            code = upstream_status["code"]
+            if code == 200:
+                payload = b'{"jsonrpc":"2.0","id":1,"result":"0x1"}'
+            else:
+                payload = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"busy"}}'
+            self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -346,12 +479,79 @@ def self_test() -> None:
     assert len(seen) == 1
     assert seen[0]["method"] == "eth_blockNumber"
 
+    # Mixed batch must surface upstream non-2xx (not collapse to HTTP 200).
+    seen.clear()
+    upstream_status["code"] = 503
+    status, payload, _ctype = handle_jsonrpc_body(
+        json.dumps(
+            [
+                {"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []},
+                {"jsonrpc": "2.0", "id": 2, "method": "admin_peers", "params": []},
+            ]
+        ).encode(),
+        "application/json",
+    )
+    assert status == 503, status
+    mixed = json.loads(payload)
+    assert mixed[1]["error"]["code"] == JSONRPC_METHOD_NOT_FOUND
+    upstream_status["code"] = 200
+
     try:
         require_loopback_listen("0.0.0.0")
         raise AssertionError("require_loopback_listen should have exited")
     except SystemExit as exc:
         assert "loopback" in str(exc).lower() or "127.0.0.1" in str(exc)
 
+    # End-to-end: chunked allowed reaches upstream; chunked denied is filtered.
+    filt = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    filt_port = filt.server_address[1]
+    threading.Thread(target=filt.serve_forever, daemon=True).start()
+
+    def _raw_post(port: int, headers: bytes, body_payload: bytes) -> tuple[bytes, bytes]:
+        s = socket.create_connection(("127.0.0.1", port), timeout=5)
+        s.sendall(
+            b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+            + headers
+            + b"\r\n"
+            + body_payload
+        )
+        data = b""
+        while b"\r\n\r\n" not in data or (
+            b"Content-Length:" in data
+            and len(data.split(b"\r\n\r\n", 1)[1])
+            < int(
+                [
+                    l.split(b":", 1)[1].strip()
+                    for l in data.split(b"\r\n\r\n", 1)[0].split(b"\r\n")
+                    if l.lower().startswith(b"content-length:")
+                ][0]
+            )
+        ):
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        s.close()
+        hdr, body = data.split(b"\r\n\r\n", 1)
+        return hdr, body
+
+    seen.clear()
+    allow_body = b'{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+    allow_chunk = f"{len(allow_body):x}\r\n".encode() + allow_body + b"\r\n0\r\n\r\n"
+    hdr, body = _raw_post(filt_port, b"Transfer-Encoding: chunked\r\n", allow_chunk)
+    assert b"Python/" not in hdr  # banner suppressed
+    assert b"BaseHTTP/" not in hdr
+    assert json.loads(body).get("result") == "0x1"
+    assert len(seen) == 1 and seen[0]["method"] == "eth_blockNumber"
+
+    seen.clear()
+    deny_body = b'{"jsonrpc":"2.0","id":1,"method":"admin_peers","params":[]}'
+    deny_chunk = f"{len(deny_body):x}\r\n".encode() + deny_body + b"\r\n0\r\n\r\n"
+    _hdr, body = _raw_post(filt_port, b"Transfer-Encoding: chunked\r\n", deny_chunk)
+    assert json.loads(body)["error"]["code"] == JSONRPC_METHOD_NOT_FOUND
+    assert seen == []  # must still filter after reading chunked body
+
+    filt.shutdown()
     up.shutdown()
     print("rpc-method-filter self-test ok", flush=True)
 
