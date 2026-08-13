@@ -1,7 +1,7 @@
 {
-  "$schema_note": "ForteL2 rail interface for SettlementOS and explorers. Version bumps when chain ID, bridge proxies, or reset policy change. The networkId values are SettlementOS registry keys, not ForteL2 labels: they are fixed, live on their side, and survive re-genesis (a wipe changes addresses, never the id). Do not reopen a networkId as an openQuestion when regenerating this file.",
-  "version": "4",
-  "updated": "2026-08-11",
+  "$schema_note": "ForteL2 rail interface for SettlementOS and explorers. Version bumps when chain ID, bridge proxies, reset policy, or the reachability of the read/write paths change. The networkId values are SettlementOS registry keys, not ForteL2 labels: they are fixed, live on their side, and survive re-genesis (a wipe changes addresses, never the id). Do not reopen a networkId as an openQuestion when regenerating this file.",
+  "version": "5",
+  "updated": "2026-08-13",
   "docs": {
     "moneyRailPrd": "tasks/prd-money-rail.md",
     "coordination": "tasks/coordination-settlementos.md",
@@ -74,7 +74,7 @@
         "rollupConfig": "deployments/sepolia/.deployer/rollup.json"
       },
       "sosRecommended": true,
-      "notes": "networkId confirmed by SettlementOS 2026-08-11: live registry key in their lib/networks.ts (chain 852), the stem of their FORTEL2_SEPOLIA_* env vars and deployment-overlay filename, and the prefix their retry policy matches to set retries=0 on a single-sequencer rail. Fixed — unchanged by re-genesis. Primary SOS target. Writes: Mac sequencer L2 RPC (loopback today). Reads today land on the sequencer endpoint; the replica has no reachable URL (D-0016). Do not share QuickNode L1 URL/token with Render."
+      "notes": "networkId confirmed by SettlementOS 2026-08-11: live registry key in their lib/networks.ts (chain 852), the stem of their FORTEL2_SEPOLIA_* env vars and deployment-overlay filename, and the prefix their retry policy matches to set retries=0 on a single-sequencer rail. Fixed — unchanged by re-genesis. Primary SOS target. WRITES: an authenticated off-box write path is LIVE (D-0035) — Cloudflare Access in front of a loopback eth/net/web3 method-allowlist filter on the sequencer host; op-geth itself never leaves 127.0.0.1. The hostname is deliberately NOT published here: it is Access-gated to one named consumer, so an unauthenticated caller receives 403 and a published URL would be unusable. Ask the operator for access. READS: SettlementOS reads the replica over Render's private network (D-0032). No public read URL exists (D-0031), so replica.readRpcUrl stays null; the private hostname is not a rail URL and must not be treated as one. First settlement on 852 through this path: 2026-08-13 (D-0036). Do not share QuickNode L1 URL/token with Render."
     }
   },
   "availability": {
@@ -106,6 +106,5 @@
       "canonical-usdc"
     ]
   },
-  "openQuestions": [
-  ]
+  "openQuestions": []
 }
