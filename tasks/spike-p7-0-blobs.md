@@ -122,7 +122,7 @@ The replica derives from L1. Any DA change requires its op-node to be updated in
 
 **Method (primary):** for each confirmed batcher→inbox L1 tx in the window, `gasUsed × effectiveGasPrice` from the receipt; divide the sum by the L2 blocks those channels covered (decoded from the channel: singular count, or span `blockCount`). This is immune to D-0027 auto-funding. Cadence (`max-channel-duration=30`), `--sub-safety-margin=2`, compression (`zlib`), and `DA=calldata` were not changed.
 
-**Pinned op-batcher flag** (from `--help` + `flags.go`): `--batch-type` is a `UintFlag`, `0`=SingularBatch, `1`=SpanBatch (`DefaultText: singular`). Script default `BATCHER_BATCH_TYPE=span` maps to `--batch-type=1`. **Revert:** `BATCHER_BATCH_TYPE=singular`.
+**Pinned op-batcher flag** (from `--help` + `flags.go`): `--batch-type` is a `UintFlag`, `0`=SingularBatch, `1`=SpanBatch (`DefaultText: singular`). Script default `BATCHER_BATCH_TYPE=span` maps to `--batch-type=1`. **Revert:** `BATCHER_BATCH_TYPE=singular ./scripts/05-start-batcher-sepolia.sh` (stock path stops an existing pid first so `start_bg` re-execs with the new flag).
 
 | | before (singular) | after (span) |
 |---|---|---|

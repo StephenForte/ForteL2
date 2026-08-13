@@ -1306,13 +1306,22 @@ fi
 # UintFlag on the pinned op-batcher (0=singular, 1=span); the script maps
 # span/singular as well. Revert is BATCHER_BATCH_TYPE=singular. Do not change
 # channel duration / compression / DA type here.
+# Stock else-branch must stop_bg before start_bg — start_bg no-ops when the
+# pid is alive, so a batch-type switch would otherwise report success on the
+# old process. The custom branch already stops; this asserts the stock path too.
 if grep -q 'BATCHER_BATCH_TYPE:-span' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q -- '--batch-type="${BATCHER_BATCH_TYPE_FLAG}"' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'BATCHER_BATCH_TYPE=span' "$FORTEL2_ROOT/.env.sepolia.example" \
   && grep -q 'BATCHER_BATCH_TYPE=singular' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'SEPOLIA_BATCHER_MAX_CHANNEL_DURATION:-30' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q -- '--sub-safety-margin=2' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
-  && grep -q 'BATCHER_DA_TYPE:-calldata' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  && grep -q 'BATCHER_DA_TYPE:-calldata' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && awk '
+       /^else$/ { in_else=1 }
+       in_else && /stop_bg op-batcher/ { if (!found_start) stopped=1 }
+       in_else && /start_bg op-batcher/ { found_start=1 }
+       END { exit !(in_else && stopped && found_start) }
+     ' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
   echo "PASS Sepolia stock batcher defaults BATCHER_BATCH_TYPE=span (--batch-type 1)"
 else
   echo "FAIL 05-start-batcher-sepolia.sh must default span batches without touching cadence/DA" >&2

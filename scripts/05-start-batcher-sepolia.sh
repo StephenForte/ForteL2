@@ -86,6 +86,14 @@ if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
   echo "Custom Sepolia batcher started (poll=${CUSTOM_POLL}, confirmations=${CUSTOM_CONFS}, receipt-timeout=${CUSTOM_RECEIPT_TIMEOUT}). Revert: stop pid, then stock 05-start-batcher-sepolia.sh"
 else
   require_bin op-batcher
+  # start_bg returns 0 when the pid is already alive and does not re-exec, so a
+  # rerun with BATCHER_BATCH_TYPE=singular (or span) would otherwise leave the
+  # old flags running while this script claimed success. Stop first — same
+  # pattern as the custom path above. Sequencer keeps producing; batcher catches up.
+  if is_running op-batcher; then
+    echo "Stopping existing op-batcher (pid $(cat "$PID_DIR/op-batcher.pid")) so stock start picks up current flags…"
+    stop_bg op-batcher
+  fi
   start_bg op-batcher op-batcher \
     --l1-eth-rpc="$L1_RPC_URL" \
     --l2-eth-rpc="$L2_RPC_URL" \
