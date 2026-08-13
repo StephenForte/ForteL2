@@ -16,7 +16,7 @@
     <key>Hour</key>
     <integer>5</integer>
     <key>Minute</key>
-    <integer>5</integer>
+    <integer>0</integer>
   </dict>
   <!--
     Log under ~/Library/Logs (always present on macOS). Do NOT use repo data/:

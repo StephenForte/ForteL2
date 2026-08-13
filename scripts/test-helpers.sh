@@ -1169,24 +1169,18 @@ fi
 # --- T5 step 3 / D-0034: cloudflared dials the write filter (:9555) only ---
 CF_HELPER="$SCRIPT_DIR/08-run-cloudflared-write.sh"
 CF_TEMPLATE="$FORTEL2_ROOT/config/cloudflared-write.yml.example"
-CF_PLIST="$LAUNCHD_DIR/com.steve.fortel2-cloudflared.plist"
 CF_CHECK="$SCRIPT_DIR/check-launchd.sh"
 
-# Template origin is the write filter; helper + plist exist; start-all does not own the tunnel.
-if [[ -x "$CF_HELPER" && -f "$CF_TEMPLATE" && -f "$CF_PLIST" ]] \
+# Template origin is the write filter; helper exists; start-all does not own the tunnel.
+if [[ -x "$CF_HELPER" && -f "$CF_TEMPLATE" ]] \
   && grep -q 'service: http://127.0.0.1:9555' "$CF_TEMPLATE" \
   && ! grep -E '^[[:space:]]*(-[[:space:]]+)?service:.*:(9545|9546|9547|9551)' "$CF_TEMPLATE" \
-  && grep -q 'com.steve.fortel2-cloudflared' "$CF_PLIST" \
-  && grep -q 'KeepAlive' "$CF_PLIST" \
-  && grep -q '08-run-cloudflared-write.sh' "$CF_PLIST" \
-  && ! grep -q '<key>StartCalendarInterval</key>' "$CF_PLIST" \
-  && grep -q 'check_keepalive_agent fortel2-cloudflared' "$CF_CHECK" \
   && ! grep -q '08-run-cloudflared-write' "$SCRIPT_DIR/start-all-sepolia.sh" \
   && ! grep -q '08-run-cloudflared-write' "$SCRIPT_DIR/stop-all-sepolia.sh" \
   && grep -q 'config/cloudflared-write.yml' "$FORTEL2_ROOT/.gitignore"; then
-  echo "PASS D-0034 cloudflared template/plist/helper independent of start-all; origin :9555"
+  echo "PASS D-0034 cloudflared template/helper independent of start-all; origin :9555"
 else
-  echo "FAIL D-0034 must commit KeepAlive agent + :9555 template; not wired into start/stop-all" >&2
+  echo "FAIL D-0034 must commit :9555 template + helper; not wired into start/stop-all" >&2
   fail=1
 fi
 
@@ -1255,13 +1249,56 @@ else
 fi
 rm -f "$CF_FAKE"
 
-# rail-interface write URL stays unpublished (loopback l2RpcUrl; no Cloudflare hostname).
-RAIL_JSON="$FORTEL2_ROOT/deployments/rail-interface.json"
-if grep -q '"l2RpcUrl": "http://127.0.0.1:9545"' "$RAIL_JSON" \
-  && ! grep -qiE 'cloudflare|trycloudflare|cf-access' "$RAIL_JSON"; then
-  echo "PASS D-0034 rail-interface write URL unpublished"
+# --- LD-01: launchd drift check tiered severity + cloudflared plist removed ---
+LD_CHECK="$SCRIPT_DIR/check-launchd.sh"
+if [[ ! -f "$LAUNCHD_DIR/com.steve.fortel2-cloudflared.plist" ]] \
+  && grep -q '<integer>0</integer>' "$LAUNCHD_DIR/com.steve.fortel2-health.plist" \
+  && grep -q 'is_contract_schedule' "$LD_CHECK" \
+  && grep -q 'fortel2-sleep|fortel2-wake' "$LD_CHECK" \
+  && ! grep -q 'check_keepalive_agent' "$LD_CHECK" \
+  && grep -q 'launchctl print' "$LD_CHECK"; then
+  echo "PASS LD-01 check-launchd tiered severity; no cloudflared LaunchAgent plist"
 else
-  echo "FAIL D-0034 must not publish a Cloudflare write URL in rail-interface.json" >&2
+  echo "FAIL LD-01 check-launchd must tier sleep/wake FAIL vs other WARN; drop cloudflared plist" >&2
+  fail=1
+fi
+
+# rail-interface write/read URLs stay unpublished (D-0034 / D-0035 / D-0031).
+# Checks URL-carrying *fields*, not free text: describing the architecture in notes is
+# wanted, publishing a reachable endpoint is not. The previous version grepped for the
+# vendor name anywhere in the file, which both blocked prose and missed the real risk —
+# the write hostname is fortel2-write.ente.ltd and contains no vendor string at all.
+# Resolve from SCRIPT_DIR, not FORTEL2_ROOT: earlier cases reassign FORTEL2_ROOT to
+# mktemp fixture dirs (lines ~233, ~268) and bare assignments persist, so by here it no
+# longer points at the repo. Neighbouring late tests (LD_CHECK, CF_HELPER) use SCRIPT_DIR
+# for the same reason.
+RAIL_JSON="$SCRIPT_DIR/../deployments/rail-interface.json"
+if python3 - "$RAIL_JSON" <<'PY'
+import json, sys
+path = sys.argv[1]
+d = json.load(open(path))
+bad = []
+for nid, n in (d.get("networks") or {}).items():
+    if n.get("l2ChainId") == 852 and n.get("l2RpcUrl") != "http://127.0.0.1:9545":
+        bad.append("%s.l2RpcUrl not loopback: %r" % (nid, n.get("l2RpcUrl")))
+    if n.get("writeRpcUrl"):
+        bad.append("%s.writeRpcUrl is published: %r" % (nid, n["writeRpcUrl"]))
+    rep = n.get("replica") or {}
+    for k in ("readRpcUrl", "writeRpcUrl"):
+        if rep.get(k):
+            bad.append("%s.replica.%s is published: %r" % (nid, k, rep[k]))
+raw = open(path).read()
+for host in ("ente.ltd", "trycloudflare.com"):
+    if host in raw:
+        bad.append("write hostname %r appears in the file" % host)
+if bad:
+    print("; ".join(bad))
+    sys.exit(1)
+PY
+then
+  echo "PASS D-0034 rail-interface write/read URLs unpublished"
+else
+  echo "FAIL D-0034 must not publish a write/read URL in rail-interface.json" >&2
   fail=1
 fi
 

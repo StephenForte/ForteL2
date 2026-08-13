@@ -622,7 +622,7 @@ op-geth cannot run a second HTTP listener, so the narrow write surface is a **lo
 | Port | Process | Surface | Who uses it |
 |---|---|---|---|
 | **9545** (`L2_EL_HTTP_PORT` / `L2_RPC_URL`) | op-geth | Full `eth,net,web3,debug,txpool,admin,miner` | Operator tooling on the mini |
-| **9555** (`L2_WRITE_RPC_PORT`) | `l2-rpc-filter` | Explicit eth/net/web3 **method allowlist** only | `cloudflared` origin (LaunchAgent `com.steve.fortel2-cloudflared`). Never publish `:9545`. |
+| **9555** (`L2_WRITE_RPC_PORT`) | `l2-rpc-filter` | Explicit eth/net/web3 **method allowlist** only | `cloudflared` origin (dashboard-managed system LaunchDaemon). Never publish `:9545`. |
 
 **Availability:** the sequencer (and therefore this filter’s upstream) is stopped nightly **23:45–03:00** `America/Los_Angeles` (D-0026). There is no uptime commitment.
 
@@ -646,7 +646,7 @@ Do **not** point `cloudflared` at `:9545`. Access is proven (D-0035). Still do *
 
 ### Authenticated Cloudflare tunnel (T5 step 3 — D-0034 / D-0035)
 
-Live path (2026-08-12) is a **dashboard-managed** Cloudflare tunnel. PR 73's LaunchAgent (`com.steve.fortel2-cloudflared`) is the optional locally-managed alternate. **Do not bootstrap that agent while the dashboard connector is Healthy** — a second `cloudflared` fights the live one.
+Live path (2026-08-12) is a **dashboard-managed** Cloudflare tunnel running as a system LaunchDaemon (`/Library/LaunchDaemons/com.cloudflare.cloudflared.plist`). **Do not run a user LaunchAgent `cloudflared` while the dashboard connector is Healthy** — a second process fights the live one. Manual yaml path: `scripts/08-run-cloudflared-write.sh` (only if you retire the dashboard connector).
 
 Nightly sleep/wake stop the sequencer; the tunnel process stays up and the origin goes dark for **23:45–03:00** `America/Los_Angeles` (D-0026). That window is expected, not an outage of the tunnel daemon.
 
@@ -666,10 +666,9 @@ Nightly sleep/wake stop the sequencer; the tunnel process stays up and the origi
 
 **Operator dashboard (do not invent a hostname or paste secrets into git/chat/`.env.sepolia.example`):**
 
-1. **Tunnel.** Live: Zero Trust → Networks → Tunnels → `SuperForteL2_mini` (remotely managed). Public hostname service **must** be `http://127.0.0.1:9555`. The yaml/LaunchAgent path (`cloudflared tunnel login` / `config/cloudflared-write.yml`) is only if you switch off the dashboard connector first.
+1. **Tunnel.** Live: Zero Trust → Networks → Tunnels → `SuperForteL2_mini` (remotely managed). Public hostname service **must** be `http://127.0.0.1:9555`. The yaml path (`cloudflared tunnel login` / `config/cloudflared-write.yml` / `scripts/08-run-cloudflared-write.sh`) is only if you switch off the dashboard connector first.
 2. **Access application.** Zero Trust → Access → Applications → `fortel2-write`. Domain `fortel2-write.ente.ltd`. Policy: **Service Auth** (`settlementos`). Do not use Bypass or Everyone.
 3. **Service token.** Held by the operator in Cloudflare + settlementos Render env (`CF-Access-Client-Id` / `CF-Access-Client-Secret`). Never in this repo. Never `VITE_*`.
-4. **LaunchAgent** (only if you retire the dashboard connector): copy `launchd/com.steve.fortel2-cloudflared.plist` into `~/Library/LaunchAgents/` and `bootout` + `bootstrap` per [`launchd/README.md`](launchd/README.md). `./scripts/08-run-cloudflared-write.sh --check-config` refuses any origin other than `http://127.0.0.1:9555`.
 
 ## Phase 2d — QuickNode L1 RPC (US-025)
 
@@ -723,7 +722,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh status
 
 Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clients is enough).
 
-**Scheduled on the Mac mini (launchd):** checked-in agents run Sepolia sleep at **23:45** and wake at **03:00** local (`launchd/com.steve.fortel2-sleep.plist`, `…-wake.plist`). `com.steve.fortel2-cloudflared` is KeepAlive (not on that calendar) and dials the write filter at `:9555` — see [Authenticated Cloudflare tunnel](#authenticated-cloudflare-tunnel-t5-step-3--d-0034). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
+**Scheduled on the Mac mini (launchd):** checked-in agents run health at **05:00**, Sepolia sleep at **23:45**, and wake at **03:00** local (`launchd/com.steve.fortel2-{health,sleep,wake}.plist`). The write tunnel is a dashboard-managed system LaunchDaemon (not a user LaunchAgent) — see [Authenticated Cloudflare tunnel](#authenticated-cloudflare-tunnel-t5-step-3--d-0034). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
 
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 
@@ -867,7 +866,7 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 | **What is exposed** | The D1 write filter (`eth,net,web3` allowlist) on **`L2_WRITE_RPC_PORT` (default 9555)**, reached through a Cloudflare tunnel that dials `http://127.0.0.1:9555` only. op-geth itself stays bound to `127.0.0.1`; no raw bind leaves loopback and `scripts/lib.sh` loopback asserts are unchanged. Full `admin/debug/miner/txpool` stays on `:9545`. op-node's RPC is admin-enabled and is **never** published. |
 | **To whom** | The `settlementos` Render service only (`srv-d9tafn3m8hqs73cks7cg`). **Not** the public internet. Everyone else reads from the replica — see the public read path below. |
 | **Auth model** | Cloudflare Access service token, held as a Render environment variable and sent as a header on outbound JSON-RPC. The token is a US-022 secret: gitignored, never in `.env.sepolia.example`, redacted in logs (`redact_rpc_url`). |
-| **Rollback** | Revoke the service token, or stop the dashboard tunnel connector (do not also run `com.steve.fortel2-cloudflared` while that connector is Healthy). Sequencer bind, chain state, and `L2_RPC_URL` are all untouched, so rollback is immediate and has no on-chain effect. |
+| **Rollback** | Revoke the service token, or stop the dashboard tunnel connector (do not also run a user LaunchAgent `cloudflared` while that connector is Healthy). Sequencer bind, chain state, and `L2_RPC_URL` are all untouched, so rollback is immediate and has no on-chain effect. |
 
 **D1 (narrow write surface) has shipped.** [`scripts/04-start-sequencer-sepolia.sh`](scripts/04-start-sequencer-sepolia.sh) still serves the full `eth,net,web3,debug,txpool,admin,miner` surface on loopback `:9545` for operator tooling. The write-facing door is a separate loopback filter on **`L2_WRITE_RPC_PORT` (default 9555)** — see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist). `cloudflared` must dial **:9555 only**, never :9545. Narrow first, tunnel second. Never the reverse.
 
