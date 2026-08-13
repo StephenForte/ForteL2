@@ -153,11 +153,17 @@ check_agent() {
     status="FAIL"
     detail="${detail:+$detail; }script path mismatch: repo=${repo_script} installed=${host_script}"
     agent_fail=1
-  elif [[ "$agent_fail" -eq 0 && "$status" == "OK" && "$host_args" != "$repo_args" ]]; then
+  elif [[ "$agent_fail" -eq 0 && "$host_args" != "$repo_args" ]]; then
     # Same trailing script, but ProgramArguments prefixed (e.g. LaunchControl fdautil).
-    status="WARN"
-    detail="ProgramArguments wrapper-prefixed (ends in same repo script); LaunchControl fdautil is a third-party dependency"
-    WARNS=$((WARNS + 1))
+    # May combine with a non-contract schedule WARN (e.g. fortel2-health).
+    local wrapper_detail="ProgramArguments wrapper-prefixed (ends in same repo script); LaunchControl fdautil is a third-party dependency"
+    if [[ "$status" == "OK" ]]; then
+      status="WARN"
+      detail="$wrapper_detail"
+      WARNS=$((WARNS + 1))
+    elif [[ "$status" == "WARN" ]]; then
+      detail="${detail}; ${wrapper_detail}"
+    fi
   fi
 
   if [[ "$agent_fail" -eq 1 ]]; then
