@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-05  
 **Card:** `tasks/review-2026-08-05.md` §R-01 / P0-1  
-**Status:** options recorded; US-012 **GO** (D-0030); D1 done; **step 3 transport done** (D-0034, cloudflared → `:9555`). Step 4 (rail-interface write URL) is not in that change.  
+**Status:** options recorded; US-012 **GO** (D-0030); D1 done; **step 3 transport live** (D-0034/D-0035, dashboard-managed cloudflared → `:9555`, Access proven). Step 4 (rail-interface write URL) remains unpublished on purpose. Step 5 SOS Render env is done.  
 **Scope:** decision material only — no code, ports, binds, or `rail-interface.json` edits in this spike.
 
 SettlementOS (SOS) must send transactions to the ForteL2 Sepolia sequencer (L2 chain **852**). Today the only write endpoint is the Mac mini’s loopback op-geth HTTP RPC. This document maps dependencies, compares five reachability options, and records a single recommendation for the operator to approve or reject under US-012.
@@ -108,9 +108,9 @@ US-012’s four review items = exposed / to-whom / auth / rollback (also columns
 |---|---|---|---|
 | **1. D1** | ✅ **Done** — write-facing allowlist proxy on loopback `L2_WRITE_RPC_PORT` (default **9555**): `scripts/rpc-method-filter.py` + `scripts/07-start-rpc-filter-sepolia.sh`, wired into `start-all-sepolia.sh` / `stop-all-sepolia.sh`. Full `admin/debug/miner/txpool` surface stays on `:9545` for operator tooling. Do **not** publish op-node `--rpc.enable-admin`. | **Yes** — stop `l2-rpc-filter` / revert start wiring; no chain wipe. | ForteL2 (T5-D1) |
 | **2. D2** | Operator US-012 README go/no-go using the four items from the chosen row (exposed / to-whom / auth / rollback), plus D5 availability and D7 unattended-uptime notes. | **Yes** — a “no-go” leaves loopback; a later “go” can still pick a different row. | **Operator** |
-| **3. Transport** | ✅ **Done** — `cloudflared` LaunchAgent dials `http://127.0.0.1:9555` only (D-0034). Access service token; `L2_RPC_URL` stays loopback; rail-interface write URL unpublished. | **Yes** — stop `cloudflared` / revoke Access token. | ForteL2 ops |
-| **4. R-02 publish** | After go: version-bump `rail-interface.json` with the write URL keys (§5). (R-02’s imminent v2 truth-up does **not** publish a non-loopback URL while loopback stands.) | URL publish is reversible by bumping again to loopback/`null` + SOS notice; chain state unchanged. | R-02 / follow-on |
-| **5. SOS registry entry** | No id coordination left (D-0028): SOS points `FORTEL2_SEPOLIA_RPC_URL` at the published URL; settle demo path unblocked for MR-1. | SOS-side config revert. | SettlementOS |
+| **3. Transport** | ✅ **Done** — dashboard-managed tunnel `SuperForteL2_mini` dials `http://127.0.0.1:9555` only (D-0034/D-0035). Hostname `https://fortel2-write.ente.ltd`. Access proven (unauth 403, token `0x354` from mini and Render). `L2_RPC_URL` stays loopback; rail-interface write URL unpublished. Do not bootstrap the LaunchAgent while the dashboard connector is Healthy. | **Yes** — stop the dashboard connector / revoke Access token. | ForteL2 ops |
+| **4. R-02 publish** | Still **not done**. Access is proven; keep the write URL out of `rail-interface.json` so unauthenticated clients do not get a 403-or-worse surprise (D-0035). | URL publish is reversible by bumping again to loopback/`null` + SOS notice; chain state unchanged. | follow-on |
+| **5. SOS registry entry** | ✅ **Env done** — Render `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd` + `CF_ACCESS_*` (SOS PR 65). UI still needs overlay Secret File `deployments.fortel2-sepolia.json`. | SOS-side config revert. | SettlementOS |
 
 **Invariant:** never run step 3 before steps 1–2. Publishing a URL (step 4) before D1 is a security regression on the current API surface.
 

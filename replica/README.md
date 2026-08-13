@@ -17,7 +17,7 @@ This directory is a thin staging area for the Mac operator — not a second node
 | Consumer | Role | Needs genesis republish? |
 |---|---|---|
 | Render / friend verifiers | Derive L2 from Sepolia L1 | **Yes** on every Sepolia redeploy (Phase 7+) |
-| SettlementOS | Optional **read** RPC (writes stay on Mac sequencer) | Only if redeploy changed genesis |
+| SettlementOS | **Read** RPC over Render private network (`http://fortel2-replica:10000`). **Writes** use Cloudflare Access `https://fortel2-write.ente.ltd` (D-0035), not the replica. | Only if redeploy changed genesis |
 | settlementos-explorer | Optional indexed reads | Same as SOS |
 
 Replica is **Phase 3 done**. Money-rail / SOS work does **not** require rebuilding it. It **does** require running the pack/publish/wipe checklist whenever L1 contracts are redeployed.

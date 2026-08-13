@@ -1,6 +1,6 @@
 # ForteL2 ↔ SettlementOS coordination
 
-**Status:** living (updated 2026-08-04 for MR-0 closeout; Phase 0–3 complete)  
+**Status:** living (updated 2026-08-12 — authenticated write path proven, D-0035)  
 **Sources:** SettlementOS PRD/README; ForteL2 learning-chain PRD; money-rail PRD
 
 ## Product split
@@ -18,7 +18,7 @@ RWA           = SOS later — L2 only hosts contracts
 **SettlementOS may start now on Sepolia ForteL2 (chain 852).**  
 Do not wait for Phase 3b/4–6/paymaster/USDC.  
 **Availability:** sequencer RPC is down **23:45–03:00** local (`America/Los_Angeles`) every night — SOS retry/backoff must assume that window. No uptime commitment (personal Mac mini L2).  
-**Writes:** still Mac sequencer loopback (`L2_RPC_URL` / `:9545`) plus D1 allowlist on `:9555`. US-012 is GO (D-0030); Cloudflare tunnel to `:9555` is not up yet. **Reads:** SettlementOS uses Render private `http://fortel2-replica:10000` (D-0032); `rail-interface.json` `replica.readRpcUrl` remains null (D-0031).
+**Writes:** D1 allowlist on mini `:9555`, Cloudflare Access hostname `https://fortel2-write.ente.ltd` (D-0034/D-0035). Operator `L2_RPC_URL` stays loopback `:9545`. **Reads:** SettlementOS uses Render private `http://fortel2-replica:10000` (D-0032); `rail-interface.json` `replica.readRpcUrl` remains null (D-0031). Write URL is **not** in `rail-interface.json`.
 
 
 Full table: `tasks/prd-money-rail.md` § “When SettlementOS may come on the L2”.
@@ -64,11 +64,15 @@ Details: `replica/README.md`, README “Network reset procedure”, money-rail P
 5. Phase 4–6 learning rebuilds (no redeploy)      ← parallel
 6. Phase 7 wipe → replica pack + SOS redeploy     ← coordinated
 ```
-## Status 2026-08-12 — replica reads live; writes still loopback pending tunnel
+## Status 2026-08-12 — replica reads live; authenticated writes proven (D-0035)
 
-**Reads (done).** Render Private Service `fortel2-replica:10000` (Oregon, env `evm-d9h424715fvs73cq2gl0`) serves the MR-2 method filter (geth/op-node loopback). SettlementOS sets `FORTEL2_SEPOLIA_READ_RPC_URL=http://fortel2-replica:10000`. Operator Shell from `settlementos` → replica `eth_chainId` = `0x354` (852). Replica is read-only (`eth_sendRawTransaction` → `-32601`). Lag ~3 minutes (L1 batches); `confirm()` and writes stay on the sequencer. `rail-interface.json` `replica.readRpcUrl` stays **null** (D-0031) — the private hostname is not a published rail URL (D-0032).
+**Reads (done).** Render Private Service `fortel2-replica:10000` (Oregon, env `evm-d9h424715fvs73cq2gl0`, service `srv-d9fsgi3rjlhs73ceh6tg`) serves the MR-2 method filter (geth/op-node loopback). SettlementOS sets `FORTEL2_SEPOLIA_READ_RPC_URL=http://fortel2-replica:10000`. Operator Shell from `settlementos` → replica `eth_chainId` = `0x354` (852). Replica is read-only (`eth_sendRawTransaction` → `-32601`). Lag ~3 minutes (L1 batches); `confirm()` and writes stay on the authenticated write RPC. `rail-interface.json` `replica.readRpcUrl` stays **null** (D-0031) — the private hostname is not a published rail URL (D-0032).
 
-**Writes (not done).** US-012 is **GO** (D-0030). D1 filter is live on mini `:9555`. Cloudflare tunnel to `:9555` (never `:9545`) is the next ForteL2 ops task (D-0034). Until that lands, SOS writes remain Mac loopback / colocate. Do not point `FORTEL2_SEPOLIA_RPC_URL` at the replica.
+**Writes (RPC path done; product overlay parked).** US-012 **GO** (D-0030). D1 filter live on mini `:9555`. Dashboard-managed tunnel `SuperForteL2_mini` (`64c3a080-44fa-4af6-9591-aba07d849757`) origin `:9555` only. Hostname `https://fortel2-write.ente.ltd`, Access app `fortel2-write`, policy `settlementos`. Unauthenticated → 403; token (mini + Render Shell) → `0x354`. SOS PR 65 (`785a9ae`) sends Access headers only on `fortel2-sepolia` writes. Render `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd`. Do **not** point the read URL at `ente.ltd`. Do **not** publish the write hostname in `rail-interface.json`. Do **not** bootstrap `com.steve.fortel2-cloudflared` while the dashboard connector is Healthy.
+
+**Parked:** SOS UI has no ForteL2 network until Secret File `deployments.fortel2-sepolia.json` is on Render. No signed settlement tx from Render yet. Access token lives with Steve (Cloudflare + Render Dashboard), not git.
+
+End-of-day recap with every live value: [`tasks/status-2026-08-12-write-path.md`](status-2026-08-12-write-path.md).
 
 **Explorer.** Same Render private network (`settlementos-explorer-ihgo`). Set **non-VITE** `FORTEL2_SEPOLIA_READ_RPC_URL=http://fortel2-replica:10000` for Node/MCP. Do not put that hostname in `VITE_*` (browser bundle; visitors cannot resolve private DNS).
 

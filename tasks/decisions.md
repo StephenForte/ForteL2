@@ -294,7 +294,17 @@
 ### D-0034 — Authenticated Cloudflare tunnel to L2_WRITE_RPC_PORT (:9555)
 - **Context:** D-0030 GO; D1 filter on loopback :9555; SOS reads use the replica (D-0032).
 - **Decision:** cloudflared origin is http://127.0.0.1:9555 only. Access service token; audience = settlementos Render. L2_RPC_URL stays loopback. rail-interface write URL not published in this change.
-- **Consequence:** SOS FORTEL2_SEPOLIA_RPC_URL + CF Access headers are a follow-up. Rollback = stop cloudflared / revoke token.
+- **Consequence:** SOS FORTEL2_SEPOLIA_RPC_URL + CF Access headers are a follow-up. Rollback = stop cloudflared / revoke token. Superseded in ops detail by D-0035 (Access proven; live tunnel is dashboard-managed).
+
+### D-0035 — Access proven; SOS Render writes use `fortel2-write.ente.ltd`; rail-interface write URL stays unpublished
+- **Context:** D-0034. Operator created a **dashboard-managed** Cloudflare tunnel (not the PR 73 LaunchAgent) on 2026-08-12. SettlementOS PR [#65](https://github.com/StephenForte/settlementos/pull/65) (`785a9ae`) attaches `CF-Access-Client-Id` / `CF-Access-Client-Secret` only on `fortel2-sepolia` write transports (`publicClientFor` / `walletFor`). `readClientFor` stays header-free.
+- **Decision:** The authenticated write path is live and proven. Do **not** publish `https://fortel2-write.ente.ltd` in `rail-interface.json` (other clients would hit Access with no headers). Do **not** bootstrap `com.steve.fortel2-cloudflared` while the dashboard connector is Healthy (a second `cloudflared` fights it). Token values stay with the operator (Cloudflare Zero Trust + Render Dashboard), never git/chat/`VITE_*`.
+- **Live facts (2026-08-12):**
+  - Tunnel `SuperForteL2_mini`, id `64c3a080-44fa-4af6-9591-aba07d849757`, connector `supermini.local` (darwin_arm64), Healthy.
+  - Origin `http://127.0.0.1:9555` only. Hostname `https://fortel2-write.ente.ltd`. Access app `fortel2-write`, policy `settlementos` (Service Auth).
+  - Unauthenticated `eth_chainId` → **403** Access HTML. Token curl (mini) and Render Shell (`settlementos` `srv-d9tafn3m8hqs73cks7cg`) → `{"result":"0x354"}` (852).
+  - Render env: `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd`, `FORTEL2_SEPOLIA_READ_RPC_URL=http://fortel2-replica:10000`, `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set (`sync: false`).
+- **Consequence:** SOS UI still needs Secret File `deployments.fortel2-sepolia.json` before ForteL2 appears in the product. A signed `eth_sendRawTransaction` / settlement write was not run. Rollback = revoke the service token and/or stop the dashboard connector. Sequencer bind and chain state are untouched.
 
 ---
 
