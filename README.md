@@ -697,6 +697,7 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 | Knob | Default | Env override |
 |---|---|---|
 | Batcher poll | `12s` | `SEPOLIA_BATCHER_POLL_INTERVAL` |
+| Batcher batch type | `span` (`--batch-type=1`) | `BATCHER_BATCH_TYPE` (`span`/`1` or `singular`/`0`) |
 | Batcher max channel duration | `30` L1 blocks (~6 min) | `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION` |
 | Batcher txmgr receipt / rebroadcast | `36s` | `SEPOLIA_BATCHER_TXMGR_*_INTERVAL` |
 | Proposer interval | `5m` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`) |
