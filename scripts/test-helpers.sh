@@ -1175,8 +1175,7 @@ CF_CHECK="$SCRIPT_DIR/check-launchd.sh"
 # Template origin is the write filter; helper + plist exist; start-all does not own the tunnel.
 if [[ -x "$CF_HELPER" && -f "$CF_TEMPLATE" && -f "$CF_PLIST" ]] \
   && grep -q 'service: http://127.0.0.1:9555' "$CF_TEMPLATE" \
-  && ! grep -E '^[[:space:]]*service:.*:9545' "$CF_TEMPLATE" \
-  && ! grep -E '^[[:space:]]*service:.*:9547' "$CF_TEMPLATE" \
+  && ! grep -E '^[[:space:]]*(-[[:space:]]+)?service:.*:(9545|9546|9547|9551)' "$CF_TEMPLATE" \
   && grep -q 'com.steve.fortel2-cloudflared' "$CF_PLIST" \
   && grep -q 'KeepAlive' "$CF_PLIST" \
   && grep -q '08-run-cloudflared-write.sh' "$CF_PLIST" \
@@ -1200,6 +1199,18 @@ else
   fail=1
 fi
 
+# --check-config accepts a dashed-only write-filter origin (list-item form).
+CF_DASH="$(mktemp "${TMPDIR:-/tmp}/cf-write-dash.XXXXXX.yml")"
+printf 'ingress:\n  - service: http://127.0.0.1:9555\n  - service: http_status:404\n' > "$CF_DASH"
+if CF_DASH_OK="$("$CF_HELPER" --check-config "$CF_DASH" 2>&1)" && [[ "$CF_DASH_OK" == *"OK origin http://127.0.0.1:9555"* ]]; then
+  echo "PASS D-0034 --check-config accepts dashed service origin :9555"
+else
+  echo "FAIL D-0034 --check-config must accept list-item - service: :9555" >&2
+  echo "${CF_DASH_OK:-}" >&2
+  fail=1
+fi
+rm -f "$CF_DASH"
+
 # --check-config refuses the full EL port (the trap).
 CF_BAD="$(mktemp "${TMPDIR:-/tmp}/cf-write-bad.XXXXXX.yml")"
 printf 'ingress:\n  - service: http://127.0.0.1:9545\n  - service: http_status:404\n' > "$CF_BAD"
@@ -1210,6 +1221,17 @@ else
   echo "PASS D-0034 --check-config rejects origin :9545"
 fi
 rm -f "$CF_BAD"
+
+# Hostname :9555 plus a dashed catch-all to the full EL must fail closed.
+CF_MIXED="$(mktemp "${TMPDIR:-/tmp}/cf-write-mixed.XXXXXX.yml")"
+printf 'ingress:\n  - hostname: example.example.com\n    service: http://127.0.0.1:9555\n  - service: http://127.0.0.1:9545\n' > "$CF_MIXED"
+if "$CF_HELPER" --check-config "$CF_MIXED" >/dev/null 2>&1; then
+  echo "FAIL D-0034 --check-config must reject dashed catch-all origin :9545" >&2
+  fail=1
+else
+  echo "PASS D-0034 --check-config rejects dashed catch-all origin :9545"
+fi
+rm -f "$CF_MIXED"
 
 # --check-config refuses op-node admin RPC.
 CF_NODE="$(mktemp "${TMPDIR:-/tmp}/cf-write-node.XXXXXX.yml")"

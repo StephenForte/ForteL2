@@ -32,7 +32,7 @@ assert_write_port_not_operator_rpc() {
   esac
 }
 
-# Validate ingress service: lines. $1 = yaml path.
+# Validate every ingress service, including list-item `- service:`. $1 = yaml path.
 check_origin() {
   local cfg="$1"
   if [[ ! -f "$cfg" ]]; then
@@ -52,7 +52,8 @@ text = open(path, encoding="utf-8").read()
 services = []
 for raw in text.splitlines():
     line = raw.split("#", 1)[0].rstrip()
-    m = re.match(r"^\s*service:\s*(.+?)\s*$", line)
+    # Indented mapping key (`service:`) and YAML list item (`- service:`).
+    m = re.match(r"^\s*(?:-\s+)?service:\s*(.+?)\s*$", line)
     if not m:
         continue
     val = m.group(1).strip().strip('"').strip("'")
