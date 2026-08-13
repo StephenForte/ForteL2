@@ -1,7 +1,7 @@
 # Spike P7-0 — Cut L1 cost and user transaction fees (blobs, span batches, cadence, scalars)
 
 **Date:** 2026-08-13
-**Status:** scoping only — **no code, no flags, no SystemConfig writes in this spike**
+**Status:** steps **1–3 done** (P7-0-A, 2026-08-13) — span batches live on 852, measured. Steps 4–7 untouched (no blobs, no beacon, no scalars, no cadence). **No SystemConfig writes.**
 **Origin:** D-0025 found the batcher burn is a tuning artifact (calldata + 30-block channels + 5-minute proposals) and that blobs + span batches + relaxed cadence cut L1 cost to single-digit $/day. Operator goal restated 2026-08-11: **low user transaction fees**, not only low operator spend. Both share one lever.
 
 ---
@@ -95,9 +95,9 @@ The replica derives from L1. Any DA change requires its op-node to be updated in
 | Step | Work | Reversible? | Owner |
 |---|---|---|---|
 | **0** | **Answer P2** — blob expiry vs counterparty verifiability | n/a | **Operator** |
-| **1** | Capture a clean burn + user-fee baseline, handling the auto-funding artifact (P3) | n/a | Worker |
-| **2** | **Span batches** (P4) — no beacon, reversible, measurable on its own | Yes — flag revert | Worker |
-| **3** | Measure step 2 in isolation before stacking anything else | n/a | Worker |
+| **1** | Capture a clean burn + user-fee baseline, handling the auto-funding artifact (P3) | n/a | **Done (P7-0-A)** — see §4 |
+| **2** | **Span batches** (P4) — no beacon, reversible, measurable on its own | Yes — flag revert | **Done (P7-0-A)** — `BATCHER_BATCH_TYPE=span` → `--batch-type=1` |
+| **3** | Measure step 2 in isolation before stacking anything else | n/a | **Done (P7-0-A)** — ~11.8× cheaper per L2 block |
 | **4** | Beacon endpoint on **both** op-nodes, still `DA=calldata`, verify derivation unaffected | Yes | Worker + operator (secret) |
 | **5** | Switch `BATCHER_DA_TYPE=blobs`, sequencer + replica together | Yes — but see P2 | Worker + operator |
 | **6** | Re-scalar SystemConfig (P5) so user fees track the new DA cost | L1 tx, owner key | **Operator only** |
@@ -115,3 +115,29 @@ The replica derives from L1. Any DA change requires its op-node to be updated in
 - Which beacon provider, and whether it shares the QuickNode account.
 - Target values for scalars or EIP-1559 params — those follow the step-1 baseline, not a guess.
 - Whether the time-to-finality change from step 7 is acceptable to SettlementOS — that is a coordination question, and SOS should be asked before it lands, not after.
+
+---
+
+## 4. P7-0-A measurement (2026-08-13, Mac mini, live 852)
+
+**Method (primary):** for each confirmed batcher→inbox L1 tx in the window, `gasUsed × effectiveGasPrice` from the receipt; divide the sum by the L2 blocks those channels covered (decoded from the channel: singular count, or span `blockCount`). This is immune to D-0027 auto-funding. Cadence (`max-channel-duration=30`), `--sub-safety-margin=2`, compression (`zlib`), and `DA=calldata` were not changed.
+
+**Pinned op-batcher flag** (from `--help` + `flags.go`): `--batch-type` is a `UintFlag`, `0`=SingularBatch, `1`=SpanBatch (`DefaultText: singular`). Script default `BATCHER_BATCH_TYPE=span` maps to `--batch-type=1`. **Revert:** `BATCHER_BATCH_TYPE=singular`.
+
+| | before (singular) | after (span) |
+|---|---|---|
+| L1 txs | 12 | 12 |
+| L1 blocks | 11482057–11482331 | 11482357–11482638 |
+| L2 blocks | 981950–983791 (1842, contiguous) | 983792–985692 (1901, contiguous) |
+| Window (PT) | 2026-08-13 11:52:40–12:49:04 | 2026-08-13 12:54:13–13:52:25 |
+| Total L1 cost | 6,995,322,791,181,630 wei (0.006995 ETH) | 610,554,200,339,110 wei (0.000611 ETH) |
+| **wei per L2 block** | **3,797,677,953,953** | **321,175,276,349** |
+| ETH per L2 block | 0.000003798 | 0.000000321 |
+
+**~11.8× cheaper per L2 block.** Calldata size dropped from ~6.5–7.2 KiB/channel to ~103–114 bytes/channel on this idle chain.
+
+**Wallet-delta (secondary, D-0027):** funder last ran 2026-08-13T18:00:33Z; next slot 00:00 UTC. The after window is entirely between top-ups; batcher balance drop 0.000611 ETH matched on-chain gas. The before window had no balance sample at its start, so no honest wallet-delta for singular — the receipt method is the number to keep.
+
+**Derivation:** `FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia` over blocks **985825–985874** (safe_l2 window, all after the span switch at 983792) — **PASS**, every derived hash matched the reference EL. Span decode is now load-bearing on real L1 data. `TestSepoliaGoldenReplay` still **matched=50** (historical singular fixture). Duplicate-channel logs after the 17s anchor restart (batcher re-posted overlapping spans) were last-write-wins and still matched.
+
+**Replica:** Render `fortel2-replica` logged `decoded span batch from channel batch_type=SpanBatch` on the first new channel (block_count=154) and kept inserting; head 986024 vs sequencer safe 986024 at 14:03 PT. Lag still ~one channel (~5 min / tens-to-low-hundreds of blocks), unchanged character. No revert.

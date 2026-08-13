@@ -20,6 +20,18 @@ fi
 BATCH_INBOX=$(jq -r '.batch_inbox_address // .batch_inbox // empty' "$DEPLOY_DIR/rollup.json")
 ROLLUP_JSON="${DEPLOY_DIR}/rollup.json"
 BATCHER_DA_TYPE="${BATCHER_DA_TYPE:-calldata}"
+# Pinned op-batcher --batch-type is a UintFlag: 0=SingularBatch, 1=SpanBatch
+# (DefaultText "singular"). Accept span/singular or 1/0. Default span (P7-0-A).
+# Revert to singular: BATCHER_BATCH_TYPE=singular
+BATCHER_BATCH_TYPE="${BATCHER_BATCH_TYPE:-span}"
+case "${BATCHER_BATCH_TYPE}" in
+  span|1) BATCHER_BATCH_TYPE_FLAG=1 ;;
+  singular|0) BATCHER_BATCH_TYPE_FLAG=0 ;;
+  *)
+    echo "ERROR: BATCHER_BATCH_TYPE=${BATCHER_BATCH_TYPE} — want span|singular|1|0 (op-batcher --batch-type)" >&2
+    exit 1
+    ;;
+esac
 BATCHER_CONFS="${SEPOLIA_BATCHER_NUM_CONFIRMATIONS:-2}"
 # Credit-budget defaults (QuickNode): longer channels + slower polls cut fee-oracle spam.
 # Fee tip/blob RPCs fire on craft + fee-bump (no dedicated estimate interval) — gated by
@@ -80,6 +92,7 @@ else
     --rollup-rpc="$L2_NODE_RPC_URL" \
     --private-key="${BATCHER_PRIVATE_KEY}" \
     --data-availability-type="${BATCHER_DA_TYPE}" \
+    --batch-type="${BATCHER_BATCH_TYPE_FLAG}" \
     --rpc.addr=127.0.0.1 \
     --rpc.port="${BATCHER_RPC_PORT}" \
     --poll-interval="${BATCHER_POLL}" \
@@ -91,7 +104,7 @@ else
     --txmgr.receipt-query-interval="${BATCHER_RECEIPT_QUERY}" \
     --txmgr.rebroadcast-interval="${BATCHER_REBROADCAST}" \
     --log.level=info
-  echo "Sepolia batcher started (DA=${BATCHER_DA_TYPE}, confs=${BATCHER_CONFS}, poll=${BATCHER_POLL}, max-channel-duration=${BATCHER_CHANNEL_DURATION})."
+  echo "Sepolia batcher started (DA=${BATCHER_DA_TYPE}, batch-type=${BATCHER_BATCH_TYPE_FLAG}/${BATCHER_BATCH_TYPE}, confs=${BATCHER_CONFS}, poll=${BATCHER_POLL}, max-channel-duration=${BATCHER_CHANNEL_DURATION}). Revert to singular: BATCHER_BATCH_TYPE=singular"
 fi
 
 echo "Inspect: cast nonce ${BATCHER_ADDRESS} --rpc-url $(redact_rpc_url "$L1_RPC_URL")"

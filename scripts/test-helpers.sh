@@ -1302,6 +1302,23 @@ else
   fail=1
 fi
 
+# P7-0-A: Sepolia stock batcher defaults to span (--batch-type 1). Flag is a
+# UintFlag on the pinned op-batcher (0=singular, 1=span); the script maps
+# span/singular as well. Revert is BATCHER_BATCH_TYPE=singular. Do not change
+# channel duration / compression / DA type here.
+if grep -q 'BATCHER_BATCH_TYPE:-span' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q -- '--batch-type="${BATCHER_BATCH_TYPE_FLAG}"' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'BATCHER_BATCH_TYPE=span' "$FORTEL2_ROOT/.env.sepolia.example" \
+  && grep -q 'BATCHER_BATCH_TYPE=singular' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'SEPOLIA_BATCHER_MAX_CHANNEL_DURATION:-30' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q -- '--sub-safety-margin=2' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'BATCHER_DA_TYPE:-calldata' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  echo "PASS Sepolia stock batcher defaults BATCHER_BATCH_TYPE=span (--batch-type 1)"
+else
+  echo "FAIL 05-start-batcher-sepolia.sh must default span batches without touching cadence/DA" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
