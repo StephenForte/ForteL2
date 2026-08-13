@@ -336,6 +336,20 @@
   **11.82×.** Extrapolated at ~43,200 L2 blocks/day: **0.164 → 0.014 ETH/day**, which matches the 0.168 ETH/day historical burn closely enough to confirm the before-window was representative rather than cherry-picked. Calldata fell from ~6.5–7.2 KiB/channel to ~103–114 bytes/channel. `derivation-check.sh --sepolia` PASSED over blocks 985,825–985,874 (entirely post-switch), so the custom verifier's span path — dead code until 2026-08-13 — is now proven on real L1 data; `TestSepoliaGoldenReplay` still matched=50.
 - **Consequence:** **This saving accrues to the operator, not to users, and the record must not be read as closing the low-user-fee goal.** Under Fjord the L1 fee a user pays is computed from a FastLZ estimate of *their own transaction's* size times the GasPriceOracle scalars — not from the amortized channel cost. Verified 2026-08-13 on chain 852: `baseFeeScalar()` **1368**, `blobBaseFeeScalar()` 801949, `decimals()` 6, `isFjord()` 1 — OP Stack defaults, unchanged, because no SystemConfig write was made. So user-facing fees are exactly where they were. **Step 6 (re-scalar) stays OPEN as a separate decision**: it is orthogonal to the blob question, needs no beacon, and is the only step that passes the 11.82× through to transaction costs. It is an L1 transaction from the SystemConfig owner key — operator-only, irreversible in the ordinary sense, and out of scope for a worker. Revert for span batches remains `BATCHER_BATCH_TYPE=singular ./scripts/05-start-batcher-sepolia.sh` (the stock path now stops a live pid first, per #76 — before that fix the revert silently no-opped).
 
+### D-0038 — Step 6 (fee scalars) closed: **no action**; user fees are already negligible and the dominant term is SOS's own tip
+- **Context:** D-0037 left step 6 open as the only remaining lever on user-facing transaction cost. Measured it on chain 852 (2026-08-13) from the D-0036 settlement receipts rather than reasoning from the formula.
+- **Decision:** **Close step 6. Do not change `baseFeeScalar`.** P7-0 is now fully closed.
+- **Evidence — what a user actually pays, by controlling lever:**
+
+  | Component | Controlled by | escrow | settlement |
+  |---|---|---|---|
+  | L2 base fee | chain EIP-1559 params | 0.02% | 0.02% |
+  | L2 priority tip | **SettlementOS client config** | **92.85%** | **81.04%** |
+  | L1 data fee | `baseFeeScalar` (step 6) | 7.12% | 18.94% |
+
+  Full two-transaction settlement flow = 2.54e-7 ETH ≈ **$0.00076** at $3,000/ETH. L2 base fee has decayed to **251 wei** (genesis 1 gwei) — the chain parameters are already effectively zero. Priority tip is 1,000,000 wei (0.001 gwei), chosen by the client.
+- **Consequence:** Step 6 would move 7–19% of a fee that is already sub-cent, so the low-user-fee goal is **already met** — by EIP-1559 decay on an idle chain, not by anything P7-0 did. **Corrects a claim made twice while scoping P7-0**: that the L1 data fee dominates user cost. True on busy L2s, false here. The real lever on SOS's transaction cost is their own priority-fee setting, which ForteL2 does not control and which is worth telling them about. Counter-argument against acting anyway: post-span the operator pays ~0.0139 ETH/day (~$41.62) regardless of traffic, and break-even at settlement-sized fees would need ~227,670 tx/day — the chain is operator-subsidised by orders of magnitude, and pushing fees lower widens that while enlarging the spam surface noted in D-0030. Revisit only if real volume arrives, at which point the lever is the **EIP-1559 params** (L2 base fee rising under load), not the L1 scalars.
+
 ---
 
 ## Escalations

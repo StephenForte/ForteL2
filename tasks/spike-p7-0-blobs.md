@@ -1,7 +1,7 @@
 # Spike P7-0 — Cut L1 cost and user transaction fees (blobs, span batches, cadence, scalars)
 
 **Date:** 2026-08-13
-**Status:** **CLOSED 2026-08-13 (D-0037).** Steps 1–3 done (P7-0-A) — span batches live on 852, **11.82× cheaper per L2 block**. Steps 4–5 (beacon + blob DA) **not pursued** — blob pruning at ~18 days conflicts with counterparty re-derivation (§1 P2). Step 7 (cadence) parked — it trades time-to-finality SOS depends on for cost no longer needed. **Step 6 (fee scalars) remains OPEN as a separate operator decision** — it is orthogonal to blobs and is the only step that reaches user-facing fees. **No SystemConfig writes were made.**
+**Status:** **CLOSED 2026-08-13 (D-0037, D-0038).** Steps 1–3 done (P7-0-A) — span batches live on 852, **11.82× cheaper per L2 block**. Steps 4–5 (beacon + blob DA) **not pursued** — blob pruning at ~18 days conflicts with counterparty re-derivation (§1 P2). Step 7 (cadence) parked — it trades time-to-finality SOS depends on for cost no longer needed. **Step 6 (fee scalars) closed 2026-08-13 with no action (D-0038)** — measured user cost is ~$0.00076 per settlement flow and 81–93% of it is SettlementOS's own priority tip, not a ForteL2 parameter. **No SystemConfig writes were made.**
 **Origin:** D-0025 found the batcher burn is a tuning artifact (calldata + 30-block channels + 5-minute proposals) and that blobs + span batches + relaxed cadence cut L1 cost to single-digit $/day. Operator goal restated 2026-08-11: **low user transaction fees**, not only low operator spend. Both share one lever.
 
 ---
@@ -100,7 +100,7 @@ The replica derives from L1. Any DA change requires its op-node to be updated in
 | **3** | Measure step 2 in isolation before stacking anything else | n/a | **Done (P7-0-A)** — ~11.8× cheaper per L2 block |
 | **4** | ~~Beacon endpoint on both op-nodes~~ | — | **Not pursued (D-0037)** — only needed for blobs |
 | **5** | ~~Switch `BATCHER_DA_TYPE=blobs`~~ | — | **Not pursued (D-0037)** — ~18-day blob pruning vs counterparty re-derivation |
-| **6** | Re-scalar SystemConfig (P5) so **user fees** track the new cost | L1 tx, owner key | **OPEN — operator only.** Independent of steps 4–5. Scalars verified unchanged at OP Stack defaults (`baseFeeScalar` 1368) on 2026-08-13, so P7-0-A's 11.82× has **not** reached users. |
+| **6** | Re-scalar SystemConfig (P5) so **user fees** track the new cost | L1 tx, owner key | **Closed, no action (D-0038)** — step 6's lever is 7–19% of an already sub-cent fee; 81–93% is the client's own tip. |
 | **7** | ~~Cadence~~ | — | **Parked (D-0037)** — trades SOS-visible time-to-finality for cost no longer needed |
 
 **Invariant:** never run step 5 before step 4. A blob-posting batcher with beacon-ignoring nodes halts derivation on the whole rail.
