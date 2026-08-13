@@ -626,6 +626,8 @@ op-geth cannot run a second HTTP listener, so the narrow write surface is a **lo
 
 **Availability:** the sequencer (and therefore this filter’s upstream) is stopped nightly **23:45–03:00** `America/Los_Angeles` (D-0026). There is no uptime commitment.
 
+**What breaking looks like from the consumer side** — 403 vs 502 vs refused vs stale, and why a 502 through a healthy tunnel is the confusing case: [`tasks/coordination-settlementos.md`](tasks/coordination-settlementos.md) → "What failure looks like on this path". `cloudflared` runs as a system LaunchDaemon and starts at boot without a login, while the ForteL2 stack runs as user LaunchAgents (D7) — so after an unattended reboot the tunnel is up and the origin is dark, which reads as **502**, not as a connection refusal. Check `:9555` on the mini before touching Cloudflare.
+
 **Log/block filters and nightly restart:** the allowlist includes `eth_newFilter`, `eth_newBlockFilter`, `eth_getFilterChanges`, `eth_getFilterLogs`, and `eth_uninstallFilter` (not `eth_newPendingTransactionFilter` — mempool). Filter IDs are per-node and in-memory; every sequencer restart invalidates them. After the nightly window (or any stack bounce), `eth_getFilterChanges` returning “filter not found” is **expected** — consumers must re-create filters and must not treat that as an outage.
 
 ```bash

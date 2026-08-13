@@ -1,7 +1,7 @@
 # Spike P7-0 — Cut L1 cost and user transaction fees (blobs, span batches, cadence, scalars)
 
 **Date:** 2026-08-13
-**Status:** steps **1–3 done** (P7-0-A, 2026-08-13) — span batches live on 852, measured. Steps 4–7 untouched (no blobs, no beacon, no scalars, no cadence). **No SystemConfig writes.**
+**Status:** **CLOSED 2026-08-13 (D-0037).** Steps 1–3 done (P7-0-A) — span batches live on 852, **11.82× cheaper per L2 block**. Steps 4–5 (beacon + blob DA) **not pursued** — blob pruning at ~18 days conflicts with counterparty re-derivation (§1 P2). Step 7 (cadence) parked — it trades time-to-finality SOS depends on for cost no longer needed. **Step 6 (fee scalars) remains OPEN as a separate operator decision** — it is orthogonal to blobs and is the only step that reaches user-facing fees. **No SystemConfig writes were made.**
 **Origin:** D-0025 found the batcher burn is a tuning artifact (calldata + 30-block channels + 5-minute proposals) and that blobs + span batches + relaxed cadence cut L1 cost to single-digit $/day. Operator goal restated 2026-08-11: **low user transaction fees**, not only low operator spend. Both share one lever.
 
 ---
@@ -98,14 +98,14 @@ The replica derives from L1. Any DA change requires its op-node to be updated in
 | **1** | Capture a clean burn + user-fee baseline, handling the auto-funding artifact (P3) | n/a | **Done (P7-0-A)** — see §4 |
 | **2** | **Span batches** (P4) — no beacon, reversible, measurable on its own | Yes — flag revert | **Done (P7-0-A)** — `BATCHER_BATCH_TYPE=span` → `--batch-type=1` |
 | **3** | Measure step 2 in isolation before stacking anything else | n/a | **Done (P7-0-A)** — ~11.8× cheaper per L2 block |
-| **4** | Beacon endpoint on **both** op-nodes, still `DA=calldata`, verify derivation unaffected | Yes | Worker + operator (secret) |
-| **5** | Switch `BATCHER_DA_TYPE=blobs`, sequencer + replica together | Yes — but see P2 | Worker + operator |
-| **6** | Re-scalar SystemConfig (P5) so user fees track the new DA cost | L1 tx, owner key | **Operator only** |
-| **7** | Cadence (P7), with the new time-to-finality stated for SOS | Yes | Worker |
+| **4** | ~~Beacon endpoint on both op-nodes~~ | — | **Not pursued (D-0037)** — only needed for blobs |
+| **5** | ~~Switch `BATCHER_DA_TYPE=blobs`~~ | — | **Not pursued (D-0037)** — ~18-day blob pruning vs counterparty re-derivation |
+| **6** | Re-scalar SystemConfig (P5) so **user fees** track the new cost | L1 tx, owner key | **OPEN — operator only.** Independent of steps 4–5. Scalars verified unchanged at OP Stack defaults (`baseFeeScalar` 1368) on 2026-08-13, so P7-0-A's 11.82× has **not** reached users. |
+| **7** | ~~Cadence~~ | — | **Parked (D-0037)** — trades SOS-visible time-to-finality for cost no longer needed |
 
 **Invariant:** never run step 5 before step 4. A blob-posting batcher with beacon-ignoring nodes halts derivation on the whole rail.
 
-**Recommended entry point: step 2.** Span batches need no new dependency, no secret, no external provider, and no answer to P2 — and they are measurable alone. Doing them first buys a real improvement and a clean measurement discipline before the beacon and blob-expiry questions have to be settled.
+**Outcome: step 2 was the entry point and, as it turned out, most of the value.** Span batches need no new dependency, no secret, no external provider, and no answer to P2 — and they are measurable alone. Doing them first buys a real improvement and a clean measurement discipline before the beacon and blob-expiry questions have to be settled.
 
 ---
 
