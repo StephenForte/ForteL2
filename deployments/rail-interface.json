@@ -54,8 +54,8 @@
         "syncMode": "derive-from-sepolia-l1",
         "readRpcUrl": null,
         "writeRpcUrl": null,
-        "accessModel": "render-private-service-web-shell",
-        "note": "No Mac-reachable replica RPC URL exists (D-0016). Access is Render private-service Web Shell only — see tasks/decisions.md D-0016 and replica/README.md.",
+        "accessModel": "render-private-network-rpc (operator inspection via Web Shell)",
+        "note": "Still no Mac-reachable and no public replica RPC URL (D-0016, D-0031) — readRpcUrl stays null. What changed: MR-2 put an eth/net/web3 method-allowlist filter in front of the replica EL, so the service now serves read RPC to callers inside Render's private network, and SettlementOS consumes it that way (D-0032). It is read-only by construction — eth_sendRawTransaction is removed from the allowlist and returns -32601 — because a replica with no peers and no sequencer forwarding would otherwise accept a transaction, return a hash, and drop it. Reads trail the sequencer by roughly 3 minutes (derived from L1 batches), so it cannot serve read-your-own-write; confirm() belongs on the write path. Operator inspection is still Render Web Shell (python3/urllib; the image has no curl). The private hostname is not a published rail URL.",
         "updateTriggers": [
           "Phase 7 Sepolia redeploy / network-wide wipe only while deployment pinned through Phase 6",
           "After redeploy: pack-replica-artifacts.sh → publish genesis+rollup → wipe Mac data-sepolia AND Render /data → hash cross-check"
