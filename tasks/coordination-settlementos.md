@@ -70,7 +70,21 @@ Details: `replica/README.md`, README “Network reset procedure”, money-rail P
 
 **Writes (RPC path done; product overlay parked).** US-012 **GO** (D-0030). D1 filter live on mini `:9555`. Dashboard-managed tunnel `SuperForteL2_mini` (`64c3a080-44fa-4af6-9591-aba07d849757`) origin `:9555` only. Hostname `https://fortel2-write.ente.ltd`, Access app `fortel2-write`, policy `settlementos`. Unauthenticated → 403; token (mini + Render Shell) → `0x354`. SOS PR 65 (`785a9ae`) sends Access headers only on `fortel2-sepolia` writes. Render `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd`. Do **not** point the read URL at `ente.ltd`. Do **not** publish the write hostname in `rail-interface.json`. Do **not** bootstrap `com.steve.fortel2-cloudflared` while the dashboard connector is Healthy.
 
-**Parked:** SOS UI has no ForteL2 network until Secret File `deployments.fortel2-sepolia.json` is on Render. No signed settlement tx from Render yet. Access token lives with Steve (Cloudflare + Render Dashboard), not git.
+**Settled end to end 2026-08-13 (D-0036).** Both parked items above are closed. Secret Files `deployments.fortel2-sepolia.json` and `deployments.base-sepolia.json` are on Render, and `pay_4bf481cdc9ea` settled on `fortel2-sepolia` — escrow `0x48797d94…c3942b` (block 979,593) and settlement `0x876325b2…8045c7` (block 979,595), both `status=0x1`, both **finalized on L1**. ~17 s from payment creation to escrow mined, so neither Access nor the method filter adds meaningful latency. Access token still lives with Steve (Cloudflare + Render Dashboard), not git.
+
+### What failure looks like on this path
+
+`cloudflared` runs as a **system LaunchDaemon** (`/Library/LaunchDaemons/com.cloudflare.cloudflared.plist`), so it starts at boot with no login. The ForteL2 stack runs as **user LaunchAgents**, which need a logged-in session (D7). The tunnel is therefore more available than the thing behind it, and that changes the failure signature:
+
+| What SOS sees | What it usually means |
+|---|---|
+| **403** + Access HTML | Missing/invalid `CF-Access-Client-Id` / `-Secret`, or the policy changed. Never a ForteL2 problem. |
+| **502 / 530** from Cloudflare | Tunnel is healthy, **origin is not** — `:9555` filter or the sequencer is down. This is the reboot-without-login case, and it is the one that looks like "ForteL2 is up but broken." |
+| Connection refused / DNS failure | The tunnel itself is down, or the mini is off/asleep. |
+| Success but stale reads | Reading the replica, which trails ~3 min by design (D-0032). Not an outage. |
+| `filter not found` on `eth_getFilterChanges` | Filter IDs are per-node in-memory and die on every sequencer restart — expected nightly. Re-create, do not alert. |
+
+**The 502 case is the trap**: the obvious first guess is "the tunnel is down," and it will be wrong every time. Check `:9555` on the mini before touching Cloudflare. Expected daily during **23:45–03:00** `America/Los_Angeles`; unexpected at any other hour means the stack did not come back after a reboot.
 
 End-of-day recap with every live value: [`tasks/status-2026-08-12-write-path.md`](status-2026-08-12-write-path.md).
 

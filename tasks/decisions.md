@@ -306,6 +306,22 @@
   - Render env: `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd`, `FORTEL2_SEPOLIA_READ_RPC_URL=http://fortel2-replica:10000`, `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set (`sync: false`).
 - **Consequence:** SOS UI still needs Secret File `deployments.fortel2-sepolia.json` before ForteL2 appears in the product. A signed `eth_sendRawTransaction` / settlement write was not run. Rollback = revoke the service token and/or stop the dashboard connector. Sequencer bind and chain state are untouched.
 
+### D-0036 — First end-to-end settlement on 852 through the authenticated write path; supersedes D-0035's "not run"
+- **Context:** D-0035 recorded Access-proven *transport* (`eth_chainId` from the Render Shell) but stated that a signed settlement write had not been run and that the SOS UI had no ForteL2 network pending Secret File `deployments.fortel2-sepolia.json`. Both closed 2026-08-13: the operator installed `deployments.fortel2-sepolia.json` and `deployments.base-sepolia.json` as Render Secret Files on `settlementos`, and payment `pay_4bf481cdc9ea` (INV-2026-001, ACME US Inc → Tokyo Trading KK, USD-JPY, 100,000 mockUSDC → 15,668,160 JPY @ 156.838440, fee 100.00) settled with `source_network` and `destination_network` both `fortel2-sepolia`.
+- **Decision:** Record the milestone from **on-chain verification against the sequencer**, not from the SettlementOS reconciliation export. Verified 2026-08-13 via `eth_getTransactionReceipt` on `127.0.0.1:9545`:
+
+  | | escrow | settlement |
+  |---|---|---|
+  | hash | `0x48797d94…c3942b` | `0x876325b2…8045c7` |
+  | status | `0x1` | `0x1` |
+  | block | 979,593 | 979,595 |
+  | timestamp | 2026-08-13T17:28:30Z | 2026-08-13T17:28:34Z |
+  | gasUsed | 178,813 | 49,387 |
+  | logs | 2 | 2 |
+
+  Both from `0x5128889f20ec13e0be38b2bebc568594159b652d` to `0x9d8b8b7c476ab02306046f3da719d380fa0456aa`. Chain id `0x354` (852). That contract is **SettlementOS-deployed and is correctly absent from ForteL2 `deployments/`**, which holds OP Stack L1 contracts only — its absence is not a gap.
+- **Consequence:** Three things are now proven that were previously assumed. (1) **The path works end to end**: SOS on Render → Cloudflare Access → dashboard tunnel → mini write filter `:9555` → sequencer, with a real signed `eth_sendRawTransaction`, not just an `eth_chainId` probe. (2) **It reaches L1**: at verification the `finalized` head was 982,099, well past 979,595, so both transactions are batched and finalized on Sepolia — this retires the D6 concern that writes could succeed on L2 and never reach safe/finalized, now tested on real traffic. (3) **The read/write split holds in implementation**: payment creation at 17:28:12.842Z to escrow mined at 17:28:30Z is ~17 s end to end, which is only possible if `confirm()` polled the sequencer rather than the replica — the ~3-minute replica lag (D-0032) would otherwise have stalled it. Neither the Access hop nor the method filter adds meaningful latency. **Precision for the record:** this is the first settlement on *ForteL2*, not the first settlement — the same invoice settled on `base-sepolia` as `pay_65723c97cb16` on 2026-08-11. Still unpublished by choice: the write hostname and the replica read URL stay out of `rail-interface.json` (D-0031, D-0035).
+
 ---
 
 ## Escalations
