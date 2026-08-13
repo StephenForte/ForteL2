@@ -358,7 +358,7 @@
 - **Context:** R-02 set `replica.readRpcUrl` to `null` (D-0016); `notes` still says "Reads: prefer replica when reachable."
 - **Needed change:** Align the notes sentence with null read URL / sequencer interim reads (D8 in T5 spike); card steps did not authorize a notes rewrite.
 - **Why not R-02:** Outside the nine instruction steps; left for integrator or R-10 consumer-doc pass.
-- **Status:** open.
+- **Status:** **resolved** 2026-08-13 (`2c03f87`, rail-interface v5). The `notes` field was rewritten wholesale for the write/read truth-up; it no longer says "prefer replica when reachable" and now states that SOS reads the replica over Render's private network (D-0032) with `replica.readRpcUrl` null (D-0031). Verified: the phrase is absent and `readRpcUrl` is `null`.
 
 ### E-H1-1 — Add `proposer/.gomodcache/` to `.gitignore`
 - **Context:** H1 secrets-hygiene sweep; `batcher/.gomodcache/` and `derivation/.gomodcache/` are gitignored; `proposer/.gomodcache/` is not.
