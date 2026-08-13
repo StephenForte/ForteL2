@@ -1263,13 +1263,42 @@ else
   fail=1
 fi
 
-# rail-interface write URL stays unpublished (loopback l2RpcUrl; no Cloudflare hostname).
-RAIL_JSON="$FORTEL2_ROOT/deployments/rail-interface.json"
-if grep -q '"l2RpcUrl": "http://127.0.0.1:9545"' "$RAIL_JSON" \
-  && ! grep -qiE 'cloudflare|trycloudflare|cf-access' "$RAIL_JSON"; then
-  echo "PASS D-0034 rail-interface write URL unpublished"
+# rail-interface write/read URLs stay unpublished (D-0034 / D-0035 / D-0031).
+# Checks URL-carrying *fields*, not free text: describing the architecture in notes is
+# wanted, publishing a reachable endpoint is not. The previous version grepped for the
+# vendor name anywhere in the file, which both blocked prose and missed the real risk —
+# the write hostname is fortel2-write.ente.ltd and contains no vendor string at all.
+# Resolve from SCRIPT_DIR, not FORTEL2_ROOT: earlier cases reassign FORTEL2_ROOT to
+# mktemp fixture dirs (lines ~233, ~268) and bare assignments persist, so by here it no
+# longer points at the repo. Neighbouring late tests (LD_CHECK, CF_HELPER) use SCRIPT_DIR
+# for the same reason.
+RAIL_JSON="$SCRIPT_DIR/../deployments/rail-interface.json"
+if python3 - "$RAIL_JSON" <<'PY'
+import json, sys
+path = sys.argv[1]
+d = json.load(open(path))
+bad = []
+for nid, n in (d.get("networks") or {}).items():
+    if n.get("l2ChainId") == 852 and n.get("l2RpcUrl") != "http://127.0.0.1:9545":
+        bad.append("%s.l2RpcUrl not loopback: %r" % (nid, n.get("l2RpcUrl")))
+    if n.get("writeRpcUrl"):
+        bad.append("%s.writeRpcUrl is published: %r" % (nid, n["writeRpcUrl"]))
+    rep = n.get("replica") or {}
+    for k in ("readRpcUrl", "writeRpcUrl"):
+        if rep.get(k):
+            bad.append("%s.replica.%s is published: %r" % (nid, k, rep[k]))
+raw = open(path).read()
+for host in ("ente.ltd", "trycloudflare.com"):
+    if host in raw:
+        bad.append("write hostname %r appears in the file" % host)
+if bad:
+    print("; ".join(bad))
+    sys.exit(1)
+PY
+then
+  echo "PASS D-0034 rail-interface write/read URLs unpublished"
 else
-  echo "FAIL D-0034 must not publish a Cloudflare write URL in rail-interface.json" >&2
+  echo "FAIL D-0034 must not publish a write/read URL in rail-interface.json" >&2
   fail=1
 fi
 
