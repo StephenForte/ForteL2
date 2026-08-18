@@ -71,14 +71,14 @@ Give SOS the **integration PRD**, not this file alone.
 |---|---|---|
 | **MR-0** | Publish rail interface + SOS/Replica lifecycle gates (this PRD) | **Done** (2026-08-04) |
 | **MR-1** | SOS can deploy + settle on **852** (Mac sequencer RPC) | **Done** (2026-08-13, D-0036) — first settlement on 852 through the authenticated write path |
-| **MR-2** | Document replica as preferred read path; optional read URL in rail interface | **Parked — no published public read URL** (`replica.readRpcUrl` stays `null`, D-0031). SOS already reads via Render private `http://fortel2-replica:10000` (D-0032). |
+| **MR-2** | Document replica as preferred read path; optional read URL in rail interface | **Done** (2026-08-18, D-0045) — public replica `https://fortel2-replica-rpc.onrender.com`; sequencer-tip `https://fortel2-sequencer-rpc.onrender.com`. Write hostname stays unpublished. SOS in-Render still uses private `http://fortel2-replica:10000` (D-0032). |
 | **MR-3** | Fee/paymaster spikes (only if SOS needs them) | **Parked** — trigger-gated (D-0005). No worker until SOS asks. |
 | **MR-4** | Canonical USDC path | **Parked** — trigger-gated (D-0005). No worker until SOS needs Circle bridged-USDC. |
 | **MR-5** | Optional predeploy / AuditAnchor | **Parked** — trigger-gated (D-0005). After SOS is stable on 852 *and* asks. |
 
 Learning-chain Phases **4–6** are done. Do **not** redeploy L1 or break SOS addresses before the redeploy gate (Phase 7 / mainnet-pilot entry).
 
-**Program closeout (D-0017 + D-0036):** ForteL2 money-rail on-ramp is closed. MR-1 settled on-chain. MR-2 public URL stays unpublished. MR-3/4/5 stay parked until an SOS trigger fires.
+**Program closeout (D-0017 + D-0036 + D-0045):** ForteL2 money-rail on-ramp is closed. MR-1 settled on-chain. MR-2 public **read** URLs published (replica + sequencer-tip). Write hostname unpublished. MR-3/4/5 stay parked until an SOS trigger fires.
 
 ---
 
@@ -131,7 +131,7 @@ Payment APIs, compliance, `PaymentSettlement` features, `TokenizedMMF` rules, FX
 ## Open questions
 
 - ~~Expose a stable tunnel/URL for SOS writes off-box, or keep SOS colocated with Mac sequencer for now?~~ — **resolved 2026-08-12/13 (D-0030, D-0035, D-0036)**: authenticated Cloudflare Access write path is live (`https://fortel2-write.ente.ltd` → `:9555`). Hostname stays **unpublished** in `rail-interface.json` (other clients lack Access headers). First settlement proven on 852.
-- ~~Public vs private Render replica RPC for explorer~~ — **resolved as parked 2026-08-12 (D-0031 / D-0032)**: replica stays a Private Service. SOS reads `http://fortel2-replica:10000`. `replica.readRpcUrl` stays `null` until a diskless public reverse-proxy is an explicit follow-up. Not MR-3/4/5 work.
+- ~~Public vs private Render replica RPC for explorer~~ — **resolved 2026-08-18 (D-0045)**: diskless public gateways are live. `replica.readRpcUrl` = `https://fortel2-replica-rpc.onrender.com` (L1-derived). `sequencerReads.readRpcUrl` = `https://fortel2-sequencer-rpc.onrender.com` (sequencer tip; down in the nightly window). The verifier Private Service stays private. SOS in-Render still uses `http://fortel2-replica:10000` (D-0032). Write hostname stays unpublished.
 - ~~Network registry id string: `fortel2-sepolia` vs `forte-l2`~~ — **resolved 2026-08-11 (D-0028)**: `fortel2-sepolia`, already live on the SOS side and fixed across re-genesis. Not a choice that was ever open to us.
 
 ### Trigger-gated later work (do not start)

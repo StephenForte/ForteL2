@@ -1,6 +1,6 @@
 # ForteL2 ↔ SettlementOS coordination
 
-**Status:** living (updated 2026-08-18 — MR-1 settled, Phase 7/3b/pilot docs landed; write path unchanged)  
+**Status:** living (updated 2026-08-18 — public read URLs published, D-0045)  
 **Sources:** SettlementOS PRD/README; ForteL2 learning-chain PRD; money-rail PRD
 
 ## Product split
@@ -18,7 +18,7 @@ RWA           = SOS later — L2 only hosts contracts
 **SettlementOS may start now on Sepolia ForteL2 (chain 852).**  
 Do not wait for Phase 3b/4–6/paymaster/USDC.  
 **Availability:** sequencer RPC is down **23:45–03:00** local (`America/Los_Angeles`) every night — SOS retry/backoff must assume that window. No uptime commitment (personal Mac mini L2).  
-**Writes:** D1 allowlist on mini `:9555`, Cloudflare Access hostname `https://fortel2-write.ente.ltd` (D-0034/D-0035). Operator `L2_RPC_URL` stays loopback `:9545`. **Reads:** SettlementOS uses Render private `http://fortel2-replica:10000` (D-0032); `rail-interface.json` `replica.readRpcUrl` remains null (D-0031). Write URL is **not** in `rail-interface.json`.
+**Writes:** D1 allowlist on mini `:9555`, Cloudflare Access hostname `https://fortel2-write.ente.ltd` (D-0034/D-0035). Operator `L2_RPC_URL` stays loopback `:9545`. **Reads:** public replica `https://fortel2-replica-rpc.onrender.com`; public sequencer tip `https://fortel2-sequencer-rpc.onrender.com` (D-0045). SettlementOS on Render still uses private `http://fortel2-replica:10000` (D-0032). `rail-interface.json` write URL remains unpublished.
 
 
 Full table: `tasks/prd-money-rail.md` § “When SettlementOS may come on the L2”.
@@ -60,14 +60,14 @@ Details: `replica/README.md`, README “Network reset procedure”, money-rail P
 1. ForteL2 publishes rail-interface.json          ← MR-0 done
 2. SOS adds fortel2-sepolia (852) + deploy        ← SOS F1–F2 done
 3. SOS single-chain settle + MMF on 852           ← SOS F3–F4 / D-0036 done
-4. Reads via replica; explorer address book       ← private-network reads live; public URL parked (MR-2)
+4. Reads via replica; explorer address book       ← MR-2 done (D-0045 public reads)
 5. Phase 4–6 learning rebuilds (no redeploy)      ← done
 6. Phase 7 wipe → replica pack + SOS redeploy     ← next coordinated event (not authorized by docs-only PRs)
 7. MR-3/4/5 (paymaster / USDC / AuditAnchor)      ← parked until SOS asks
 ```
 ## Status 2026-08-12 — replica reads live; authenticated writes proven (D-0035)
 
-**Reads (done).** Render Private Service `fortel2-replica:10000` (Oregon, env `evm-d9h424715fvs73cq2gl0`, service `srv-d9fsgi3rjlhs73ceh6tg`) serves the MR-2 method filter (geth/op-node loopback). SettlementOS sets `FORTEL2_SEPOLIA_READ_RPC_URL=http://fortel2-replica:10000`. Operator Shell from `settlementos` → replica `eth_chainId` = `0x354` (852). Replica is read-only (`eth_sendRawTransaction` → `-32601`). Lag ~3 minutes (L1 batches); `confirm()` and writes stay on the authenticated write RPC. `rail-interface.json` `replica.readRpcUrl` stays **null** (D-0031) — the private hostname is not a published rail URL (D-0032).
+**Reads (done).** Public replica `https://fortel2-replica-rpc.onrender.com` (L1-derived, ~3 min lag). Public sequencer tip `https://fortel2-sequencer-rpc.onrender.com` (tip-follow; 502/403 during 23:45–03:00). Both reject `eth_sendRawTransaction` (`-32601`). SettlementOS on Render still sets `FORTEL2_SEPOLIA_READ_RPC_URL=http://fortel2-replica:10000` (D-0032). `rail-interface.json` `replica.readRpcUrl` / `sequencerReads.readRpcUrl` are those public URLs (D-0045). Do **not** convert the Private Service to Web.
 
 **Writes (RPC path done; product overlay parked).** US-012 **GO** (D-0030). D1 filter live on mini `:9555`. Dashboard-managed tunnel `SuperForteL2_mini` (`64c3a080-44fa-4af6-9591-aba07d849757`) origin `:9555` only. Hostname `https://fortel2-write.ente.ltd`, Access app `fortel2-write`, policy `settlementos`. Unauthenticated → 403; token (mini + Render Shell) → `0x354`. SOS PR 65 (`785a9ae`) sends Access headers only on `fortel2-sepolia` writes. Render `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd`. Do **not** point the read URL at `ente.ltd`. Do **not** publish the write hostname in `rail-interface.json`. Do **not** bootstrap `com.steve.fortel2-cloudflared` while the dashboard connector is Healthy.
 
@@ -93,4 +93,4 @@ End-of-day recap with every live value: [`tasks/status-2026-08-12-write-path.md`
 
 **Availability unchanged:** sequencer (and therefore writes) down **23:45–03:00** `America/Los_Angeles`. Replica may keep serving a stale tip until new L1 batches land.
 
-**Do not:** convert the replica Private Service to Web; apply `fortel2-replica` `render.yaml` as a new Blueprint (20 GB empty disk vs live 50 GB); publish a public replica URL until a diskless reverse-proxy exists (D-0031).
+**Do not:** convert the replica Private Service to Web; apply `fortel2-replica` `render.yaml` as a new Blueprint (20 GB empty disk vs live 50 GB); put the Access write hostname in `rail-interface.json`.

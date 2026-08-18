@@ -27,7 +27,7 @@ This is a **learning phase**, not a mainnet launch. It is the first work allowed
 - Blob DA / beacon endpoints (D-0037 — not pursued)
 - Changing SOS product contracts except the mandatory post-wipe redeploy they own
 - Replacing stock proposer/challenger with a from-scratch challenger
-- Publishing the write hostname or a public replica URL
+- Publishing the Access write hostname
 - Editing `scripts/lib.sh` `start_bg` / `stop_bg`
 
 ## Constraints

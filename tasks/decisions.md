@@ -381,6 +381,11 @@
 - **Decision:** No worker, spike, or Sepolia redeploy for MR-3/4/5 until SettlementOS asks. Money-rail PRD status column says **Parked** with the D-0005 trigger table.
 - **Consequence:** A mainnet-pilot P7-3 checkbox is not a trigger. The trigger is an SOS ask recorded in `tasks/decisions.md`.
 
+### D-0045 — Public read URLs published; write hostname stays unpublished
+- **Context:** D-0031 froze `replica.readRpcUrl: null` until a diskless reverse-proxy existed. Those gateways are live on Render: `fortel2-replica-rpc` (L1-derived) and `fortel2-sequencer-rpc` (sequencer tip). Operator confirmed both return chain `0x354` and reject `eth_sendRawTransaction`.
+- **Decision:** Bump `rail-interface.json` to **v6**. Set `networks.fortel2-sepolia.replica.readRpcUrl` = `https://fortel2-replica-rpc.onrender.com`. Add sibling `sequencerReads.readRpcUrl` = `https://fortel2-sequencer-rpc.onrender.com` — do **not** put the sequencer-tip URL in `replica.readRpcUrl`. Both `writeRpcUrl` fields stay `null`. Access write hostname stays out of the file (D-0035). The verifier Private Service stays a Private Service (do not convert to Web). SOS in-Render may keep `http://fortel2-replica:10000` (D-0032).
+- **Consequence:** MR-2 is done. Explorer/public clients read the published HTTPS URLs. `confirm()` and SOS writes still use the unpublished Access path. Nightly window: sequencer-tip door fails; replica door serves a stale tip. Supercedes D-0031's "no public URL" clause only.
+
 ---
 
 ## Escalations

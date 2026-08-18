@@ -81,7 +81,7 @@ SettlementOS is the payments application; this L2 is the intended home rail. **S
 1. Start the Sepolia stack: `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (after Phase 2b deploy + fund check).
 2. Fund the SOS deployer on L2: deposit L1→L2 with `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` (credits `ADMIN_ADDRESS` on L2), then transfer to the SOS deployer — note the env file must be sourced in *this* shell (the `FORTEL2_ENV=…` prefix only reaches the script's subprocess): `( set -a; source .env.sepolia; set +a; cast send <SOS_DEPLOYER_ADDRESS> --value <amount> --rpc-url "$L2_RPC_URL" --private-key "$ADMIN_PRIVATE_KEY" )`.
 3. Point SettlementOS **locally** at the Mac sequencer **`L2_RPC_URL`** from `.env.sepolia` (loopback `http://127.0.0.1:9545`). On **Render**, SettlementOS uses `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd` plus Access headers (D-0035). Deploy SOS contracts on chain **852**.
-4. **Writes** (tx submit, contract deploy) → D1 filter / Access hostname for remote SOS; operator tooling stays on loopback `:9545`. **Reads** on Render: `http://fortel2-replica:10000` (D-0032). `rail-interface.json` `replica.readRpcUrl` stays null (D-0016 / D-0031).
+4. **Writes** (tx submit, contract deploy) → D1 filter / Access hostname for remote SOS; operator tooling stays on loopback `:9545`. **Reads:** public replica `https://fortel2-replica-rpc.onrender.com` (~3 min L1 lag); public sequencer tip `https://fortel2-sequencer-rpc.onrender.com` (tip-follow; down 23:45–03:00). SOS on Render still uses private `http://fortel2-replica:10000` (D-0032). The Access write hostname stays **unpublished** in `rail-interface.json` (D-0035).
 
 **Replica reminder:** Phase 3 is done. Republish genesis/rollup to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only on a Sepolia **redeploy** (next expected: Phase 7). Do not pack/publish “just in case” while the deployment is pinned through Phase 6. See `replica/README.md` and the Network reset procedure under Phase 3.
 
@@ -662,7 +662,7 @@ Nightly sleep/wake stop the sequencer; the tunnel process stays up and the origi
 | **`L2_RPC_URL`** | Stays loopback (`http://127.0.0.1:9545`). Do not point it at the tunnel hostname (`lib.sh` loopback asserts). |
 | **SOS Render env** | `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd` plus `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` (operator-held; never git). |
 | **Rollback** | Stop the dashboard connector and/or revoke the Access service token. Sequencer bind and chain state are untouched. |
-| **rail-interface** | Write URL **unpublished** (D-0035). |
+| **rail-interface** | Write URL **unpublished** (D-0035). Public reads published (D-0045): replica + sequencer-tip. |
 
 **Proven (2026-08-12):** unauthenticated curl → 403 Access HTML; mini token curl → `0x354`; Render Shell with live env → `0x354`.
 
@@ -882,9 +882,9 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 
 **D1 (narrow write surface) has shipped.** [`scripts/04-start-sequencer-sepolia.sh`](scripts/04-start-sequencer-sepolia.sh) still serves the full `eth,net,web3,debug,txpool,admin,miner` surface on loopback `:9545` for operator tooling. The write-facing door is a separate loopback filter on **`L2_WRITE_RPC_PORT` (default 9555)** — see [Write RPC filter](#write-rpc-filter-t5-d1--ethnetweb3-allowlist). `cloudflared` must dial **:9555 only**, never :9545. Narrow first, tunnel second. Never the reverse.
 
-**Writes stay authenticated; replica reads stay off the public internet — this is deliberate and must not be "fixed" later.** Every transaction becomes batcher calldata burning L1 ETH that an external funder refills (D-0027). An unauthenticated write endpoint is therefore a stranger's lever on your L1 spend, and it gets *worse* as L2 fees are tuned down (P7-0), because cheap transactions make spam cheap while leaving the cost with the operator. Permissioned writes plus private-network replica reads is the live posture (D-0031 / D-0035).
+**Writes stay authenticated; public reads are method-filtered — this is deliberate and must not be "fixed" by opening writes.** Every transaction becomes batcher calldata burning L1 ETH that an external funder refills (D-0027). An unauthenticated write endpoint is therefore a stranger's lever on your L1 spend, and it gets *worse* as L2 fees are tuned down (P7-0), because cheap transactions make spam cheap while leaving the cost with the operator. Permissioned writes plus public **read-only** gateways is the live posture (D-0045 / D-0035).
 
-**Replica reads are a separate decision on a separate host.** US-012 governs the mini. Reads belong on `fortel2-replica`, which holds no keys, produces no blocks, and cannot accept writes. Live: Private Service `fortel2-replica:10000` (D-0031/D-0032). No public `onrender.com` URL until a diskless reverse-proxy exists. EL filter only, never op-node.
+**Replica / sequencer-tip reads are a separate decision on a separate host.** US-012 governs the mini. Reads belong on `fortel2-replica` gateways, which hold no keys, produce no blocks, and reject `eth_sendRawTransaction`. Live public URLs (D-0045): `https://fortel2-replica-rpc.onrender.com` (L1-derived replica) and `https://fortel2-sequencer-rpc.onrender.com` (sequencer tip). The Private Service stays private; do not convert it to Web. EL filter only, never op-node.
 
 **The replica is ~3 minutes behind and cannot serve read-your-own-write.** It derives from L1 batches rather than following the sequencer, so its latency floor is batcher cadence, not block time (measured 2026-08-11: 94 blocks / ~3m10s, corroborated by the node's own `age=` field). SOS must poll `eth_getTransactionReceipt` on the **write** endpoint. Pointing a settle-and-confirm loop at the replica will look like failed transactions.
 
