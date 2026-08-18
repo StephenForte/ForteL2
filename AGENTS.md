@@ -14,7 +14,7 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 - **Never commit** `.env`, `.env.sepolia`, private keys, JWT secrets, or live datadir contents.
 - **Never ask the operator to paste private keys** into chat; never write keys into committed files.
 - **Loopback only** for L2 RPCs, the guestbook HTTP server, and the pipeline viewer (`127.0.0.1` / `localhost`). Sepolia **L1** may be remote HTTPS (`assert_sepolia_rpc_urls`).
-- Prefer **small, reversible diffs**. Phase **3** (Render replica) is done. Phase **4** custom batcher is **done** under `batcher/` + `tasks/prd-phase-4-batcher.md` (`USE_CUSTOM_BATCHER=1` opt-in; stock default). Phase **5** custom proposer is **done** under `proposer/` + `tasks/prd-phase-5-proposer.md` (`USE_CUSTOM_PROPOSER=1` opt-in; stock default) — do not expand into Phase **3a**, **3b**, **6+**, or Sepolia redeploy unless asked.
+- Prefer **small, reversible diffs**. Phases **0–6** are done (including `batcher/`, `proposer/`, `derivation/`, `blocks/`). Phase **3** Render replica is done. Do **not** execute a Sepolia redeploy, wipe replica genesis, or start Phase **3a** unless asked. Phase **7** spec is `tasks/prd-phase-7-fault-proofs.md` (learning; wipe is operator-owned). Phase **3b** friend runbook is `replica/FRIENDS.md` (recruiting is operator-owned). MR-3/4/5 stay parked until SOS asks.
 - Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` on the **local Anvil** stack (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start. Sepolia L1 is ~12s; local L2 may stay 2s.
 - **`scripts/lib.sh` `start_bg` / `stop_bg` are privileged.** Any edit needs human review (see `.github/CODEOWNERS`), even when the rest of a change is AI-authored. (`serve_static_loopback` is not privileged process control.)
 
@@ -25,10 +25,12 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `scripts/` | Start/stop/deploy helpers; shared logic in `scripts/lib.sh` |
 | `contracts/` | Foundry project (`Guestbook` demo) |
 | `dapp/` | Static guestbook UI (`index.html`, `styles.css`, `app.js`, `config.js`) |
-| `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate); Phase 6 adds a Blockchair-style block viewer (US-063) — not Blockscout |
+| `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate) |
+| `blocks/` | Phase 6 Blockchair-style block viewer (US-063) — not Blockscout |
+| `derivation/` | Phase 6 derivation verifier + sequencer stub |
 | `deployments/` | Phase 1 checked-in addresses + local `.deployer` artifacts |
 | `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
-| `replica/` | Thin Phase 3 bridge: pack staging + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (Docker/runtime lives there) |
+| `replica/` | Thin Phase 3 bridge: pack staging + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica); friend runbook `replica/FRIENDS.md` |
 | `batcher/` | Phase 4 custom batcher (Go); stock `op-batcher` remains default; `USE_CUSTOM_BATCHER=1` opt-in |
 | `proposer/` | Phase 5 custom proposer (Go); stock `op-proposer` remains default; `USE_CUSTOM_PROPOSER=1` opt-in |
 | `config/` | L1 chain config fragments |
@@ -62,7 +64,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh          # Phase 2d QuickNode/public L1 check
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep            # overnight: stop stack + HTTP; wake with … wake
-# Mac mini schedule: launchd sleep 21:00 / wake 05:00 — see launchd/README.md (not cron)
+# Mac mini schedule: launchd health 05:00 / sleep 23:45 / wake 03:00 — see launchd/README.md (not cron)
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/ (publish to fortel2-replica)
 # FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh
 ./scripts/stop-all.sh
@@ -79,12 +81,13 @@ cd contracts && forge test
 # Script helpers (no chain required)
 ./scripts/test-helpers.sh
 
-# Pipeline viewer + dApp pure helpers
-node --test viewer/lib.test.js dapp/lib.test.js
+# Pipeline viewer + dApp + block viewer
+node --test viewer/lib.test.js dapp/lib.test.js blocks/lib.test.js
 
-# Phase 4 / 5 Go modules
+# Phase 4 / 5 / 6 Go modules
 (cd batcher && go test ./...)
 (cd proposer && go test ./...)
+(cd derivation && go test ./...)
 
 # Bridge helpers (viem deps)
 (cd scripts/bridge && npm ci && node --test lib.test.js)

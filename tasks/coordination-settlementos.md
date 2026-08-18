@@ -1,6 +1,6 @@
 # ForteL2 ↔ SettlementOS coordination
 
-**Status:** living (updated 2026-08-12 — authenticated write path proven, D-0035)  
+**Status:** living (updated 2026-08-18 — MR-1 settled, Phase 7/3b/pilot docs landed; write path unchanged)  
 **Sources:** SettlementOS PRD/README; ForteL2 learning-chain PRD; money-rail PRD
 
 ## Product split
@@ -57,12 +57,13 @@ Details: `replica/README.md`, README “Network reset procedure”, money-rail P
 ## Integration order
 
 ```text
-1. ForteL2 publishes rail-interface.json          ← MR-0 (now)
-2. SOS adds fortel2-sepolia (852) + deploy        ← SOS F1–F2
-3. SOS single-chain settle + MMF on 852           ← SOS F3–F4
-4. Reads via replica; explorer address book       ← MR-2 / SOS explorer
-5. Phase 4–6 learning rebuilds (no redeploy)      ← parallel
-6. Phase 7 wipe → replica pack + SOS redeploy     ← coordinated
+1. ForteL2 publishes rail-interface.json          ← MR-0 done
+2. SOS adds fortel2-sepolia (852) + deploy        ← SOS F1–F2 done
+3. SOS single-chain settle + MMF on 852           ← SOS F3–F4 / D-0036 done
+4. Reads via replica; explorer address book       ← private-network reads live; public URL parked (MR-2)
+5. Phase 4–6 learning rebuilds (no redeploy)      ← done
+6. Phase 7 wipe → replica pack + SOS redeploy     ← next coordinated event (not authorized by docs-only PRs)
+7. MR-3/4/5 (paymaster / USDC / AuditAnchor)      ← parked until SOS asks
 ```
 ## Status 2026-08-12 — replica reads live; authenticated writes proven (D-0035)
 
