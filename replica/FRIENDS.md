@@ -99,4 +99,4 @@ Recruiting is out of band. Close Phase 3b only when all of these are true:
 - [ ] Two friends (or friend-owned VPS) in **different regions**
 - [ ] Each followed this runbook (or `RUNNING.md`) without operator keys
 - [ ] Each reported a `safe_l2` hash that matched the Mac sequencer
-- [ ] Both are on the notify list for the redeploy gate (README Network reset step 1)
+- [ ] Both are on the notify list for the redeploy gate (README Network reset **announce** step)

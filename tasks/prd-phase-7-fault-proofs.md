@@ -7,7 +7,8 @@ Exercise a real OP Stack **dispute game** on Sepolia ForteL2 (chain **852**): ch
 This is a **learning phase**, not a mainnet launch. It is the first work allowed to break the pinned 2026-07-22 Sepolia deploy. Custom `batcher/` / `proposer/` / `derivation/` stay learning artifacts — production roles stay **stock** `op-batcher` / `op-proposer` / `op-node` (D-0018).
 
 **Parent roadmap:** `tasks/prd-l2-learning-chain.md` Phase 7  
-**Network reset procedure (binding):** README § “Network reset procedure”  
+**Operator sequence (binding, this file):** § “Operator sequence” — knobs → notice → wipe → rail v7 → challenger.  
+**Network reset procedure (same runbook, operator-facing):** README § “Network reset procedure”  
 **Companion:** `tasks/prd-mainnet-pilot.md` (Phase 9 track shares the same redeploy gate; do not conflate the two programs)  
 **Predecessors:** Phase 5 proposer (output roots understood from the inside); Phase 6 derivation verifier
 
@@ -36,7 +37,7 @@ This is a **learning phase**, not a mainnet launch. It is the first work allowed
 |---|---|
 | Host | Native binaries on the Mac mini; no Docker on this workstation |
 | Keys | Never commit `.env.sepolia`; never ask the operator to paste keys |
-| Notice | SOS + every replica operator get **≥1 day** before step 2 of the reset (D-0028 / D-0029) |
+| Notice | SOS + every replica operator get **≥1 day** between announce and stop-writers / redeploy (D-0028 / D-0029) |
 | Immutables | Choose **all six** delay/clock knobs (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) in `.env.sepolia` **before** `FORCE_SEPOLIA_REDEPLOY=1`. File values win over inline env (README reset step 3). `02-deploy-contracts-sepolia.sh` refuses a combo that fails `PermissionedDisputeGame.initialize` |
 | Replica | Pack → publish fortel2-replica → wipe Mac `data-sepolia` **and** Render `/data` together. Never one side |
 | Friends | Same genesis/`rollup.json` as Render. Point them at `replica/FRIENDS.md` |
@@ -69,6 +70,32 @@ The 2026-07-22 deploy left `preimageOracleChallengePeriod` at op-deployer’s de
 | `FAULT_GAME_WITHDRAWAL_DELAY` | learning-short | `3600` (1 h) | Withdrawal delay after game |
 
 Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` — `scripts/lib.sh` sources `.env.sepolia` after start and the file wins. The Sepolia deploy script writes all six into `intent.toml` and exits before apply if the initialize inequality fails.
+
+## Operator sequence
+
+This is the Phase 7 order **for us**. User stories below are the same work split for tracking. README “Network reset procedure” is the same knobs → notice → wipe → v7 runbook in operator-facing form. **This PRD still does not authorize the wipe.**
+
+Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SOS contract (chain 852, current proxies, public reads). A version bump with unchanged addresses is a false event — SOS keys off `version`.
+
+| # | When | What | Story |
+|---|---|---|---|
+| — | Now | Do not bump rail-interface, do not pack genesis, do not set `FORCE_SEPOLIA_REDEPLOY` | pre-wipe |
+| 0 | Before anyone is notified | Write **all six** immutables into local `.env.sepolia` + `tasks/spike-phase-7-immutables.md` (notice date included) | **US-070** |
+| 1 | ≥1 day before stop/redeploy | Announce to SOS + Render + every Phase 3b friend. Write path is already live and **unpublished** (D-0035); do not couple this wipe to publishing that hostname (D-0029) | **US-071** (start) |
+| 2 | After the notice window | Stop Mac writers: `FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh` | **US-071** |
+| 3 | File knobs already set | `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 ./scripts/02-deploy-contracts-sepolia.sh` | **US-071** |
+| 4 | New L1 proxies exist | Send new addresses to SOS (from `deployments/sepolia/deployments.json`) | **US-071** |
+| 5 | After step 3, never before | `FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh` → publish genesis/rollup to fortel2-replica | **US-072** |
+| 6 | Together, never one side | Wipe Mac `data-sepolia` **and** Render `/data` **and** every friend | **US-072** |
+| 7 | After wipe | Restart all against the new artifacts | **US-072** |
+| 8 | Before calling the network healthy | Same L2 block hash at the same number on Mac vs Render vs each friend | **US-072** |
+| 9 | After step 3 addresses are in git | Bump `rail-interface.json` to **v7** with the new `bridge.*` proxies. Leave v6 until this step | **US-072** |
+| 10 | SOS-owned | SOS redeploys-or-adopts on 852, re-seeds wallets, re-verifies one settlement, republishes their address book | G5 |
+| 11 | Network healthy | Stock proposer posts a valid game; `op-challenger` does not fault it | **US-073** |
+| 12 | Isolated | Deliberately bad proposal; challenger wins; kill the bad path | **US-074** |
+| 13 | Closeout | README note: what the game proved vs what is still trusted | **US-075** |
+
+What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155111, public read URLs, unpublished Access write path, nightly 23:45–03:00 window. What is **rewritten**: every `bridge.*` proxy, SOS escrow / mocks / `TokenizedMMF`, cited tx hashes.
 
 ## Phase roadmap
 
@@ -117,7 +144,7 @@ Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` �
 - [ ] New `genesis.json` / `rollup.json` published to [fortel2-replica](https://github.com/StephenForte/fortel2-replica)
 - [ ] Mac `reset-sepolia.sh` **and** Render `/data` wipe **and** every friend wipe, then all restart
 - [ ] Same L2 block hash at the same number on Mac vs Render vs each friend
-- [ ] `rail-interface.json` version bump if bridge proxies changed (addresses are a versioned contract)
+- [ ] `rail-interface.json` bumped to **v7** with the new `bridge.*` proxies after they exist in `deployments/sepolia/deployments.json`. **v6 stays until this step** — do not bump before the wipe
 
 ### US-073: Watch a valid game
 
@@ -165,7 +192,7 @@ Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` �
 
 ## References
 
-- README Network reset procedure
+- README Network reset procedure (same knobs → notice → wipe → v7 runbook)
 - `tasks/prd-l2-learning-chain.md` Phase 7 row
-- `tasks/decisions.md` D-0018, D-0028, D-0029, D-0037, D-0046
+- `tasks/decisions.md` D-0018, D-0028, D-0029, D-0037, D-0046, D-0048
 - Dispute game interface: https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html

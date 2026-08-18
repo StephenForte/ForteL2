@@ -26,9 +26,9 @@ Give SOS the **integration PRD**, not this file alone.
 | **G0 — blocked** | Before Phase 1 blocks | Nothing | — |
 | **G1 — earliest code** | Phase 1 local L2 (901) up | Optional offline adapter against `fortel2-local` | Ephemeral; resets freely |
 | **G2 — recommended start (NOW)** | Phase **2c+** Sepolia L2 **852** + batcher/proposer | **F1–F5**: registry, deploy contracts, single-chain settle, MMF | Pin: no Sepolia redeploy until the redeploy gate (Phase 7 / mainnet-pilot entry) |
-| **G3 — preferred reads** | Phase **3** Render replica ✅ | Point explorer / heavy reads at replica RPC | Writes: authenticated Access hostname `fortel2-write.ente.ltd` (D-0035). Reads: Render private `fortel2-replica:10000` (D-0032). |
+| **G3 — preferred reads** | Phase **3** Render replica ✅ | Point explorer / heavy reads at replica RPC | Writes: authenticated Access hostname (live, **unpublished** in `rail-interface.json`, D-0035). Public reads: replica `https://fortel2-replica-rpc.onrender.com` + sequencer-tip `https://fortel2-sequencer-rpc.onrender.com` (D-0045). SOS in-Render may keep private `http://fortel2-replica:10000` (D-0032). |
 | **G4 — partner-facing** | Replica stable + SOS settle demo green | Demo to partners on 852 | Best-effort uptime; personal L2 |
-| **G5 — after wipe** | redeploy gate (Phase 7 / mainnet-pilot entry) | Redeploy SOS contracts; update explorer address book | Coordinated with replica pack/publish |
+| **G5 — after wipe** | redeploy gate (Phase 7 / mainnet-pilot entry) | Redeploy SOS contracts; update explorer address book | Follow [`tasks/prd-phase-7-fault-proofs.md`](prd-phase-7-fault-proofs.md) § Operator sequence. `rail-interface.json` stays **v6** until new `bridge.*` proxies exist, then **v7**. |
 
 **Do not wait for:** Phase 3b (friends), Phase 4–6 client rebuilds, paymaster, or canonical USDC before SOS starts.
 
@@ -46,7 +46,7 @@ Give SOS the **integration PRD**, not this file alone.
 | Routine Mac sequencer restart | **No** | Replica derives from L1; verify with `replica-sync-check.sh` if tips diverge |
 | redeploy gate (Phase 7 / mainnet-pilot entry) Sepolia redeploy / network wipe | **YES — mandatory** | Announce → redeploy → `pack-replica-artifacts.sh` → push genesis/rollup to fortel2-replica → wipe Mac **and** Render `/data` → hash cross-check (see README Network reset procedure) |
 | Accidental one-sided wipe | **Recover** | Never leave Mac and Render on different genesis under chain 852 |
-| Opening public replica RPC later | Config only | fortel2-replica service exposure; keep keys out of this repo |
+| Opening public replica RPC | **Done** (D-0045) | Diskless gateways in `rail-interface.json`; verifier Private Service stays private; keep keys out of this repo |
 
 **Pinned through Phase 6:** do not pack/publish “just in case.” Packing without a redeploy republishes the same genesis. Next expected replica artifact update = the **redeploy gate** (Phase 7 / mainnet-pilot entry).
 
