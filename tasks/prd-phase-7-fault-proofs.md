@@ -101,7 +101,7 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 
 | Story | Scope | Status |
 |---|---|---|
-| **US-070** | Choose all immutables + write the operator brief (no on-chain spend) | **Spec ready** |
+| **US-070** | Choose all immutables + write the operator brief (no on-chain spend) | **Values confirmed (D-0049); `tasks/spike-phase-7-immutables.md` written; local `.env.sepolia` edit still pending — operator** |
 | **US-071** | Announce (≥1 day) + stop writers + redeploy Sepolia L1 + new genesis | Not started — operator |
 | **US-072** | Pack / publish replica artifacts + coordinated wipe + hash cross-check | Not started — operator |
 | **US-073** | Stock proposer posts a valid game; `op-challenger` watches and does not fault it | Not started |
@@ -116,10 +116,10 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 
 **Acceptance Criteria:**
 
-- [ ] All six knobs in the table above are written into local `.env.sepolia` (never committed)
-- [ ] Brief in `tasks/spike-phase-7-immutables.md` records chosen values, why they are minutes-to-hours, the preimage-oracle period, and the SOS/friend notice date
-- [ ] `.env.sepolia.example` documents the **names** (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) and the “choose in one sitting” rule without publishing the Phase 7 chosen numbers as the file’s applied defaults
-- [ ] No `FORCE_SEPOLIA_REDEPLOY`, no pack/publish, no datadir wipe in this story
+- [ ] All six knobs in the table above are written into local `.env.sepolia` (never committed) — **pending, operator-only** (the file holds signing keys; `FAULT_GAME_CLOCK_EXTENSION` and `PREIMAGE_ORACLE_CHALLENGE_PERIOD` are currently absent, the other four are still at old pinned values)
+- [x] Brief in `tasks/spike-phase-7-immutables.md` records chosen values, why they are minutes-to-hours, the preimage-oracle period, and the SOS/friend notice date — values + rationale recorded 2026-08-18 (D-0049); the notice date is recorded as a **rule** (notice only after all Phase 7 work is done, wipe ≥24h after notice), not a fixed calendar date, per operator direction
+- [x] `.env.sepolia.example` documents the **names** (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) and the “choose in one sitting” rule without publishing the Phase 7 chosen numbers as the file’s applied defaults — already true (D-0046), reverified 2026-08-18
+- [x] No `FORCE_SEPOLIA_REDEPLOY`, no pack/publish, no datadir wipe in this story
 
 ### US-071: Redeploy gate (L1 contracts + genesis)
 
