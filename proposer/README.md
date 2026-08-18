@@ -141,7 +141,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/create-bad-proposal-sepolia.sh
 # Broadcast (post-wipe, stock proposer already stopped):
 FORTEL2_ENV=.env.sepolia CONFIRM_BAD_PROPOSAL_SEPOLIA=1 \
   ./scripts/create-bad-proposal-sepolia.sh
-# optional: append -block N  (forwarded to the Go tool)
+# optional: append -block N  (only extra flag this wrapper accepts)
 ```
 
 Direct `go run ./cmd/bad-proposal …` without the confirm flag is the code-level dry-run (prints the plan, exits 1). This script is never called by `start-all-sepolia.sh` or launchd. Kill switch: the process exits after one attempt; restart stock with `FORTEL2_ENV=.env.sepolia ./scripts/06-start-proposer-sepolia.sh`.
