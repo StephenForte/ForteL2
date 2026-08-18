@@ -406,6 +406,35 @@ else
   echo "FAIL 02-deploy-contracts.sh must set preimageOracleChallengePeriod (InvalidClockExtension otherwise)" >&2
   fail=1
 fi
+# Sepolia deploy must write + validate the sixth immutable (D-0046). Stock
+# preimageOracleChallengePeriod=86400 makes Phase 7's 600/7200 illegal.
+if grep -q 'preimageOracleChallengePeriod' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q 'PREIMAGE_ORACLE_CHALLENGE_PERIOD:-86400' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q 'clockExtension+preimageOracleChallengePeriod' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q '_min_oracle' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q 'PREIMAGE_ORACLE_CHALLENGE_PERIOD' "$SCRIPT_DIR/../.env.sepolia.example"; then
+  echo "PASS Sepolia deploy sets and validates preimageOracleChallengePeriod (D-0046)"
+else
+  echo "FAIL 02-deploy-contracts-sepolia.sh must override + validate preimageOracleChallengePeriod before apply" >&2
+  fail=1
+fi
+# Phase 7 proposed clocks are legal with proposed preimage=3600 and illegal with stock 86400.
+_p7_ext=600; _p7_max=7200; _p7_pre=3600
+_p7_min=$(( _p7_ext * 2 )); _p7_or=$(( _p7_ext + _p7_pre ))
+if (( _p7_or > _p7_min )); then _p7_min=$_p7_or; fi
+if (( _p7_max >= _p7_min )); then
+  echo "PASS Phase 7 proposed 600/7200/3600 satisfies initialize constraint (min=$_p7_min)"
+else
+  echo "FAIL Phase 7 proposed 3600 preimage must fit under maxClockDuration=7200" >&2
+  fail=1
+fi
+_p7_stock=$(( _p7_ext + 86400 ))
+if (( _p7_max < _p7_stock )); then
+  echo "PASS stock preimageOracleChallengePeriod=86400 is rejected under Phase 7 600/7200"
+else
+  echo "FAIL 7200 must be < 600+86400 so the Sepolia deploy gate has something to catch" >&2
+  fail=1
+fi
 # Phase 5: custom proposer is opt-in; stock path remains default; Sepolia needs confirm gate.
 if grep -q 'USE_CUSTOM_PROPOSER' "$SCRIPT_DIR/06-start-proposer.sh" \
   && grep -q 'fortel2-proposer' "$SCRIPT_DIR/06-start-proposer.sh" \
@@ -1263,12 +1292,9 @@ else
   fail=1
 fi
 
-# rail-interface write/read URLs stay unpublished (D-0034 / D-0035 / D-0031).
-# Checks URL-carrying *fields*, not free text: describing the architecture in notes is
-# wanted, publishing a reachable endpoint is not. The previous version grepped for the
-# vendor name anywhere in the file, which both blocked prose and missed the real risk —
-# the write hostname is fortel2-write.ente.ltd and contains no vendor string at all.
-# Resolve from SCRIPT_DIR, not FORTEL2_ROOT: earlier cases reassign FORTEL2_ROOT to
+# rail-interface: public *read* URLs are published (D-0045); write hostname stays unpublished
+# (D-0034 / D-0035). Checks URL-carrying *fields* plus a raw-file ban on the Access write
+# host. Resolve from SCRIPT_DIR, not FORTEL2_ROOT: earlier cases reassign FORTEL2_ROOT to
 # mktemp fixture dirs (lines ~233, ~268) and bare assignments persist, so by here it no
 # longer points at the repo. Neighbouring late tests (LD_CHECK, CF_HELPER) use SCRIPT_DIR
 # for the same reason.
@@ -1278,15 +1304,27 @@ import json, sys
 path = sys.argv[1]
 d = json.load(open(path))
 bad = []
+replica_pub = "https://fortel2-replica-rpc.onrender.com"
+seq_pub = "https://fortel2-sequencer-rpc.onrender.com"
 for nid, n in (d.get("networks") or {}).items():
     if n.get("l2ChainId") == 852 and n.get("l2RpcUrl") != "http://127.0.0.1:9545":
         bad.append("%s.l2RpcUrl not loopback: %r" % (nid, n.get("l2RpcUrl")))
     if n.get("writeRpcUrl"):
         bad.append("%s.writeRpcUrl is published: %r" % (nid, n["writeRpcUrl"]))
+    if n.get("l2ChainId") != 852:
+        continue
     rep = n.get("replica") or {}
-    for k in ("readRpcUrl", "writeRpcUrl"):
-        if rep.get(k):
-            bad.append("%s.replica.%s is published: %r" % (nid, k, rep[k]))
+    if rep.get("readRpcUrl") != replica_pub:
+        bad.append("%s.replica.readRpcUrl want %r got %r" % (nid, replica_pub, rep.get("readRpcUrl")))
+    if rep.get("writeRpcUrl"):
+        bad.append("%s.replica.writeRpcUrl is published: %r" % (nid, rep["writeRpcUrl"]))
+    sr = n.get("sequencerReads") or {}
+    if sr.get("readRpcUrl") != seq_pub:
+        bad.append("%s.sequencerReads.readRpcUrl want %r got %r" % (nid, seq_pub, sr.get("readRpcUrl")))
+    if sr.get("writeRpcUrl"):
+        bad.append("%s.sequencerReads.writeRpcUrl is published: %r" % (nid, sr["writeRpcUrl"]))
+    if replica_pub == seq_pub:
+        bad.append("replica and sequencer-tip public URLs must differ")
 raw = open(path).read()
 for host in ("ente.ltd", "trycloudflare.com"):
     if host in raw:
@@ -1296,9 +1334,9 @@ if bad:
     sys.exit(1)
 PY
 then
-  echo "PASS D-0034 rail-interface write/read URLs unpublished"
+  echo "PASS D-0045 rail-interface public reads published; write hostname unpublished"
 else
-  echo "FAIL D-0034 must not publish a write/read URL in rail-interface.json" >&2
+  echo "FAIL D-0045 must publish replica+sequencer-tip reads and keep the write hostname out" >&2
   fail=1
 fi
 

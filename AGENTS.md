@@ -13,8 +13,8 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 - **No containers** on this workstation for Phase 1 (see Phase 0 verdict in `tasks/spike-notes.md`).
 - **Never commit** `.env`, `.env.sepolia`, private keys, JWT secrets, or live datadir contents.
 - **Never ask the operator to paste private keys** into chat; never write keys into committed files.
-- **Loopback only** for L2 RPCs, the guestbook HTTP server, and the pipeline viewer (`127.0.0.1` / `localhost`). Sepolia **L1** may be remote HTTPS (`assert_sepolia_rpc_urls`).
-- Prefer **small, reversible diffs**. Phase **3** (Render replica) is done. Phase **4** custom batcher is **done** under `batcher/` + `tasks/prd-phase-4-batcher.md` (`USE_CUSTOM_BATCHER=1` opt-in; stock default). Phase **5** custom proposer is **done** under `proposer/` + `tasks/prd-phase-5-proposer.md` (`USE_CUSTOM_PROPOSER=1` opt-in; stock default) — do not expand into Phase **3a**, **3b**, **6+**, or Sepolia redeploy unless asked.
+- **Operator L2 RPCs, guestbook, and pipeline/block viewers stay loopback** (`127.0.0.1` / `localhost`; `assert_l2_loopback_urls` / `assert_local_rpc_urls`). Sepolia **L1** may be remote HTTPS (`assert_sepolia_rpc_urls`). **Scoped exception (D-0047 / D-0045):** advertise only the two diskless public **read** JSON-RPC gateways in `rail-interface.json` (`replica.readRpcUrl` = `https://fortel2-replica-rpc.onrender.com`, `sequencerReads.readRpcUrl` = `https://fortel2-sequencer-rpc.onrender.com`). They reject writes. Do **not** bind op-geth / dApp / viewer off loopback, convert the replica Private Service to Web, or publish the Access write hostname. A method allowlist does not make an HTTPS URL loopback — the exception is the go/no-go, not the filter.
+- Prefer **small, reversible diffs**. Phases **0–6** are done (including `batcher/`, `proposer/`, `derivation/`, `blocks/`). Phase **3** Render replica is done. Do **not** execute a Sepolia redeploy, wipe replica genesis, or start Phase **3a** unless asked. Phase **7** spec is `tasks/prd-phase-7-fault-proofs.md` (learning; wipe is operator-owned). Phase **3b** friend runbook is `replica/FRIENDS.md` (recruiting is operator-owned). MR-3/4/5 stay parked until SOS asks.
 - Keep `L1_BLOCK_TIME >= L2_BLOCK_TIME` on the **local Anvil** stack (both `2` today) or the sequencer hits Fjord drift / `NoTxPool` — `assert_block_times` enforces this on start. Sepolia L1 is ~12s; local L2 may stay 2s.
 - **`scripts/lib.sh` `start_bg` / `stop_bg` are privileged.** Any edit needs human review (see `.github/CODEOWNERS`), even when the rest of a change is AI-authored. (`serve_static_loopback` is not privileged process control.)
 
@@ -25,10 +25,12 @@ Canonical product/roadmap context: `tasks/prd-l2-learning-chain.md` and `README.
 | `scripts/` | Start/stop/deploy helpers; shared logic in `scripts/lib.sh` |
 | `contracts/` | Foundry project (`Guestbook` demo) |
 | `dapp/` | Static guestbook UI (`index.html`, `styles.css`, `app.js`, `config.js`) |
-| `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate); Phase 6 adds a Blockchair-style block viewer (US-063) — not Blockscout |
+| `viewer/` | Phase 1c pipeline viewer (sequencer / batcher / proposer / aggregate) |
+| `blocks/` | Phase 6 Blockchair-style block viewer (US-063) — not Blockscout |
+| `derivation/` | Phase 6 derivation verifier + sequencer stub |
 | `deployments/` | Phase 1 checked-in addresses + local `.deployer` artifacts |
 | `deployments/sepolia/` | Phase 2 deploy tree (separate; `.deployer/` gitignored) |
-| `replica/` | Thin Phase 3 bridge: pack staging + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica) (Docker/runtime lives there) |
+| `replica/` | Thin Phase 3 bridge: pack staging + pointer to [fortel2-replica](https://github.com/StephenForte/fortel2-replica); friend runbook `replica/FRIENDS.md` |
 | `batcher/` | Phase 4 custom batcher (Go); stock `op-batcher` remains default; `USE_CUSTOM_BATCHER=1` opt-in |
 | `proposer/` | Phase 5 custom proposer (Go); stock `op-proposer` remains default; `USE_CUSTOM_PROPOSER=1` opt-in |
 | `config/` | L1 chain config fragments |
@@ -62,7 +64,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh          # Phase 2d QuickNode/public L1 check
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep            # overnight: stop stack + HTTP; wake with … wake
-# Mac mini schedule: launchd sleep 21:00 / wake 05:00 — see launchd/README.md (not cron)
+# Mac mini schedule: launchd health 05:00 / sleep 23:45 / wake 03:00 — see launchd/README.md (not cron)
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/ (publish to fortel2-replica)
 # FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh
 ./scripts/stop-all.sh
@@ -79,12 +81,13 @@ cd contracts && forge test
 # Script helpers (no chain required)
 ./scripts/test-helpers.sh
 
-# Pipeline viewer + dApp pure helpers
-node --test viewer/lib.test.js dapp/lib.test.js
+# Pipeline viewer + dApp + block viewer
+node --test viewer/lib.test.js dapp/lib.test.js blocks/lib.test.js
 
-# Phase 4 / 5 Go modules
+# Phase 4 / 5 / 6 Go modules
 (cd batcher && go test ./...)
 (cd proposer && go test ./...)
+(cd derivation && go test ./...)
 
 # Bridge helpers (viem deps)
 (cd scripts/bridge && npm ci && node --test lib.test.js)
@@ -109,13 +112,13 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Keys in `.env.example` are **public Foundry test keys** — fine for local Anvil chain **901**; never fund them on public nets. Broadcast scripts refuse those keys when `L2_CHAIN_ID != 901` (including Sepolia L2 **852**).
 - Sepolia keys live only in local `.env.sepolia` (gitignored). Agents must not request, log, or commit them.
 - Treat guestbook storage as unbounded demo state (DoS/growth is acceptable locally; do not ship as production).
-- Do not expose Anvil / op-geth / dApp / viewer beyond loopback without an explicit hardening task (Phase 1b US-012).
+- Do not expose Anvil / op-geth / dApp / viewer beyond loopback without an explicit hardening task (Phase 1b US-012). Public L2 JSON-RPC is only the two named diskless read gateways (D-0047); never bind op-geth off loopback or publish the Access write hostname.
 - `ethers` is **vendored** under `dapp/vendor/` and copied into `viewer/vendor/` (CSP `script-src 'self'`). Do not use a symlink for the viewer copy — static serve roots at `viewer/` and symlink-as-text checkouts break the import. Bump both files via `dapp/vendor/README.md` — do not reintroduce CDN script tags.
 
 ## When editing scripts
 
 - Source `scripts/lib.sh`; use `require_bin`, `redact_rpc_url`, `wait_for_rpc` (logs redacted URLs), `start_bg` / `stop_bg`, `serve_static_loopback`, `assert_loopback_url` / `assert_local_rpc_urls` / `assert_sepolia_rpc_urls` / `assert_l2_loopback_urls`, `assert_block_times`, `refuse_foundry_defaults_unless_local_l2`.
-- Phase 2 scripts (when added) must set/require `FORTEL2_ENV=.env.sepolia` and call `assert_sepolia_rpc_urls` — never `assert_local_rpc_urls` against a remote L1.
+- Phase 2 scripts (when added) must set/require `FORTEL2_ENV=.env.sepolia` and call `assert_sepolia_rpc_urls` — never `assert_local_rpc_urls` against a remote L1. `L2_RPC_URL` / `L2_NODE_RPC_URL` stay loopback; published public-read URLs live only in `deployments/rail-interface.json` (D-0047).
 - Validate addresses with `is_eth_address` / `require_eth_address`.
 - Keep `set -euo pipefail` and avoid printing private keys.
 

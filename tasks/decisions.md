@@ -356,6 +356,46 @@
 - **Decision:** D-0038's *decision* stands — do not change `baseFeeScalar`; that lever really is only 7–19% of a sub-cent fee. D-0038's *attribution* is **superseded**: the dominant term is a ForteL2 parameter, not a consumer setting. Open a new, small item to set the GPO suggestion deliberately rather than inheriting a default (`--gpo.*` on the sequencer; the replica sets none either, so it serves the same suggestion to its readers). **Not** actioned in this entry — sizing it needs the spam trade-off from D-0030 weighed, since a near-zero suggested tip is exactly what makes flooding cheap for someone else and expensive for the operator.
 - **Consequence:** The correction matters beyond the number: **it changes who the fix helps.** Under D-0038 the advice was "SettlementOS should lower their tip," which they cannot do because they never set one. Under D-0039 it is a one-line chain-side change that lowers costs for every future client of 852 without any of them doing anything. Also a process note for the integrator: D-0038 reasoned from a fee decomposition without checking what the node suggests, and the counterparty caught it — measurements should be traced to their source, not inferred from where a number lands. Any SOS-facing note that repeats D-0038's advice is wrong and must be corrected.
 
+### D-0040 — Remaining-work hygiene: Phase 6 README truth-up; health agent 05:00; MR on-ramp questions closed
+- **Context:** The remaining-work inventory found README still marking Phase 6 “Planned”, a stale “next is Phase 4” line, money-rail still asking the T5 tunnel question, and D-0026’s health-agent 5:05-vs-5:00 drift.
+- **Decision:** README Phase 6 is **Done (2026-08-04)**. `com.steve.fortel2-health` is **05:00** in the checked-in plist (Minute=0) — that is the source of truth; remaining “05:05” operator copy is corrected. Money-rail T5 / registry-id / public-replica questions are resolved or parked per D-0028 / D-0031 / D-0035 / D-0036. Closes the D-0026 “checker exits 1 until reconciled” note **for the repo file**; installed-vs-loaded launchd drift still needs `launchctl print` on the mini (unchanged gap).
+- **Consequence:** Operators and agents treat Phase 6 as closed. Health docs and `launchd/README.md` agree on 05:00.
+
+### D-0041 — Phase 7 learning spec exists; this change does not authorize the wipe
+- **Context:** Phase 7 had a roadmap row and no PRD.
+- **Decision:** Spec is `tasks/prd-phase-7-fault-proofs.md` (US-070–075). Merging the spec must not set `FORCE_SEPOLIA_REDEPLOY`, pack replica genesis, or edit live immutables. Execution is operator-owned after US-070 chooses all five knobs in one sitting.
+- **Consequence:** The next *learning* implementation wave starts at US-070 (brief + `.env.sepolia` knobs), not at a surprise redeploy.
+
+### D-0042 — Mainnet-pilot P7-0 leftovers expanded; D-0018 DA=blobs superseded until archive is solved
+- **Context:** `prd-mainnet-pilot.md` was a skeleton. D-0018 #2 said blobs; D-0037 already rejected blobs because of ~18-day prune vs the derivation audit story.
+- **Decision:** Expand P7-0 leftovers into US-P7-001..005 (custody, deploy policy, sequencer HA, RaaS re-check, independent derivation). D-0018 #2 is **superseded for now**: staging and any near-term pilot stay **calldata + span**. Revisit blobs only if cost requires it **and** the archive question is solved. P7-1..P7-5 stay later waves.
+- **Consequence:** Do not promise a pilot counterparty blob DA or an honest-independent `derivation/` until US-P7-005 lands.
+
+### D-0043 — Phase 3b runbook shipped; recruiting stays operator-owned
+- **Context:** Phase 3b had success metrics (2 friends, different regions) but no handout.
+- **Decision:** `replica/FRIENDS.md` is the friend-facing runbook (clone fortel2-replica, Docker Compose, no keys, matching `safe_l2` hashes, redeploy-gate wipe order). US-033 runbook criteria that are repo-side are done; US-034 (actually standing up two nodes) is operator-owned and stays unchecked.
+- **Consequence:** Agents must not invent friend identities or claim Phase 3b closed. Docker on friend machines / VPS is allowed.
+
+### D-0044 — Reaffirm D-0005: MR-3 / MR-4 / MR-5 stay parked
+- **Context:** Remaining-work inventory listed paymaster / USDC / AuditAnchor as later money-rail work.
+- **Decision:** No worker, spike, or Sepolia redeploy for MR-3/4/5 until SettlementOS asks. Money-rail PRD status column says **Parked** with the D-0005 trigger table.
+- **Consequence:** A mainnet-pilot P7-3 checkbox is not a trigger. The trigger is an SOS ask recorded in `tasks/decisions.md`.
+
+### D-0045 — Public read URLs published; write hostname stays unpublished
+- **Context:** D-0031 froze `replica.readRpcUrl: null` until a diskless reverse-proxy existed. Those gateways are live on Render: `fortel2-replica-rpc` (L1-derived) and `fortel2-sequencer-rpc` (sequencer tip). Operator confirmed both return chain `0x354` and reject `eth_sendRawTransaction`.
+- **Decision:** Bump `rail-interface.json` to **v6**. Set `networks.fortel2-sepolia.replica.readRpcUrl` = `https://fortel2-replica-rpc.onrender.com`. Add sibling `sequencerReads.readRpcUrl` = `https://fortel2-sequencer-rpc.onrender.com` — do **not** put the sequencer-tip URL in `replica.readRpcUrl`. Both `writeRpcUrl` fields stay `null`. Access write hostname stays out of the file (D-0035). The verifier Private Service stays a Private Service (do not convert to Web). SOS in-Render may keep `http://fortel2-replica:10000` (D-0032).
+- **Consequence:** MR-2 is done. Explorer/public clients read the published HTTPS URLs. `confirm()` and SOS writes still use the unpublished Access path. Nightly window: sequencer-tip door fails; replica door serves a stale tip. Supercedes D-0031's "no public URL" clause only. Loopback-guardrail exception for these two URLs is D-0047.
+
+### D-0046 — Phase 7 sixth immutable: `PREIMAGE_ORACLE_CHALLENGE_PERIOD` before any wipe
+- **Context:** Phase 7 proposed `FAULT_GAME_CLOCK_EXTENSION=600` and `FAULT_GAME_MAX_CLOCK_DURATION=7200`. `PermissionedDisputeGame.initialize` requires `maxClockDuration >= max(2*clockExtension, clockExtension+preimageOracleChallengePeriod)`. The 2026-07-22 Sepolia deploy left the sixth parameter at op-deployer's **86400** (`02-deploy-contracts-sepolia.sh` neither wrote nor validated it). `7200 < 600+86400`, so US-073 `create()` would revert `InvalidClockExtension` after a coordinated wipe.
+- **Decision:** Treat `PREIMAGE_ORACLE_CHALLENGE_PERIOD` as a sixth constructor immutable chosen with the other five in US-070. Proposed learning default **3600** (1 h) — not stock 86400, not local Anvil's `1`. `02-deploy-contracts-sepolia.sh` defaults the unset var to 86400 (honest about the live chain), writes `preimageOracleChallengePeriod` into `intent.toml`, and refuses apply when the initialize inequality fails. `.env.sepolia.example` documents the name + full constraint; pinned example numbers stay 5/10/86400. D-0041's "five knobs" is superseded.
+- **Consequence:** A wipe that only changes the five clocks fails closed at deploy time instead of after network-wide reset. Do not set `FORCE_SEPOLIA_REDEPLOY` from this decision.
+
+### D-0047 — Scoped exception: two public L2 read gateways may leave loopback
+- **Context:** D-0045 published unauthenticated HTTPS L2 JSON-RPC URLs. AGENTS.md still said "Loopback only for L2 RPCs". A method allowlist is not loopback-only. The operator had already asked to publish those URLs; un-publishing them is not the fix.
+- **Decision:** Explicit US-012 go/no-go for **these two read URLs only**: `https://fortel2-replica-rpc.onrender.com` and `https://fortel2-sequencer-rpc.onrender.com`. Operator `L2_RPC_URL`, op-geth, guestbook, and viewers stay `127.0.0.1`. Writes stay Access-gated; the write hostname stays unpublished (D-0035). Do not convert the replica Private Service to Web. Do not add a third public RPC without another go/no-go.
+- **Consequence:** AGENTS.md, README US-012, and `.cursor/rules/fortel2.mdc` name the exception. D-0045 URLs stay published. `assert_l2_loopback_urls` still governs env RPCs.
+
 ---
 
 ## Escalations

@@ -4,7 +4,7 @@
 
 Specialize ForteL2 as the **home settlement rail** for [SettlementOS](https://github.com/StephenForte/settlementos). Payment orchestration, compliance, FX, escrow, and the JLTXX-inspired `TokenizedMMF` stay in SettlementOS. This PRD covers only what the L2 operator must publish and operate so SOS can land.
 
-**Infra status (learning chain):** Phases **0–3 are done**, including Sepolia-backed L2 (chain **852**) and the Render replica ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)). Money-rail work is therefore mostly **interface + ops for SOS**, not standing up a new rollup.
+**Infra status (learning chain):** Phases **0–6 are done**, including Sepolia-backed L2 (chain **852**), the Render replica ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)), the authenticated write path, and the public-read URLs (MR-2 / D-0045). Money-rail work left in this repo is trigger-gated (MR-3/4/5).
 
 **Companion docs**
 
@@ -26,7 +26,7 @@ Give SOS the **integration PRD**, not this file alone.
 | **G0 — blocked** | Before Phase 1 blocks | Nothing | — |
 | **G1 — earliest code** | Phase 1 local L2 (901) up | Optional offline adapter against `fortel2-local` | Ephemeral; resets freely |
 | **G2 — recommended start (NOW)** | Phase **2c+** Sepolia L2 **852** + batcher/proposer | **F1–F5**: registry, deploy contracts, single-chain settle, MMF | Pin: no Sepolia redeploy until the redeploy gate (Phase 7 / mainnet-pilot entry) |
-| **G3 — preferred reads** | Phase **3** Render replica ✅ | Point explorer / heavy reads at replica RPC | Writes still go to Mac sequencer (loopback or future tunnel) |
+| **G3 — preferred reads** | Phase **3** Render replica ✅ | Point explorer / heavy reads at replica RPC | Writes: authenticated Access hostname `fortel2-write.ente.ltd` (D-0035). Reads: Render private `fortel2-replica:10000` (D-0032). |
 | **G4 — partner-facing** | Replica stable + SOS settle demo green | Demo to partners on 852 | Best-effort uptime; personal L2 |
 | **G5 — after wipe** | redeploy gate (Phase 7 / mainnet-pilot entry) | Redeploy SOS contracts; update explorer address book | Coordinated with replica pack/publish |
 
@@ -70,15 +70,15 @@ Give SOS the **integration PRD**, not this file alone.
 | Phase | Scope | Status |
 |---|---|---|
 | **MR-0** | Publish rail interface + SOS/Replica lifecycle gates (this PRD) | **Done** (2026-08-04) |
-| **MR-1** | SOS can deploy + settle on **852** (Mac sequencer RPC) | Ready for SOS (infra done) |
-| **MR-2** | Document replica as preferred read path; optional read URL in rail interface | **Blocked — no reachable replica read URL (D-0016); rail interface documents the Web Shell access model instead** |
-| **MR-3** | Fee/paymaster spikes (only if SOS needs them) | Later |
-| **MR-4** | Canonical USDC path | Later |
-| **MR-5** | Optional predeploy / AuditAnchor | After SOS stable on 852 |
+| **MR-1** | SOS can deploy + settle on **852** (Mac sequencer RPC) | **Done** (2026-08-13, D-0036) — first settlement on 852 through the authenticated write path |
+| **MR-2** | Document replica as preferred read path; optional read URL in rail interface | **Done** (2026-08-18, D-0045) — public replica `https://fortel2-replica-rpc.onrender.com`; sequencer-tip `https://fortel2-sequencer-rpc.onrender.com`. Write hostname stays unpublished. SOS in-Render still uses private `http://fortel2-replica:10000` (D-0032). |
+| **MR-3** | Fee/paymaster spikes (only if SOS needs them) | **Parked** — trigger-gated (D-0005). No worker until SOS asks. |
+| **MR-4** | Canonical USDC path | **Parked** — trigger-gated (D-0005). No worker until SOS needs Circle bridged-USDC. |
+| **MR-5** | Optional predeploy / AuditAnchor | **Parked** — trigger-gated (D-0005). After SOS is stable on 852 *and* asks. |
 
-Learning-chain Phases **4–6** (rebuild batcher/proposer/derivation) proceed in parallel and **must not** redeploy L1 or break SOS addresses before the redeploy gate (Phase 7 / mainnet-pilot entry).
+Learning-chain Phases **4–6** are done. Do **not** redeploy L1 or break SOS addresses before the redeploy gate (Phase 7 / mainnet-pilot entry).
 
-**Program closeout (D-0017):** ForteL2 in-scope work for the parallel-integration program is closed and operator-verified; remaining MR-1/MR-2 delivery depends on SOS and the D-0016 access model.
+**Program closeout (D-0017 + D-0036 + D-0045):** ForteL2 money-rail on-ramp is closed. MR-1 settled on-chain. MR-2 public **read** URLs published (replica + sequencer-tip). Write hostname unpublished. MR-3/4/5 stay parked until an SOS trigger fires.
 
 ---
 
@@ -123,13 +123,21 @@ Payment APIs, compliance, `PaymentSettlement` features, `TokenizedMMF` rules, FX
 
 ## Success metrics
 
-- SOS settles one ACME→Tokyo-style payment on chain 852 with audit hashes
+- SOS settles one ACME→Tokyo-style payment on chain 852 with audit hashes — **met** 2026-08-13 (`pay_4bf481cdc9ea`, D-0036)
 - Rail interface readable without a meeting
 - Redeploy-gate (Phase 7 / mainnet-pilot entry) reset runbook still mentions replica **before** anyone wipes Mac-only
 - Zero duplicate escrow/MMF implementations
 
 ## Open questions
 
-- Expose a stable tunnel/URL for SOS writes off-box, or keep SOS colocated with Mac sequencer for now?
-- Public vs private Render replica RPC for explorer
+- ~~Expose a stable tunnel/URL for SOS writes off-box, or keep SOS colocated with Mac sequencer for now?~~ — **resolved 2026-08-12/13 (D-0030, D-0035, D-0036)**: authenticated Cloudflare Access write path is live (`https://fortel2-write.ente.ltd` → `:9555`). Hostname stays **unpublished** in `rail-interface.json` (other clients lack Access headers). First settlement proven on 852.
+- ~~Public vs private Render replica RPC for explorer~~ — **resolved 2026-08-18 (D-0045)**: diskless public gateways are live. `replica.readRpcUrl` = `https://fortel2-replica-rpc.onrender.com` (L1-derived). `sequencerReads.readRpcUrl` = `https://fortel2-sequencer-rpc.onrender.com` (sequencer tip; down in the nightly window). The verifier Private Service stays private. SOS in-Render still uses `http://fortel2-replica:10000` (D-0032). Write hostname stays unpublished.
 - ~~Network registry id string: `fortel2-sepolia` vs `forte-l2`~~ — **resolved 2026-08-11 (D-0028)**: `fortel2-sepolia`, already live on the SOS side and fixed across re-genesis. Not a choice that was ever open to us.
+
+### Trigger-gated later work (do not start)
+
+| Phase | Trigger | Owner |
+|---|---|---|
+| **MR-3** paymaster / fee abstraction | SOS asks | ForteL2 spike only after the ask |
+| **MR-4** canonical USDC | SOS needs Circle bridged-USDC | ForteL2 + SOS |
+| **MR-5** AuditAnchor | SOS stable on 852 *and* asks | ForteL2 |

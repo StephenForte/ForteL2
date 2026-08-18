@@ -7,7 +7,7 @@ alwaysApply: true
 
 - Phase 1 is **native binaries only** — do not introduce Docker/OrbStack/Kurtosis workflows.
 - Never commit `.env`, keys, JWTs, or `data/` contents. Keys in `.env.example` are throwaway Foundry defaults only (local chain 901).
-- Keep local RPCs, `serve-dapp.sh`, and `serve-viewer.sh` on **loopback**; use `assert_local_rpc_urls` / `assert_loopback_url` / `serve_static_loopback`.
+- Keep local RPCs, `serve-dapp.sh`, and `serve-viewer.sh` on **loopback**; use `assert_local_rpc_urls` / `assert_loopback_url` / `serve_static_loopback`. Public L2 JSON-RPC is only the two D-0045/D-0047 diskless read gateways in `rail-interface.json` — do not bind op-geth off loopback or publish the Access write hostname.
 - Enforce `L1_BLOCK_TIME >= L2_BLOCK_TIME` via `assert_block_times` on start scripts.
 - After Solidity/ABI changes: update `contracts/test`, run `forge test`, and regenerate `dapp/config.js` via `scripts/deploy-guestbook.sh`.
 - dApp / viewer: use `textContent` for on-chain strings; keep CSP `script-src 'self'`; ethers stays vendored under `dapp/vendor/` (viewer symlinks it); guestbook message length is **UTF-8 bytes**.
