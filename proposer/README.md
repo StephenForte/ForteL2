@@ -114,3 +114,34 @@ FORTEL2_ENV=.env.sepolia USE_CUSTOM_PROPOSER=1 CONFIRM_CUSTOM_PROPOSER_SEPOLIA=1
 ## What an output root is (US-055 summary)
 
 See [`tasks/spike-phase-5-proposer.md`](../tasks/spike-phase-5-proposer.md).
+
+## US-074: one-shot bad proposal (isolated)
+
+Creates **one** DisputeGameFactory game whose `rootClaim` is a deliberate corruption of the honest `optimism_outputAtBlock` root, waits until that create tx is mined, reads the on-chain claim back, and exits. Not a daemon — no `-interval`, no retry loop. Stock `op-proposer` remains the only standing writer. Operator-only, after the Phase 7 wipe; there is nothing meaningful to run this against on the current pinned factory.
+
+**Who signs:** `PROPOSER_PRIVATE_KEY` (or `-private-key`). The deployed `PermissionedDisputeGame` / factory `create()` accepts only the **proposer** role (`[chains.roles] proposer` in `intent.toml`). The **challenger** role is a different address with different permissions (disputing an existing game, not creating one). `CHALLENGER_PRIVATE_KEY` will revert on `create()`. There is no separate “attacker” identity on this deployment; this tool uses the same key stock `op-proposer` already uses honestly.
+
+**Stop stock proposer first** (both processes share one nonce sequence):
+
+```bash
+kill "$(cat "$DATA_DIR/pids/op-proposer.pid")" && rm -f "$DATA_DIR/pids/op-proposer.pid"
+```
+
+**Two-gate safety** — both required to broadcast:
+
+1. Code: `-i-understand-this-posts-a-false-claim=true` (or env `I_UNDERSTAND_THIS_POSTS_A_FALSE_CLAIM=true`). Without it the binary still fetches block / real root / corrupted root / bond / factory, prints them, and exits non-zero — no broadcast.
+2. Script: `CONFIRM_BAD_PROPOSAL_SEPOLIA=1` before `scripts/create-bad-proposal-sepolia.sh`. Without it the script never `go run`s.
+
+Corruption: XOR the last byte of the honest output root with `0xFF`. The tool prints both roots before sending. After the receipt is successful it locates the new game and refuses to print `done` unless on-chain `rootClaim` equals the corrupted value.
+
+```bash
+# Dry-run of the wrapper (no go run):
+FORTEL2_ENV=.env.sepolia ./scripts/create-bad-proposal-sepolia.sh
+
+# Broadcast (post-wipe, stock proposer already stopped):
+FORTEL2_ENV=.env.sepolia CONFIRM_BAD_PROPOSAL_SEPOLIA=1 \
+  ./scripts/create-bad-proposal-sepolia.sh
+# optional: append -block N  (forwarded to the Go tool)
+```
+
+Direct `go run ./cmd/bad-proposal …` without the confirm flag is the code-level dry-run (prints the plan, exits 1). This script is never called by `start-all-sepolia.sh` or launchd. Kill switch: the process exits after one attempt; restart stock with `FORTEL2_ENV=.env.sepolia ./scripts/06-start-proposer-sepolia.sh`.
