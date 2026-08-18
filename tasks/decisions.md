@@ -396,6 +396,11 @@
 - **Decision:** Explicit US-012 go/no-go for **these two read URLs only**: `https://fortel2-replica-rpc.onrender.com` and `https://fortel2-sequencer-rpc.onrender.com`. Operator `L2_RPC_URL`, op-geth, guestbook, and viewers stay `127.0.0.1`. Writes stay Access-gated; the write hostname stays unpublished (D-0035). Do not convert the replica Private Service to Web. Do not add a third public RPC without another go/no-go.
 - **Consequence:** AGENTS.md, README US-012, and `.cursor/rules/fortel2.mdc` name the exception. D-0045 URLs stay published. `assert_l2_loopback_urls` still governs env RPCs.
 
+### D-0048 — Phase 7 operator sequence is canonical; rail-interface stays v6 until post-wipe proxies
+- **Context:** The money-rail on-ramp is closed (MR-0/1/2). SOS is already settling on 852. The wipe runbook lived in README; US-070–075 lived in the Phase 7 PRD; “keep v6 / bump v7 after new proxies / SOS redeploys / then challenger” was not in one place. G3 still described reads as private-only.
+- **Decision:** Canonical order is `tasks/prd-phase-7-fault-proofs.md` § “Operator sequence”. README Network reset is the same knobs → notice → wipe → v7 runbook. `rail-interface.json` stays **v6** until new `bridge.*` proxies exist, then **v7**. Do not bump version for docs-only truth-ups. G3 now names the public-read URLs and the unpublished write path. Knobs are chosen **before** announce so notice is not “we will figure clocks out on the day.”
+- **Consequence:** Next learning wave still starts at US-070. This entry does not authorize `FORCE_SEPOLIA_REDEPLOY`.
+
 ---
 
 ## Escalations

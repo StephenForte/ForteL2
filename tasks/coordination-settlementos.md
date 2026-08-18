@@ -1,6 +1,6 @@
 # ForteL2 ↔ SettlementOS coordination
 
-**Status:** living (updated 2026-08-18 — public read URLs published, D-0045)  
+**Status:** living (updated 2026-08-18 — public read URLs published, D-0045; Phase 7 operator sequence in `tasks/prd-phase-7-fault-proofs.md`)  
 **Sources:** SettlementOS PRD/README; ForteL2 learning-chain PRD; money-rail PRD
 
 ## Product split
@@ -62,7 +62,12 @@ Details: `replica/README.md`, README “Network reset procedure”, money-rail P
 3. SOS single-chain settle + MMF on 852           ← SOS F3–F4 / D-0036 done
 4. Reads via replica; explorer address book       ← MR-2 done (D-0045 public reads)
 5. Phase 4–6 learning rebuilds (no redeploy)      ← done
-6. Phase 7 wipe → replica pack + SOS redeploy     ← next coordinated event (not authorized by docs-only PRs)
+6. Phase 7 wipe → replica pack + SOS redeploy + rail-interface v7
+                                          ← next coordinated event; order in
+                                            tasks/prd-phase-7-fault-proofs.md
+                                            § Operator sequence (v6 stays until
+                                            new proxies exist). Not authorized
+                                            by docs-only PRs.
 7. MR-3/4/5 (paymaster / USDC / AuditAnchor)      ← parked until SOS asks
 ```
 ## Status 2026-08-12 — replica reads live; authenticated writes proven (D-0035)
