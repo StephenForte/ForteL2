@@ -401,6 +401,11 @@
 - **Decision:** Canonical order is `tasks/prd-phase-7-fault-proofs.md` § “Operator sequence”. README Network reset is the same knobs → notice → wipe → v7 runbook. `rail-interface.json` stays **v6** until new `bridge.*` proxies exist, then **v7**. Do not bump version for docs-only truth-ups. G3 now names the public-read URLs and the unpublished write path. Knobs are chosen **before** announce so notice is not “we will figure clocks out on the day.”
 - **Consequence:** Next learning wave still starts at US-070. This entry does not authorize `FORCE_SEPOLIA_REDEPLOY`.
 
+### D-0049 — US-070 immutables confirmed as the PRD's proposed defaults; notice date is a rule, not a date
+- **Context:** `tasks/prd-phase-7-fault-proofs.md` proposed all six fault-game immutables with the `initialize` inequality pre-checked. Operator asked for the operational implications of each knob before confirming, rather than accepting the numbers blind.
+- **Decision:** Operator confirmed the PRD's proposed defaults as-is (`FAULT_GAME_CLOCK_EXTENSION=600`, `FAULT_GAME_MAX_CLOCK_DURATION=7200`, `PREIMAGE_ORACLE_CHALLENGE_PERIOD=3600`, `PROOF_MATURITY_DELAY_SECONDS=1800`, `DISPUTE_GAME_FINALITY_DELAY_SECONDS=1800`, `FAULT_GAME_WITHDRAWAL_DELAY=3600`) — recorded with rationale in `tasks/spike-phase-7-immutables.md`. Separately, the operator set the notice-date policy: no calendar date is fixed now; SOS/Render/friends notice (D-0028) goes out only once all Phase 7 coding/config work is complete, and step 2 of the Operator sequence (stop Mac writers) waits **≥24 h** from that notice.
+- **Consequence:** `.env.sepolia` itself is still unwritten (operator-only edit — the file holds signing keys, so no agent touches it) — two of the six vars (`FAULT_GAME_CLOCK_EXTENSION`, `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) are currently absent from it and fall back to script defaults (`5`, `86400`); the other four are still at old pinned values. This entry does not authorize `FORCE_SEPOLIA_REDEPLOY` and does not set a notice date — the next step is the operator's local `.env.sepolia` edit, then, only once all Phase 7 work is ready, the actual notice.
+
 ---
 
 ## Escalations
