@@ -4,7 +4,7 @@
 
 Specialize ForteL2 as the **home settlement rail** for [SettlementOS](https://github.com/StephenForte/settlementos). Payment orchestration, compliance, FX, escrow, and the JLTXX-inspired `TokenizedMMF` stay in SettlementOS. This PRD covers only what the L2 operator must publish and operate so SOS can land.
 
-**Infra status (learning chain):** Phases **0–6 are done**, including Sepolia-backed L2 (chain **852**), the Render replica ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)), and the authenticated write path. Money-rail work left in this repo is trigger-gated (MR-3/4/5) plus the parked public-read URL (MR-2).
+**Infra status (learning chain):** Phases **0–6 are done**, including Sepolia-backed L2 (chain **852**), the Render replica ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)), the authenticated write path, and the public-read URLs (MR-2 / D-0045). Money-rail work left in this repo is trigger-gated (MR-3/4/5).
 
 **Companion docs**
 

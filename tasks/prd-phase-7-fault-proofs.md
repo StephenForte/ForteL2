@@ -11,7 +11,7 @@ This is a **learning phase**, not a mainnet launch. It is the first work allowed
 **Companion:** `tasks/prd-mainnet-pilot.md` (Phase 9 track shares the same redeploy gate; do not conflate the two programs)  
 **Predecessors:** Phase 5 proposer (output roots understood from the inside); Phase 6 derivation verifier
 
-**This PRD does not authorize the wipe.** Writing or merging it must not set `FORCE_SEPOLIA_REDEPLOY`, pack/publish replica genesis, or change live immutables. Execution is operator-owned after US-070 values are chosen in one sitting.
+**This PRD does not authorize the wipe.** Writing or merging it must not set `FORCE_SEPOLIA_REDEPLOY`, pack/publish replica genesis, or change live immutables. Execution is operator-owned after US-070 chooses all six knobs in one sitting.
 
 ## Goals
 
@@ -37,7 +37,7 @@ This is a **learning phase**, not a mainnet launch. It is the first work allowed
 | Host | Native binaries on the Mac mini; no Docker on this workstation |
 | Keys | Never commit `.env.sepolia`; never ask the operator to paste keys |
 | Notice | SOS + every replica operator get **≥1 day** before step 2 of the reset (D-0028 / D-0029) |
-| Immutables | Choose **all five** delay/clock knobs in `.env.sepolia` **before** `FORCE_SEPOLIA_REDEPLOY=1`. File values win over inline env (README reset step 3) |
+| Immutables | Choose **all six** delay/clock knobs (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) in `.env.sepolia` **before** `FORCE_SEPOLIA_REDEPLOY=1`. File values win over inline env (README reset step 3). `02-deploy-contracts-sepolia.sh` refuses a combo that fails `PermissionedDisputeGame.initialize` |
 | Replica | Pack → publish fortel2-replica → wipe Mac `data-sepolia` **and** Render `/data` together. Never one side |
 | Friends | Same genesis/`rollup.json` as Render. Point them at `replica/FRIENDS.md` |
 | Rollback | There is no rollback except another redeploy. A forgotten parameter is a second network-wide wipe |
@@ -49,17 +49,26 @@ The 2026-07-22 deploy used learning-short fault-game immutables so Phase 1b with
 
 ## Proposed immutable defaults (operator confirms in US-070)
 
-Minutes-to-hours, not seconds, not mainnet’s multi-day values. Confirm or replace **all five** in one sitting before anyone wipes.
+Minutes-to-hours, not seconds, not mainnet’s multi-day values. Confirm or replace **all six** in one sitting before anyone wipes.
+
+`PermissionedDisputeGame.initialize` requires:
+
+```
+maxClockDuration >= max(2 * clockExtension, clockExtension + preimageOracleChallengePeriod)
+```
+
+The 2026-07-22 deploy left `preimageOracleChallengePeriod` at op-deployer’s default **86400**. `600` / `7200` with that sixth parameter still in place cannot create a game (`InvalidClockExtension`). Proposed `PREIMAGE_ORACLE_CHALLENGE_PERIOD=3600` makes `7200 >= 600 + 3600` legal without using the local Anvil value of `1`.
 
 | Env var | Current (pinned) | Proposed learning default | Intent |
 |---|---|---|---|
 | `FAULT_GAME_CLOCK_EXTENSION` | `5` | `600` (10 min) | Chess-clock extension per move |
-| `FAULT_GAME_MAX_CLOCK_DURATION` | `10` | `7200` (2 h) | Must be ≥ extension. Long enough to run `op-challenger` by hand |
+| `FAULT_GAME_MAX_CLOCK_DURATION` | `10` | `7200` (2 h) | Must be ≥ max(2×extension, extension+preimage period). Long enough to run `op-challenger` by hand |
+| `PREIMAGE_ORACLE_CHALLENGE_PERIOD` | implicit `86400` (not in intent) | `3600` (1 h) | Sixth constructor immutable. Stock 86400 makes 7200 illegal (`7200 < 600+86400`) |
 | `PROOF_MATURITY_DELAY_SECONDS` | learning-short | `1800` (30 min) | Proof must sit before finalize |
 | `DISPUTE_GAME_FINALITY_DELAY_SECONDS` | learning-short | `1800` (30 min) | Game finality delay |
 | `FAULT_GAME_WITHDRAWAL_DELAY` | learning-short | `3600` (1 h) | Withdrawal delay after game |
 
-Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` — `scripts/lib.sh` sources `.env.sepolia` after start and the file wins.
+Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` — `scripts/lib.sh` sources `.env.sepolia` after start and the file wins. The Sepolia deploy script writes all six into `intent.toml` and exits before apply if the initialize inequality fails.
 
 ## Phase roadmap
 
@@ -80,9 +89,9 @@ Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` �
 
 **Acceptance Criteria:**
 
-- [ ] All five knobs in the table above are written into local `.env.sepolia` (never committed)
-- [ ] Brief in `tasks/spike-phase-7-immutables.md` records chosen values, why they are minutes-to-hours, and the SOS/friend notice date
-- [ ] `.env.sepolia.example` documents the **names** and the “choose in one sitting” rule without publishing the live numbers
+- [ ] All six knobs in the table above are written into local `.env.sepolia` (never committed)
+- [ ] Brief in `tasks/spike-phase-7-immutables.md` records chosen values, why they are minutes-to-hours, the preimage-oracle period, and the SOS/friend notice date
+- [ ] `.env.sepolia.example` documents the **names** (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) and the “choose in one sitting” rule without publishing the Phase 7 chosen numbers as the file’s applied defaults
 - [ ] No `FORCE_SEPOLIA_REDEPLOY`, no pack/publish, no datadir wipe in this story
 
 ### US-071: Redeploy gate (L1 contracts + genesis)
@@ -93,7 +102,7 @@ Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` �
 
 - [ ] SOS + Render + every Phase 3b friend notified ≥1 day ahead (D-0028)
 - [ ] Mac writers stopped: `FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh`
-- [ ] `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 ./scripts/02-deploy-contracts-sepolia.sh` after the file knobs are set
+- [ ] `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 ./scripts/02-deploy-contracts-sepolia.sh` after the file knobs are set (script must echo `preimageOracleChallengePeriod` and must have refused any illegal clock combo)
 - [ ] New addresses recorded under `deployments/sepolia/`; Phase 1 Anvil tree untouched
 - [ ] New contract addresses sent to SOS once they exist
 - [ ] Foundry default keys still refused (`L2_CHAIN_ID=852`)
@@ -146,7 +155,7 @@ Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` �
 - One honest game observed; one dishonest game challenged and won
 - Every replica (Render + friends) matches Mac hashes after the wipe
 - SOS redeployed or adopted new 852 addresses without discovering the wipe from a failed read
-- No second redeploy caused by a forgotten immutable
+- No second redeploy caused by a forgotten immutable (including the preimage-oracle period)
 
 ## Out of scope until a later plan
 
@@ -158,5 +167,5 @@ Do **not** pass these as inline overrides on `02-deploy-contracts-sepolia.sh` �
 
 - README Network reset procedure
 - `tasks/prd-l2-learning-chain.md` Phase 7 row
-- `tasks/decisions.md` D-0018, D-0028, D-0029, D-0037
+- `tasks/decisions.md` D-0018, D-0028, D-0029, D-0037, D-0046
 - Dispute game interface: https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html

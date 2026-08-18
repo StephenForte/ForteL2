@@ -406,6 +406,35 @@ else
   echo "FAIL 02-deploy-contracts.sh must set preimageOracleChallengePeriod (InvalidClockExtension otherwise)" >&2
   fail=1
 fi
+# Sepolia deploy must write + validate the sixth immutable (D-0046). Stock
+# preimageOracleChallengePeriod=86400 makes Phase 7's 600/7200 illegal.
+if grep -q 'preimageOracleChallengePeriod' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q 'PREIMAGE_ORACLE_CHALLENGE_PERIOD:-86400' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q 'clockExtension+preimageOracleChallengePeriod' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q '_min_oracle' "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" \
+  && grep -q 'PREIMAGE_ORACLE_CHALLENGE_PERIOD' "$SCRIPT_DIR/../.env.sepolia.example"; then
+  echo "PASS Sepolia deploy sets and validates preimageOracleChallengePeriod (D-0046)"
+else
+  echo "FAIL 02-deploy-contracts-sepolia.sh must override + validate preimageOracleChallengePeriod before apply" >&2
+  fail=1
+fi
+# Phase 7 proposed clocks are legal with proposed preimage=3600 and illegal with stock 86400.
+_p7_ext=600; _p7_max=7200; _p7_pre=3600
+_p7_min=$(( _p7_ext * 2 )); _p7_or=$(( _p7_ext + _p7_pre ))
+if (( _p7_or > _p7_min )); then _p7_min=$_p7_or; fi
+if (( _p7_max >= _p7_min )); then
+  echo "PASS Phase 7 proposed 600/7200/3600 satisfies initialize constraint (min=$_p7_min)"
+else
+  echo "FAIL Phase 7 proposed 3600 preimage must fit under maxClockDuration=7200" >&2
+  fail=1
+fi
+_p7_stock=$(( _p7_ext + 86400 ))
+if (( _p7_max < _p7_stock )); then
+  echo "PASS stock preimageOracleChallengePeriod=86400 is rejected under Phase 7 600/7200"
+else
+  echo "FAIL 7200 must be < 600+86400 so the Sepolia deploy gate has something to catch" >&2
+  fail=1
+fi
 # Phase 5: custom proposer is opt-in; stock path remains default; Sepolia needs confirm gate.
 if grep -q 'USE_CUSTOM_PROPOSER' "$SCRIPT_DIR/06-start-proposer.sh" \
   && grep -q 'fortel2-proposer' "$SCRIPT_DIR/06-start-proposer.sh" \
