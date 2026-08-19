@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/lib.sh"
 usage() {
   echo "usage: 09-start-challenger-sepolia.sh"
   echo "  Isolated US-073 start. Signs with CHALLENGER_PRIVATE_KEY, never PROPOSER_PRIVATE_KEY."
-  echo "  Requires FORTEL2_ENV=.env.sepolia, CHALLENGER_TRACE_TYPE, and a Cannon-family prestate."
+  echo "  Requires FORTEL2_ENV=.env.sepolia, L1_BEACON_URL, CHALLENGER_TRACE_TYPE, and a Cannon-family prestate."
   echo "  No extra flags are accepted (guarded RPC/key/factory values cannot be overridden)."
 }
 
@@ -73,6 +73,22 @@ needs_any_prestate() {
   needs_cannon_prestate "$1" || needs_kona_prestate "$1"
 }
 
+# CheckCannonFlags (cannon + permissioned) wants --cannon-rollup-config + --cannon-l2-genesis.
+needs_cannon_rollup_genesis() {
+  case "$1" in
+    cannon|permissioned) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# CheckCannonKonaFlags wants --cannon-kona-rollup-config + --cannon-kona-l2-genesis.
+needs_kona_rollup_genesis() {
+  case "$1" in
+    cannon-kona) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # gameImpls(uint32) mapping we will look up. Anything else is skipped, not guessed.
 # (Local optimism tree also has cannon-kona=8, super-cannon-kona=9, fast=254,
 # alphabet=255, zk=10 — not applied here; see E-F7-2-1.)
@@ -129,6 +145,16 @@ case "$TRACE_TYPE" in
     ;;
 esac
 
+# CheckSuperCannonKonaFlags also requires --supernode-rpc and --cannon-kona-depset-config.
+# ForteL2 has neither; do not guess a mapping (D-0053 / F7-2b).
+if [[ "$TRACE_TYPE" == "super-cannon-kona" ]]; then
+  echo "ERROR: CHALLENGER_TRACE_TYPE=super-cannon-kona is not supported by this wrapper" >&2
+  echo "  This build's CheckSuperCannonKonaFlags requires --supernode-rpc and --cannon-kona-depset-config." >&2
+  echo "  ForteL2 has no supernode and no interop depset to map; refusing to guess." >&2
+  echo "  Set CHALLENGER_TRACE_TYPE from the post-wipe factory to a type this script can start." >&2
+  exit 1
+fi
+
 L1_RPC_KIND="${SEPOLIA_L1_RPC_KIND:-standard}"
 case "$L1_RPC_KIND" in
   alchemy|quicknode|infura|parity|nethermind|debug_geth|erigon|basic|any|standard) ;;
@@ -145,6 +171,14 @@ if ! [[ "$NUM_CONFS" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 LOG_LEVEL="${CHALLENGER_LOG_LEVEL:-info}"
+
+# Always required by this binary's CheckRequired (requiredFlags includes l1-beacon).
+# Passing --l1-beacon is NOT a DA change: op-node still uses --l1.beacon.ignore (D-0037 / D-0053).
+if [[ -z "${L1_BEACON_URL:-}" ]]; then
+  echo "ERROR: L1_BEACON_URL is required (this binary's CheckRequired gate — not a DA change; see D-0037 / D-0053)" >&2
+  echo "  Set it in .env.sepolia (QuickNode beacon endpoint). op-node still uses --l1.beacon.ignore." >&2
+  exit 1
+fi
 
 PRESTATE_PATH="${CHALLENGER_PRESTATE:-}"
 PRESTATES_URL="${CHALLENGER_PRESTATES_URL:-}"
@@ -165,8 +199,8 @@ if [[ -n "$PRESTATE_PATH" ]]; then
     exit 1
   fi
   PRESTATE_PATH="$(canonical_abs_path "$PRESTATE_PATH")"
-  if [[ ! -f "$PRESTATE_PATH" ]]; then
-    echo "ERROR: CHALLENGER_PRESTATE does not exist (resolved): $PRESTATE_PATH" >&2
+  if [[ ! -f "$PRESTATE_PATH" || ! -r "$PRESTATE_PATH" ]]; then
+    echo "ERROR: CHALLENGER_PRESTATE is missing or not readable (resolved): $PRESTATE_PATH" >&2
     exit 1
   fi
   echo "Using absolute prestate path: $PRESTATE_PATH"
@@ -177,6 +211,25 @@ if needs_cannon_bin "$TRACE_TYPE"; then
   CANNON_BIN="$(canonical_abs_path "$BIN_DIR/cannon")"
   if [[ ! -x "$CANNON_BIN" ]]; then
     echo "ERROR: cannon binary not executable at $CANNON_BIN" >&2
+    exit 1
+  fi
+fi
+
+# CheckCannonFlags / CheckCannonKonaFlags: custom chain 852 cannot use --network.
+# start_bg's daemonizer chdirs to /, so these must be absolute.
+CANNON_ROLLUP=""
+CANNON_GENESIS=""
+if needs_cannon_rollup_genesis "$TRACE_TYPE" || needs_kona_rollup_genesis "$TRACE_TYPE"; then
+  CANNON_ROLLUP="$(canonical_abs_path "$DEPLOY_DIR/rollup.json")"
+  CANNON_GENESIS="$(canonical_abs_path "$DEPLOY_DIR/genesis.json")"
+  if [[ ! -f "$CANNON_ROLLUP" ]]; then
+    echo "ERROR: missing Cannon rollup config (resolved): $CANNON_ROLLUP" >&2
+    echo "  Expected \$DEPLOY_DIR/rollup.json from the Sepolia deploy tree." >&2
+    exit 1
+  fi
+  if [[ ! -f "$CANNON_GENESIS" ]]; then
+    echo "ERROR: missing Cannon L2 genesis (resolved): $CANNON_GENESIS" >&2
+    echo "  Expected \$DEPLOY_DIR/genesis.json from the Sepolia deploy tree." >&2
     exit 1
   fi
 fi
@@ -243,6 +296,7 @@ export OP_CHALLENGER_PRIVATE_KEY="$CHALLENGER_PRIVATE_KEY"
 
 challenger_args=(
   --l1-eth-rpc="$L1_RPC_URL"
+  --l1-beacon="$L1_BEACON_URL"
   --rollup-rpc="$L2_NODE_RPC_URL"
   --l2-eth-rpc="$L2_RPC_URL"
   --game-factory-address="$GAME_FACTORY"
@@ -255,6 +309,18 @@ challenger_args=(
 
 if needs_cannon_bin "$TRACE_TYPE"; then
   challenger_args+=(--cannon-bin="$CANNON_BIN")
+fi
+
+if needs_cannon_rollup_genesis "$TRACE_TYPE"; then
+  challenger_args+=(
+    --cannon-rollup-config="$CANNON_ROLLUP"
+    --cannon-l2-genesis="$CANNON_GENESIS"
+  )
+elif needs_kona_rollup_genesis "$TRACE_TYPE"; then
+  challenger_args+=(
+    --cannon-kona-rollup-config="$CANNON_ROLLUP"
+    --cannon-kona-l2-genesis="$CANNON_GENESIS"
+  )
 fi
 
 if [[ -n "$PRESTATE_PATH" ]]; then
@@ -274,14 +340,15 @@ if [[ -n "$PRESTATES_URL" ]]; then
   fi
 fi
 
-# This build's CheckRequired also wants --l1-beacon always, and for
-# permissioned/cannon either --network or --cannon-rollup-config + --cannon-l2-genesis.
-# Those are not in the F7-2 flag table (custom chain 852 cannot use --network;
-# D-0037 parked beacon). If the daemon exits immediately, read $LOG_DIR/op-challenger.log.
+# --l1-beacon satisfies CheckRequired; it does not enable blob DA (D-0037 / D-0053).
+# Chain 852 is not in the superchain registry — never pass --network.
 
 echo "Sepolia challenger starting against DisputeGameFactory=$GAME_FACTORY game-types=$TRACE_TYPE"
-echo "  L1=$(redact_rpc_url "$L1_RPC_URL")  op-node=$(redact_rpc_url "$L2_NODE_RPC_URL")  L2=$(redact_rpc_url "$L2_RPC_URL")"
+echo "  L1=$(redact_rpc_url "$L1_RPC_URL")  beacon=$(redact_rpc_url "$L1_BEACON_URL")  op-node=$(redact_rpc_url "$L2_NODE_RPC_URL")  L2=$(redact_rpc_url "$L2_RPC_URL")"
 echo "  challenger=$CHALLENGER_ADDRESS  datadir=$CHALLENGER_DATADIR  l1-rpc-kind=$L1_RPC_KIND"
+if [[ -n "$CANNON_ROLLUP" ]]; then
+  echo "  rollup=$CANNON_ROLLUP  genesis=$CANNON_GENESIS"
+fi
 if [[ -n "$PRESTATES_URL" ]]; then
   echo "  prestates-url=$(redact_rpc_url "$PRESTATES_URL")"
 fi
