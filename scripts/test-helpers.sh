@@ -1409,6 +1409,46 @@ else
   fail=1
 fi
 
+# F7-3 / D-0055: preflight reads gameArgs (CWIA implArgs tail), not the
+# implementation's vm()/absolutePrestate() as the primary source. Those
+# getters are the empty-args fallback only. Unmapped trace types still
+# skip before any factory call. Assert structure, not error phrasing.
+if awk '
+     /^run_preflight\(\)/ { fn = 1; next }
+     fn && /^}/ { fn = 0 }
+     fn {
+       if (!committed) {
+         if ($0 ~ /skipping factory lookup/) { skip_msg = 1; skip_msg_nr = NR }
+         if ($0 ~ /return 0/) { skip_ret = 1; skip_ret_nr = NR }
+         if ($0 ~ /cast call/ && $0 ~ /gameImpls/) { committed = 1; fact_nr = NR }
+       } else {
+         if ($0 ~ /return 0/) leak = 1
+         if ($0 ~ /exit 1/) e1++
+         if ($0 ~ /cast call/ && $0 ~ /gameArgs/) { args = 1; args_nr = NR }
+         if ($0 ~ /cast call/ && $0 ~ /vm\(\)\(address\)/) { vm_fb = 1; vm_nr = NR }
+         if ($0 ~ /cast call/ && $0 ~ /absolutePrestate\(\)\(bytes32\)/) ps_fb = 1
+         if (index($0, "is_zero_hex \"$impl\"")) impl_z = 1
+         if (index($0, "is_zero_hex \"$vm_addr\"")) vm_z = 1
+         if (index($0, "is_zero_hex \"$prestate\"")) ps_z = 1
+       }
+     }
+     END {
+       exit !(skip_msg && skip_ret && committed && skip_msg_nr < fact_nr \
+         && skip_ret_nr < fact_nr && !leak && e1 >= 4 \
+         && args && vm_fb && ps_fb && impl_z && vm_z && ps_z \
+         && args_nr && vm_nr && args_nr < vm_nr)
+     }
+   ' "$CHALLENGER_START" \
+  && grep -q 'CHALLENGER_SKIP_PREFLIGHT' "$CHALLENGER_START" \
+  && grep -Fq 'gameArgs(uint32)(bytes)' "$CHALLENGER_START" \
+  && grep -Fq 'vm()(address)' "$CHALLENGER_START" \
+  && grep -Fq 'absolutePrestate()(bytes32)' "$CHALLENGER_START"; then
+  echo "PASS F7-3 preflight reads gameArgs with impl-getter fallback; mapped types fail closed (D-0055)"
+else
+  echo "FAIL 09-start-challenger-sepolia.sh preflight must read gameArgs, keep impl-getter fallback, skip unmapped types before factory lookup, and exit 1 on every mapped-type miss (D-0055)" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
