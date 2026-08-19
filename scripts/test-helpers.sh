@@ -1366,6 +1366,49 @@ else
   fail=1
 fi
 
+# F7-2c / D-0054: cannon / cannon-kona fail closed without a pre-image server.
+# start_bg returns 0 whether the daemon survives, so CheckRequired flags must
+# be refused before wait_for_rpc. Assert properties, not error phrasing.
+# Resolve the example env from SCRIPT_DIR: FORTEL2_ROOT is reassigned to
+# fixture dirs earlier in this file (same reason as the D-0045 rail check).
+CHALLENGER_START="$SCRIPT_DIR/09-start-challenger-sepolia.sh"
+CHALLENGER_ENV="$SCRIPT_DIR/../.env.sepolia.example"
+if [[ -f "$CHALLENGER_START" ]] \
+  && awk '
+       /CHALLENGER_CANNON_SERVER/ { if (!cannon_var) cannon_var = NR }
+       /CHALLENGER_KONA_SERVER/ { if (!kona_var) kona_var = NR }
+       /--cannon-server/ && !/--cannon-server=/ { if (!cannon_flag) cannon_flag = NR }
+       /--cannon-kona-server/ && !/--cannon-kona-server=/ { if (!kona_flag) kona_flag = NR }
+       /wait_for_rpc/ { if (!first_wait) first_wait = NR }
+       END {
+         exit !(cannon_var && kona_var && cannon_flag && kona_flag && first_wait \
+           && cannon_var < first_wait && kona_var < first_wait \
+           && cannon_flag < first_wait && kona_flag < first_wait)
+       }
+     ' "$CHALLENGER_START" \
+  && awk '
+       /challenger_args=\(/ { building = 1 }
+       building && /needs_cannon_server/ { cguard = 1 }
+       building && cguard && /--cannon-server=/ { carg = 1 }
+       building && /needs_kona_server/ { kguard = 1 }
+       building && kguard && /--cannon-kona-server=/ { karg = 1 }
+       END { exit !(carg && karg) }
+     ' "$CHALLENGER_START" \
+  && awk '
+       /-x/ && /CANNON_SERVER/ { cannon_x = 1 }
+       /-x/ && /KONA_SERVER/ { kona_x = 1 }
+       END { exit !(cannon_x && kona_x) }
+     ' "$CHALLENGER_START" \
+  && grep -qE '^# CHALLENGER_CANNON_SERVER=$' "$CHALLENGER_ENV" \
+  && grep -qE '^# CHALLENGER_KONA_SERVER=$' "$CHALLENGER_ENV" \
+  && ! grep -qE '^CHALLENGER_CANNON_SERVER=' "$CHALLENGER_ENV" \
+  && ! grep -qE '^CHALLENGER_KONA_SERVER=' "$CHALLENGER_ENV"; then
+  echo "PASS F7-2c cannon/cannon-kona fail closed without pre-image server (D-0054)"
+else
+  echo "FAIL 09-start-challenger-sepolia.sh must refuse cannon/cannon-kona without an executable server, before wait_for_rpc" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
