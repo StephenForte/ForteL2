@@ -5,7 +5,7 @@ Copy everything below the line into the worker. **Mid model tier** — shell onl
 ---
 
 DISPATCH · Model: mid · Order: wave 1, standalone (no siblings, no blockers)
-Baseline: branch `agent/f7-2-challenger-start-script` off tag `wave14-base`
+Baseline: branch `agent/f7-2-challenger-start-script` off tag `wave15-base`
 Host: any — **no live RPC, no `.env.sepolia`, no Sepolia keys, and `op-challenger` is not installed in your environment.** All verification is `bash -n`, `shellcheck` if available, and reading. Do not attempt to run the challenger.
 Working directory: main checkout (single delegate this round)
 Landing: PR into `main`, squash-merge after review; closes the code-readiness half of US-073's "Native `op-challenger` process documented in README (start/stop, logs, no keys in git)"
@@ -139,7 +139,7 @@ If the task appears to need anything outside this list, stop and report rather t
 - The script must fail closed. Every one of these exits non-zero **before** `start_bg`: missing key; **key that does not derive to `CHALLENGER_ADDRESS`**; missing trace type; missing prestate when the trace type needs one; **a `CHALLENGER_PRESTATE` that does not resolve to an existing file** (a relative path is canonicalized, not rejected — see above); unfunded challenger; **any of the three RPCs unreachable**; failed preflight.
 - **The long-running daemon's `argv` must contain no secret** — `op-challenger` gets its key via `OP_CHALLENGER_PRIVATE_KEY`, never `--private-key`. The single short-lived `cast wallet address --private-key …` call specified above is the one deliberate, documented exception to this, because that tool has no env-var form and the check it enables (wrong-signer detection) is worth more than a milliseconds-long exposure; it is not a violation of this rule. No secret may reach any log line or any echo, without exception. Pass RPC URLs through `redact_rpc_url` before echoing, consistent with the rest of `scripts/`.
 
-## Verification (run against `wave14-base` at hand-back, restated after any rebase)
+## Verification (run against `wave15-base` at hand-back, restated after any rebase)
 
 ```
 bash -n scripts/09-start-challenger-sepolia.sh
@@ -173,13 +173,13 @@ If you think this should be a `run-trace` invocation rather than the default `op
 
 ```
 TASK:        F7-2 — op-challenger Sepolia start script
-LINE OF WORK: agent/f7-2-challenger-start-script (off wave14-base)
+LINE OF WORK: agent/f7-2-challenger-start-script (off wave15-base)
 REVIEW ARTIFACT: <PR URL>
 STATUS:      complete | complete-with-caveats | blocked
 
 VERIFICATION: bash -n (3 files) — pass/fail; shellcheck — pass/fail/not-installed;
               test-helpers.sh — pass/fail with final line; auto-start grep — what it returned
-              (run against wave14-base as of hand-back)
+              (run against wave15-base as of hand-back)
 MIGRATION:   none
 
 SHARED FILES TOUCHED: stop-all-sepolia.sh / status.sh / README.md — exact lines, why additive
