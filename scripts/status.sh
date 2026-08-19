@@ -8,6 +8,11 @@ echo "=== Process status ==="
 procs=(op-geth op-node op-batcher op-proposer)
 if [[ "${L2_CHAIN_ID:-}" == "852" ]]; then
   procs+=(l2-rpc-filter)
+  # Opt-in (not in start-all-sepolia.sh): only report when running so a stopped
+  # challenger does not look like a failure in normal Sepolia operation.
+  if is_running op-challenger; then
+    procs+=(op-challenger)
+  fi
 else
   procs=(anvil "${procs[@]}")
 fi

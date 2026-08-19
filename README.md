@@ -904,3 +904,29 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 **The replica is ~3 minutes behind and cannot serve read-your-own-write.** It derives from L1 batches rather than following the sequencer, so its latency floor is batcher cadence, not block time (measured 2026-08-11: 94 blocks / ~3m10s, corroborated by the node's own `age=` field). SOS must poll `eth_getTransactionReceipt` on the **write** endpoint. Pointing a settle-and-confirm loop at the replica will look like failed transactions.
 
 **Availability is unchanged by any of this:** the sequencer RPC is stopped nightly **23:45–03:00** `America/Los_Angeles` (D-0026). A published URL does not imply uptime.
+
+## Phase 7 challenger (US-073)
+
+Isolated, opt-in — **not** started by `start-all-sepolia.sh` or launchd. Operator-only, after the Phase 7 wipe. Watches the DisputeGameFactory as the **challenger** role (`CHALLENGER_PRIVATE_KEY` / `CHALLENGER_ADDRESS`), never the proposer. A valid game should not be attacked; a deliberately bad proposal is US-074.
+
+```bash
+# After the wipe, with the Sepolia stack already up:
+FORTEL2_ENV=.env.sepolia ./scripts/09-start-challenger-sepolia.sh
+
+# Stop (challenger is torn down before op-node / op-geth):
+FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+```
+
+| Piece | Where |
+|---|---|
+| Log | `$DATA_DIR/logs/op-challenger.log` (Sepolia `DATA_DIR`, e.g. `~/src/fortel2/data-sepolia/logs/op-challenger.log`) |
+| Pid | `$DATA_DIR/pids/op-challenger.pid` |
+| Known-good | `starting monitoring` — it should **not** attack a valid game |
+
+**Keys:** this process signs with `CHALLENGER_PRIVATE_KEY`, which must derive to `CHALLENGER_ADDRESS`. That is the inverse of the US-074 bad-proposal tool, which must sign with `PROPOSER_PRIVATE_KEY` because only the factory proposer role may `create()` a game. Putting the proposer key in the challenger slot would have the honest-party process signing as the party it is supposed to be disputing. The daemon receives the key via environment (`OP_CHALLENGER_PRIVATE_KEY`), not `ps` argv. Keys live only in local `.env.sepolia` (gitignored); nothing in this script or the committed tree is a secret.
+
+**Trace type / prestate (no defaults):** set `CHALLENGER_TRACE_TYPE` to what the **post-wipe** factory actually registers (`alphabet`, `cannon`, `cannon-kona`, `permissioned`, `fast`, `super-cannon-kona`, `zk`). For Cannon-family types (`cannon`, `permissioned`, `cannon-kona`, `super-cannon-kona`) also set `CHALLENGER_PRESTATE` (local file) and/or `CHALLENGER_PRESTATES_URL` (base URL). A relative `CHALLENGER_PRESTATE` is resolved to an absolute path before the daemon starts (`start_bg` chdirs to `/`). Obtaining the prestate itself is tracked separately (D-0052). `L1_BEACON_URL` is required for this binary's CheckRequired (`--l1-beacon`); it does not turn on blob DA — op-node still uses `--l1.beacon.ignore` (D-0037 / D-0053). For `cannon` / `permissioned` the script also passes `--cannon-rollup-config` and `--cannon-l2-genesis` from the Sepolia deploy tree (`$DEPLOY_DIR/rollup.json`, `$DEPLOY_DIR/genesis.json`); `cannon-kona` uses the matching `--cannon-kona-*` flags on the same files.
+
+**Preflight:** before launch the script reads `gameImpls` → `vm()` / `absolutePrestate()` on L1 and exits if either is zero (the pinned 2026-07-22 impl reported both zero — D-0052). Bypass only if you mean it: `CHALLENGER_SKIP_PREFLIGHT=1`.
+
+Spec: [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) US-073.
