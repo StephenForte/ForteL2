@@ -929,6 +929,6 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 **What can start on the pinned binary (D-0054):** `permissioned` is the working Cannon-family path (it still needs a prestate — D-0052). `alphabet` / `fast` / `zk` start but prove nothing about fault proofs. `cannon` / `cannon-kona` need a pre-image server binary that does not exist on this host and are refused until `CHALLENGER_CANNON_SERVER` / `CHALLENGER_KONA_SERVER` is supplied. `super-cannon-kona` is unsupported (no supernode, no interop depset).
 
-**Preflight:** before launch the script reads `gameImpls` → `vm()` / `absolutePrestate()` on L1 and exits if either is zero (the pinned 2026-07-22 impl reported both zero — D-0052). Bypass only if you mean it: `CHALLENGER_SKIP_PREFLIGHT=1`.
+**Preflight:** before launch the script looks up `gameImpls`, then reads `vm` and `absolutePrestate` from `DisputeGameFactory.gameArgs(gameType)` (clone-with-immutable-args tail — D-0055). If `gameArgs` is empty it falls back to the implementation getters (older immutable layout). Either source must yield a non-zero VM and a non-zero prestate or the script exits. Bypass only if you mean it: `CHALLENGER_SKIP_PREFLIGHT=1`.
 
 Spec: [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) US-073.

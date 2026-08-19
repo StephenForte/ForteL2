@@ -302,7 +302,7 @@ wait_for_rpc "$L2_RPC_URL" "L2"
 require_min_balance_eth "$CHALLENGER_ADDRESS" "${SEPOLIA_CHALLENGER_MIN_ETH:-0.15}" "CHALLENGER"
 
 run_preflight() {
-  local type_num impl vm_addr prestate
+  local type_num impl vm_addr prestate args args_hex preflight_source
   type_num="$(game_impls_type_number "$TRACE_TYPE")"
   if [[ -z "$type_num" ]]; then
     echo "Preflight: no confident gameImpls(uint32) mapping for CHALLENGER_TRACE_TYPE=$TRACE_TYPE (mapped: cannon=0, permissioned=1); skipping factory lookup."
@@ -314,24 +314,70 @@ run_preflight() {
   if is_zero_hex "$impl"; then
     echo "ERROR: factory $GAME_FACTORY has no implementation registered for game type $type_num ($TRACE_TYPE)" >&2
     echo "  gameImpls($type_num) returned the zero address. op-challenger has nothing to play." >&2
-    echo "  Re-read the post-wipe factory before retrying (D-0052)." >&2
+    echo "  Re-read the post-wipe factory before retrying (D-0055)." >&2
     exit 1
   fi
   echo "Preflight: game impl $impl"
-  vm_addr="$(cast call "$impl" "vm()(address)" --rpc-url "$L1_RPC_URL")"
-  prestate="$(cast call "$impl" "absolutePrestate()(bytes32)" --rpc-url "$L1_RPC_URL")"
-  vm_addr="$(printf '%s' "$vm_addr" | tr -d '[:space:]')"
-  prestate="$(printf '%s' "$prestate" | tr -d '[:space:]')"
-  if is_zero_hex "$vm_addr" || is_zero_hex "$prestate"; then
-    echo "ERROR: deployed game has no VM / no absolute prestate — op-challenger cannot play a Cannon-family game against it" >&2
-    echo "  impl:              $impl" >&2
-    echo "  vm():              $vm_addr" >&2
-    echo "  absolutePrestate(): $prestate" >&2
-    echo "  This is the D-0052 failure mode (tasks/decisions.md). Do not spend gas on a game the challenger cannot step." >&2
+
+  # gameArgs is the CWIA implArgs tail. FaultDisputeGame reads
+  # absolutePrestate at clone offset 120 and vm at 152; create() writes a
+  # 120-byte header (creator‖rootClaim‖parentHash‖gameType‖extraData) ahead
+  # of implArgs, so the tail offsets are [0,32) and [32,52). Bound-check
+  # (≥52 bytes); do not length-match — permissioned args are 164 bytes, a
+  # non-permissioned game's args are shorter (D-0055).
+  args="$(cast call "$GAME_FACTORY" "gameArgs(uint32)(bytes)" "$type_num" --rpc-url "$L1_RPC_URL")"
+  args="$(printf '%s' "$args" | tr -d '[:space:]"')"
+  args_hex="${args#0x}"
+  args_hex="${args_hex#0X}"
+
+  if [[ -n "$args_hex" ]]; then
+    if (( ${#args_hex} % 2 != 0 )) || (( ${#args_hex} < 104 )); then
+      echo "ERROR: factory $GAME_FACTORY gameArgs($type_num) is too short to contain absolutePrestate + vm" >&2
+      echo "  got ${#args_hex} hex chars (need ≥104 for 32-byte prestate + 20-byte vm)." >&2
+      echo "  A truncated blob is not a pass (D-0055). Do not spend gas on a game the challenger cannot step." >&2
+      echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
+      exit 1
+    fi
+    preflight_source="gameArgs($type_num)"
+    prestate="0x${args_hex:0:64}"
+    vm_addr="0x${args_hex:64:40}"
+    echo "Preflight: decoded $preflight_source (CWIA implArgs tail; D-0055)"
+  else
+    preflight_source="implementation getters"
+    echo "Preflight: gameArgs($type_num) empty — falling back to implementation vm()/absolutePrestate() (older immutable layout; D-0055)"
+    vm_addr="$(cast call "$impl" "vm()(address)" --rpc-url "$L1_RPC_URL")"
+    prestate="$(cast call "$impl" "absolutePrestate()(bytes32)" --rpc-url "$L1_RPC_URL")"
+    vm_addr="$(printf '%s' "$vm_addr" | tr -d '[:space:]')"
+    prestate="$(printf '%s' "$prestate" | tr -d '[:space:]')"
+  fi
+
+  if is_zero_hex "$vm_addr"; then
+    echo "ERROR: deployed game has no VM — op-challenger cannot play a Cannon-family game against it" >&2
+    echo "  impl:   $impl" >&2
+    echo "  source: $preflight_source" >&2
+    echo "  vm:     $vm_addr" >&2
+    if [[ "$preflight_source" == "implementation getters" ]]; then
+      echo "  gameArgs empty and implementation vm() is zero (D-0055). Do not spend gas on a game the challenger cannot step." >&2
+    else
+      echo "  Decoded vm from gameArgs is zero (D-0055). Do not spend gas on a game the challenger cannot step." >&2
+    fi
     echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
     exit 1
   fi
-  echo "Preflight: vm=$vm_addr absolutePrestate=$prestate"
+  if is_zero_hex "$prestate"; then
+    echo "ERROR: deployed game has no absolute prestate — op-challenger cannot play a Cannon-family game against it" >&2
+    echo "  impl:             $impl" >&2
+    echo "  source:           $preflight_source" >&2
+    echo "  absolutePrestate: $prestate" >&2
+    if [[ "$preflight_source" == "implementation getters" ]]; then
+      echo "  gameArgs empty and implementation absolutePrestate() is zero (D-0055). Do not spend gas on a game the challenger cannot step." >&2
+    else
+      echo "  Decoded absolutePrestate from gameArgs is zero (D-0055). Do not spend gas on a game the challenger cannot step." >&2
+    fi
+    echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
+    exit 1
+  fi
+  echo "Preflight: source=$preflight_source vm=$vm_addr absolutePrestate=$prestate"
 }
 
 if [[ "${CHALLENGER_SKIP_PREFLIGHT:-}" == "1" ]]; then
