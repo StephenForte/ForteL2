@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+# US-073: native op-challenger against Sepolia DisputeGameFactory.
+# Isolated — never started by start-all-sepolia.sh / launchd. Operator-only, post-wipe.
+# Signs with CHALLENGER_PRIVATE_KEY (the factory challenger role), never PROPOSER_PRIVATE_KEY.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib.sh"
+
+usage() {
+  echo "usage: 09-start-challenger-sepolia.sh"
+  echo "  Isolated US-073 start. Signs with CHALLENGER_PRIVATE_KEY, never PROPOSER_PRIVATE_KEY."
+  echo "  Requires FORTEL2_ENV=.env.sepolia, CHALLENGER_TRACE_TYPE, and a Cannon-family prestate."
+  echo "  No extra flags are accepted (guarded RPC/key/factory values cannot be overridden)."
+}
+
+VALID_TRACE_TYPES="alphabet, cannon, cannon-kona, permissioned, fast, super-cannon-kona, zk"
+VALID_L1_RPC_KINDS="alchemy, quicknode, infura, parity, nethermind, debug_geth, erigon, basic, any, standard"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unsupported argument: $1" >&2
+      echo "  This wrapper accepts no flags other than -h/--help." >&2
+      echo "  Guarded values (RPCs, factory, private key, datadir) cannot be overridden on argv." >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+# Resolve a path against the caller's cwd, then to an absolute path.
+# start_bg's daemonizer runs os.chdir("/") before execvp (scripts/lib.sh), so a
+# relative path that exists here would be looked up under / inside the daemon.
+canonical_abs_path() {
+  python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$1"
+}
+
+is_zero_hex() {
+  local h
+  h="$(printf '%s' "${1:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+  [[ -z "$h" || "$h" =~ ^0x0+$ ]]
+}
+
+needs_cannon_bin() {
+  case "$1" in
+    cannon|permissioned|cannon-kona|super-cannon-kona) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Cannon VM prestates (--cannon-prestate / --cannon-prestates-url).
+needs_cannon_prestate() {
+  case "$1" in
+    cannon|permissioned) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Kona prestates (--cannon-kona-prestate / --cannon-kona-prestates-url).
+needs_kona_prestate() {
+  case "$1" in
+    cannon-kona|super-cannon-kona) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+needs_any_prestate() {
+  needs_cannon_prestate "$1" || needs_kona_prestate "$1"
+}
+
+# gameImpls(uint32) mapping we will look up. Anything else is skipped, not guessed.
+# (Local optimism tree also has cannon-kona=8, super-cannon-kona=9, fast=254,
+# alphabet=255, zk=10 — not applied here; see E-F7-2-1.)
+game_impls_type_number() {
+  case "$1" in
+    cannon) echo 0 ;;
+    permissioned) echo 1 ;;
+    *) echo "" ;;
+  esac
+}
+
+require_bin op-challenger
+require_bin jq
+require_bin cast
+require_sepolia_env
+refuse_foundry_defaults_unless_local_l2 "${CHALLENGER_PRIVATE_KEY:-}" "CHALLENGER_PRIVATE_KEY"
+
+if [[ -z "${CHALLENGER_PRIVATE_KEY:-}" ]]; then
+  echo "ERROR: CHALLENGER_PRIVATE_KEY is required (challenger role — not PROPOSER_PRIVATE_KEY)" >&2
+  exit 1
+fi
+
+require_eth_address "CHALLENGER_ADDRESS" "${CHALLENGER_ADDRESS:-}"
+
+# This is the one place the key touches argv, for a single short-lived `cast`
+# process. `cast wallet address` has no env-var form (ETH_PRIVATE_KEY is not
+# accepted). That bounded exposure is deliberately accepted to close a
+# silent-wrong-signer failure; the long-running daemon still gets the key via
+# OP_CHALLENGER_PRIVATE_KEY, never argv.
+derived="$(cast wallet address --private-key "$CHALLENGER_PRIVATE_KEY")"
+derived_lc="$(printf '%s' "$derived" | tr '[:upper:]' '[:lower:]')"
+configured_lc="$(printf '%s' "$CHALLENGER_ADDRESS" | tr '[:upper:]' '[:lower:]')"
+if [[ "$derived_lc" != "$configured_lc" ]]; then
+  echo "ERROR: CHALLENGER_PRIVATE_KEY does not match CHALLENGER_ADDRESS" >&2
+  echo "  derived:    $derived" >&2
+  echo "  configured: $CHALLENGER_ADDRESS" >&2
+  echo "  This script signs as the challenger role, never PROPOSER_PRIVATE_KEY." >&2
+  exit 1
+fi
+
+TRACE_TYPE="${CHALLENGER_TRACE_TYPE:-}"
+if [[ -z "$TRACE_TYPE" ]]; then
+  echo "ERROR: CHALLENGER_TRACE_TYPE is required (no default — set it from the post-wipe factory)" >&2
+  echo "  Valid options: $VALID_TRACE_TYPES" >&2
+  echo "  See README.md § Phase 7 challenger (US-073)." >&2
+  exit 1
+fi
+case "$TRACE_TYPE" in
+  alphabet|cannon|cannon-kona|permissioned|fast|super-cannon-kona|zk) ;;
+  *)
+    echo "ERROR: unknown CHALLENGER_TRACE_TYPE=$TRACE_TYPE" >&2
+    echo "  Valid options: $VALID_TRACE_TYPES" >&2
+    exit 1
+    ;;
+esac
+
+L1_RPC_KIND="${SEPOLIA_L1_RPC_KIND:-standard}"
+case "$L1_RPC_KIND" in
+  alchemy|quicknode|infura|parity|nethermind|debug_geth|erigon|basic|any|standard) ;;
+  *)
+    echo "ERROR: SEPOLIA_L1_RPC_KIND=$L1_RPC_KIND is not valid" >&2
+    echo "  Valid options: $VALID_L1_RPC_KINDS" >&2
+    exit 1
+    ;;
+esac
+
+NUM_CONFS="${SEPOLIA_CHALLENGER_CONFIRMATIONS:-3}"
+if ! [[ "$NUM_CONFS" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: SEPOLIA_CHALLENGER_CONFIRMATIONS must be an integer (got $NUM_CONFS)" >&2
+  exit 1
+fi
+LOG_LEVEL="${CHALLENGER_LOG_LEVEL:-info}"
+
+PRESTATE_PATH="${CHALLENGER_PRESTATE:-}"
+PRESTATES_URL="${CHALLENGER_PRESTATES_URL:-}"
+
+if needs_any_prestate "$TRACE_TYPE"; then
+  if [[ -z "$PRESTATE_PATH" && -z "$PRESTATES_URL" ]]; then
+    echo "ERROR: Cannon-family CHALLENGER_TRACE_TYPE=$TRACE_TYPE needs a prestate" >&2
+    echo "  Set CHALLENGER_PRESTATE (local file) and/or CHALLENGER_PRESTATES_URL (base URL)." >&2
+    echo "  See README.md § Phase 7 challenger (US-073)." >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "$PRESTATE_PATH" ]]; then
+  if ! needs_cannon_prestate "$TRACE_TYPE" && ! needs_kona_prestate "$TRACE_TYPE"; then
+    echo "ERROR: CHALLENGER_PRESTATE is set but CHALLENGER_TRACE_TYPE=$TRACE_TYPE has no local prestate flag" >&2
+    echo "  Use CHALLENGER_PRESTATES_URL, or pick a Cannon-family type (cannon, permissioned, cannon-kona, super-cannon-kona)." >&2
+    exit 1
+  fi
+  PRESTATE_PATH="$(canonical_abs_path "$PRESTATE_PATH")"
+  if [[ ! -f "$PRESTATE_PATH" ]]; then
+    echo "ERROR: CHALLENGER_PRESTATE does not exist (resolved): $PRESTATE_PATH" >&2
+    exit 1
+  fi
+  echo "Using absolute prestate path: $PRESTATE_PATH"
+fi
+
+if needs_cannon_bin "$TRACE_TYPE"; then
+  require_bin cannon
+  CANNON_BIN="$(canonical_abs_path "$BIN_DIR/cannon")"
+  if [[ ! -x "$CANNON_BIN" ]]; then
+    echo "ERROR: cannon binary not executable at $CANNON_BIN" >&2
+    exit 1
+  fi
+fi
+
+DEPLOYMENTS="$(deployments_json_path)"
+GAME_FACTORY=$(jq -r '.DisputeGameFactoryProxy // .disputeGameFactoryProxy // empty' "$DEPLOYMENTS")
+if [[ -z "$GAME_FACTORY" || "$GAME_FACTORY" == "null" ]]; then
+  echo "ERROR: DisputeGameFactoryProxy not found in $DEPLOYMENTS" >&2
+  jq 'keys' "$DEPLOYMENTS" || true
+  exit 1
+fi
+
+CHALLENGER_DATADIR="$(canonical_abs_path "$DATA_DIR/challenger")"
+mkdir -p "$CHALLENGER_DATADIR"
+
+wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
+wait_for_rpc "$L2_NODE_RPC_URL" "op-node"
+wait_for_rpc "$L2_RPC_URL" "L2"
+
+require_min_balance_eth "$CHALLENGER_ADDRESS" "${SEPOLIA_CHALLENGER_MIN_ETH:-0.15}" "CHALLENGER"
+
+run_preflight() {
+  local type_num impl vm_addr prestate
+  type_num="$(game_impls_type_number "$TRACE_TYPE")"
+  if [[ -z "$type_num" ]]; then
+    echo "Preflight: no confident gameImpls(uint32) mapping for CHALLENGER_TRACE_TYPE=$TRACE_TYPE (mapped: cannon=0, permissioned=1); skipping factory lookup."
+    return 0
+  fi
+  echo "Preflight: DisputeGameFactory.gameImpls($type_num) for CHALLENGER_TRACE_TYPE=$TRACE_TYPE"
+  impl="$(cast call "$GAME_FACTORY" "gameImpls(uint32)(address)" "$type_num" --rpc-url "$L1_RPC_URL")"
+  impl="$(printf '%s' "$impl" | tr -d '[:space:]')"
+  if is_zero_hex "$impl"; then
+    echo "ERROR: factory $GAME_FACTORY has no implementation registered for game type $type_num ($TRACE_TYPE)" >&2
+    echo "  gameImpls($type_num) returned the zero address. op-challenger has nothing to play." >&2
+    echo "  Re-read the post-wipe factory before retrying (D-0052)." >&2
+    exit 1
+  fi
+  echo "Preflight: game impl $impl"
+  vm_addr="$(cast call "$impl" "vm()(address)" --rpc-url "$L1_RPC_URL")"
+  prestate="$(cast call "$impl" "absolutePrestate()(bytes32)" --rpc-url "$L1_RPC_URL")"
+  vm_addr="$(printf '%s' "$vm_addr" | tr -d '[:space:]')"
+  prestate="$(printf '%s' "$prestate" | tr -d '[:space:]')"
+  if is_zero_hex "$vm_addr" || is_zero_hex "$prestate"; then
+    echo "ERROR: deployed game has no VM / no absolute prestate — op-challenger cannot play a Cannon-family game against it" >&2
+    echo "  impl:              $impl" >&2
+    echo "  vm():              $vm_addr" >&2
+    echo "  absolutePrestate(): $prestate" >&2
+    echo "  This is the D-0052 failure mode (tasks/decisions.md). Do not spend gas on a game the challenger cannot step." >&2
+    echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
+    exit 1
+  fi
+  echo "Preflight: vm=$vm_addr absolutePrestate=$prestate"
+}
+
+if [[ "${CHALLENGER_SKIP_PREFLIGHT:-}" == "1" ]]; then
+  echo "WARN: CHALLENGER_SKIP_PREFLIGHT=1 — skipping gameImpls/vm/absolutePrestate checks (D-0052)." >&2
+else
+  run_preflight
+fi
+
+# Long-running daemon gets the key via env, never --private-key (unlike
+# 06-start-proposer-sepolia.sh, which puts the secret on argv / ps).
+export OP_CHALLENGER_PRIVATE_KEY="$CHALLENGER_PRIVATE_KEY"
+
+challenger_args=(
+  --l1-eth-rpc="$L1_RPC_URL"
+  --rollup-rpc="$L2_NODE_RPC_URL"
+  --l2-eth-rpc="$L2_RPC_URL"
+  --game-factory-address="$GAME_FACTORY"
+  --game-types="$TRACE_TYPE"
+  --datadir="$CHALLENGER_DATADIR"
+  --l1-rpc-kind="$L1_RPC_KIND"
+  --num-confirmations="$NUM_CONFS"
+  --log.level="$LOG_LEVEL"
+)
+
+if needs_cannon_bin "$TRACE_TYPE"; then
+  challenger_args+=(--cannon-bin="$CANNON_BIN")
+fi
+
+if [[ -n "$PRESTATE_PATH" ]]; then
+  if needs_kona_prestate "$TRACE_TYPE"; then
+    challenger_args+=(--cannon-kona-prestate="$PRESTATE_PATH")
+  else
+    challenger_args+=(--cannon-prestate="$PRESTATE_PATH")
+  fi
+fi
+if [[ -n "$PRESTATES_URL" ]]; then
+  if needs_kona_prestate "$TRACE_TYPE"; then
+    challenger_args+=(--cannon-kona-prestates-url="$PRESTATES_URL")
+  elif needs_cannon_prestate "$TRACE_TYPE"; then
+    challenger_args+=(--cannon-prestates-url="$PRESTATES_URL")
+  else
+    challenger_args+=(--prestates-url="$PRESTATES_URL")
+  fi
+fi
+
+# This build's CheckRequired also wants --l1-beacon always, and for
+# permissioned/cannon either --network or --cannon-rollup-config + --cannon-l2-genesis.
+# Those are not in the F7-2 flag table (custom chain 852 cannot use --network;
+# D-0037 parked beacon). If the daemon exits immediately, read $LOG_DIR/op-challenger.log.
+
+echo "Sepolia challenger starting against DisputeGameFactory=$GAME_FACTORY game-types=$TRACE_TYPE"
+echo "  L1=$(redact_rpc_url "$L1_RPC_URL")  op-node=$(redact_rpc_url "$L2_NODE_RPC_URL")  L2=$(redact_rpc_url "$L2_RPC_URL")"
+echo "  challenger=$CHALLENGER_ADDRESS  datadir=$CHALLENGER_DATADIR  l1-rpc-kind=$L1_RPC_KIND"
+if [[ -n "$PRESTATES_URL" ]]; then
+  echo "  prestates-url=$(redact_rpc_url "$PRESTATES_URL")"
+fi
+
+start_bg op-challenger op-challenger "${challenger_args[@]}"
+
+echo "Sepolia challenger started (pid file $PID_DIR/op-challenger.pid). Signs as CHALLENGER, never PROPOSER."
+echo "Known-good: 'starting monitoring' in $LOG_DIR/op-challenger.log — it should not attack a valid game"
