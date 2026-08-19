@@ -5,7 +5,7 @@ Copy everything below the line into the worker. **Mid model tier** — shell onl
 ---
 
 DISPATCH · Model: mid · Order: wave 1, standalone (no siblings, no blockers)
-Baseline: branch `agent/f7-3-preflight-gameargs` off tag `wave17-base`
+Baseline: branch `agent/f7-3-preflight-gameargs` off tag `wave18-base`
 Host: any. **No `.env.sepolia`, no Sepolia keys, no `op-challenger`, and nothing here signs or spends.** If your environment has outbound network, you may make the **read-only** public-RPC calls named below and should report their output; if it does not, say so and rely on the static gate. Do not attempt to run the challenger.
 Working directory: main checkout (single delegate this round)
 Landing: PR into `main`, squash-merge after review. **Must land before US-071/072 (the network wipe)** — post-wipe the current preflight would block US-073 outright.
@@ -26,7 +26,7 @@ You are a worker on the ForteL2 repo (`github.com/StephenForte/ForteL2`). Phase 
 ## Pre-assigned identifiers — use these exactly
 
 - Task id **F7-3**. Decision record **D-0055** (already written; do not add or renumber decisions).
-- Branch **`agent/f7-3-preflight-gameargs`**, cut from tag **`wave17-base`**.
+- Branch **`agent/f7-3-preflight-gameargs`**, cut from tag **`wave18-base`**.
 - Escalation ids if you need them: **E-F7-3-1**, **E-F7-3-2**. One of them is pre-assigned a question — see "Report back, do not implement" below.
 
 These override any "find the highest and add one" convention. If one looks wrong, stop and ask.
@@ -75,7 +75,9 @@ Second trap, the one that matters more: **do not turn "always fail" into "always
 
 ## What to build
 
-The property that must hold: **the preflight exits non-zero unless it has positively read a non-zero `vm` and a non-zero `absolutePrestate` for the trace type being started, from whichever location this factory actually keeps them.**
+The property that must hold, **for a trace type the preflight actually inspects**: the preflight exits non-zero unless it has positively read a non-zero `vm` and a non-zero `absolutePrestate`, from whichever location this factory actually keeps them.
+
+"A trace type the preflight actually inspects" means one that `game_impls_type_number()` maps to a number — today `cannon` = 0 and `permissioned` = 1, and nothing else. `run_preflight()` opens with an early `return 0` for every unmapped type, printing "no confident gameImpls(uint32) mapping …; skipping factory lookup." **That skip is correct, is out of scope, and must survive unchanged.** `alphabet`, `fast` and `zk` are startable types (D-0054) whose games carry no Cannon VM or prestate configuration to read; making them fail the preflight would break three working modes. Extending the type-number mapping is a separate open question (E-F7-2-1) and is not yours.
 
 ### 1. `scripts/09-start-challenger-sepolia.sh` — `run_preflight()`
 
@@ -96,7 +98,8 @@ Append one block in the house style, asserting properties rather than phrasing:
 - The implementation-getter path still exists as a fallback (the file should contain both).
 - The `gameImpls` zero-address refusal survives.
 - `CHALLENGER_SKIP_PREFLIGHT` survives.
-- Every branch of the preflight that cannot establish both values reaches an `exit 1` — an `awk` structural check is the right tool; a grep for one sentence is not.
+- The early `return 0` skip for unmapped trace types is still present and still reached before any factory call.
+- **Once the preflight has committed to a factory lookup** (a mapped type), every path that cannot establish both values reaches an `exit 1` — an `awk` structural check is the right tool; a grep for one sentence is not. Do not assert this about the unmapped-type skip, which returns 0 by design.
 
 Assert what survives rewording. Say in your report how many assertions you added.
 
@@ -119,10 +122,11 @@ If the task appears to require changing something outside that surface, **stop a
 ## What must survive this change
 
 - Every gate from F7-2 / F7-2b / F7-2c: the key/address derivation match, the three `wait_for_rpc` calls, the balance check, the prestate `-f` **and** `-r` check, absolute-path canonicalization, the `--l1-beacon` requirement, the Cannon rollup/genesis flags, the `cannon` / `cannon-kona` pre-image-server refusal, and the `super-cannon-kona` refusal. None of them are in scope; all of them must still be there.
+- `run_preflight()`'s early `return 0` for trace types with no `game_impls_type_number()` mapping, unchanged — `alphabet`, `fast` and `zk` must still start.
 - The daemon still receives its key via `OP_CHALLENGER_PRIVATE_KEY`, never on argv; RPC URLs still pass through `redact_rpc_url` before being echoed; no secret in any output.
-- `scripts/test-helpers.sh` reports **107 PASS** and `All script helper tests passed.` at `wave17-base`. Existing assertions may not be weakened, skipped, or deleted. If you believe one encoded the behaviour this change corrects, say so with before, after, and why it is a strengthening.
+- `scripts/test-helpers.sh` reports **107 PASS** and `All script helper tests passed.` at `wave18-base`. Existing assertions may not be weakened, skipped, or deleted. If you believe one encoded the behaviour this change corrects, say so with before, after, and why it is a strengthening.
 
-## Verification (run against `wave17-base` at hand-back, restated after any rebase)
+## Verification (run against `wave18-base` at hand-back, restated after any rebase)
 
 ```
 bash -n scripts/09-start-challenger-sepolia.sh
@@ -171,7 +175,7 @@ Argue it with evidence. This brief overturns a previously recorded decision (D-0
 
 ```
 TASK:        F7-3 — preflight reads gameArgs, not the implementation
-LINE OF WORK: agent/f7-3-preflight-gameargs (off wave17-base)
+LINE OF WORK: agent/f7-3-preflight-gameargs (off wave18-base)
 REVIEW ARTIFACT: <PR URL>
 STATUS:      complete | complete-with-caveats | blocked
 
@@ -179,7 +183,7 @@ VERIFICATION: bash -n — pass/fail; shellcheck — pass/fail/not-installed;
               test-helpers.sh — pass/fail, PASS count 107 → N, final line;
               auto-start grep — what it returned;
               public-RPC reads — output, or "no network"
-              (run against wave17-base as of hand-back)
+              (run against wave18-base as of hand-back)
 MIGRATION:   none
 
 SHARED FILES TOUCHED: test-helpers.sh / README.md — exact lines, what changed
