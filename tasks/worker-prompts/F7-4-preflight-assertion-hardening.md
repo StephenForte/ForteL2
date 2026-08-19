@@ -112,7 +112,7 @@ The third row is the new behaviour and the second row is the regression risk bes
 
 - **The prestate-commitment check (D-0057).** That is F7-5 and it is deliberately not written yet — it depends on D-0056 being resolved. Do not add `cannon witness`, do not read `CHALLENGER_PRESTATE`'s contents, do not add any flag or variable for it.
 - Anything about the wipe or redeploy (US-071 / US-072) — not authorized.
-- The intent's `faultGameAbsolutePrestate` (D-0056) — operator territory, not a script change.
+- The intent's `faultGameAbsolutePrestate` (D-0056). That is **F7-6**, a separate task against `scripts/02-deploy-contracts-sepolia.sh` — the deploy script rewrites `intent.toml` on every run, so the override has to be written there, not hand-edited. Nothing about it belongs in this task.
 - Changing which trace types are startable (D-0054, settled) or extending `game_impls_type_number` (E-F7-2-1, someone else's).
 - Adding new environment variables.
 - Running the challenger, the proposer, or the bad-proposal tool against anything.
