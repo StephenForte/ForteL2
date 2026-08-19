@@ -89,6 +89,23 @@ needs_kona_rollup_genesis() {
   esac
 }
 
+# CheckCannonFlags (cannon only — not permissioned) requires --cannon-server.
+needs_cannon_server() {
+  case "$1" in
+    cannon) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# CheckCannonKonaFlags requires --cannon-kona-server. super-cannon-kona is
+# refused outright (supernode + depset); do not extend this to it (D-0054).
+needs_kona_server() {
+  case "$1" in
+    cannon-kona) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # gameImpls(uint32) mapping we will look up. Anything else is skipped, not guessed.
 # (Local optimism tree also has cannon-kona=8, super-cannon-kona=9, fast=254,
 # alphabet=255, zk=10 — not applied here; see E-F7-2-1.)
@@ -153,6 +170,39 @@ if [[ "$TRACE_TYPE" == "super-cannon-kona" ]]; then
   echo "  ForteL2 has no supernode and no interop depset to map; refusing to guess." >&2
   echo "  Set CHALLENGER_TRACE_TYPE from the post-wipe factory to a type this script can start." >&2
   exit 1
+fi
+
+# CheckCannonFlags / CheckCannonKonaFlags require a pre-image oracle server.
+# start_bg returns 0 whether the daemon survives, so an unset server would
+# print "started" and die on CheckRequired (D-0054). Gate here, before any RPC wait.
+CANNON_SERVER=""
+KONA_SERVER=""
+if needs_cannon_server "$TRACE_TYPE"; then
+  if [[ -z "${CHALLENGER_CANNON_SERVER:-}" ]]; then
+    echo "ERROR: CHALLENGER_TRACE_TYPE=cannon is not startable without --cannon-server" >&2
+    echo "  This build's CheckCannonFlags requires --cannon-server (set CHALLENGER_CANNON_SERVER)." >&2
+    echo "  No pre-image server binary exists on this host today (D-0052 / D-0054); refusing to start a daemon that would die on CheckRequired." >&2
+    echo "  Set CHALLENGER_TRACE_TYPE from the post-wipe factory to a type this script can start, or supply CHALLENGER_CANNON_SERVER." >&2
+    exit 1
+  fi
+  CANNON_SERVER="$(canonical_abs_path "$CHALLENGER_CANNON_SERVER")"
+  if [[ ! -f "$CANNON_SERVER" || ! -x "$CANNON_SERVER" ]]; then
+    echo "ERROR: CHALLENGER_CANNON_SERVER is missing or not executable (resolved): $CANNON_SERVER" >&2
+    exit 1
+  fi
+elif needs_kona_server "$TRACE_TYPE"; then
+  if [[ -z "${CHALLENGER_KONA_SERVER:-}" ]]; then
+    echo "ERROR: CHALLENGER_TRACE_TYPE=cannon-kona is not startable without --cannon-kona-server" >&2
+    echo "  This build's CheckCannonKonaFlags requires --cannon-kona-server (set CHALLENGER_KONA_SERVER)." >&2
+    echo "  No pre-image server binary exists on this host today (D-0052 / D-0054); refusing to start a daemon that would die on CheckRequired." >&2
+    echo "  Set CHALLENGER_TRACE_TYPE from the post-wipe factory to a type this script can start, or supply CHALLENGER_KONA_SERVER." >&2
+    exit 1
+  fi
+  KONA_SERVER="$(canonical_abs_path "$CHALLENGER_KONA_SERVER")"
+  if [[ ! -f "$KONA_SERVER" || ! -x "$KONA_SERVER" ]]; then
+    echo "ERROR: CHALLENGER_KONA_SERVER is missing or not executable (resolved): $KONA_SERVER" >&2
+    exit 1
+  fi
 fi
 
 L1_RPC_KIND="${SEPOLIA_L1_RPC_KIND:-standard}"
@@ -323,6 +373,12 @@ elif needs_kona_rollup_genesis "$TRACE_TYPE"; then
   )
 fi
 
+if needs_cannon_server "$TRACE_TYPE"; then
+  challenger_args+=(--cannon-server="$CANNON_SERVER")
+elif needs_kona_server "$TRACE_TYPE"; then
+  challenger_args+=(--cannon-kona-server="$KONA_SERVER")
+fi
+
 if [[ -n "$PRESTATE_PATH" ]]; then
   if needs_kona_prestate "$TRACE_TYPE"; then
     challenger_args+=(--cannon-kona-prestate="$PRESTATE_PATH")
@@ -348,6 +404,12 @@ echo "  L1=$(redact_rpc_url "$L1_RPC_URL")  beacon=$(redact_rpc_url "$L1_BEACON_
 echo "  challenger=$CHALLENGER_ADDRESS  datadir=$CHALLENGER_DATADIR  l1-rpc-kind=$L1_RPC_KIND"
 if [[ -n "$CANNON_ROLLUP" ]]; then
   echo "  rollup=$CANNON_ROLLUP  genesis=$CANNON_GENESIS"
+fi
+if [[ -n "$CANNON_SERVER" ]]; then
+  echo "  cannon-server=$CANNON_SERVER"
+fi
+if [[ -n "$KONA_SERVER" ]]; then
+  echo "  cannon-kona-server=$KONA_SERVER"
 fi
 if [[ -n "$PRESTATES_URL" ]]; then
   echo "  prestates-url=$(redact_rpc_url "$PRESTATES_URL")"
