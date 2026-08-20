@@ -5,7 +5,7 @@ Copy everything below the line into the worker. **High model tier** — this edi
 ---
 
 DISPATCH · Model: high · Order: wave 1, standalone (no siblings, no blockers)
-Baseline: branch `agent/f7-6-additional-dispute-game` off tag `wave21-base`
+Baseline: branch `agent/f7-6-additional-dispute-game` off tag `wave21-base` (= commit `845b27bc2013e527d1afa4e3639ec1c11fee4672`; both the tag and the branch already exist on the remote — fetch, do not create them)
 Host: any. **No `.env.sepolia`, no Sepolia keys, no `op-deployer` run, no network.** Nothing in this task signs, spends, deploys, or wipes anything. You are editing a script and asserting on its text.
 Working directory: main checkout (single delegate this round)
 Landing: PR into `main`, squash-merge after review. **This is the last step-0b prerequisite** — F7-7 and F7-8 are done.
@@ -27,9 +27,9 @@ You are a worker on the ForteL2 repo (`github.com/StephenForte/ForteL2`). Phase 
 ## Pre-assigned identifiers — use these exactly
 
 - Task id **F7-6**. Decisions listed above are written; do not add or renumber decisions.
-- Branch **`agent/f7-6-additional-dispute-game`**, cut from tag **`wave21-base`**.
+- Branch **`agent/f7-6-additional-dispute-game`**, already cut from tag **`wave21-base`** (`845b27bc`). Both refs exist; `git fetch --tags` if your clone predates them.
 - New environment variable: **`FAULT_GAME_ABSOLUTE_PRESTATE`** — this exact name.
-- Escalations: **E-F7-6-1**, **E-F7-6-2**.
+- Escalations: **E-F7-6-1** (L1PAO, required) and **E-F7-6-2** (once-only, required), both pre-assigned below. **E-F7-6-3** is reserved for a challenge to refusal (a); use **E-F7-6-4** for anything else.
 
 These override any "find the highest and add one" convention. If one looks wrong, stop and ask.
 
@@ -117,7 +117,7 @@ If the task appears to require changing something outside that surface, **stop a
 - **With `FAULT_GAME_ABSOLUTE_PRESTATE` unset, the generated `intent.toml` must be byte-identical to today's.** Prove this, do not assert it — generate one before and one after and `diff` them.
 - The existing clock-combo refusal, the `preimageOracleChallengePeriod` echo, the `FORCE_SEPOLIA_REDEPLOY` resume/wipe logic, and every existing `[globalDeployOverrides]` / `[superchainRoles]` / `[[chains]]` / `[chains.roles]` key, unchanged.
 - No secret is ever echoed. `redact_rpc_url` still guards every URL that is printed.
-- `scripts/test-helpers.sh` reports **110 PASS** and `All script helper tests passed.` at `wave21-base`; your additions raise it. Existing assertions may not be weakened, skipped, or deleted.
+- `scripts/test-helpers.sh` reports **110 PASS** and `All script helper tests passed.` at `wave21-base` (`845b27bc`); your additions raise it. Existing assertions may not be weakened, skipped, or deleted.
 
 ## Verification
 
@@ -149,13 +149,13 @@ State exactly what you exercised and what you did not.
 
 ## If you think this is wrong
 
-Argue it with evidence. The judgement most worth challenging: **refusal (a)** — that a set prestate plus `FORCE_SEPOLIA_REDEPLOY=1` is an error rather than a convenience. It means the operator cannot do the wipe and the registration in one command, which looks like friction. It is deliberate: at wipe time the post-wipe rollup config does not exist, so any prestate present is for the old chain, and registering it would burn the wipe. If you see a way to make one-shot safe, say so as **E-F7-6-1** rather than relaxing the guard.
+Argue it with evidence. The judgement most worth challenging: **refusal (a)** — that a set prestate plus `FORCE_SEPOLIA_REDEPLOY=1` is an error rather than a convenience. It means the operator cannot do the wipe and the registration in one command, which looks like friction. It is deliberate: at wipe time the post-wipe rollup config does not exist, so any prestate present is for the old chain, and registering it would burn the wipe. If you see a way to make one-shot safe, say so as **E-F7-6-3** rather than relaxing the guard — `E-F7-6-1` and `E-F7-6-2` are both already spoken for below and must not be reused for it.
 
 ## Return exactly this
 
 ```
 TASK:        F7-6 — register the type-8 dispute game from the deploy script
-LINE OF WORK: agent/f7-6-additional-dispute-game (off wave21-base)
+LINE OF WORK: agent/f7-6-additional-dispute-game (off wave21-base = 845b27bc)
 REVIEW ARTIFACT: <PR URL>
 STATUS:      complete | complete-with-caveats | blocked
 
