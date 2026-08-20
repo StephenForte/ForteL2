@@ -115,6 +115,8 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | optimism monorepo | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
+| Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
+| kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
 
 Source trees and **runtime data** live under `~/src/fortel2/` (outside Dropbox). This repo symlinks binaries via `./bin/`. `DATA_DIR` defaults to `~/src/fortel2/data` so Anvil state / op-geth datadir are not Dropbox-synced.
 
@@ -222,6 +224,10 @@ ln -sfn ~/src/fortel2/optimism/op-node/bin/op-node ~/src/fortel2/bin/op-node
 ln -sfn ~/src/fortel2/optimism/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
 ln -sfn ~/src/fortel2/optimism/op-proposer/bin/op-proposer ~/src/fortel2/bin/op-proposer
 ln -sfn ~/src/fortel2/op-geth/build/bin/geth ~/src/fortel2/bin/op-geth
+# kona-host — pre-image server for CHALLENGER_TRACE_TYPE=cannon-kona (D-0060/D-0062).
+# rustup honours rust/rust-toolchain.toml (1.94), so no toolchain flag is needed.
+(cd ~/src/fortel2/optimism/rust && cargo build --release -p kona-host)
+ln -sfn ~/src/fortel2/optimism/rust/target/release/kona-host ~/src/fortel2/bin/kona-host
 ```
 
 ## Endpoints
