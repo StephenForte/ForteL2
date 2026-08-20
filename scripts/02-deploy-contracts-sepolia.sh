@@ -79,6 +79,41 @@ if (( FAULT_GAME_MAX_CLOCK_DURATION < _min_needed )); then
   exit 1
 fi
 
+# F7-6 / D-0061: type-8 additional game is a *second* apply after the network
+# is healthy. Unset FAULT_GAME_ABSOLUTE_PRESTATE keeps intent byte-identical
+# (the wipe). Must refuse before any write — including rm -rf "$DEPLOY_DIR".
+refuse_fault_game_absolute_prestate() {
+  local prestate="${FAULT_GAME_ABSOLUTE_PRESTATE:-}"
+  if [[ -z "$prestate" ]]; then
+    return 0
+  fi
+  if [[ "${FORCE_SEPOLIA_REDEPLOY:-}" == "1" ]]; then
+    echo "ERROR: FAULT_GAME_ABSOLUTE_PRESTATE is set while FORCE_SEPOLIA_REDEPLOY=1." >&2
+    echo "  A prestate present at wipe time commits to the old rollup config (D-0061)." >&2
+    echo "  Unset FAULT_GAME_ABSOLUTE_PRESTATE, run the wipe, then set it from the" >&2
+    echo "  CI-built Kona artifact for the post-wipe rollup.json at step 8b." >&2
+    exit 1
+  fi
+  if [[ ! "$prestate" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    echo "ERROR: FAULT_GAME_ABSOLUTE_PRESTATE must be exactly 0x followed by 64 hex characters." >&2
+    echo "  Got: $prestate" >&2
+    echo "  Set it to the CI prestate build's commitment (D-0059 / D-0061), not a guessed hash." >&2
+    exit 1
+  fi
+  # op-deployer standard.DisputeAbsolutePrestate — a cannon32 artifact the
+  # MIPS64 VM cannot execute (D-0056). Compare case-insensitively.
+  local prestate_lc cannon32_default
+  prestate_lc="$(printf '%s' "$prestate" | tr '[:upper:]' '[:lower:]')"
+  cannon32_default="0x038512e02c4c3f7bdaec27d00edf55b7155e0905301e1a88083e4e0a6764d54c"
+  if [[ "$prestate_lc" == "$cannon32_default" ]]; then
+    echo "ERROR: FAULT_GAME_ABSOLUTE_PRESTATE is op-deployer's built-in default ($cannon32_default)." >&2
+    echo "  That hash is a cannon32 artifact; the MIPS64 VM requires stateVersion 8 (D-0056)." >&2
+    echo "  Set FAULT_GAME_ABSOLUTE_PRESTATE to the CI-built Kona prestate commitment instead." >&2
+    exit 1
+  fi
+}
+refuse_fault_game_absolute_prestate
+
 if [[ -f "$DEPLOY_DIR/state.json" && "${FORCE_SEPOLIA_REDEPLOY:-}" != "1" ]]; then
   echo "Resuming existing Sepolia deploy workdir at $DEPLOY_DIR (set FORCE_SEPOLIA_REDEPLOY=1 to wipe)"
 else
@@ -142,7 +177,35 @@ useInterop = false
     challenger = "${CHALLENGER_ADDRESS}"
 EOF
 
+# Nested under [[chains]] *after* that table's scalar keys (and [chains.roles]).
+# Placing [[chains.dangerousAdditionalDisputeGames]] before the scalars silently
+# reparents them. Depths are op-deployer standard.DisputeMaxGameDepth=73 /
+# DisputeSplitDepth=30 (standard/standard.go:27-28); live type-1
+# maxGameDepth()/splitDepth() match. Additional-game clocks come only from this
+# stanza (omitted = 0); reuse the already-validated FAULT_GAME_CLOCK_* so the
+# initialize refusal covers type 8 too. Game type / VMType / MakeRespected are
+# fixed: a configurable type invites setting 1, which D-0060 established can never play.
+if [[ -n "${FAULT_GAME_ABSOLUTE_PRESTATE:-}" ]]; then
+  cat >> "$DEPLOY_DIR/intent.toml" << EOF
+
+  [[chains.dangerousAdditionalDisputeGames]]
+    respectedGameType = 8
+    faultGameAbsolutePrestate = "${FAULT_GAME_ABSOLUTE_PRESTATE}"
+    faultGameMaxDepth = 73
+    faultGameSplitDepth = 30
+    faultGameClockExtension = ${FAULT_GAME_CLOCK_EXTENSION}
+    faultGameMaxClockDuration = ${FAULT_GAME_MAX_CLOCK_DURATION}
+    VMType = "CANNON"
+    MakeRespected = true
+EOF
+fi
+
 echo "Deploy overrides: proofMaturityDelaySeconds=${PROOF_MATURITY_DELAY_SECONDS} disputeGameFinalityDelaySeconds=${DISPUTE_GAME_FINALITY_DELAY_SECONDS} faultGameClockExtension=${FAULT_GAME_CLOCK_EXTENSION} faultGameMaxClockDuration=${FAULT_GAME_MAX_CLOCK_DURATION} faultGameWithdrawalDelay=${FAULT_GAME_WITHDRAWAL_DELAY} preimageOracleChallengePeriod=${PREIMAGE_ORACLE_CHALLENGE_PERIOD}"
+if [[ -n "${FAULT_GAME_ABSOLUTE_PRESTATE:-}" ]]; then
+  echo "Additional dispute game: type 8 (cannon-kona) will be registered with prestate=${FAULT_GAME_ABSOLUTE_PRESTATE}"
+else
+  echo "Additional dispute game: none (FAULT_GAME_ABSOLUTE_PRESTATE unset)"
+fi
 echo "fundDevAccounts=false (fund L2 via bridge in Phase 2c)"
 echo
 echo "Applying op-deployer intent to live Sepolia at $(redact_rpc_url "$L1_RPC_URL") ..."
