@@ -203,7 +203,10 @@ jobs:
           MATCH="fetch-failed"
           NOTE="could not download standard-prestates.toml"
           if curl -fsSL "${STANDARD_PRESTATES_URL}" -o "${TOML}"; then
-            if grep -F "hash=\"${COMMITMENT}\"" "${TOML}" >/dev/null; then
+            # Live standard-prestates.toml mixes `hash="0x…"` (newer) and
+            # `hash = "0x…"` (older). A contiguous hash="…" search would
+            # report MATCH=no against a real published entry that uses spaces.
+            if grep -E '^[[:space:]]*hash[[:space:]]*=[[:space:]]*"'"${COMMITMENT}"'"' "${TOML}" >/dev/null; then
               MATCH="yes"
               NOTE="computed hash matches a published superchain-registry prestate — surprising for a custom-config build"
             else
