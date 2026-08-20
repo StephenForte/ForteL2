@@ -70,6 +70,10 @@ Two candidate routes. **Establish which works, implement that one, and report wh
 
 **Prefer Route A.** If it works, the workflow's only new repo input is a `rollup.json` that is already public by design.
 
+**Either way, this task must commit `deployments/sepolia/rollup.json`.** Today **no** `rollup.json` is tracked (`git ls-files '*rollup.json'` is empty) — the live one sits under the gitignored `deployments/sepolia/.deployer/`. A GitHub-hosted run sees only the checked-out commit, so with nothing tracked the workflow can never be exercised before the wipe, and the missing-file check below would kill every run. Commit the **current** config at that path so the pipeline can be proven at step 0b; at step **8b** the operator replaces it in place with the post-wipe config and re-runs. One tracked path, two lifetimes.
+
+The file has been checked for publication: it carries chain config, fork activation times, and the batcher / deposit-contract / system-config addresses — no keys, no URLs, no secrets. Those addresses are already in the committed `deployments/sepolia/deployments.json`, and `pack-replica-artifacts.sh` already ships this exact file to the public replica repo, so tracking it changes nothing about its exposure.
+
 ## What to build
 
 `.github/workflows/build-prestate.yml`:
@@ -77,7 +81,7 @@ Two candidate routes. **Establish which works, implement that one, and report wh
 ### 1. Trigger and inputs
 
 - **`workflow_dispatch` only.** No `push`, no `pull_request`, no `schedule`. This is an expensive, deliberate, operator-initiated build; firing it on every push would be a defect.
-- Take an input for the rollup-config path, defaulting to the committed post-wipe location. This matters for a reason beyond tidiness: at step 0b the post-wipe config **does not exist yet**, so the operator needs to be able to smoke-test the pipeline against the *current* config and throw the resulting hash away. Say so in a comment, so nobody mistakes a smoke-test hash for the real one.
+- Take an input for the rollup-config path, defaulting to **`deployments/sepolia/rollup.json`** — the file this task commits. At step 0b that path holds the *current* config, so a dispatch there is a genuine end-to-end smoke test whose commitment is **thrown away**; at step 8b the operator replaces the file with the post-wipe config and re-runs for the real one. Say this in a comment, so nobody mistakes a smoke-test hash for the real one. The input exists so an operator can point at an alternate copy without editing the workflow; the default should be right for both real uses.
 - **Fail clearly and early if the config file is missing** — name the path and say "commit the post-wipe `rollup.json` first". A confusing failure here lands at the worst moment.
 - `runs-on: ubuntu-latest` — x86_64 with Docker, so `--platform linux/amd64` is native. Do **not** add QEMU/binfmt setup; that would silently make this an emulated build.
 - Generous `timeout-minutes` — this compiles a Rust MIPS64 target from scratch. Pick a number, comment why.
@@ -111,7 +115,7 @@ Write the commitment, both self-check results, the registry comparison, the mono
 
 **Freely changeable:** `.github/workflows/build-prestate.yml` (new).
 
-**Additive only, and only if Route A needs it:** a committed `rollup.json` under `deployments/sepolia/`, plus whatever small generator script the conversion needs (put it somewhere sensible and say where).
+**Additive, required:** `deployments/sepolia/rollup.json` — copy the current file from `deployments/sepolia/.deployer/rollup.json` verbatim, no edits. **Additive if the conversion needs it:** a small generator script (put it somewhere sensible and say where).
 
 **Do not touch:** `ci.yml`, `security-scans.yml`; `scripts/` of any kind; `README.md`; `.env.sepolia.example`; `tasks/` (planner-owned); `.gitignore`; anything under `deployments/sepolia/.deployer/`.
 
