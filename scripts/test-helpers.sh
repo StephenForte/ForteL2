@@ -1413,6 +1413,12 @@ fi
 # implementation's vm()/absolutePrestate() as the primary source. Those
 # getters are the empty-args fallback only. Unmapped trace types still
 # skip before any factory call. Assert structure, not error phrasing.
+#
+# F7-4 items 1–2: the skip-preflight grep was a string match (the name
+# appears in four error texts), so deleting the bypass left this green.
+# The 104-hex bound was unasserted — relaxing `< 104` to `< 0` also
+# stayed green. Both are structural now; this is a strengthening of the
+# same F7-3 PASS, not a new one.
 if awk '
      /^run_preflight\(\)/ { fn = 1; next }
      fn && /^}/ { fn = 0 }
@@ -1439,13 +1445,91 @@ if awk '
          && args_nr && vm_nr && args_nr < vm_nr)
      }
    ' "$CHALLENGER_START" \
-  && grep -q 'CHALLENGER_SKIP_PREFLIGHT' "$CHALLENGER_START" \
+  && awk '
+       /if \[\[/ && /CHALLENGER_SKIP_PREFLIGHT/ { in_if = 1; in_then = 1; next }
+       !in_if { next }
+       /^else$/ { in_else = 1; in_then = 0; next }
+       /^fi$/ { saw_fi = 1; in_if = 0; next }
+       in_then {
+         if ($0 ~ /WARN/ && $0 ~ />&2/) then_warn = 1
+         if ($0 ~ /run_preflight/ && $0 !~ /run_preflight\(\)/) then_calls = 1
+       }
+       in_else {
+         if ($0 ~ /run_preflight/ && $0 !~ /run_preflight\(\)/) else_calls = 1
+       }
+       END { exit !(saw_fi && then_warn && else_calls && !then_calls) }
+     ' "$CHALLENGER_START" \
+  && awk '
+       /^run_preflight\(\)/ { fn = 1; next }
+       fn && /^}/ { fn = 0 }
+       fn {
+         if ($0 ~ /cast call/ && $0 ~ /gameArgs/) saw_args = 1
+         if (saw_args && !in_empty_fallback) {
+           if (index($0, "-n \"$args_hex\"")) nonempty = 1
+           if (nonempty && index($0, "${#args_hex}") && index($0, "< 104")) gate = 1
+           if (nonempty && gate && /exit 1/) refused = 1
+           if (/falling back to implementation/ || /implementation getters/) in_empty_fallback = 1
+         }
+       }
+       END { exit !(saw_args && nonempty && gate && refused) }
+     ' "$CHALLENGER_START" \
   && grep -Fq 'gameArgs(uint32)(bytes)' "$CHALLENGER_START" \
   && grep -Fq 'vm()(address)' "$CHALLENGER_START" \
   && grep -Fq 'absolutePrestate()(bytes32)' "$CHALLENGER_START"; then
   echo "PASS F7-3 preflight reads gameArgs with impl-getter fallback; mapped types fail closed (D-0055)"
 else
   echo "FAIL 09-start-challenger-sepolia.sh preflight must read gameArgs, keep impl-getter fallback, skip unmapped types before factory lookup, and exit 1 on every mapped-type miss (D-0055)" >&2
+  fail=1
+fi
+
+# F7-4 / D-0055: bypass WARN cites D-0055 (D-0052 Finding 2 was withdrawn).
+# Text only — branch, exit behaviour, >&2 stay as they are.
+if awk '
+     /if \[\[/ && /CHALLENGER_SKIP_PREFLIGHT/ { in_if = 1; in_then = 1; next }
+     !in_if { next }
+     /^else$/ { in_else = 1; in_then = 0; next }
+     /^fi$/ { in_if = 0; next }
+     in_then && /WARN/ && /D-0055/ { cite = 1 }
+     in_then && /WARN/ && /D-0052/ { stale = 1 }
+     END { exit !(cite && !stale) }
+   ' "$CHALLENGER_START"; then
+  echo "PASS F7-4 bypass WARN cites D-0055, not withdrawn D-0052"
+else
+  echo "FAIL 09-start-challenger-sepolia.sh skip-preflight WARN must cite D-0055 (D-0052 Finding 2 was withdrawn)" >&2
+  fail=1
+fi
+
+# F7-4: a failed gameArgs call is a named refusal, not a raw cast abort and
+# not the empty-args fallback. Predating-gameArgs vs RPC failure cannot be
+# told apart from here; guessing is how D-0055 happened. Successful empty
+# (`0x`) must still reach the impl-getter fallback.
+if awk '
+     /^run_preflight\(\)/ { fn = 1; next }
+     fn && /^}/ { fn = 0 }
+     fn {
+       if ($0 ~ /cast call/ && $0 ~ /gameArgs/) {
+         saw_args = 1
+         if ($0 ~ /if !/ || $0 ~ /\|\|/) { guarded = 1; in_fail = 1 }
+       }
+       if (in_fail) {
+         if (/exit 1/) fail_exit = 1
+         if (/echo/ && /ERROR/) err_echo = 1
+         if (/echo/ && /GAME_FACTORY/) names_factory = 1
+         if (/echo/ && /type_num/) names_type = 1
+         if (/predate/) cause_old = 1
+         if (/RPC/) cause_rpc = 1
+         if (/vm\(\)\(address\)/ || /absolutePrestate\(\)\(bytes32\)/) leaked = 1
+         if (/^[[:space:]]*fi[[:space:]]*$/) in_fail = 0
+       }
+     }
+     END {
+       exit !(saw_args && guarded && fail_exit && err_echo \
+         && names_factory && names_type && cause_old && cause_rpc && !leaked)
+     }
+   ' "$CHALLENGER_START"; then
+  echo "PASS F7-4 failed gameArgs call is a named refusal, not an impl-getter fallback"
+else
+  echo "FAIL 09-start-challenger-sepolia.sh must refuse a failed gameArgs call with a named error (factory + type + predates-or-RPC); must not fall back" >&2
   fail=1
 fi
 

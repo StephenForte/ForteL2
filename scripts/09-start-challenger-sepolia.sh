@@ -325,7 +325,19 @@ run_preflight() {
   # of implArgs, so the tail offsets are [0,32) and [32,52). Bound-check
   # (≥52 bytes); do not length-match — permissioned args are 164 bytes, a
   # non-permissioned game's args are shorter (D-0055).
-  args="$(cast call "$GAME_FACTORY" "gameArgs(uint32)(bytes)" "$type_num" --rpc-url "$L1_RPC_URL")"
+  # Under set -e, a bare assignment aborts on a reverted call before we can
+  # name the failure. `if ! args="$(…)"` captures status without swallowing a
+  # successful empty (`0x`) result, which is legitimate data and must still
+  # reach the impl-getter fallback. A failed call is not an empty result —
+  # predating-gameArgs and RPC failure are indistinguishable here, so refuse
+  # rather than guess (D-0055).
+  if ! args="$(cast call "$GAME_FACTORY" "gameArgs(uint32)(bytes)" "$type_num" --rpc-url "$L1_RPC_URL")"; then
+    echo "ERROR: factory $GAME_FACTORY gameArgs($type_num) call failed" >&2
+    echo "  Either this factory predates the gameArgs function, or the RPC call failed." >&2
+    echo "  Those two cannot be distinguished from here; refusing rather than guessing (D-0055)." >&2
+    echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
+    exit 1
+  fi
   args="$(printf '%s' "$args" | tr -d '[:space:]"')"
   args_hex="${args#0x}"
   args_hex="${args_hex#0X}"
@@ -381,7 +393,7 @@ run_preflight() {
 }
 
 if [[ "${CHALLENGER_SKIP_PREFLIGHT:-}" == "1" ]]; then
-  echo "WARN: CHALLENGER_SKIP_PREFLIGHT=1 — skipping gameImpls/vm/absolutePrestate checks (D-0052)." >&2
+  echo "WARN: CHALLENGER_SKIP_PREFLIGHT=1 — skipping gameImpls/vm/absolutePrestate checks (D-0055)." >&2
 else
   run_preflight
 fi
