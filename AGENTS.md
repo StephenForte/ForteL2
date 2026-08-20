@@ -127,6 +127,7 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Operator-facing behavior → `README.md`
 - Roadmap / acceptance criteria → `tasks/prd-l2-learning-chain.md`
 - Agent workflow / guardrails → this file
+- **A new pre-redeploy gate touches four places — update them in one commit.** The Phase 7 wipe precondition is restated in `tasks/prd-phase-7-fault-proofs.md` § Operator sequence (**binding and complete** — the authority), `README.md` § "Network reset procedure" (asserts parity with it), `.env.sepolia.example` (pointer), and `tasks/prd-l2-learning-chain.md` `:19` glossary + `:51` Phase 7 row (both self-declared **summaries**, not closed lists). Missing one leaves a reader routed to an irreversible network-wide wipe with an incomplete gate. Search by **concept** ("precondition", "redeploy", "immutables"), not by the string `FORCE_SEPOLIA_REDEPLOY` — the roadmap describes the gate without naming that command. Do **not** edit dated records (`tasks/review-*.md`, `tasks/worker-prompts/`) to match; they are history.
 
 ## Cursor Cloud specific instructions
 
