@@ -1533,6 +1533,229 @@ else
   fail=1
 fi
 
+# F7-6 / D-0061: type-8 additional dispute game is a second apply, never the wipe.
+# Assert properties of generated intent and of the prestate gate, not error phrasing.
+DEPLOY_SEPOLIA="$SCRIPT_DIR/02-deploy-contracts-sepolia.sh"
+_F76_VALID_PRESTATE="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+_F76_CANNON32_DEFAULT="0x038512e02c4c3f7bdaec27d00edf55b7155e0905301e1a88083e4e0a6764d54c"
+
+_f76_expand_intent() {
+  local mode="$1"
+  python3 - "$DEPLOY_SEPOLIA" "$mode" "${2:-}" << 'PY'
+import pathlib, subprocess, sys
+script_path, mode = sys.argv[1], sys.argv[2]
+prestate = sys.argv[3] if len(sys.argv) > 3 else ""
+script = pathlib.Path(script_path).read_text()
+
+def heredoc_after(marker: str) -> str:
+    start = script.find(marker)
+    if start < 0:
+        raise SystemExit("missing marker: " + marker)
+    rest = script[start + len(marker):]
+    end = rest.find("\nEOF\n")
+    if end < 0:
+        raise SystemExit("missing EOF after: " + marker)
+    return rest[:end]
+
+main = heredoc_after('cat > "$DEPLOY_DIR/intent.toml" << EOF\n')
+extra = heredoc_after('cat >> "$DEPLOY_DIR/intent.toml" << EOF\n')
+body = main if mode == "unset" else main + extra
+env = {
+    "L1_CHAIN_ID": "11155111",
+    "L2_ID_HEX": "0x" + format(852, "064x"),
+    "ADMIN_ADDRESS": "0x1111111111111111111111111111111111111111",
+    "CHALLENGER_ADDRESS": "0x2222222222222222222222222222222222222222",
+    "SEQUENCER_ADDRESS": "0x3333333333333333333333333333333333333333",
+    "BATCHER_ADDRESS": "0x4444444444444444444444444444444444444444",
+    "PROPOSER_ADDRESS": "0x5555555555555555555555555555555555555555",
+    "PROOF_MATURITY_DELAY_SECONDS": "12",
+    "DISPUTE_GAME_FINALITY_DELAY_SECONDS": "6",
+    "FAULT_GAME_CLOCK_EXTENSION": "5",
+    "FAULT_GAME_MAX_CLOCK_DURATION": "10",
+    "FAULT_GAME_WITHDRAWAL_DELAY": "1",
+    "PREIMAGE_ORACLE_CHALLENGE_PERIOD": "86400",
+    "FAULT_GAME_ABSOLUTE_PRESTATE": prestate,
+}
+assign = "\n".join(f"{k}={v!r}" for k, v in env.items())
+out = subprocess.check_output(
+    ["bash", "-c", f"set -euo pipefail\n{assign}\ncat << EOF\n{body}\nEOF\n"],
+    text=True,
+)
+sys.stdout.write(out)
+PY
+}
+
+_f76_unset="$(_f76_expand_intent unset)"
+_f76_main_heredoc="$(python3 - "$DEPLOY_SEPOLIA" << 'PY'
+import pathlib, sys
+script = pathlib.Path(sys.argv[1]).read_text()
+marker = 'cat > "$DEPLOY_DIR/intent.toml" << EOF\n'
+start = script.find(marker)
+rest = script[start + len(marker):]
+print(rest[:rest.find("\nEOF\n")])
+PY
+)"
+if [[ "$_f76_unset" != *dangerousAdditionalDisputeGames* ]] \
+  && [[ "$_f76_main_heredoc" != *dangerousAdditionalDisputeGames* ]] \
+  && awk '
+       /cat > "\$DEPLOY_DIR\/intent.toml"/ { over = NR }
+       /if \[\[ -n "\$\{FAULT_GAME_ABSOLUTE_PRESTATE:-\}" \]\]/ {
+         if (over && !app) gated = NR
+       }
+       /cat >> "\$DEPLOY_DIR\/intent.toml"/ { app = NR }
+       END { exit !(over && gated && app && over < gated && gated < app) }
+     ' "$DEPLOY_SEPOLIA"; then
+  echo "PASS F7-6 unset intent has no additional dispute game (append is gated)"
+else
+  echo "FAIL 02-deploy-contracts-sepolia.sh must omit dangerousAdditionalDisputeGames unless FAULT_GAME_ABSOLUTE_PRESTATE is set" >&2
+  fail=1
+fi
+
+_f76_set="$(_f76_expand_intent set "$_F76_VALID_PRESTATE")"
+_f76_set_parse=1
+if ! printf '%s' "$_f76_set" | python3 -c '
+import sys, tomllib
+data = tomllib.loads(sys.stdin.read())
+if "dangerousAdditionalDisputeGames" in data:
+    raise SystemExit("additional games escaped to top-level TOML")
+chains = data.get("chains") or []
+if len(chains) != 1:
+    raise SystemExit("expected one [[chains]] entry")
+chain = chains[0]
+for key in ("id", "gasLimit", "baseFeeVaultRecipient", "roles"):
+    if key not in chain:
+        raise SystemExit("[[chains]] missing scalar/table " + key)
+games = chain.get("dangerousAdditionalDisputeGames") or []
+if len(games) != 1:
+    raise SystemExit("expected one additional dispute game")
+g = games[0]
+required = {
+    "respectedGameType": 8,
+    "faultGameAbsolutePrestate": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "faultGameMaxDepth": 73,
+    "faultGameSplitDepth": 30,
+    "faultGameClockExtension": 5,
+    "faultGameMaxClockDuration": 10,
+    "VMType": "CANNON",
+    "MakeRespected": True,
+}
+missing = [k for k in required if k not in g]
+if missing:
+    raise SystemExit("missing keys: " + ",".join(missing))
+for k, v in required.items():
+    if g[k] != v:
+        raise SystemExit(f"{k}: got {g[k]!r} want {v!r}")
+if len(g) != 8:
+    raise SystemExit(f"expected exactly 8 keys, got {sorted(g)}")
+'; then
+  _f76_set_parse=0
+fi
+if ((_f76_set_parse)) \
+  && awk '
+       /cat > "\$DEPLOY_DIR\/intent.toml"/ { over = NR }
+       /cat >> "\$DEPLOY_DIR\/intent.toml"/ { app = NR }
+       END { exit !(over && app && over < app) }
+     ' "$DEPLOY_SEPOLIA" \
+  && awk '
+       /cat >> "\$DEPLOY_DIR\/intent.toml"/ { extra = 1; next }
+       extra && /^EOF$/ { extra = 0 }
+       extra {
+         if ($0 ~ /respectedGameType = 8/) t8 = 1
+         if ($0 ~ /respectedGameType = \$/) t8var = 1
+         if ($0 ~ /\[\[chains\.dangerousAdditionalDisputeGames\]\]/) nested = 1
+       }
+       END { exit !(t8 && nested && !t8var) }
+     ' "$DEPLOY_SEPOLIA"; then
+  echo "PASS F7-6 set intent registers type-8 stanza inside [[chains]] with all eight keys"
+else
+  echo "FAIL 02-deploy-contracts-sepolia.sh must append [[chains.dangerousAdditionalDisputeGames]] with respectedGameType=8 and all eight keys" >&2
+  fail=1
+fi
+
+_f76_fn="$(awk '/^refuse_fault_game_absolute_prestate\(\)/,/^}/' "$DEPLOY_SEPOLIA")"
+_f76_run_gate() {
+  local rc
+  rc=0
+  (
+    eval "$_f76_fn"
+    FAULT_GAME_ABSOLUTE_PRESTATE="${1-}"
+    FORCE_SEPOLIA_REDEPLOY="${2-}"
+    export FAULT_GAME_ABSOLUTE_PRESTATE FORCE_SEPOLIA_REDEPLOY
+    refuse_fault_game_absolute_prestate
+  ) >/dev/null 2>&1 || rc=$?
+  echo "$rc"
+}
+_f76_rc_wipe="$(_f76_run_gate "" "1")"
+_f76_rc_step8b="$(_f76_run_gate "$_F76_VALID_PRESTATE" "")"
+_f76_rc_a="$(_f76_run_gate "$_F76_VALID_PRESTATE" "1")"
+_f76_rc_b="$(_f76_run_gate "0x1234" "")"
+_f76_rc_c="$(_f76_run_gate "$_F76_CANNON32_DEFAULT" "")"
+if [[ "$_f76_rc_wipe" == "0" && "$_f76_rc_step8b" == "0" \
+     && "$_f76_rc_a" != "0" && "$_f76_rc_b" != "0" && "$_f76_rc_c" != "0" ]] \
+  && awk '
+       /^refuse_fault_game_absolute_prestate\(\)/ { def = NR }
+       /^refuse_fault_game_absolute_prestate$/ { call = NR }
+       /rm -rf "\$DEPLOY_DIR"/ { rm = NR }
+       /cat > "\$DEPLOY_DIR\/intent.toml"/ { intent = NR }
+       END { exit !(def && call && rm && intent && def < call && call < rm && call < intent) }
+     ' "$DEPLOY_SEPOLIA"; then
+  echo "PASS F7-6 prestate refusals (wipe+set / malformed / cannon32 default) exit non-zero before writes"
+else
+  echo "FAIL 02-deploy-contracts-sepolia.sh must refuse FAULT_GAME_ABSOLUTE_PRESTATE during wipe, if malformed, or if it is op-deployer's cannon32 default — before any write (D-0061 / D-0056)" >&2
+  fail=1
+fi
+
+_f76_extra="$(python3 - "$DEPLOY_SEPOLIA" << 'PY'
+import pathlib, sys
+script = pathlib.Path(sys.argv[1]).read_text()
+marker = 'cat >> "$DEPLOY_DIR/intent.toml" << EOF\n'
+start = script.find(marker)
+rest = script[start + len(marker):]
+print(rest[:rest.find("\nEOF\n")])
+PY
+)"
+_f76_allowed=1
+if ! printf '%s\n' "$_f76_extra" | grep -q 'faultGameClockExtension = ${FAULT_GAME_CLOCK_EXTENSION}'; then
+  _f76_allowed=0
+fi
+if ! printf '%s\n' "$_f76_extra" | grep -q 'faultGameMaxClockDuration = ${FAULT_GAME_MAX_CLOCK_DURATION}'; then
+  _f76_allowed=0
+fi
+while IFS= read -r _v; do
+  [[ -z "$_v" ]] && continue
+  case "$_v" in
+    '${FAULT_GAME_ABSOLUTE_PRESTATE}'|'${FAULT_GAME_CLOCK_EXTENSION}'|'${FAULT_GAME_MAX_CLOCK_DURATION}') ;;
+    *) _f76_allowed=0 ;;
+  esac
+done << EOF
+$(printf '%s\n' "$_f76_extra" | grep -oE '\$\{FAULT_GAME_[A-Z_]+\}' | sort -u)
+EOF
+if ((_f76_allowed)); then
+  echo "PASS F7-6 additional-game clocks reuse FAULT_GAME_CLOCK_EXTENSION / FAULT_GAME_MAX_CLOCK_DURATION"
+else
+  echo "FAIL 02-deploy-contracts-sepolia.sh additional-game clocks must reference the existing FAULT_GAME_CLOCK_* variables, not new ones" >&2
+  fail=1
+fi
+
+ENV_SEPOLIA_EXAMPLE="$SCRIPT_DIR/../.env.sepolia.example"
+if grep -qE '^# FAULT_GAME_ABSOLUTE_PRESTATE=' "$ENV_SEPOLIA_EXAMPLE" \
+  && ! grep -qE '^FAULT_GAME_ABSOLUTE_PRESTATE=' "$ENV_SEPOLIA_EXAMPLE" \
+  && ! grep -q "$_F76_CANNON32_DEFAULT" "$ENV_SEPOLIA_EXAMPLE" \
+  && ! grep -q 'prestate must be resolved and pinned first' "$ENV_SEPOLIA_EXAMPLE" \
+  && awk '
+       /[Ss]tep 8b/ { eight = NR }
+       /^# FAULT_GAME_ABSOLUTE_PRESTATE=/ { assign = NR }
+       END {
+         d = eight - assign; if (d < 0) d = -d
+         exit !(eight && assign && d <= 15)
+       }
+     ' "$ENV_SEPOLIA_EXAMPLE"; then
+  echo "PASS F7-6 .env.sepolia.example documents FAULT_GAME_ABSOLUTE_PRESTATE commented out for step 8b"
+else
+  echo "FAIL .env.sepolia.example must document FAULT_GAME_ABSOLUTE_PRESTATE as commented-out, step 8b only — not pinned before the wipe, not op-deployer's default" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
