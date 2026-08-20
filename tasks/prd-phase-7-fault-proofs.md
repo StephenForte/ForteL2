@@ -38,7 +38,7 @@ This is a **learning phase**, not a mainnet launch. It is the first work allowed
 | Host | Native binaries on the Mac mini; no Docker on this workstation |
 | Keys | Never commit `.env.sepolia`; never ask the operator to paste keys |
 | Notice | SOS + every replica operator get **≥1 day** between announce and stop-writers / redeploy (D-0028 / D-0029) |
-| Immutables | Choose **all six** delay/clock knobs (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) in `.env.sepolia` **before** `FORCE_SEPOLIA_REDEPLOY=1`. File values win over inline env (README reset step 3). `02-deploy-contracts-sepolia.sh` refuses a combo that fails `PermissionedDisputeGame.initialize` |
+| Immutables | Choose **all six** delay/clock knobs (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) in `.env.sepolia` **before** `FORCE_SEPOLIA_REDEPLOY=1`. File values win over inline env (README reset step 1). `02-deploy-contracts-sepolia.sh` refuses a combo that fails `PermissionedDisputeGame.initialize` |
 | Prestate | The redeploy must commit to an absolute prestate the pinned `cannon` can actually execute (**stateVersion 8**). op-deployer 0.7.1's built-in default is a **cannon32** artifact and `02-deploy-contracts-sepolia.sh` **rewrites `intent.toml` on every run**, so a hand-edited intent does not survive — the override has to be written by the script. Resolve D-0056 (1)–(3) before `FORCE_SEPOLIA_REDEPLOY=1` |
 | Replica | Pack → publish fortel2-replica → wipe Mac `data-sepolia` **and** Render `/data` together. Never one side |
 | Friends | Same genesis/`rollup.json` as Render. Point them at `replica/FRIENDS.md` |
