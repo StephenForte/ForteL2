@@ -39,7 +39,7 @@ This is a **learning phase**, not a mainnet launch. It is the first work allowed
 | Keys | Never commit `.env.sepolia`; never ask the operator to paste keys |
 | Notice | SOS + every replica operator get **≥1 day** between announce and stop-writers / redeploy (D-0028 / D-0029) |
 | Immutables | Choose **all six** delay/clock knobs (including `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) in `.env.sepolia` **before** `FORCE_SEPOLIA_REDEPLOY=1`. File values win over inline env (README reset step 1). `02-deploy-contracts-sepolia.sh` refuses a combo that fails `PermissionedDisputeGame.initialize` |
-| Prestate | The redeploy must commit to an absolute prestate the pinned `cannon` can actually execute (**stateVersion 8**). op-deployer 0.7.1's built-in default is a **cannon32** artifact and `02-deploy-contracts-sepolia.sh` **rewrites `intent.toml` on every run**, so a hand-edited intent does not survive — the override has to be written by the script. Resolve D-0056 (1)–(3) before `FORCE_SEPOLIA_REDEPLOY=1` |
+| Prestate | The redeploy must commit to an absolute prestate the pinned `cannon` can actually execute (**stateVersion 8**). op-deployer 0.7.1's built-in default is a **cannon32** artifact and `02-deploy-contracts-sepolia.sh` **rewrites `intent.toml` on every run**, so a hand-edited intent does not survive — the override has to be written by the script. Resolve D-0056 (1)–(3) **before the announcement** (step 0b) — it is a reviewed code change, not an operator edit, so it cannot happen inside the notice window |
 | Replica | Pack → publish fortel2-replica → wipe Mac `data-sepolia` **and** Render `/data` together. Never one side |
 | Friends | Same genesis/`rollup.json` as Render. Point them at `replica/FRIENDS.md` |
 | Rollback | There is no rollback except another redeploy. A forgotten parameter is a second network-wide wipe |
@@ -82,10 +82,10 @@ Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SO
 |---|---|---|---|
 | — | Now | Do not bump rail-interface, do not pack genesis, do not set `FORCE_SEPOLIA_REDEPLOY` | pre-wipe |
 | 0 | Before anyone is notified | Write **all six** immutables into local `.env.sepolia` + `tasks/spike-phase-7-immutables.md` (notice date included) | **US-070** |
+| 0b | Before anyone is notified, blocking | **Prestate gate (D-0056).** Confirm which prestate release/type is stateVersion 8, obtain that artifact, verify it with `cannon witness --input`, and land **F7-6** so `02-deploy-contracts-sepolia.sh` writes `faultGameAbsolutePrestate` into `[globalDeployOverrides]` and refuses without it. This is research plus a reviewed code change, so it sits **before** the announcement — D-0049's rule is that notice goes out only once all Phase 7 coding/config work is done. Doing it after step 2 would hold chain 852 down for the whole of it | **US-071** (pre) |
 | 1 | ≥1 day before stop/redeploy | Announce to SOS + Render + every Phase 3b friend. Write path is already live and **unpublished** (D-0035); do not couple this wipe to publishing that hostname (D-0029) | **US-071** (start) |
 | 2 | After the notice window | Stop Mac writers: `FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh` | **US-071** |
-| 2b | Before step 3, blocking | **Prestate gate (D-0056).** Confirm which prestate release/type is stateVersion 8, obtain that artifact, verify it with `cannon witness --input`, and make `02-deploy-contracts-sepolia.sh` write `faultGameAbsolutePrestate` into `[globalDeployOverrides]`. Without this the redeploy silently re-commits op-deployer's stale cannon32 default | **US-071** |
-| 3 | File knobs already set **and step 2b done** | `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 ./scripts/02-deploy-contracts-sepolia.sh` | **US-071** |
+| 3 | File knobs set and step 0b done | `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 ./scripts/02-deploy-contracts-sepolia.sh` | **US-071** |
 | 4 | New L1 proxies exist | Send new addresses to SOS (from `deployments/sepolia/deployments.json`) | **US-071** |
 | 5 | After step 3, never before | `FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh` → publish genesis/rollup to fortel2-replica | **US-072** |
 | 6 | Together, never one side | Wipe Mac `data-sepolia` **and** Render `/data` **and** every friend | **US-072** |
@@ -129,9 +129,9 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 
 **Acceptance Criteria:**
 
+- [ ] **Prestate resolved and pinned before the notice goes out (D-0056, sequence step 0b):** the stateVersion-8 prestate release/type identified, the artifact in hand and its commitment confirmed with `cannon witness --input`, and `02-deploy-contracts-sepolia.sh` writing `faultGameAbsolutePrestate` into `[globalDeployOverrides]` — the script rewrites `intent.toml` every run, so this cannot be done by editing the intent file
 - [ ] SOS + Render + every Phase 3b friend notified ≥1 day ahead (D-0028)
 - [ ] Mac writers stopped: `FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh`
-- [ ] **Prestate resolved and pinned (D-0056):** the stateVersion-8 prestate release/type identified, the artifact in hand and its commitment confirmed with `cannon witness --input`, and `02-deploy-contracts-sepolia.sh` writing `faultGameAbsolutePrestate` into `[globalDeployOverrides]` — the script rewrites `intent.toml` every run, so this cannot be done by editing the intent file
 - [ ] `FORTEL2_ENV=.env.sepolia FORCE_SEPOLIA_REDEPLOY=1 ./scripts/02-deploy-contracts-sepolia.sh` after the file knobs are set (script must echo `preimageOracleChallengePeriod` and must have refused any illegal clock combo)
 - [ ] New addresses recorded under `deployments/sepolia/`; Phase 1 Anvil tree untouched
 - [ ] New contract addresses sent to SOS once they exist
