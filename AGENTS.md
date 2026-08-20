@@ -97,6 +97,8 @@ CI runs the same suite on every PR (`.github/workflows/ci.yml`).
 
 Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std --no-git --shallow`.
 
+**A verification step you prescribe or claim must be one you have confirmed can run — and can fail.** This applies to your own work and to any brief you write for someone else. Two ways it has gone wrong here, both caught by review rather than by us: a worker brief prescribed a CI smoke test against a file that turned out not to be tracked, so the run could never have started (`git ls-files` would have shown it in one command); and a decision record asserted that pinning a monorepo commit made a build config-correct, which nothing had been run to establish. Before writing "run X to check Y": confirm X executes in the environment it will run in, and that it goes red when Y is false. An assertion that passes against broken input is worse than no assertion, and a check that cannot start is worse still — it reads as green.
+
 ## dApp / viewer conventions
 
 - Static ESM only — no bundler. Guestbook config from `deploy-guestbook.sh`; viewer config from `gen-viewer-config.sh`.
