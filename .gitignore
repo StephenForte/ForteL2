@@ -1,5 +1,11 @@
 .env
 .env.sepolia
+# Timestamped backups of the above. The bare names are exact-match patterns,
+# so `.env.sepolia.bak-20260820-113344` was NOT ignored and a `git add -A`
+# would have staged seven private keys. Does not match `.env.sepolia.example`,
+# which is tracked on purpose.
+.env.bak*
+.env.sepolia.bak*
 data/
 bin/
 deployments/.deployer/state.json
