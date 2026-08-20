@@ -115,6 +115,8 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | optimism monorepo | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
+| Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
+| kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
 
 Source trees and **runtime data** live under `~/src/fortel2/` (outside Dropbox). This repo symlinks binaries via `./bin/`. `DATA_DIR` defaults to `~/src/fortel2/data` so Anvil state / op-geth datadir are not Dropbox-synced.
 
@@ -222,6 +224,14 @@ ln -sfn ~/src/fortel2/optimism/op-node/bin/op-node ~/src/fortel2/bin/op-node
 ln -sfn ~/src/fortel2/optimism/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
 ln -sfn ~/src/fortel2/optimism/op-proposer/bin/op-proposer ~/src/fortel2/bin/op-proposer
 ln -sfn ~/src/fortel2/op-geth/build/bin/geth ~/src/fortel2/bin/op-geth
+# Rust — needed only for kona-host below. Nothing Rust-related ships with the
+# other tooling, so a cold-start Mac must install it here (D-0062).
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+source "$HOME/.cargo/env"   # or open a new shell
+# kona-host — pre-image server for CHALLENGER_TRACE_TYPE=cannon-kona (D-0060/D-0062).
+# rustup honours rust/rust-toolchain.toml (1.94), so no toolchain flag is needed.
+(cd ~/src/fortel2/optimism/rust && cargo build --release -p kona-host)
+ln -sfn ~/src/fortel2/optimism/rust/target/release/kona-host ~/src/fortel2/bin/kona-host
 ```
 
 ## Endpoints
@@ -927,9 +937,9 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 **Keys:** this process signs with `CHALLENGER_PRIVATE_KEY`, which must derive to `CHALLENGER_ADDRESS`. That is the inverse of the US-074 bad-proposal tool, which must sign with `PROPOSER_PRIVATE_KEY` because only the factory proposer role may `create()` a game. Putting the proposer key in the challenger slot would have the honest-party process signing as the party it is supposed to be disputing. The daemon receives the key via environment (`OP_CHALLENGER_PRIVATE_KEY`), not `ps` argv. Keys live only in local `.env.sepolia` (gitignored); nothing in this script or the committed tree is a secret.
 
-**Trace type / prestate (no defaults):** set `CHALLENGER_TRACE_TYPE` to what the **post-wipe** factory actually registers (`alphabet`, `cannon`, `cannon-kona`, `permissioned`, `fast`, `super-cannon-kona`, `zk`). For Cannon-family types (`cannon`, `permissioned`, `cannon-kona`, `super-cannon-kona`) also set `CHALLENGER_PRESTATE` (local file) and/or `CHALLENGER_PRESTATES_URL` (base URL). A relative `CHALLENGER_PRESTATE` is resolved to an absolute path before the daemon starts (`start_bg` chdirs to `/`). Obtaining the prestate itself is tracked separately (D-0052). `L1_BEACON_URL` is required for this binary's CheckRequired (`--l1-beacon`); it does not turn on blob DA — op-node still uses `--l1.beacon.ignore` (D-0037 / D-0053). For `cannon` / `permissioned` the script also passes `--cannon-rollup-config` and `--cannon-l2-genesis` from the Sepolia deploy tree (`$DEPLOY_DIR/rollup.json`, `$DEPLOY_DIR/genesis.json`); `cannon-kona` uses the matching `--cannon-kona-*` flags on the same files.
+**Trace type / prestate (no defaults):** set `CHALLENGER_TRACE_TYPE` to what the **post-wipe** factory actually registers (`alphabet`, `cannon`, `cannon-kona`, `permissioned`, `fast`, `super-cannon-kona`, `zk`). For Cannon-family types (`cannon`, `permissioned`, `cannon-kona`, `super-cannon-kona`) also set `CHALLENGER_PRESTATE` (local file) and/or `CHALLENGER_PRESTATES_URL` (base URL). A relative `CHALLENGER_PRESTATE` is resolved to an absolute path before the daemon starts (`start_bg` chdirs to `/`). The prestate is a **Kona** artifact built in CI and registered post-wipe at step 8b (D-0059 / D-0061); it is not the op-deployer default, which is a stale cannon32 hash (D-0056). `L1_BEACON_URL` is required for this binary's CheckRequired (`--l1-beacon`); it does not turn on blob DA — op-node still uses `--l1.beacon.ignore` (D-0037 / D-0053). For `cannon` / `permissioned` the script also passes `--cannon-rollup-config` and `--cannon-l2-genesis` from the Sepolia deploy tree (`$DEPLOY_DIR/rollup.json`, `$DEPLOY_DIR/genesis.json`); `cannon-kona` uses the matching `--cannon-kona-*` flags on the same files.
 
-**What can start on the pinned binary (D-0054):** `permissioned` is the working Cannon-family path (it still needs a prestate — D-0052). `alphabet` / `fast` / `zk` start but prove nothing about fault proofs. `cannon` / `cannon-kona` need a pre-image server binary that does not exist on this host and are refused until `CHALLENGER_CANNON_SERVER` / `CHALLENGER_KONA_SERVER` is supplied. `super-cannon-kona` is unsupported (no supernode, no interop depset).
+**What can start, and what can actually play (D-0054 / D-0060 / D-0062):** starting is not playing. op-challenger binds the fault-proof *program* to the game type at compile time, and **`op-program` is absent from the pinned monorepo** — so game types **0 (`cannon`) and 1 (`permissioned`) can never generate a trace**, whatever prestate they hold. `permissioned` starts cleanly and is therefore the most misleading option here. `alphabet` / `fast` / `zk` also start and also prove nothing about fault proofs. **`cannon-kona` (game type 8) is the playable path**, and its pre-image server now exists: `kona-host` 1.0.2 at `~/src/fortel2/bin/kona-host` — set `CHALLENGER_KONA_SERVER` to that absolute path or the script refuses to start. `cannon` remains refused unless `CHALLENGER_CANNON_SERVER` names an executable, and no `op-program` build exists to supply one. `super-cannon-kona` is unsupported (no supernode, no interop depset).
 
 **Preflight:** before launch the script looks up `gameImpls`, then reads `vm` and `absolutePrestate` from `DisputeGameFactory.gameArgs(gameType)` (clone-with-immutable-args tail — D-0055). If `gameArgs` is empty it falls back to the implementation getters (older immutable layout). Either source must yield a non-zero VM and a non-zero prestate or the script exits. Bypass only if you mean it: `CHALLENGER_SKIP_PREFLIGHT=1`.
 
