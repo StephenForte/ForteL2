@@ -1741,6 +1741,7 @@ ENV_SEPOLIA_EXAMPLE="$SCRIPT_DIR/../.env.sepolia.example"
 if grep -qE '^# FAULT_GAME_ABSOLUTE_PRESTATE=' "$ENV_SEPOLIA_EXAMPLE" \
   && ! grep -qE '^FAULT_GAME_ABSOLUTE_PRESTATE=' "$ENV_SEPOLIA_EXAMPLE" \
   && ! grep -q "$_F76_CANNON32_DEFAULT" "$ENV_SEPOLIA_EXAMPLE" \
+  && ! grep -q 'prestate must be resolved and pinned first' "$ENV_SEPOLIA_EXAMPLE" \
   && awk '
        /[Ss]tep 8b/ { eight = NR }
        /^# FAULT_GAME_ABSOLUTE_PRESTATE=/ { assign = NR }
@@ -1751,7 +1752,7 @@ if grep -qE '^# FAULT_GAME_ABSOLUTE_PRESTATE=' "$ENV_SEPOLIA_EXAMPLE" \
      ' "$ENV_SEPOLIA_EXAMPLE"; then
   echo "PASS F7-6 .env.sepolia.example documents FAULT_GAME_ABSOLUTE_PRESTATE commented out for step 8b"
 else
-  echo "FAIL .env.sepolia.example must document FAULT_GAME_ABSOLUTE_PRESTATE as commented-out, step 8b only, not op-deployer's default" >&2
+  echo "FAIL .env.sepolia.example must document FAULT_GAME_ABSOLUTE_PRESTATE as commented-out, step 8b only — not pinned before the wipe, not op-deployer's default" >&2
   fail=1
 fi
 
