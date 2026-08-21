@@ -107,7 +107,7 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 
 | Tool | Version | Notes |
 |---|---|---|
-| Go | 1.26.5 (`darwin/arm64`) | Homebrew |
+| Go | 1.26.7 (`darwin/arm64`) | Homebrew |
 | just | 1.56.0 | Homebrew |
 | yq | 4.53.3 | Homebrew |
 | jq | 1.8.2 | Homebrew |
@@ -351,11 +351,19 @@ Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike
 
 ### Tracked dependency advisories (Go modules + frontend vendors)
 
-Last refresh: **2026-08-04** (Wave 6 / H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
+Last refresh: **2026-08-21** (Go modules: stdlib 1.26.7, pion/stun v3.1.7). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
 | [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep + `govulncheck -show verbose` on `derivation/` — symbol scan clean; module-level note only). Indirect pin is `golang.org/x/crypto v0.54.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+
+**2026-08-21 bumps:**
+
+| Area | Dependency | From → To | Advisory / reason |
+|---|---|---|---|
+| `batcher/` `proposer/` `derivation/` | Go stdlib (module `go` line + CI `setup-go`) | 1.26.5 → **1.26.7** | [CVE-2026-39821](https://pkg.go.dev/vuln/GO-2026-5026) (fixed in 1.26.6; take latest 1.26 patch) |
+| `batcher/` `proposer/` `derivation/` | `github.com/pion/stun/v3` | v3.1.2 → **v3.1.7** | [CVE-2026-54909](https://pkg.go.dev/vuln/GO-2026-6163) — XOR-MAPPED-ADDRESS parse panic (fixed in 3.1.5; take latest 3.1 patch) |
+| `batcher/` `proposer/` `derivation/` | `github.com/pion/dtls/v3` | v3.1.4 → **v3.1.5** | companion bump via stun 3.1.7 |
 
 **H2 bumps (2026-08-04):**
 
