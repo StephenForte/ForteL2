@@ -1,6 +1,6 @@
 module github.com/StephenForte/ForteL2/proposer
 
-go 1.26.5
+go 1.26.7
 
 require github.com/ethereum/go-ethereum v1.17.5
 
@@ -22,8 +22,9 @@ require (
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
-	github.com/pion/dtls/v3 v3.1.4 // indirect
+	github.com/pion/stun/v3 v3.1.7 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
+	github.com/stretchr/testify v1.12.0 // indirect
 	github.com/supranational/blst v0.3.16 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
@@ -36,4 +37,5 @@ require (
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 )
