@@ -70,7 +70,16 @@ Two refusals in `scripts/02-deploy-contracts-sepolia.sh`, placed **after** the F
 
 **1. Duplicate refusal — unconditional, every run of this script.** If any of the six immutables is assigned more than once in the resolved env file, refuse. The error must name the variable and the line numbers of the offending assignments.
 
-**2. Absence refusal — only on the two irreversible paths.** If any of the six is not assigned at all in the resolved env file, refuse **when `FORCE_SEPOLIA_REDEPLOY=1`** (the wipe) **or when `FAULT_GAME_ABSOLUTE_PRESTATE` is set** (step 8b, the second apply).
+**2. Absence refusal — only on the two irreversible paths.** If any of the six is **absent, or assigned an empty value**, refuse **when `FORCE_SEPOLIA_REDEPLOY=1`** (the wipe) **or when `FAULT_GAME_ABSOLUTE_PRESTATE` is set** (step 8b, the second apply).
+
+**"Assigned" is not the test — "has a non-empty effective value" is.** All six defaults use `${VAR:-default}` (colon-dash, verified: 6 of 6), which substitutes the default when the variable is **unset *or* empty**. So a line like `FAULT_GAME_WITHDRAWAL_DELAY=` passes any assigned-at-all check and still silently bakes in `1`. Measured:
+
+```
+VAR=''    -> ${VAR:-1} = '1'      <- empty is indistinguishable from unset; SILENT
+VAR=abc   -> ${VAR:-1} = 'abc'    <- garbage survives into intent.toml; TOML rejects it; LOUD
+```
+
+That asymmetry is why this rule is scoped to *empty* rather than to value validation: a malformed value fails loudly at `op-deployer apply`, an empty one is baked in permanently and silently. Rejecting non-integer values is **out of scope** — raise it as E-F7-11-3 if you disagree, do not add it.
 
 Both conditions are settled decisions; the reasoning, so you can recognise variants:
 
@@ -107,7 +116,9 @@ Append an F7-11 block to `scripts/test-helpers.sh`, before the final `if (( fail
 - leading-whitespace assignment counts
 - absence + `FORCE_SEPOLIA_REDEPLOY=1` refuses
 - absence + `FAULT_GAME_ABSOLUTE_PRESTATE` set refuses
-- absence with **neither** set still proceeds (today's behaviour preserved)
+- **`VAR=` (empty) and `VAR=""` refuse on both irreversible paths**, exactly as absence does — assert this per variable, since three of the six are covered by no other check
+- `VAR=3600` followed later by `VAR=` is a **duplicate** and refuses unconditionally, on every path
+- absence or emptiness with **neither** gate set still proceeds (today's behaviour preserved)
 - the guard reads `$FORTEL2_ENV_FILE`, not a hard-coded `.env.sepolia`
 - error output contains no value from any line of the env file
 - structurally, both refusals run before `require_min_balance_eth` and before `rm -rf "$DEPLOY_DIR"`
@@ -141,7 +152,7 @@ Re-fetch `origin/main` and re-run everything at hand-back time.
   Run it with a temporary, secret-free env file rather than bare — with no local `.env` the suite falls back to tracked `.env.example`, whose `FORTEL2_ROOT` is a macOS-only path:
 
   ```bash
-  TMPENV="$(mktemp -t fortel2-test-env)"
+  TMPENV="$(mktemp "${TMPDIR:-/tmp}/fortel2-test-env.XXXXXX")"
   sed -e "s|/Users/steveforte/ForteL2|$PWD|g" \
       -e "s|/Users/steveforte/src/fortel2/data|${TMPDIR:-/tmp}/fortel2-test-data|g" \
       .env.example > "$TMPENV"
@@ -149,6 +160,8 @@ Re-fetch `origin/main` and re-run everything at hand-back time.
   ```
 
   This produced 122 PASS on `wave23-base`. **Do not write a repo-root `.env`** — the operator has one.
+
+  That `mktemp` form is the house convention — every `mktemp` in `test-helpers.sh` uses `"${TMPDIR:-/tmp}/name.XXXXXX"`, e.g. `FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-viewer-XXXXXX")"`. Use it for any fixture you create. The `-t prefix` form without explicit `X`s works on BSD/macOS and fails on GNU/Linux with `too few X's in template`, which would stop the mandatory gate before it started.
 
 - **Byte-identity:** regenerate `intent.toml` with `FAULT_GAME_ABSOLUTE_PRESTATE` unset, under identical dummy env, from both `wave23-base` and your branch. `diff` must be empty. **Assert both captures are non-empty before comparing** — an empty-vs-empty comparison reports a false match, and that has happened twice on this project (D-0064 Finding 7, D-0065 Finding 4). Report the command, the byte count, and the hash.
 - The refusal drives and the mutation table.
