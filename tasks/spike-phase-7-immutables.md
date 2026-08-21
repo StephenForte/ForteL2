@@ -1,7 +1,7 @@
 # Spike US-070 — Phase 7 fault-game immutables, chosen
 
 **Date:** 2026-08-18
-**Status:** Values confirmed by operator. `.env.sepolia` update and notice date are still **operator-pending** — this file records the decision, it does not execute it. No `FORCE_SEPOLIA_REDEPLOY`, no pack/publish, no datadir wipe has happened.
+**Status:** Values confirmed by operator. **`.env.sepolia` was written and verified 2026-08-21 (D-0065)** — all six values present, no duplicate assignments, deploy script's own clock gate passes. The **notice date** remains operator-pending (§4) — this file records the decision, it does not execute it. No `FORCE_SEPOLIA_REDEPLOY`, no pack/publish, no datadir wipe has happened.
 
 ---
 
@@ -44,7 +44,7 @@ Per operator direction (2026-08-18): the ≥1-day SOS/Render/friends notice (D-0
 
 ## 5. What is still pending (not done by this file)
 
-- [ ] Operator hand-edits local `.env.sepolia` (gitignored, contains signing keys — not touched by this brief or any agent) to set all six values above. Two of the six (`FAULT_GAME_CLOCK_EXTENSION`, `PREIMAGE_ORACLE_CHALLENGE_PERIOD`) are currently **absent** from the file and fall back to script defaults (`5`, `86400`) until added; the other four are still at old pinned values (`12`, `6`, `10`, `1`).
+- [x] Operator hand-edits local `.env.sepolia` (gitignored, contains signing keys — not touched by this brief or any agent) to set all six values above. **Done 2026-08-21.** All six are now present and no variable is assigned twice; the earlier Phase 2b block lower in the file had been shadowing four of them, which is recorded with the near-miss in **D-0065**. Backup outside the git tree at `~/src/fortel2/env-backups/`.
 - [ ] Notice to SOS + Render + every Phase 3b friend, ≥1 day ahead, sent only once the operator is actually ready (§4).
 - [ ] Everything from US-071 onward (redeploy gate, coordinated wipe, challenger runs) — all operator-executed per the Operator sequence table; not started.
 
