@@ -301,7 +301,9 @@ fi
 
 # Bad batcher address must fail closed
 sed -i.bak 's/BATCHER_ADDRESS=.*/BATCHER_ADDRESS=not-an-address/' "$FIXTURE/.env"
-if FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null 2>&1; then
+# env -u: same FORTEL2_ENV leak as the fixture run above — an inherited
+# absolute FORTEL2_ENV would load a valid BATCHER_ADDRESS and this would pass.
+if env -u FORTEL2_ENV FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null 2>&1; then
   echo "FAIL gen-viewer-config should reject bad BATCHER_ADDRESS" >&2
   fail=1
 else
@@ -1753,6 +1755,165 @@ if grep -qE '^# FAULT_GAME_ABSOLUTE_PRESTATE=' "$ENV_SEPOLIA_EXAMPLE" \
   echo "PASS F7-6 .env.sepolia.example documents FAULT_GAME_ABSOLUTE_PRESTATE commented out for step 8b"
 else
   echo "FAIL .env.sepolia.example must document FAULT_GAME_ABSOLUTE_PRESTATE as commented-out, step 8b only — not pinned before the wipe, not op-deployer's default" >&2
+  fail=1
+fi
+
+# F7-10: ADMIN_PRIVATE_KEY must derive ADMIN_ADDRESS before spend or wipe.
+# Generate the keypair at runtime — never a key literal in this file.
+_f710_fn="$(awk '/^require_admin_key_matches_address\(\)/,/^}/' "$DEPLOY_SEPOLIA")"
+_f710_rc=""
+_f710_out=""
+_f710_run() {
+  local key="${1-}"
+  local addr="${2-}"
+  _f710_rc=0
+  _f710_out="$(
+    (
+      eval "$_f710_fn"
+      if [[ "$key" == "__UNSET__" ]]; then
+        unset ADMIN_PRIVATE_KEY
+      else
+        ADMIN_PRIVATE_KEY="$key"
+        export ADMIN_PRIVATE_KEY
+      fi
+      ADMIN_ADDRESS="$addr"
+      export ADMIN_ADDRESS
+      require_admin_key_matches_address
+    ) 2>&1
+  )" || _f710_rc=$?
+}
+_f710_key_leaked() {
+  local hay="$1" key="$2" allowed="$3"
+  local body chunk i
+  [[ -z "$key" ]] && return 1
+  if printf '%s' "$hay" | grep -F -q -- "$key"; then
+    return 0
+  fi
+  body="${key#0x}"
+  body="${body#0X}"
+  if [[ "$body" != "$key" ]] && printf '%s' "$hay" | grep -F -q -- "$body"; then
+    return 0
+  fi
+  i=0
+  while (( i + 8 <= ${#body} )); do
+    chunk="${body:i:8}"
+    if printf '%s' "$hay" | grep -F -q -- "$chunk"; then
+      if ! printf '%s' "$allowed" | grep -F -q -- "$chunk"; then
+        return 0
+      fi
+    fi
+    i=$((i + 1))
+  done
+  return 1
+}
+
+if ! command -v cast >/dev/null 2>&1; then
+  echo "FAIL F7-10 tests require cast on PATH (Foundry)" >&2
+  fail=1
+elif [[ -z "$_f710_fn" ]]; then
+  echo "FAIL 02-deploy-contracts-sepolia.sh must define require_admin_key_matches_address" >&2
+  fail=1
+else
+  _f710_wallet="$(cast wallet new)"
+  _f710_addr="$(printf '%s\n' "$_f710_wallet" | awk '/^Address:/{print $2}')"
+  _f710_key="$(printf '%s\n' "$_f710_wallet" | awk '/^Private key:/{print $3}')"
+  _f710_addr_lc="$(printf '%s' "$_f710_addr" | tr '[:upper:]' '[:lower:]')"
+  _f710_other_addr="$(cast wallet new | awk '/^Address:/{print $2}')"
+  unset _f710_wallet
+
+  _f710_run "$_f710_key" "$_f710_addr_lc"
+  if [[ "$_f710_rc" == "0" ]]; then
+    echo "PASS F7-10 matching pair (checksummed vs lowercase) exits 0"
+  else
+    echo "FAIL require_admin_key_matches_address must accept a checksummed-vs-lowercase pair of the same account" >&2
+    fail=1
+  fi
+
+  _f710_run "$_f710_key" "$_f710_other_addr"
+  _f710_mismatch_out="$_f710_out"
+  if [[ "$_f710_rc" != "0" ]] \
+    && printf '%s' "$_f710_mismatch_out" | grep -F -q -- "$_f710_addr" \
+    && printf '%s' "$_f710_mismatch_out" | grep -F -q -- "$_f710_other_addr"; then
+    echo "PASS F7-10 mismatched pair exits non-zero"
+  else
+    echo "FAIL require_admin_key_matches_address must refuse when ADMIN_PRIVATE_KEY does not derive ADMIN_ADDRESS" >&2
+    fail=1
+  fi
+
+  _f710_run "" "$_f710_addr"
+  _f710_empty_rc="$_f710_rc"
+  _f710_empty_out="$_f710_out"
+  _f710_run "__UNSET__" "$_f710_addr"
+  if [[ "$_f710_empty_rc" != "0" && "$_f710_rc" != "0" ]] \
+    && printf '%s' "$_f710_empty_out" | grep -q 'ADMIN_PRIVATE_KEY is required' \
+    && printf '%s' "$_f710_out" | grep -q 'ADMIN_PRIVATE_KEY is required'; then
+    echo "PASS F7-10 unset or empty ADMIN_PRIVATE_KEY exits non-zero"
+  else
+    echo "FAIL require_admin_key_matches_address must refuse an unset or empty ADMIN_PRIVATE_KEY" >&2
+    fail=1
+  fi
+
+  _f710_run "$_f710_key" "$_f710_addr_lc"
+  _f710_match_out="$_f710_out"
+  if ! _f710_key_leaked "${_f710_match_out}${_f710_mismatch_out}${_f710_empty_out}" "$_f710_key" "${_f710_addr}${_f710_addr_lc}${_f710_other_addr}"; then
+    echo "PASS F7-10 error output does not contain the key or an 8-character substring of it"
+  else
+    echo "FAIL require_admin_key_matches_address must not print ADMIN_PRIVATE_KEY or any 8-character substring of it" >&2
+    fail=1
+  fi
+
+  if awk '
+       /^require_admin_key_matches_address\(\)/ { def = NR }
+       /^require_admin_key_matches_address$/ { call = NR }
+       /require_min_balance_eth/ && !bal { bal = NR }
+       /rm -rf "\$DEPLOY_DIR"/ && !rm { rm = NR }
+       END { exit !(def && call && bal && rm && def < call && call < bal && call < rm) }
+     ' "$DEPLOY_SEPOLIA"; then
+    echo "PASS F7-10 pairing check is called before require_min_balance_eth and before the wipe"
+  else
+    echo "FAIL require_admin_key_matches_address must run before require_min_balance_eth and before rm -rf \"\$DEPLOY_DIR\"" >&2
+    fail=1
+  fi
+
+  if awk '
+       /cast wallet address/ {
+         saw = 1
+         if ($0 ~ /--private-key/) flag = 1
+         if ($0 ~ /cast wallet address[[:space:]]+"\$ADMIN_PRIVATE_KEY"/) pos = 1
+       }
+       END { exit !(saw && flag && !pos) }
+     ' "$DEPLOY_SEPOLIA"; then
+    echo "PASS F7-10 derives the address with cast wallet address --private-key"
+  else
+    echo "FAIL 02-deploy-contracts-sepolia.sh must call cast wallet address --private-key, not a positional key" >&2
+    fail=1
+  fi
+
+  unset _f710_key _f710_addr _f710_addr_lc _f710_other_addr _f710_match_out _f710_mismatch_out _f710_empty_out _f710_empty_rc
+fi
+unset _f710_fn _f710_rc _f710_out
+
+if python3 - "$SCRIPT_DIR/test-helpers.sh" << 'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+# Frozen set: two pre-existing Foundry-tripwire fixtures (not secrets) plus
+# the F7-6 public prestate hashes. A new 0x+64-hex literal fails this check.
+allowed = {
+    "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "0x038512e02c4c3f7bdaec27d00edf55b7155e0905301e1a88083e4e0a6764d54c",
+}
+bad = []
+for m in re.finditer(r"0x[0-9a-fA-F]{64}", text):
+    if m.group(0).lower() not in {a.lower() for a in allowed}:
+        bad.append(m.group(0))
+sys.exit(1 if bad else 0)
+PY
+  then
+    echo "PASS F7-10 test-helpers.sh 0x-prefixed 64-hex literals are a frozen allowlist"
+else
+  echo "FAIL scripts/test-helpers.sh 0x-prefixed 64-hex literals must stay on the frozen allowlist (Foundry tripwire fixtures + F7-6 prestates)" >&2
   fail=1
 fi
 
