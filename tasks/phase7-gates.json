@@ -53,6 +53,10 @@
     "readmeStep": "2",
     "note": "Under README numbering, step 3 is stop-writers; under PRD numbering, step 3 is redeploy. Locked as current README text."
   },
+  "gateIds": {
+    "both": ["F7-10", "F7-11", "F7-12"],
+    "prdOnly": ["F7-6", "F7-7", "F7-8"]
+  },
   "steps": [
     {
       "id": "choose-immutables",

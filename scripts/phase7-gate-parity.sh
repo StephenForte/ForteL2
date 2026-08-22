@@ -14,10 +14,12 @@
 #   PHASE7_LEARNING_PRD   default: $REPO_ROOT/tasks/prd-l2-learning-chain.md
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck disable=SC1091
-source "$SCRIPT_DIR/lib.sh"
-
-require_bin python3
+# Do not source lib.sh. It loads .env / .env.example (macOS FORTEL2_ROOT) and
+# mkdir -p DATA_DIR. This check is offline JSON/markdown only.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: required binary not found on PATH: python3" >&2
+  exit 1
+fi
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 export PHASE7_GATES_JSON="${PHASE7_GATES_JSON:-$REPO_ROOT/tasks/phase7-gates.json}"
@@ -283,23 +285,79 @@ def check_timestamps(label: str, text: str, notice: dict) -> None:
             )
 
 
-# File-level, not a 120-char window: summaries mention FORCE_SEPOLIA_REDEPLOY=1
-# as next-redeploy guidance next to "SECOND time" / "do not re-run". A window
-# shorter than that block is a false positive (the negation is a few lines earlier).
+# Per-paragraph / imperative, not file-wide: a "next redeploy" phrase at the
+# top of .env.sepolia.example must not bless a later `run FORCE_SEPOLIA_REDEPLOY=1 now`.
 WIPE_FILE_NEGATION = (
     "second time",
     "do not re-run",
     "must not be re-run",
     "never execute",
+    "never set",
     "next redeploy",
+    "would wipe",
 )
 
+IMPERATIVE_WIPE = re.compile(
+    r"(?:run|execute)\s+FORCE_SEPOLIA_REDEPLOY=1",
+    re.I,
+)
 
-def instructs_current_wipe(text: str) -> bool:
-    if "FORCE_SEPOLIA_REDEPLOY=1" not in text:
-        return False
-    low = text.lower()
-    return not any(p in low for p in WIPE_FILE_NEGATION)
+GATE_ID_RE = re.compile(r"\bF7-\d+\b")
+
+
+def fmt_ids(ids: set[str] | list[str]) -> str:
+    return ",".join(sorted(ids, key=lambda s: int(s.split("-")[1]))) or "<none>"
+
+
+def extract_gate_ids(text: str) -> set[str]:
+    return set(GATE_ID_RE.findall(text))
+
+
+def check_gate_ids(label: str, text: str, declared: set[str]) -> None:
+    found = extract_gate_ids(text)
+    if found != declared:
+        fail(
+            f"{label} gate ids (declared={fmt_ids(declared)} found={fmt_ids(found)})"
+        )
+    else:
+        pass_(f"{label} gate ids match ({fmt_ids(declared)})")
+
+
+def comment_paragraphs(text: str) -> list[str]:
+    paras: list[str] = []
+    buf: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("#"):
+            buf.append(line)
+            continue
+        if buf:
+            paras.append("\n".join(buf))
+            buf = []
+    if buf:
+        paras.append("\n".join(buf))
+    return paras
+
+
+def unnegated_wipe_units(text: str) -> list[str]:
+    hits: list[str] = []
+    if IMPERATIVE_WIPE.search(text):
+        hits.append("imperative run/execute FORCE_SEPOLIA_REDEPLOY=1")
+    hashed = any(
+        ln.startswith("#") and "FORCE_SEPOLIA_REDEPLOY=1" in ln
+        for ln in text.splitlines()
+    )
+    units = comment_paragraphs(text) if hashed else (
+        [text] if "FORCE_SEPOLIA_REDEPLOY=1" in text else []
+    )
+    for unit in units:
+        if "FORCE_SEPOLIA_REDEPLOY=1" not in unit:
+            continue
+        if IMPERATIVE_WIPE.search(unit):
+            continue
+        low = unit.lower()
+        if not any(p in low for p in WIPE_FILE_NEGATION):
+            hits.append(" ".join(unit.split())[:180])
+    return hits
 
 
 def check_complete_range(label: str, text: str, declared: list[str]) -> None:
@@ -355,6 +413,7 @@ def main() -> int:
         v7 = facts["v7Bump"]
         preflight = facts["preflight"]
         actions = facts["steps"]
+        gate_ids_facts = facts["gateIds"]
         prd_heading = loc["prd"]["heading"]
         readme_heading = loc["readme"]["heading"]
     except KeyError as e:
@@ -417,6 +476,25 @@ def main() -> int:
         fail(f"missing README step(s) {','.join(missing_readme)}")
     else:
         pass_("every declared README step is in Order:")
+
+    both_ids = set(gate_ids_facts["both"])
+    prd_ids = both_ids | set(gate_ids_facts.get("prdOnly") or [])
+    readme_ids = both_ids | set(gate_ids_facts.get("readmeOnly") or [])
+    check_gate_ids("PRD Operator sequence", prd_section, prd_ids)
+    check_gate_ids("README Network reset procedure", readme_section, readme_ids)
+    known_ids = prd_ids | readme_ids
+    for label, text in (
+        (".env.sepolia.example", env_text),
+        ("glossary Redeploy gate", glossary),
+        ("Phase 7 roadmap row", roadmap_row),
+    ):
+        extra = extract_gate_ids(text) - known_ids
+        if extra:
+            fail(
+                f"{label} undeclared gate id(s) (declared={fmt_ids(known_ids)} found extra={fmt_ids(extra)})"
+            )
+        else:
+            pass_(f"{label} gate ids are a subset of declared")
 
     for action in actions:
         aid = action["id"]
@@ -541,9 +619,10 @@ def main() -> int:
         ("glossary Redeploy gate", glossary),
         ("Phase 7 roadmap row", roadmap_row),
     ):
-        if instructs_current_wipe(text):
+        hits = unnegated_wipe_units(text)
+        if hits:
             fail(
-                f"{label} instructs FORCE_SEPOLIA_REDEPLOY=1 without second-wipe/do-not-rerun negation"
+                f"{label} instructs FORCE_SEPOLIA_REDEPLOY=1 without nearby negation ({hits[0]!r})"
             )
         else:
             pass_(f"{label} does not instruct a second wipe")
