@@ -1,7 +1,7 @@
 # Spike US-070 — Phase 7 fault-game immutables, chosen
 
 **Date:** 2026-08-18
-**Status:** Values confirmed by operator. **`.env.sepolia` was written and verified 2026-08-21 (D-0065)** — all six values present, no duplicate assignments, deploy script's own clock gate passes. The **notice date** remains operator-pending (§4) — this file records the decision, it does not execute it. No `FORCE_SEPOLIA_REDEPLOY`, no pack/publish, no datadir wipe has happened.
+**Status:** Complete. Values confirmed by operator; notice sent 2026-08-21 (D-0067). **`.env.sepolia` was written and verified 2026-08-21 (D-0065)** — all six values present, no duplicate assignments, deploy script's own clock gate passes. The **notice date** remains operator-pending (§4) — this file records the decision, it does not execute it. No `FORCE_SEPOLIA_REDEPLOY`, no pack/publish, no datadir wipe has happened.
 
 ---
 
@@ -38,14 +38,18 @@ The old pinned values (`clockExtension=5`, `maxClockDuration=10`, implicit `prei
 
 Either way this is same-day, one- or two-sitting work — not seconds (the old pinned values, which couldn't even create a game), and not mainnet's multi-day windows. That matches the PRD's stated intent: minutes-to-hours, sized for a human to actually play by hand.
 
-## 4. Notice date — rule, not a date
+## 4. Notice date — sent 2026-08-21 13:00 PDT
+
+**The rule resolved to a date.** Notice went out **2026-08-21 13:00 PDT (20:00Z)** to SettlementOS, SOS Explorer, L2Replica and ChainBank; earliest step 2 is **2026-08-22T20:00Z** (D-0067). The rule that produced it is preserved below.
+
+### The rule it came from
 
 Per operator direction (2026-08-18): the ≥1-day SOS/Render/friends notice (D-0028) does not start on a calendar date chosen now. **The notice goes out only after all Phase 7 coding/config work is complete and reviewed.** At that point the operator sends notice and sets the actual date; step 2 of the Operator sequence (stop Mac writers) may not begin until **≥24 h after that notice is sent**, per the PRD's Operator sequence and README Network reset procedure. No specific calendar date is recorded here — recording one now, before the work it gates is even done, would misstate readiness to SOS and every Phase 3b friend.
 
 ## 5. What is still pending (not done by this file)
 
 - [x] Operator hand-edits local `.env.sepolia` (gitignored, contains signing keys — not touched by this brief or any agent) to set all six values above. **Done 2026-08-21.** All six are now present and no variable is assigned twice; the earlier Phase 2b block lower in the file had been shadowing four of them, which is recorded with the near-miss in **D-0065**. Backup outside the git tree at `~/src/fortel2/env-backups/`.
-- [ ] Notice to SOS + Render + every Phase 3b friend, ≥1 day ahead, sent only once the operator is actually ready (§4).
+- [x] Notice to SOS + Render + every Phase 3b friend, ≥1 day ahead, sent only once the operator is actually ready (§4). **Sent 2026-08-21 13:00 PDT (D-0067).** No Phase 3b friends were notified — none are active.
 - [ ] Everything from US-071 onward (redeploy gate, coordinated wipe, challenger runs) — all operator-executed per the Operator sequence table; not started.
 
 ## References
