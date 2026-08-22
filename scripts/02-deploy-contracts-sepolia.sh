@@ -35,6 +35,132 @@ require_admin_key_matches_address() {
   fi
 }
 require_admin_key_matches_address
+
+# F7-11 / D-0065: the six Phase 7 immutables are loaded with `set -a; source`, so
+# the last assignment wins. A duplicate makes the file lie about its effective
+# values; an empty assignment is indistinguishable from unset under ${VAR:-def}
+# and silently bakes in a script default. Duplicate refusal is unconditional.
+# Absence/empty refusal is only on the two irreversible paths (wipe / step 8b).
+# Read the resolved path from FORTEL2_ENV_FILE — never a hard-coded filename.
+# Error text names variables and line numbers only; never a line's contents.
+# >>> F7-11
+_f711_is_phase7_immutable() {
+  case "$1" in
+    PROOF_MATURITY_DELAY_SECONDS|DISPUTE_GAME_FINALITY_DELAY_SECONDS|FAULT_GAME_CLOCK_EXTENSION|FAULT_GAME_MAX_CLOCK_DURATION|FAULT_GAME_WITHDRAWAL_DELAY|PREIMAGE_ORACLE_CHALLENGE_PERIOD)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Stdout: "<lineno> <NAME> <0|1>" for each assignment of a Phase 7 immutable.
+# 1 means the assigned value is empty after stripping matching quotes.
+_f711_scan_immutable_assignments() {
+  local lineno=0 line trimmed name value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    line="${line%$'\r'}"
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$trimmed" ]] && continue
+    [[ "$trimmed" == \#* ]] && continue
+    if [[ "$trimmed" == export[[:space:]]* ]]; then
+      trimmed="${trimmed#export}"
+      trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+    fi
+    [[ "$trimmed" == *=* ]] || continue
+    name="${trimmed%%=*}"
+    _f711_is_phase7_immutable "$name" || continue
+    value="${trimmed#*=}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ "$value" == \"*\" ]]; then
+      value="${value#\"}"
+      value="${value%\"}"
+    elif [[ "$value" == \'*\' ]]; then
+      value="${value#\'}"
+      value="${value%\'}"
+    fi
+    if [[ -z "$value" ]]; then
+      printf '%s %s 1\n' "$lineno" "$name"
+    else
+      printf '%s %s 0\n' "$lineno" "$name"
+    fi
+  done < "$FORTEL2_ENV_FILE"
+}
+
+refuse_duplicate_phase7_immutables() {
+  local name lineno empty joined
+  local -a lines
+  if [[ -z "${FORTEL2_ENV_FILE:-}" ]]; then
+    echo "ERROR: FORTEL2_ENV_FILE is unset; cannot check Phase 7 immutables" >&2
+    exit 1
+  fi
+  if [[ ! -f "$FORTEL2_ENV_FILE" ]]; then
+    echo "ERROR: FORTEL2_ENV_FILE is not a file; cannot check Phase 7 immutables" >&2
+    exit 1
+  fi
+  for name in \
+    PROOF_MATURITY_DELAY_SECONDS \
+    DISPUTE_GAME_FINALITY_DELAY_SECONDS \
+    FAULT_GAME_CLOCK_EXTENSION \
+    FAULT_GAME_MAX_CLOCK_DURATION \
+    FAULT_GAME_WITHDRAWAL_DELAY \
+    PREIMAGE_ORACLE_CHALLENGE_PERIOD
+  do
+    lines=()
+    while read -r lineno empty; do
+      lines+=("$lineno")
+    done < <(_f711_scan_immutable_assignments | awk -v n="$name" '$2 == n { print $1, $3 }')
+    if (( ${#lines[@]} > 1 )); then
+      joined="$(printf '%s, ' "${lines[@]}")"
+      joined="${joined%, }"
+      echo "ERROR: $name is assigned more than once in the env file (lines $joined)." >&2
+      echo "  The last assignment wins when the file is sourced; remove the extra assignment(s) (D-0065)." >&2
+      exit 1
+    fi
+  done
+}
+
+refuse_absent_phase7_immutables() {
+  local name lineno empty last_empty found
+  if [[ "${FORCE_SEPOLIA_REDEPLOY:-}" != "1" && -z "${FAULT_GAME_ABSOLUTE_PRESTATE:-}" ]]; then
+    return 0
+  fi
+  if [[ -z "${FORTEL2_ENV_FILE:-}" ]]; then
+    echo "ERROR: FORTEL2_ENV_FILE is unset; cannot check Phase 7 immutables" >&2
+    exit 1
+  fi
+  if [[ ! -f "$FORTEL2_ENV_FILE" ]]; then
+    echo "ERROR: FORTEL2_ENV_FILE is not a file; cannot check Phase 7 immutables" >&2
+    exit 1
+  fi
+  for name in \
+    PROOF_MATURITY_DELAY_SECONDS \
+    DISPUTE_GAME_FINALITY_DELAY_SECONDS \
+    FAULT_GAME_CLOCK_EXTENSION \
+    FAULT_GAME_MAX_CLOCK_DURATION \
+    FAULT_GAME_WITHDRAWAL_DELAY \
+    PREIMAGE_ORACLE_CHALLENGE_PERIOD
+  do
+    found=0
+    last_empty=1
+    while read -r lineno empty; do
+      found=1
+      last_empty="$empty"
+    done < <(_f711_scan_immutable_assignments | awk -v n="$name" '$2 == n { print $1, $3 }')
+    if (( found == 0 || last_empty == 1 )); then
+      echo "ERROR: $name is missing or empty in the env file." >&2
+      echo "  Set a non-empty value before FORCE_SEPOLIA_REDEPLOY=1 or a type-8 apply (D-0065)." >&2
+      echo "  An unset or empty assignment silently takes a script default under \${VAR:-default}." >&2
+      exit 1
+    fi
+  done
+}
+# <<< F7-11
+refuse_duplicate_phase7_immutables
+refuse_absent_phase7_immutables
+
 require_eth_address "BATCHER_ADDRESS" "${BATCHER_ADDRESS:-}"
 require_eth_address "PROPOSER_ADDRESS" "${PROPOSER_ADDRESS:-}"
 require_eth_address "SEQUENCER_ADDRESS" "${SEQUENCER_ADDRESS:-}"

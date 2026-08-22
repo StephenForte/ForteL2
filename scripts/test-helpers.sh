@@ -1893,6 +1893,400 @@ else
 fi
 unset _f710_fn _f710_rc _f710_out
 
+# F7-11: refuse duplicate Phase 7 immutables on every run; refuse absent/empty
+# ones on the two irreversible paths (D-0065). Do not modify the F7-6 or F7-10
+# blocks above. Fixtures are built at runtime — never a committed env file.
+_F711_VARS=(
+  PROOF_MATURITY_DELAY_SECONDS
+  DISPUTE_GAME_FINALITY_DELAY_SECONDS
+  FAULT_GAME_CLOCK_EXTENSION
+  FAULT_GAME_MAX_CLOCK_DURATION
+  FAULT_GAME_WITHDRAWAL_DELAY
+  PREIMAGE_ORACLE_CHALLENGE_PERIOD
+)
+_f711_fn="$(awk '/^# >>> F7-11$/,/^# <<< F7-11$/' "$DEPLOY_SEPOLIA")"
+_f711_dir="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-f711-XXXXXX")"
+_f711_rc=""
+_f711_out=""
+_f711_write_complete() {
+  local dest="$1"
+  cat > "$dest" <<'EOF'
+PROOF_MATURITY_DELAY_SECONDS=1800
+DISPUTE_GAME_FINALITY_DELAY_SECONDS=1800
+FAULT_GAME_CLOCK_EXTENSION=600
+FAULT_GAME_MAX_CLOCK_DURATION=7200
+FAULT_GAME_WITHDRAWAL_DELAY=3600
+PREIMAGE_ORACLE_CHALLENGE_PERIOD=3600
+EOF
+}
+_f711_write_complete_except() {
+  local dest="$1" skip="$2"
+  local v
+  : > "$dest"
+  for v in "${_F711_VARS[@]}"; do
+    if [[ "$v" == "$skip" ]]; then
+      continue
+    fi
+    echo "${v}=3600" >> "$dest"
+  done
+}
+_f711_write_empty() {
+  local dest="$1" target="$2" form="$3"
+  local v
+  : > "$dest"
+  for v in "${_F711_VARS[@]}"; do
+    if [[ "$v" == "$target" ]]; then
+      if [[ "$form" == quoted ]]; then
+        echo "${v}=\"\"" >> "$dest"
+      else
+        echo "${v}=" >> "$dest"
+      fi
+    else
+      echo "${v}=3600" >> "$dest"
+    fi
+  done
+}
+_f711_run() {
+  local envfile="$1"
+  local force="${2-}"
+  local prestate="${3-}"
+  _f711_rc=0
+  _f711_out="$(
+    (
+      eval "$_f711_fn"
+      FORTEL2_ENV_FILE="$envfile"
+      export FORTEL2_ENV_FILE
+      if [[ -n "$force" ]]; then
+        FORCE_SEPOLIA_REDEPLOY="$force"
+        export FORCE_SEPOLIA_REDEPLOY
+      else
+        unset FORCE_SEPOLIA_REDEPLOY
+      fi
+      if [[ -n "$prestate" ]]; then
+        FAULT_GAME_ABSOLUTE_PRESTATE="$prestate"
+        export FAULT_GAME_ABSOLUTE_PRESTATE
+      else
+        unset FAULT_GAME_ABSOLUTE_PRESTATE
+      fi
+      refuse_duplicate_phase7_immutables
+      refuse_absent_phase7_immutables
+    ) 2>&1
+  )" || _f711_rc=$?
+}
+_f711_leaked_values() {
+  local hay="$1" envfile="$2"
+  local line val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    local trimmed="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$trimmed" ]] && continue
+    [[ "$trimmed" == \#* ]] && continue
+    [[ "$trimmed" == *=* ]] || continue
+    val="${trimmed#*=}"
+    val="${val%"${val##*[![:space:]]}"}"
+    if [[ "$val" == \"*\" ]]; then
+      val="${val#\"}"
+      val="${val%\"}"
+    elif [[ "$val" == \'*\' ]]; then
+      val="${val#\'}"
+      val="${val%\'}"
+    fi
+    [[ -z "$val" ]] && continue
+    if printf '%s' "$hay" | grep -F -q -- "$val"; then
+      return 0
+    fi
+  done < "$envfile"
+  return 1
+}
+
+if [[ -z "$_f711_fn" ]] \
+  || ! printf '%s' "$_f711_fn" | grep -q 'refuse_duplicate_phase7_immutables' \
+  || ! printf '%s' "$_f711_fn" | grep -q 'refuse_absent_phase7_immutables'; then
+  echo "FAIL 02-deploy-contracts-sepolia.sh must define the F7-11 refuse functions" >&2
+  fail=1
+else
+  _f711_good="$_f711_dir/good.env"
+  _f711_write_complete "$_f711_good"
+
+  _f711_dup_ok=1
+  _i=0
+  for _var in "${_F711_VARS[@]}"; do
+    _i=$((_i + 1))
+    _f711_dup="$_f711_dir/dup-${_var}.env"
+    _f711_write_complete "$_f711_dup"
+    echo "${_var}=f711dup" >> "$_f711_dup"
+    _f711_run "$_f711_dup" "" ""
+    if [[ "$_f711_rc" != "0" ]] \
+      && printf '%s' "$_f711_out" | grep -F -q -- "$_var" \
+      && printf '%s' "$_f711_out" | grep -F -q -- "lines ${_i}, 7"; then
+      echo "PASS F7-11 duplicate ${_var} refuses (lines ${_i}, 7)"
+    else
+      echo "FAIL F7-11 must refuse a duplicate ${_var} and name both line numbers" >&2
+      fail=1
+      _f711_dup_ok=0
+    fi
+    if _f711_leaked_values "$_f711_out" "$_f711_dup"; then
+      echo "FAIL F7-11 duplicate ${_var} error leaked an env-file value" >&2
+      fail=1
+      _f711_dup_ok=0
+    fi
+  done
+
+  _f711_comment="$_f711_dir/comment.env"
+  _f711_write_complete "$_f711_comment"
+  echo "#FAULT_GAME_CLOCK_EXTENSION=5" >> "$_f711_comment"
+  _f711_run "$_f711_comment" "1" ""
+  if [[ "$_f711_rc" == "0" ]]; then
+    echo "PASS F7-11 commented #VAR= is not a duplicate"
+  else
+    echo "FAIL F7-11 must not treat a commented #VAR= line as an assignment" >&2
+    fail=1
+  fi
+
+  _f711_export="$_f711_dir/export.env"
+  _f711_write_complete "$_f711_export"
+  echo "export FAULT_GAME_CLOCK_EXTENSION=f711dup" >> "$_f711_export"
+  _f711_run "$_f711_export" "" ""
+  if [[ "$_f711_rc" != "0" ]] \
+    && printf '%s' "$_f711_out" | grep -F -q -- "FAULT_GAME_CLOCK_EXTENSION" \
+    && printf '%s' "$_f711_out" | grep -F -q -- "lines 3, 7"; then
+    echo "PASS F7-11 export VAR= counts as an assignment"
+  else
+    echo "FAIL F7-11 must count export VAR= as an assignment (duplicate with line 3)" >&2
+    fail=1
+  fi
+  if _f711_leaked_values "$_f711_out" "$_f711_export"; then
+    echo "FAIL F7-11 export-duplicate error leaked an env-file value" >&2
+    fail=1
+  fi
+
+  _f711_ws="$_f711_dir/ws.env"
+  _f711_write_complete "$_f711_ws"
+  echo "  FAULT_GAME_CLOCK_EXTENSION=f711dup" >> "$_f711_ws"
+  _f711_run "$_f711_ws" "" ""
+  if [[ "$_f711_rc" != "0" ]] \
+    && printf '%s' "$_f711_out" | grep -F -q -- "FAULT_GAME_CLOCK_EXTENSION" \
+    && printf '%s' "$_f711_out" | grep -F -q -- "lines 3, 7"; then
+    echo "PASS F7-11 leading-whitespace assignment counts"
+  else
+    echo "FAIL F7-11 must count a leading-whitespace assignment as a duplicate" >&2
+    fail=1
+  fi
+  if _f711_leaked_values "$_f711_out" "$_f711_ws"; then
+    echo "FAIL F7-11 leading-whitespace error leaked an env-file value" >&2
+    fail=1
+  fi
+
+  _f711_abs_force_ok=1
+  _f711_abs_pre_ok=1
+  _f711_abs_neither_ok=1
+  for _var in "${_F711_VARS[@]}"; do
+    _f711_miss="$_f711_dir/miss-${_var}.env"
+    _f711_write_complete_except "$_f711_miss" "$_var"
+    _f711_run "$_f711_miss" "1" ""
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      :
+    else
+      echo "FAIL F7-11 must refuse absent ${_var} when FORCE_SEPOLIA_REDEPLOY=1" >&2
+      fail=1
+      _f711_abs_force_ok=0
+    fi
+    if _f711_leaked_values "$_f711_out" "$_f711_miss"; then
+      echo "FAIL F7-11 absence+FORCE ${_var} error leaked an env-file value" >&2
+      fail=1
+      _f711_abs_force_ok=0
+    fi
+    _f711_run "$_f711_miss" "" "prestate-set"
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      :
+    else
+      echo "FAIL F7-11 must refuse absent ${_var} when FAULT_GAME_ABSOLUTE_PRESTATE is set" >&2
+      fail=1
+      _f711_abs_pre_ok=0
+    fi
+    if _f711_leaked_values "$_f711_out" "$_f711_miss"; then
+      echo "FAIL F7-11 absence+prestate ${_var} error leaked an env-file value" >&2
+      fail=1
+      _f711_abs_pre_ok=0
+    fi
+    _f711_run "$_f711_miss" "" ""
+    if [[ "$_f711_rc" != "0" ]]; then
+      echo "FAIL F7-11 absence of ${_var} must still proceed when neither irreversible gate is set" >&2
+      fail=1
+      _f711_abs_neither_ok=0
+    fi
+  done
+  if ((_f711_abs_force_ok)); then
+    echo "PASS F7-11 absence + FORCE_SEPOLIA_REDEPLOY=1 refuses each of the six"
+  fi
+  if ((_f711_abs_pre_ok)); then
+    echo "PASS F7-11 absence + FAULT_GAME_ABSOLUTE_PRESTATE set refuses each of the six"
+  fi
+
+  _f711_empty_force_ok=1
+  _f711_empty_pre_ok=1
+  _f711_quoted_force_ok=1
+  _f711_quoted_pre_ok=1
+  _f711_empty_neither_ok=1
+  for _var in "${_F711_VARS[@]}"; do
+    _f711_empty="$_f711_dir/empty-${_var}.env"
+    _f711_write_empty "$_f711_empty" "$_var" empty
+    _f711_run "$_f711_empty" "1" ""
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 empty ${_var}= refuses on FORCE_SEPOLIA_REDEPLOY=1"
+    else
+      echo "FAIL F7-11 must refuse empty ${_var}= when FORCE_SEPOLIA_REDEPLOY=1" >&2
+      fail=1
+      _f711_empty_force_ok=0
+    fi
+    _f711_run "$_f711_empty" "" "prestate-set"
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 empty ${_var}= refuses on FAULT_GAME_ABSOLUTE_PRESTATE set"
+    else
+      echo "FAIL F7-11 must refuse empty ${_var}= when FAULT_GAME_ABSOLUTE_PRESTATE is set" >&2
+      fail=1
+      _f711_empty_pre_ok=0
+    fi
+    _f711_run "$_f711_empty" "" ""
+    if [[ "$_f711_rc" == "0" ]]; then
+      :
+    else
+      echo "FAIL F7-11 empty ${_var}= must still proceed when neither irreversible gate is set" >&2
+      fail=1
+      _f711_empty_neither_ok=0
+    fi
+
+    _f711_qempty="$_f711_dir/qempty-${_var}.env"
+    _f711_write_empty "$_f711_qempty" "$_var" quoted
+    _f711_run "$_f711_qempty" "1" ""
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 quoted-empty ${_var}=\"\" refuses on FORCE_SEPOLIA_REDEPLOY=1"
+    else
+      echo "FAIL F7-11 must refuse quoted-empty ${_var}=\"\" when FORCE_SEPOLIA_REDEPLOY=1" >&2
+      fail=1
+      _f711_quoted_force_ok=0
+    fi
+    _f711_run "$_f711_qempty" "" "prestate-set"
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 quoted-empty ${_var}=\"\" refuses on FAULT_GAME_ABSOLUTE_PRESTATE set"
+    else
+      echo "FAIL F7-11 must refuse quoted-empty ${_var}=\"\" when FAULT_GAME_ABSOLUTE_PRESTATE is set" >&2
+      fail=1
+      _f711_quoted_pre_ok=0
+    fi
+    _f711_run "$_f711_qempty" "" ""
+    if [[ "$_f711_rc" != "0" ]]; then
+      echo "FAIL F7-11 quoted-empty ${_var}=\"\" must still proceed when neither irreversible gate is set" >&2
+      fail=1
+      _f711_empty_neither_ok=0
+    fi
+  done
+  if ((_f711_empty_neither_ok && _f711_abs_neither_ok)); then
+    echo "PASS F7-11 absence or emptiness with neither gate set still proceeds"
+  fi
+
+  _f711_then_empty="$_f711_dir/then-empty.env"
+  _f711_write_complete "$_f711_then_empty"
+  echo "FAULT_GAME_WITHDRAWAL_DELAY=" >> "$_f711_then_empty"
+  _f711_run "$_f711_then_empty" "" ""
+  if [[ "$_f711_rc" != "0" ]] \
+    && printf '%s' "$_f711_out" | grep -F -q -- "FAULT_GAME_WITHDRAWAL_DELAY" \
+    && printf '%s' "$_f711_out" | grep -F -q -- "lines 5, 7"; then
+    echo "PASS F7-11 VAR=3600 followed by VAR= is a duplicate on every path"
+  else
+    echo "FAIL F7-11 must refuse VAR=3600 later overwritten by VAR= as a duplicate, even with neither gate set" >&2
+    fail=1
+  fi
+
+  _f711_run "$_f711_good" "1" ""
+  _f711_good_force="$_f711_rc"
+  _f711_run "$_f711_good" "" "prestate-set"
+  _f711_good_pre="$_f711_rc"
+  _f711_run "$_f711_good" "" ""
+  if [[ "$_f711_good_force" == "0" && "$_f711_good_pre" == "0" && "$_f711_rc" == "0" ]]; then
+    echo "PASS F7-11 complete env file proceeds on wipe, step 8b, and neither"
+  else
+    echo "FAIL F7-11 must accept a file that assigns each of the six once, non-empty" >&2
+    fail=1
+  fi
+
+  # Resolved-path drive: FORTEL2_ENV is an absolute temp file (not named
+  # .env.sepolia). env -u clears an inherited FORTEL2_ENV so the fixture is not
+  # bypassed (D-0065 Finding on vacuous tests).
+  _f711_abs="$(mktemp "${TMPDIR:-/tmp}/fortel2-f711-env.XXXXXX")"
+  _f711_root="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-f711-root.XXXXXX")"
+  {
+    echo "FORTEL2_ROOT=${_f711_root}"
+    echo "DATA_DIR=${_f711_root}/data"
+    echo "DEPLOY_DIR=${_f711_root}/deployments/.deployer"
+    echo "PROOF_MATURITY_DELAY_SECONDS=1800"
+    echo "DISPUTE_GAME_FINALITY_DELAY_SECONDS=1800"
+    echo "FAULT_GAME_CLOCK_EXTENSION=600"
+    echo "FAULT_GAME_MAX_CLOCK_DURATION=7200"
+    echo "FAULT_GAME_WITHDRAWAL_DELAY=3600"
+    echo "PREIMAGE_ORACLE_CHALLENGE_PERIOD=3600"
+    echo "FAULT_GAME_CLOCK_EXTENSION=f711-leak-canary-token"
+  } > "$_f711_abs"
+  _f711_path_rc=0
+  _f711_path_out="$(
+    env -u FORTEL2_ENV -u FORTEL2_ENV_FILE \
+      FORTEL2_ENV="$_f711_abs" \
+      F711_FN="$_f711_fn" \
+      bash -c '
+        set -euo pipefail
+        # shellcheck disable=SC1090
+        source "$1"
+        eval "$F711_FN"
+        if [[ "$FORTEL2_ENV_FILE" != "$FORTEL2_ENV" ]]; then
+          echo "ERROR: FORTEL2_ENV_FILE was not resolved from FORTEL2_ENV" >&2
+          exit 2
+        fi
+        refuse_duplicate_phase7_immutables
+      ' bash "$SCRIPT_DIR/lib.sh" 2>&1
+  )" || _f711_path_rc=$?
+  if [[ "$_f711_path_rc" != "0" && "$_f711_path_rc" != "2" ]] \
+    && printf '%s' "$_f711_path_out" | grep -F -q -- "FAULT_GAME_CLOCK_EXTENSION" \
+    && ! printf '%s' "$_f711_path_out" | grep -F -q -- "f711-leak-canary-token" \
+    && printf '%s' "$_f711_fn" | grep -q 'FORTEL2_ENV_FILE' \
+    && ! printf '%s' "$_f711_fn" | grep -q '\.env\.sepolia'; then
+    echo "PASS F7-11 guard reads FORTEL2_ENV_FILE (absolute FORTEL2_ENV, not a hard-coded filename)"
+  else
+    echo "FAIL F7-11 must read \$FORTEL2_ENV_FILE, not a hard-coded .env.sepolia" >&2
+    fail=1
+  fi
+  if _f711_leaked_values "$_f711_path_out" "$_f711_abs"; then
+    echo "FAIL F7-11 resolved-path error leaked an env-file value" >&2
+    fail=1
+  else
+    echo "PASS F7-11 error output contains no value from any env-file line"
+  fi
+  rm -rf "$_f711_root"
+  rm -f "$_f711_abs"
+
+  if awk '
+       /^refuse_duplicate_phase7_immutables$/ { dup = NR }
+       /^refuse_absent_phase7_immutables$/ { abs = NR }
+       /require_min_balance_eth/ && !bal { bal = NR }
+       /rm -rf "\$DEPLOY_DIR"/ && !rm { rm = NR }
+       END { exit !(dup && abs && bal && rm && dup < bal && abs < bal && dup < rm && abs < rm) }
+     ' "$DEPLOY_SEPOLIA"; then
+    echo "PASS F7-11 both refusals run before require_min_balance_eth and before the wipe"
+  else
+    echo "FAIL F7-11 refuse_duplicate_phase7_immutables and refuse_absent_phase7_immutables must run before require_min_balance_eth and before rm -rf \"\$DEPLOY_DIR\"" >&2
+    fail=1
+  fi
+fi
+rm -rf "$_f711_dir"
+unset _f711_fn _f711_rc _f711_out _f711_dir _f711_good _f711_dup _f711_comment \
+  _f711_export _f711_ws _f711_miss _f711_empty _f711_qempty _f711_then_empty \
+  _f711_abs _f711_root _f711_path_rc _f711_path_out _f711_good_force _f711_good_pre \
+  _var _i _f711_dup_ok _f711_abs_force_ok _f711_abs_pre_ok \
+  _f711_empty_force_ok _f711_empty_pre_ok _f711_quoted_force_ok _f711_quoted_pre_ok \
+  _f711_empty_neither_ok
+unset -f _f711_write_complete _f711_write_complete_except _f711_write_empty \
+  _f711_run _f711_leaked_values 2>/dev/null || true
+unset _F711_VARS
+
 if python3 - "$SCRIPT_DIR/test-helpers.sh" << 'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
