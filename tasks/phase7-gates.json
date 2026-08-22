@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Declared Phase 7 operator-sequence facts for scripts/phase7-gate-parity.sh (F7-12). The PRD/README step-number collision is locked here rather than treated as accidental. Renumbering README is an operator decision, not this file's job.",
+  "authority": "tasks/prd-phase-7-fault-proofs.md § Operator sequence",
+  "locations": {
+    "prd": {
+      "path": "tasks/prd-phase-7-fault-proofs.md",
+      "heading": "## Operator sequence",
+      "mode": "completeness"
+    },
+    "readme": {
+      "path": "README.md",
+      "heading": "### Network reset procedure",
+      "mode": "completeness"
+    },
+    "envExample": {
+      "path": ".env.sepolia.example",
+      "mode": "non-contradiction"
+    },
+    "glossary": {
+      "path": "tasks/prd-l2-learning-chain.md",
+      "heading": "**Phase glossary (used throughout):**",
+      "bullet": "- **Redeploy gate**",
+      "mode": "non-contradiction"
+    },
+    "roadmap": {
+      "path": "tasks/prd-l2-learning-chain.md",
+      "heading": "## Phase Roadmap",
+      "phaseCell": "**7**",
+      "mode": "non-contradiction"
+    }
+  },
+  "notice": {
+    "sentUtc": "2026-08-21 20:00Z",
+    "sentLocal": "2026-08-21 13:00 PDT",
+    "sentReadme": "2026-08-21 13:00 PDT / 20:00Z",
+    "gateUtc": "2026-08-22T20:00Z"
+  },
+  "executed": {
+    "prdBanner": "steps 2 through 9 are COMPLETE",
+    "readmeBanner": "Steps 1 through 8 are complete",
+    "prdCompleteRange": ["2", "9"],
+    "date": "2026-08-22"
+  },
+  "v7Bump": {
+    "prdStep": "9",
+    "prdTrigger": "after step 3 addresses are in git",
+    "readmeFoldedInto": "8",
+    "readmeTrigger": "before declaring the network healthy"
+  },
+  "preflight": {
+    "readmeMustContain": "Immediately before step 3",
+    "readmeStep": "2",
+    "note": "Under README numbering, step 3 is stop-writers; under PRD numbering, step 3 is redeploy. Locked as current README text."
+  },
+  "steps": [
+    {
+      "id": "choose-immutables",
+      "prd": "0",
+      "readme": "1",
+      "prdMustContain": ["all six", "immutables"],
+      "readmeMustContain": ["**Choose Phase 7 immutables"]
+    },
+    {
+      "id": "code-gate",
+      "prd": "0b",
+      "readme": "1b",
+      "prdMustContain": ["**Phase 7 code gate"],
+      "readmeMustContain": ["**Phase 7 code gate"]
+    },
+    {
+      "id": "announce",
+      "prd": "1",
+      "readme": "2",
+      "prdMustContain": ["Announce to SOS"],
+      "readmeMustContain": ["**Announce**"]
+    },
+    {
+      "id": "stop-writers",
+      "prd": "2",
+      "readme": "3",
+      "prdMustContain": ["Stop Mac writers"],
+      "readmeMustContain": ["**Stop Mac writers**"]
+    },
+    {
+      "id": "redeploy",
+      "prd": "3",
+      "readme": "4",
+      "prdMustContain": ["FORCE_SEPOLIA_REDEPLOY=1"],
+      "readmeMustContain": ["**Redeploy**", "FORCE_SEPOLIA_REDEPLOY=1"]
+    },
+    {
+      "id": "send-addresses",
+      "prd": "4",
+      "readme": null,
+      "readmeFoldedInto": "4",
+      "prdMustContain": ["Send new addresses to SOS"],
+      "readmeFoldedMustContain": ["Send the new proxy addresses to SOS"]
+    },
+    {
+      "id": "pack-publish",
+      "prd": "5",
+      "readme": "5",
+      "prdMustContain": ["pack-replica-artifacts.sh"],
+      "readmeMustContain": ["**Pack + publish**"]
+    },
+    {
+      "id": "wipe",
+      "prd": "6",
+      "readme": "6",
+      "prdMustContain": ["Wipe Mac"],
+      "readmeMustContain": ["**All operators wipe**"]
+    },
+    {
+      "id": "restart",
+      "prd": "7",
+      "readme": "7",
+      "prdMustContain": ["Restart all"],
+      "readmeMustContain": ["**All restart**"]
+    },
+    {
+      "id": "hash-check",
+      "prd": "8",
+      "readme": "8",
+      "prdMustContain": ["block hash"],
+      "readmeMustContain": ["**Cross-check block hashes**"]
+    },
+    {
+      "id": "register-game",
+      "prd": "8b",
+      "readme": "8b",
+      "prdMustContain": ["**Register the fault-proof game"],
+      "readmeMustContain": ["**Register the fault-proof game"]
+    },
+    {
+      "id": "rail-v7",
+      "prd": "9",
+      "readme": null,
+      "readmeFoldedInto": "8",
+      "prdMustContain": ["Bump `rail-interface.json` to **v7**"],
+      "readmeFoldedMustContain": ["bump `rail-interface.json` to **v7**"]
+    },
+    {
+      "id": "sos-adopt",
+      "prd": "10",
+      "readme": null,
+      "prdMustContain": ["SOS redeploys-or-adopts"]
+    },
+    {
+      "id": "valid-game",
+      "prd": "11",
+      "readme": null,
+      "prdMustContain": ["Stock proposer posts a valid game"]
+    },
+    {
+      "id": "bad-proposal",
+      "prd": "12",
+      "readme": null,
+      "prdMustContain": ["Deliberately bad proposal"]
+    },
+    {
+      "id": "closeout",
+      "prd": "13",
+      "readme": null,
+      "prdMustContain": ["README note"]
+    }
+  ]
+}

@@ -56,6 +56,9 @@ jobs:
       - name: Rail interface check
         run: ./scripts/rail-interface-check.sh
 
+      - name: Phase 7 gate-parity check
+        run: ./scripts/phase7-gate-parity.sh
+
       - name: Pipeline snapshot unit tests
         run: python3 -m unittest scripts/test_pipeline_snapshot.py
 
