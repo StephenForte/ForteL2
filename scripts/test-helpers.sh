@@ -1938,6 +1938,10 @@ _f711_write_empty() {
     if [[ "$v" == "$target" ]]; then
       if [[ "$form" == quoted ]]; then
         echo "${v}=\"\"" >> "$dest"
+      elif [[ "$form" == inline ]]; then
+        echo "${v}= # f711-inline-comment-canary" >> "$dest"
+      elif [[ "$form" == quoted-inline ]]; then
+        echo "${v}=\"\" # f711-inline-comment-canary" >> "$dest"
       else
         echo "${v}=" >> "$dest"
       fi
@@ -2180,6 +2184,60 @@ else
       fail=1
       _f711_empty_neither_ok=0
     fi
+
+    _f711_inline="$_f711_dir/inline-${_var}.env"
+    _f711_write_empty "$_f711_inline" "$_var" inline
+    _f711_run "$_f711_inline" "1" ""
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 inline-comment empty ${_var}= # … refuses on FORCE_SEPOLIA_REDEPLOY=1"
+    else
+      echo "FAIL F7-11 must refuse ${_var}= # comment (bash-empty) when FORCE_SEPOLIA_REDEPLOY=1" >&2
+      fail=1
+    fi
+    if _f711_leaked_values "$_f711_out" "$_f711_inline"; then
+      echo "FAIL F7-11 inline-comment ${_var} error leaked an env-file value" >&2
+      fail=1
+    fi
+    _f711_run "$_f711_inline" "" "prestate-set"
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 inline-comment empty ${_var}= # … refuses on FAULT_GAME_ABSOLUTE_PRESTATE set"
+    else
+      echo "FAIL F7-11 must refuse ${_var}= # comment (bash-empty) when FAULT_GAME_ABSOLUTE_PRESTATE is set" >&2
+      fail=1
+    fi
+    _f711_run "$_f711_inline" "" ""
+    if [[ "$_f711_rc" != "0" ]]; then
+      echo "FAIL F7-11 inline-comment empty ${_var}= # comment must still proceed when neither irreversible gate is set" >&2
+      fail=1
+      _f711_empty_neither_ok=0
+    fi
+
+    _f711_qinline="$_f711_dir/qinline-${_var}.env"
+    _f711_write_empty "$_f711_qinline" "$_var" quoted-inline
+    _f711_run "$_f711_qinline" "1" ""
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 quoted-empty-plus-comment ${_var}=\"\" # … refuses on FORCE_SEPOLIA_REDEPLOY=1"
+    else
+      echo "FAIL F7-11 must refuse ${_var}=\"\" # comment when FORCE_SEPOLIA_REDEPLOY=1" >&2
+      fail=1
+    fi
+    if _f711_leaked_values "$_f711_out" "$_f711_qinline"; then
+      echo "FAIL F7-11 quoted-inline-comment ${_var} error leaked an env-file value" >&2
+      fail=1
+    fi
+    _f711_run "$_f711_qinline" "" "prestate-set"
+    if [[ "$_f711_rc" != "0" ]] && printf '%s' "$_f711_out" | grep -F -q -- "$_var"; then
+      echo "PASS F7-11 quoted-empty-plus-comment ${_var}=\"\" # … refuses on FAULT_GAME_ABSOLUTE_PRESTATE set"
+    else
+      echo "FAIL F7-11 must refuse ${_var}=\"\" # comment when FAULT_GAME_ABSOLUTE_PRESTATE is set" >&2
+      fail=1
+    fi
+    _f711_run "$_f711_qinline" "" ""
+    if [[ "$_f711_rc" != "0" ]]; then
+      echo "FAIL F7-11 quoted-empty-plus-comment ${_var} must still proceed when neither irreversible gate is set" >&2
+      fail=1
+      _f711_empty_neither_ok=0
+    fi
   done
   if ((_f711_empty_neither_ok && _f711_abs_neither_ok)); then
     echo "PASS F7-11 absence or emptiness with neither gate set still proceeds"
@@ -2207,6 +2265,28 @@ else
     echo "PASS F7-11 complete env file proceeds on wipe, step 8b, and neither"
   else
     echo "FAIL F7-11 must accept a file that assigns each of the six once, non-empty" >&2
+    fail=1
+  fi
+
+  _f711_valued_comment="$_f711_dir/valued-comment.env"
+  _f711_write_complete_except "$_f711_valued_comment" "FAULT_GAME_WITHDRAWAL_DELAY"
+  echo "FAULT_GAME_WITHDRAWAL_DELAY=3600 # f711-inline-comment-canary" >> "$_f711_valued_comment"
+  _f711_run "$_f711_valued_comment" "1" ""
+  if [[ "$_f711_rc" == "0" ]]; then
+    echo "PASS F7-11 VAR=3600 # comment is non-empty on FORCE_SEPOLIA_REDEPLOY=1"
+  else
+    echo "FAIL F7-11 must accept a non-empty value that has a trailing inline comment" >&2
+    fail=1
+  fi
+
+  _f711_hashkeep="$_f711_dir/hashkeep.env"
+  _f711_write_complete_except "$_f711_hashkeep" "PREIMAGE_ORACLE_CHALLENGE_PERIOD"
+  echo "PREIMAGE_ORACLE_CHALLENGE_PERIOD=\"#keep\"" >> "$_f711_hashkeep"
+  _f711_run "$_f711_hashkeep" "1" ""
+  if [[ "$_f711_rc" == "0" ]]; then
+    echo "PASS F7-11 quoted VAR=\"#keep\" is non-empty on FORCE_SEPOLIA_REDEPLOY=1"
+  else
+    echo "FAIL F7-11 must not treat a quoted # as an inline comment" >&2
     fail=1
   fi
 
@@ -2279,6 +2359,7 @@ fi
 rm -rf "$_f711_dir"
 unset _f711_fn _f711_rc _f711_out _f711_dir _f711_good _f711_dup _f711_comment \
   _f711_export _f711_ws _f711_miss _f711_empty _f711_qempty _f711_then_empty \
+  _f711_inline _f711_qinline _f711_valued_comment _f711_hashkeep \
   _f711_abs _f711_root _f711_path_rc _f711_path_out _f711_good_force _f711_good_pre \
   _var _i _f711_dup_ok _f711_abs_force_ok _f711_abs_pre_ok \
   _f711_empty_force_ok _f711_empty_pre_ok _f711_quoted_force_ok _f711_quoted_pre_ok \

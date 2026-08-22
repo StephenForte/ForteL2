@@ -56,7 +56,7 @@ _f711_is_phase7_immutable() {
 }
 
 # Stdout: "<lineno> <NAME> <0|1>" for each assignment of a Phase 7 immutable.
-# 1 means the assigned value is empty after stripping matching quotes.
+# 1 means the bash-effective assigned value is empty (unset-or-empty under ${VAR:-def}).
 _f711_scan_immutable_assignments() {
   local lineno=0 line trimmed name value
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -73,13 +73,23 @@ _f711_scan_immutable_assignments() {
     name="${trimmed%%=*}"
     _f711_is_phase7_immutable "$name" || continue
     value="${trimmed#*=}"
-    value="${value%"${value##*[![:space:]]}"}"
-    if [[ "$value" == \"*\" ]]; then
+    # Bash: a new word beginning with # is a comment. `VAR= # later` and
+    # `VAR="" # later` source as empty; `VAR=#keep` and `VAR="#keep"` do not.
+    # Strip only that comment form — never print the remainder.
+    if [[ "$value" == \"* ]]; then
       value="${value#\"}"
-      value="${value%\"}"
-    elif [[ "$value" == \'*\' ]]; then
+      if [[ "$value" == *\"* ]]; then
+        value="${value%%\"*}"
+      fi
+    elif [[ "$value" == \'* ]]; then
       value="${value#\'}"
-      value="${value%\'}"
+      if [[ "$value" == *\'* ]]; then
+        value="${value%%\'*}"
+      fi
+    else
+      value="${value%%[[:space:]]#*}"
+      value="${value%"${value##*[![:space:]]}"}"
+      value="${value#"${value%%[![:space:]]*}"}"
     fi
     if [[ -z "$value" ]]; then
       printf '%s %s 1\n' "$lineno" "$name"
