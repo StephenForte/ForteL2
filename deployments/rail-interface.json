@@ -1,7 +1,7 @@
 {
   "$schema_note": "ForteL2 rail interface for SettlementOS and explorers. Version bumps when chain ID, bridge proxies, reset policy, or the reachability of the read/write paths change. The networkId values are SettlementOS registry keys, not ForteL2 labels: they are fixed, live on their side, and survive re-genesis (a wipe changes addresses, never the id). Do not reopen a networkId as an openQuestion when regenerating this file.",
-  "version": "6",
-  "updated": "2026-08-18",
+  "version": "7",
+  "updated": "2026-08-22",
   "docs": {
     "moneyRailPrd": "tasks/prd-money-rail.md",
     "coordination": "tasks/coordination-settlementos.md",
@@ -40,11 +40,11 @@
       "explorer": null,
       "bridge": {
         "mode": "standard-bridge",
-        "optimismPortalProxy": "0xb4679b1c65e5c07bac95988583c2d7a65108c624",
-        "l1StandardBridgeProxy": "0x7ec222d979bd8445ac51776f67d914b6775089f8",
-        "l1CrossDomainMessengerProxy": "0x68c9b25d887fbda4139f3f54394892027e0cbbe8",
-        "systemConfigProxy": "0x8416cd475d75b558899d83f4cf0ffeb85d7bc361",
-        "disputeGameFactoryProxy": "0xba1fda6baf25f43a340cdd5a86c02a69c8e49eed",
+        "optimismPortalProxy": "0xf8c7da6c009d5d05bb98f8cd8286b9b838a3b54e",
+        "l1StandardBridgeProxy": "0x113aad08047e9a9b1556627a658f87f0ebef85a7",
+        "l1CrossDomainMessengerProxy": "0x8513e8b78ab4b2f648b6ae4bef8f644a93e3c121",
+        "systemConfigProxy": "0x7c799f23a427328831be0a8206a525a9bc886bde",
+        "disputeGameFactoryProxy": "0x67f9e427c716586ecc0dc0b62baa8cd05e43262f",
         "source": "deployments/sepolia/deployments.json",
         "funding": "L2 accounts funded via L1→L2 deposit (no genesis fundDevAccounts). Use deposit-eth-sepolia.sh patterns."
       },
@@ -57,8 +57,8 @@
         "accessModel": "public-diskless-gateway over Render Private Service (D-0045); SOS in-Render still uses private http://fortel2-replica:10000 (D-0032)",
         "note": "Public replica reads go through a diskless reverse-proxy (fortel2-replica-rpc) in front of the Private Service. The live verifier stays private; do not convert it to Web. eth_sendRawTransaction returns -32601. Reads trail the sequencer by roughly 3 minutes (L1 batches) — cannot serve read-your-own-write; confirm() belongs on the authenticated write path or sequencerReads. Operator inspection of the Private Service is still Render Web Shell.",
         "updateTriggers": [
-          "Phase 7 Sepolia redeploy / network-wide wipe only while deployment pinned through Phase 6",
-          "After redeploy: pack-replica-artifacts.sh → publish genesis+rollup → wipe Mac data-sepolia AND Render /data → hash cross-check"
+          "Network-wide wipe / re-genesis (most recent: 2026-08-22, Phase 7)",
+          "After redeploy: pack-replica-artifacts.sh → publish genesis+rollup to fortel2-replica → wipe Mac data-sepolia AND Render /data → REDEPLOY the Render private service, not restart (config is baked into the image at build time, so a restart reuses the old genesis) → hash cross-check at the same block number"
         ],
         "consumers": [
           "fortel2-replica operators",
@@ -72,7 +72,7 @@
         "writeRpcUrl": null,
         "note": "Public sequencer-tip reads. Diskless method-filter Web Service; writes rejected (-32601). Follows the sequencer, not L1 batches — use this for just-settled receipts. During the nightly 23:45–03:00 America/Los_Angeles window this door fails (origin down); fall back to replica.readRpcUrl. The Access write hostname is deliberately not published here."
       },
-      "resetPolicy": "Phase 6 completed 2026-08-04. The 2026-07-22 deployment remains pinned — 852 is the staging chain per D-0018. The next redeploy is the Phase 7 / mainnet-pilot gate and is a coordinated network-wide wipe. SettlementOS is a notified party, not just replica operators: give them at least one day of advance notice and the new contract addresses once they exist. A re-genesis expires every ForteL2 address they hold (escrow, three mock tokens, TokenizedMMF), kills cited tx hashes, and invalidates the ForteL2 rows in their explorer address book — their recovery is redeploy-or-adopt, re-seed wallets, re-verify a settlement, republish the address book. The redeploy is NOT coupled to the off-box write-URL publish: SOS withdrew that request 2026-08-11 (D-0029) and the write URL ships whenever the operator go/no-go clears.",
+      "resetPolicy": "Phase 7 network-wide wipe executed 2026-08-22. Chain 852 was re-genesised: every bridge proxy above is new, every ForteL2 address held before this date is expired, cited tx hashes are dead, and the ForteL2 rows in an explorer address book must be rebuilt. Recovery for SettlementOS is redeploy-or-adopt, re-seed wallets, re-verify one settlement, republish the address book. Notice went out 2026-08-21 20:00Z and the ≥24h gate cleared 2026-08-22 20:00Z (D-0067). The type-8 fault-proof game is registered later in a separate second apply (D-0061); it adds an implementation to the DisputeGameFactory above and flips the chain's respected game type from 1 to 8 (D-0063), but changes no address in this file and is not another wipe. The next network-wide wipe is the mainnet-pilot gate and carries its own ≥1 day notice. The redeploy is NOT coupled to the off-box write-URL publish: SOS withdrew that request 2026-08-11 (D-0029).",
       "l2Metadata": {
         "blockTime": 2,
         "nativeCurrency": "ETH",
@@ -80,7 +80,7 @@
         "rollupConfig": "deployments/sepolia/.deployer/rollup.json"
       },
       "sosRecommended": true,
-      "notes": "networkId confirmed by SettlementOS 2026-08-11: live registry key in their lib/networks.ts (chain 852), the stem of their FORTEL2_SEPOLIA_* env vars and deployment-overlay filename, and the prefix their retry policy matches to set retries=0 on a single-sequencer rail. Fixed — unchanged by re-genesis. Primary SOS target. WRITES: an authenticated off-box write path is LIVE (D-0035) — Cloudflare Access in front of a loopback eth/net/web3 method-allowlist filter on the sequencer host; op-geth itself never leaves 127.0.0.1. The write hostname is deliberately NOT published here: it is Access-gated to one named consumer, so an unauthenticated caller receives 403 and a published URL would be unusable. Ask the operator for access. READS: public replica = replica.readRpcUrl (L1-derived, ~3 min lag). Public sequencer tip = sequencerReads.readRpcUrl (tip-follow; down during the nightly window). SOS in-Render still uses private http://fortel2-replica:10000 (D-0032). First settlement on 852: 2026-08-13 (D-0036). Do not share QuickNode L1 URL/token with Render."
+      "notes": "networkId confirmed by SettlementOS 2026-08-11: live registry key in their lib/networks.ts (chain 852), the stem of their FORTEL2_SEPOLIA_* env vars and deployment-overlay filename, and the prefix their retry policy matches to set retries=0 on a single-sequencer rail. Fixed — unchanged by re-genesis. Primary SOS target. WRITES: an authenticated off-box write path is LIVE (D-0035) — Cloudflare Access in front of a loopback eth/net/web3 method-allowlist filter on the sequencer host; op-geth itself never leaves 127.0.0.1. The write hostname is deliberately NOT published here: it is Access-gated to one named consumer, so an unauthenticated caller receives 403 and a published URL would be unusable. Ask the operator for access. READS: public replica = replica.readRpcUrl (L1-derived, ~3 min lag). Public sequencer tip = sequencerReads.readRpcUrl (tip-follow; down during the nightly window). SOS in-Render still uses private http://fortel2-replica:10000 (D-0032). First settlement on the pre-2026-08-22 deployment was 2026-08-13 (D-0036); that tx hash did not survive the re-genesis. Do not share QuickNode L1 URL/token with Render."
     }
   },
   "availability": {
