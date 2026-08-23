@@ -29,7 +29,7 @@ Full table: `tasks/prd-money-rail.md` § “When SettlementOS may come on the L2
 |---|---|
 | SOS/explorer reads | Prefer Render replica RPC if reachable |
 | Phase 7 redeploy | **Mandatory** pack → publish fortel2-replica → wipe Mac + Render together |
-| Phase 7 redeploy | **Notify SOS ≥1 day ahead**, and send new contract addresses once they exist — re-genesis expires every ForteL2 address they hold and breaks their live explorer address book (D-0028) |
+| Phase 7 redeploy | **Notify SOS ≥1 day ahead**, and send new contract addresses once they exist — re-genesis does not reliably retire every ForteL2 address they hold (a shifted deployer nonce may leave a slot empty or occupied by a different live contract, so a cached address can succeed with wrong data until identity is re-verified) and breaks their live explorer address book (D-0028) |
 | Before Phase 7 | Do not republish genesis “for fun” — deployment is pinned |
 
 Details: `replica/README.md`, README “Network reset procedure”, money-rail PRD.
