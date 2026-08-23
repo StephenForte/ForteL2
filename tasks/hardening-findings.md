@@ -432,3 +432,438 @@ fundable from the documented sources; switching to a registered
 type-8 game is the option that removes the 0.08 ETH `value` without
 giving up a 5-minute cadence. That is a description of the data, not a
 recommendation to run 8b tonight.
+
+---
+
+## R-13 (2026-08-23) — type-1 bond comes back: 0.08 ETH returned after resolve + two delays
+
+Sequel to **R-12**. Live Sepolia, operator machine, repo `8f68056` at start.
+Exactly **one** game was resolved (index 0). At hand-back `gameCount` is 42
+(the 1h proposer posted games 41 and 42); **41 others stay `IN_PROGRESS`**.
+`PROPOSER_GAME_TYPE` was left at `1`. No `scripts/` changes. `.env.sepolia`
+was edited for `SEPOLIA_PROPOSER_INTERVAL` only (gitignored; not in this
+commit).
+
+The round trip is transaction-proven. The 0.08 ETH init bond from game 0
+landed back in `PROPOSER_ADDRESS`. Recovery is not a single call: it is
+`resolveClaim` → `resolve` → wait `disputeGameFinalityDelaySeconds = 1800`
+→ `claimCredit` (unlock) → wait `DelayedWETH.delay() = 3600` →
+`claimCredit` (withdraw). R-12's 10800s float window missed the 1800s
+finality airgap. The **protocol-delay lower bound** is
+`7200 + 1800 + 3600 = 12600s`, assuming resolve/unlock/withdraw land
+the instant each gate opens. This run did not measure that: game 0
+`createdAt = 1787435052`, unlock `withdrawals.timestamp = 1787505900`,
+withdraw ready 3600s later → **74448s** (20.68 h) create-to-withdraw.
+Calling 12600s "measured" would understate operational float.
+
+### Step 0 — throttle to 1h (done before any resolve)
+
+Overnight `launchd` sleep (23:45 PT) had already stopped the stack. The
+03:00 wake failed: proposer 0.008 ETH and batcher 0.145 ETH, both under the
+0.15 start floor. By this run the proposer was 0.308 ETH and the batcher
+1.790 ETH. Pidfile was gone; `pgrep` found no `op-proposer`.
+
+`SEPOLIA_PROPOSER_INTERVAL` was `5m`; set to `1h`. Then `stop_bg
+op-proposer` (confirmed down) and `dev-sleep.sh wake` so L2 existed for
+the start script's `wait_for_rpc`. A re-run of `06-start-proposer-sepolia.sh`
+alone would have failed on a dead L2, and `start_bg` would have been a
+silent no-op had the pid still been alive (D-0063 Finding 7).
+
+| | Value |
+|---|---|
+| old pid | **none** (pidfile missing). Last live pid before sleep was **95838** (R-12 / sleep log). |
+| `stop_bg` | `op-proposer not running (no pidfile)` |
+| new pid | **29994** (`ps` `op-proposer`, started 2026-08-23 09:52 PT) |
+| `PROPOSER_GAME_TYPE` | still `1` |
+| factory started against | `0x67f9e427c716586ecc0dc0b62baa8cd05e43262f` (post-wipe) |
+
+Live log — not the script's exit 0:
+
+```text
+t=2026-08-23T09:52:22-0700 lvl=info msg="No proposals found for at least proposal interval, submitting proposal now" proposalInterval=1h0m0s
+```
+
+The restart immediately posted game 41 (last proposal was >9 h earlier):
+`tx=0x942a3b9cf15873376f49875ff15312da209f13519a22e0423ff1fc94a8b4b8a9`
+nonce 40 → 41, `gameCount` 40 → 41. That is the "keep posting, throttled"
+condition. Next `create` is due ~1 h later. Resolve txs used nonces 41–42
+after that create confirmed, so there was no nonce race.
+
+### Re-read of game 0 (before any send)
+
+Factory `0x67f9e427c716586ecc0dc0b62baa8cd05e43262f`, L1 block 11551244.
+Every value matched R-12 / the brief:
+
+```text
+$ cast call $FACTORY 'gameCount()(uint256)'
+40
+
+$ cast call $FACTORY 'gameAtIndex(uint256)(uint32,uint64,address)' 0
+1
+1787435052
+0xb5acB19f808296Bb555318cBCF862CbBD9b33c4A
+
+$ cast call $GAME 'status()(uint8)'
+0
+$ cast call $GAME 'resolvedAt()(uint64)'
+0
+$ cast call $GAME 'createdAt()(uint64)'
+1787435052
+$ cast call $GAME 'rootClaim()(bytes32)'
+0x9cee12dda25fa9d7560f21c748781b6cc2508dc8be6221c8a0664e6905e333fc
+$ cast call $GAME 'l2BlockNumber()(uint256)'
+21
+$ cast call $GAME 'claimDataLen()(uint256)'
+1
+$ cast call $GAME 'maxClockDuration()(uint64)'
+7200
+$ cast call $GAME 'anchorStateRegistry()(address)'
+0x8f98EB7f5EbB9a0de0AcF8Fa7916b67b9295F480
+$ cast call $GAME 'credit(address)(uint256)' 0x350A0F7becCE56598962C501CaA02f900F256803
+0
+$ cast call $GAME 'weth()(address)'
+0xA9DB650cd2959A127083bf6448074E6b01b14B80
+$ cast call $GAME 'getChallengerDuration(uint256)(uint64)' 0
+7200
+
+$ cast call $WETH 'delay()(uint256)'
+3600
+$ cast call $WETH 'withdrawals(address,address)(uint256,uint256)' $GAME $PROPOSER
+0
+0
+$ cast balance $WETH --ether
+3.200000000000000000
+
+$ cast call $FACTORY 'initBonds(uint32)(uint256)' 1
+80000000000000000
+$ cast call $FACTORY 'gameImpls(uint32)(address)' 8
+0x0000000000000000000000000000000000000000
+
+$ cast call $ASR 'disputeGameFinalityDelaySeconds()(uint256)'
+1800
+$ cast call $ASR 'respectedGameType()(uint32)'
+1
+```
+
+Static `resolveClaim(0,0)` from `address(0)` returned `0x` (would succeed).
+Static `resolve()` from `address(0)` reverted `0x9a076646` =
+`OutOfOrderResolution()`. Static `claimCredit` / `closeGame` reverted
+`0xc105260a` = `GameNotResolved()`. `resolveClaim` / `resolve` are **not**
+`onlyAuthorized` on `PermissionedDisputeGame` — only `move` / `step` /
+`initialize` are. Resolution is permissionless; a non-proposer wallet can
+pay the gas. This run still used `PROPOSER_ADDRESS` so the nonce/balance
+delta is on the same wallet.
+
+### 1. `resolveClaim(0, 0)` — real transaction
+
+Immediately before send, L1 block 11551316. Proposer 0.227692960434396282 ETH
+(the 0.308 → 0.227 drop is game 41's 0.08 bond + create gas, not resolve).
+Nonce 41. `status = 0`, `credit = 0`.
+
+```text
+$ cast send $GAME 'resolveClaim(uint256,uint256)' 0 0
+# from 0x350A0F7becCE56598962C501CaA02f900F256803
+
+$ cast receipt 0x1f673629e8cc9fb2e6d23429a8d1f4910c2dac226abe6a4685c99aa18cc3569a --json
+  transactionHash=0x1f673629e8cc9fb2e6d23429a8d1f4910c2dac226abe6a4685c99aa18cc3569a
+  status=0x1
+  gasUsed=0x1b134          # 110900
+  effectiveGasPrice=0x4078049d  # 1081607325
+  blockNumber=0xb04256
+  to=0xb5acb19f808296bb555318cbcf862cbbd9b33c4a
+  type=0x2
+  cost = 110900 * 1081607325 = 119950252342500 wei = 0.000119950252342500 ETH
+```
+
+Immediately after:
+
+```text
+$ cast call $GAME 'status()(uint8)'
+0
+$ cast call $GAME 'resolvedAt()(uint64)'
+0
+$ cast call $GAME 'credit(address)(uint256)' $PROPOSER
+80000000000000000
+```
+
+`credit` became 0.08 ETH on `resolveClaim`, while the game was still
+`IN_PROGRESS`. `_distributeBond` writes `normalModeCredit`; `resolve()`
+only flips status. R-12's "credit reads 0 now" is therefore the unresolved
+state, not a missing method.
+
+### 2. `resolve()` — real transaction; outcome `DEFENDER_WINS`
+
+```text
+$ cast send $GAME 'resolve()'
+
+$ cast receipt 0x3ed2f9edb88922edb261549051440858d8caee9046bc483bcdba56f08099cf2f --json
+  transactionHash=0x3ed2f9edb88922edb261549051440858d8caee9046bc483bcdba56f08099cf2f
+  status=0x1
+  gasUsed=0x9193           # 37267
+  effectiveGasPrice=0x38106c7e  # 940600446
+  blockNumber=0xb04258
+  to=0xb5acb19f808296bb555318cbcf862cbbd9b33c4a
+  type=0x2
+  cost = 37267 * 940600446 = 35053356821082 wei = 0.000035053356821082 ETH
+```
+
+```text
+$ cast call $GAME 'status()(uint8)'
+2
+$ cast call $GAME 'resolvedAt()(uint64)'
+1787504028
+$ cast call $ASR 'isGameResolved(address)(bool)' $GAME
+true
+$ cast call $ASR 'isGameFinalized(address)(bool)' $GAME
+false
+```
+
+`2 = DEFENDER_WINS`. Unchallenged root, `counteredBy == 0`. **Not**
+`1 = CHALLENGER_WINS`. Scan of all 41 factory games: the only non-zero
+`status` is index 0. Games 1, 39, 40 (and the rest) remain `0`.
+
+### Anchors — unchanged by resolve itself
+
+```text
+# immediately BEFORE resolveClaim (L1 11551316)
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 1
+0xdead000000000000000000000000000000000000000000000000000000000000
+0
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 8
+0xdead000000000000000000000000000000000000000000000000000000000000
+0
+
+# immediately AFTER resolve()
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 1
+0xdead000000000000000000000000000000000000000000000000000000000000
+0
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 8
+0xdead000000000000000000000000000000000000000000000000000000000000
+0
+```
+
+The brief expected `resolve()` to advance `anchors(1)`. It does not.
+`FaultDisputeGame.resolve()` only sets `status` / `resolvedAt`.
+`setAnchorState` runs later, inside `closeGame()`, which `claimCredit`
+calls once `isGameFinalized` is true (`resolvedAt + 1800s`, i.e.
+2026-08-23 17:23:48 UTC).
+
+**Type-8 interaction (read the deployed ASR, not the brief's mental
+model):** `AnchorStateRegistry` v3.9.0 has a **single** `anchorGame`, not
+per-type slots. `anchors(GameType)` is a legacy alias that **ignores**
+the argument and returns `getAnchorRoot()`. So if/when `closeGame`
+succeeds, **both** `anchors(1)` and `anchors(8)` will display the same
+new root — that is one shared view, not type 8 being overwritten as a
+separate store. Recorded here so a later `anchors(8)` change is not
+misread as a step-8b collision. `respectedGameType()` is still `1`.
+
+### 3. Claim leg — unlock, then ETH returns after the WETH delay
+
+Deployed sequence (read from
+`optimism/packages/contracts-bedrock/src/dispute/FaultDisputeGame.sol`
+`claimCredit` / `closeGame` and `DelayedWETH.sol`):
+
+1. `claimCredit(proposer)` — first call after finality: `closeGame()`
+   (sets bond mode, `try setAnchorState`), then `weth.unlock(recipient,
+   credit)` and **returns**. ETH does not move yet.
+2. Wait `DelayedWETH.delay() = 3600`.
+3. `claimCredit(proposer)` again — `weth.withdraw` + ETH transfer to
+   the proposer.
+
+```text
+$ cast call $GAME 'claimCredit(address)' $PROPOSER   # ~1 min after resolve
+# revert 0x4851bd9b = GameNotFinalized()
+
+$ cast call $ASR 'isGameFinalized(address)(bool)' $GAME   # 17:24:21Z
+true
+
+$ cast send $GAME 'claimCredit(address)' $PROPOSER
+# first call = closeGame + unlock
+
+$ cast receipt 0x700f5c0df64110619896327a3bf265dac239fa47b88ad0826dddd86c60927746 --json
+  transactionHash=0x700f5c0df64110619896327a3bf265dac239fa47b88ad0826dddd86c60927746
+  status=0x1
+  gasUsed=0x3d039          # 249913
+  effectiveGasPrice=0x3dc3d548  # 1036244296
+  blockNumber=0xb042f1
+  to=0xb5acb19f808296bb555318cbcf862cbbd9b33c4a
+  type=0x2
+  cost = 249913 * 1036244296 = 258970920746248 wei = 0.000258970920746248 ETH
+```
+
+Immediately after unlock:
+
+```text
+$ cast call $ASR 'anchorGame()(address)'
+0xb5acB19f808296Bb555318cBCF862CbBD9b33c4A
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 1
+0x9cee12dda25fa9d7560f21c748781b6cc2508dc8be6221c8a0664e6905e333fc
+21
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 8
+0x9cee12dda25fa9d7560f21c748781b6cc2508dc8be6221c8a0664e6905e333fc
+21
+$ cast call $ASR 'respectedGameType()(uint32)'
+1
+$ cast call $WETH 'withdrawals(address,address)(uint256,uint256)' $GAME $PROPOSER
+80000000000000000
+1787505900
+$ cast call $GAME 'credit(address)(uint256)' $PROPOSER
+80000000000000000
+$ cast balance $PROPOSER --ether
+0.227278985904486452
+$ cast balance $WETH --ether
+3.280000000000000000
+$ cast call $GAME 'claimCredit(address)' $PROPOSER
+# revert: DelayedWETH: withdrawal delay not met
+```
+
+**`anchors(8)` displayed a new value.** That is the stop-and-report
+condition in the brief. It is **not** a separate type-8 slot being
+written: `anchors(GameType)` ignores its argument and both calls now
+return the single `anchorGame` (game 0, L2 block 21). Type 8 is still
+unregistered (`gameImpls(8) = 0x0`); `respectedGameType` is still `1`.
+No other game was resolved after this observation. The remaining
+permitted action was this same game's DelayedWETH withdraw after 3600s
+(`unlock` timestamp 1787505900 → withdraw ready 2026-08-23 18:25:00Z).
+
+Proposer wallet after unlock (nonce 44): `0.227278985904486452` ETH.
+Still no +0.08 at that instant. DelayedWETH still held 3.28 ETH
+(41 × 0.08). During the 1h WETH wait the throttled proposer posted
+game 42 (`tx=0x3db3571e…a176db`, nonce 44, confirmed ~10:55 PT) and an
+inbound top-up arrived — so the next wallet snapshot is not a clean
+continuation of 0.227.
+
+### 3b. `claimCredit` #2 — ETH lands
+
+Immediately before withdraw (L1 11551774), after the intervening create
++ top-up:
+
+```text
+$ cast balance $PROPOSER --ether
+0.446177692598508052
+$ cast nonce $PROPOSER
+45
+$ cast balance $WETH --ether
+3.360000000000000000
+$ cast call $WETH 'withdrawals(address,address)(uint256,uint256)' $GAME $PROPOSER
+80000000000000000
+1787505900
+$ cast call $GAME 'credit(address)(uint256)' $PROPOSER
+80000000000000000
+$ cast call $GAME 'claimCredit(address)' $PROPOSER --from $PROPOSER
+0x
+
+$ cast send $GAME 'claimCredit(address)' $PROPOSER
+
+$ cast receipt 0x30f1d19ce7c05fef501a23a8554a526ae4b220028ed3a36a5c59c0078b4638b2 --json
+  transactionHash=0x30f1d19ce7c05fef501a23a8554a526ae4b220028ed3a36a5c59c0078b4638b2
+  status=0x1
+  gasUsed=0x15c91          # 89233
+  effectiveGasPrice=0x4187a2b2  # 1099408050
+  blockNumber=0xb0441f
+  to=0xb5acb19f808296bb555318cbcf862cbbd9b33c4a
+  type=0x2
+  cost = 89233 * 1099408050 = 98103478525650 wei = 0.000098103478525650 ETH
+```
+
+Immediately after:
+
+```text
+$ cast balance $PROPOSER --ether
+0.526079589119982402
+$ cast nonce $PROPOSER
+46
+$ cast balance $WETH --ether
+3.280000000000000000
+$ cast call $WETH 'withdrawals(address,address)(uint256,uint256)' $GAME $PROPOSER
+0
+1787505900
+$ cast call $GAME 'credit(address)(uint256)' $PROPOSER
+0
+$ cast call $GAME 'status()(uint8)'
+2
+$ cast call $FACTORY 'gameCount()(uint256)'
+42
+```
+
+**Wallet delta on the withdraw tx: +0.079901896521474350 ETH**
+(`0.526079589119982402 − 0.446177692598508052`), which is
+`0.08 − 0.000098103478525650` gas. DelayedWETH dropped by exactly
+0.08 (`3.36 → 3.28`). That is the ETH-back-in-the-wallet line R-12
+could not claim. Scan of all 42 factory games: the only non-zero
+`status` is still index 0 (`2`). Anchors after withdraw are unchanged
+from after unlock (same shared `anchorGame`).
+
+Do not read the whole-session wallet delta as the recovery number.
+Between unlock and withdraw the proposer created game 42 (another
+0.08 out) and received an inbound top-up. The withdraw-leg pair above
+is the isolated proof.
+
+### 4. Whole-sequence cost, and implied 1h-cadence scale
+
+| Step | Proven by | Gas | ETH |
+|---|---|---|---|
+| `resolveClaim(0,0)` | transaction `0x1f673629…cc3569a` | 110900 | 0.000119950252342500 |
+| `resolve()` | transaction `0x3ed2f9ed…099cf2f` | 37267 | 0.000035053356821082 |
+| `claimCredit` #1 (unlock) | transaction `0x700f5c0d…0927746` | 249913 | 0.000258970920746248 |
+| `claimCredit` #2 (withdraw) | transaction `0x30f1d19c…4638b2` | 89233 | 0.000098103478525650 |
+| **recovery total** | | 487313 | **0.000512078008435480** |
+
+At a 1h interval (~24 games/day):
+
+| | Per game | Per day (×24) |
+|---|---|---|
+| Recovery gas (measured) | 0.000512 ETH | **0.0123 ETH** |
+| Create gas (R-12, ~0.001) | ~0.001 ETH | ~0.024 ETH |
+| Bond (recycled, not burned) | 0.08 ETH | 1.92 ETH posted / 1.92 ETH returned after the window |
+
+Steady-state **float** is bonds locked in the unrecoverable window, not
+a burn rate. R-12 used `7200 + 3600 = 10800s` → 0.24 ETH at 1h. The
+deployed path adds the 1800s finality airgap **between** resolve and
+unlock. The protocol-delay lower bound is
+`7200 + 1800 + 3600 = 12600s` (3.5 h), not a measured round trip —
+this game's create-to-withdraw was 74448s because resolution waited
+for this task, not for clock expiry.
+
+A 3.5 h minimum at a 1h interval means posts at hours 0, 1, 2, and 3
+are all still locked when hour 3 posts: **four** 0.08 ETH bonds,
+**0.32 ETH**, before the first can return at 3.5 h. The time-average
+`3.5 × 0.08 = 0.28` is not a funding floor — it leaves the fourth
+`create` unfunded even if every recovery hits the theoretical
+minimum. 5m divides 12600s evenly (42 games), so average and ceiling
+match.
+
+| Interval | R-12 (10800s, average) | Protocol-min average (12600s) | Protocol-min **funding floor** (⌈window/interval⌉ × 0.08) |
+|---|---|---|---|
+| 5m | ~2.77 ETH | 3.36 ETH | **3.36 ETH** (42 bonds) |
+| 1h | ~0.24 ETH | 0.28 ETH | **0.32 ETH** (4 bonds) |
+
+All four questions were answered by transaction, not inference:
+(1) `resolveClaim` succeeded, (2) `resolve` → `DEFENDER_WINS`,
+(3) 0.08 ETH returned to the proposer wallet, (4) recovery gas
+0.000512 ETH/game.
+
+### `gas-runway.sh` at hand-back
+
+```text
+$ FORTEL2_ENV=.env.sepolia ./scripts/gas-runway.sh
+# exit 0
+appended sample ts=1787509689 l2_block=38201
+Samples file: …/data-sepolia/gas-samples.jsonl (18 sample(s))
+role=BATCHER  balance_eth=1.786662  burn_eth_per_day=0.031002  days_to_floor=52.792  floor_eth=0.15
+role=PROPOSER balance_eth=0.526080  burn_eth_per_day=0.027187  days_to_floor=13.833  floor_eth=0.15
+```
+
+Same artifact as R-12: the proposer `0.027 ETH/day` skips top-up
+intervals and is not the posting-rate drain. Recorded; not the answer.
+
+### What this does *not* decide
+
+Whether to automate resolution of the remaining 41 `IN_PROGRESS` games,
+and at what cadence, is an operator call. Recovery of the ~3.28 ETH
+still in DelayedWETH is a one-time follow-up, not executed here.
+Switching to type 8 is still step 8b (`gameImpls(8) = 0x0`). Resolution
+is permissionless (static `resolveClaim` from `address(0)` returned
+`0x`; `onlyAuthorized` does not wrap `resolve` / `resolveClaim` /
+`claimCredit`), so recovery gas need not compete with the proposer's
+bond budget — observed, not acted on.
