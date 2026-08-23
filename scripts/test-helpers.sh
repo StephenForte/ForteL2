@@ -2387,10 +2387,129 @@ sys.exit(1 if bad else 0)
 PY
   then
     echo "PASS F7-10 test-helpers.sh 0x-prefixed 64-hex literals are a frozen allowlist"
+  else
+    echo "FAIL scripts/test-helpers.sh 0x-prefixed 64-hex literals must stay on the frozen allowlist (Foundry tripwire fixtures + F7-6 prestates)" >&2
+    fail=1
+  fi
+
+# phase7-gate-parity.sh: README step-number swap fails naming both values;
+# a missing Operator sequence heading fails closed (not a pass); a newly
+# reserved F7-N in the PRD alone fails; an imperative second-wipe instruction
+# in .env.sepolia.example fails; clean repo files pass.
+# env -u: lib.sh is not sourced by the checker, but an inherited FORTEL2_ROOT
+# from this suite's .env.example fallback still must not point the child at
+# another checkout (Codex P2 on #118).
+P7_CHECK="$SCRIPT_DIR/phase7-gate-parity.sh"
+P7_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-p7-gates.XXXXXX")"
+cleanup_p7_fixtures() { rm -rf "$P7_FIXTURE_DIR"; }
+trap cleanup_p7_fixtures EXIT
+P7_ENV_CLEAR=(env -u FORTEL2_ENV -u FORTEL2_ROOT -u FORTEL2_ENV_FILE)
+
+cp "$SCRIPT_DIR/../README.md" "$P7_FIXTURE_DIR/README.md"
+python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text()
+t = t.replace("2. **Announce**", "2. **Stop Mac writers**", 1)
+t = t.replace("3. ~~**Stop Mac writers**~~", "3. ~~**Announce**~~", 1)
+p.write_text(t)
+' "$P7_FIXTURE_DIR/README.md"
+
+P7_BAD_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_README="$P7_FIXTURE_DIR/README.md" \
+    "$P7_CHECK" 2>&1
+)" && P7_BAD_EC=0 || P7_BAD_EC=$?
+if [[ "$P7_BAD_EC" -ne 0 ]] \
+  && echo "$P7_BAD_OUT" | grep -q 'announce README numbering (declared=2 found=3)' \
+  && echo "$P7_BAD_OUT" | grep -q 'stop-writers README numbering (declared=3 found=2)'; then
+  echo "PASS phase7-gate-parity rejects README announce/stop-writers swap"
 else
-  echo "FAIL scripts/test-helpers.sh 0x-prefixed 64-hex literals must stay on the frozen allowlist (Foundry tripwire fixtures + F7-6 prestates)" >&2
+  echo "FAIL phase7-gate-parity should exit non-zero naming announce declared=2 found=3 (ec=$P7_BAD_EC)" >&2
+  echo "$P7_BAD_OUT" >&2
   fail=1
 fi
+
+cp "$SCRIPT_DIR/../tasks/prd-phase-7-fault-proofs.md" "$P7_FIXTURE_DIR/prd.md"
+python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text()
+t = t.replace("## Operator sequence", "## Operator seq", 1)
+p.write_text(t)
+' "$P7_FIXTURE_DIR/prd.md"
+
+P7_ANCHOR_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_PRD="$P7_FIXTURE_DIR/prd.md" \
+    "$P7_CHECK" 2>&1
+)" && P7_ANCHOR_EC=0 || P7_ANCHOR_EC=$?
+if [[ "$P7_ANCHOR_EC" -ne 0 ]] \
+  && echo "$P7_ANCHOR_OUT" | grep -q "could not find heading '## Operator sequence'" \
+  && ! echo "$P7_ANCHOR_OUT" | grep -q 'all checks passed'; then
+  echo "PASS phase7-gate-parity fails closed when Operator sequence heading is missing"
+else
+  echo "FAIL phase7-gate-parity should fail closed naming the missing heading (ec=$P7_ANCHOR_EC)" >&2
+  echo "$P7_ANCHOR_OUT" >&2
+  fail=1
+fi
+
+cp "$SCRIPT_DIR/../tasks/prd-phase-7-fault-proofs.md" "$P7_FIXTURE_DIR/prd-f713.md"
+python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text()
+t = t.replace(
+    "## Operator sequence",
+    "## Operator sequence\n\nF7-13 must land before announcement\n",
+    1,
+)
+p.write_text(t)
+' "$P7_FIXTURE_DIR/prd-f713.md"
+
+P7_F713_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_PRD="$P7_FIXTURE_DIR/prd-f713.md" \
+    "$P7_CHECK" 2>&1
+)" && P7_F713_EC=0 || P7_F713_EC=$?
+if [[ "$P7_F713_EC" -ne 0 ]] \
+  && echo "$P7_F713_OUT" | grep -q 'PRD Operator sequence gate ids' \
+  && echo "$P7_F713_OUT" | grep -q 'F7-13'; then
+  echo "PASS phase7-gate-parity rejects undeclared F7-13 in PRD Operator sequence"
+else
+  echo "FAIL phase7-gate-parity should fail naming undeclared F7-13 (ec=$P7_F713_EC)" >&2
+  echo "$P7_F713_OUT" >&2
+  fail=1
+fi
+
+cp "$SCRIPT_DIR/../.env.sepolia.example" "$P7_FIXTURE_DIR/env.sepolia.example"
+printf '\n# run FORCE_SEPOLIA_REDEPLOY=1 now\n' >> "$P7_FIXTURE_DIR/env.sepolia.example"
+
+P7_WIPE_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_ENV_EXAMPLE="$P7_FIXTURE_DIR/env.sepolia.example" \
+    "$P7_CHECK" 2>&1
+)" && P7_WIPE_EC=0 || P7_WIPE_EC=$?
+if [[ "$P7_WIPE_EC" -ne 0 ]] \
+  && echo "$P7_WIPE_OUT" | grep -q 'FORCE_SEPOLIA_REDEPLOY=1' \
+  && echo "$P7_WIPE_OUT" | grep -q 'imperative'; then
+  echo "PASS phase7-gate-parity rejects imperative FORCE_SEPOLIA_REDEPLOY=1 in env example"
+else
+  echo "FAIL phase7-gate-parity should fail on run FORCE_SEPOLIA_REDEPLOY=1 now (ec=$P7_WIPE_EC)" >&2
+  echo "$P7_WIPE_OUT" >&2
+  fail=1
+fi
+
+P7_OK_OUT="$("${P7_ENV_CLEAR[@]}" "$P7_CHECK" 2>&1)" && P7_OK_EC=0 || P7_OK_EC=$?
+if [[ "$P7_OK_EC" -eq 0 ]] && echo "$P7_OK_OUT" | grep -q 'phase7-gate-parity: all checks passed'; then
+  echo "PASS phase7-gate-parity exits 0 on unmodified repo files"
+else
+  echo "FAIL phase7-gate-parity should exit 0 on repo files (ec=$P7_OK_EC)" >&2
+  echo "$P7_OK_OUT" >&2
+  fail=1
+fi
+
+cleanup_p7_fixtures
+trap - EXIT
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2
