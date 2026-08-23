@@ -449,7 +449,12 @@ landed back in `PROPOSER_ADDRESS`. Recovery is not a single call: it is
 `resolveClaim` → `resolve` → wait `disputeGameFinalityDelaySeconds = 1800`
 → `claimCredit` (unlock) → wait `DelayedWETH.delay() = 3600` →
 `claimCredit` (withdraw). R-12's 10800s float window missed the 1800s
-finality airgap; the measured unrecoverable window is **12600s**.
+finality airgap. The **protocol-delay lower bound** is
+`7200 + 1800 + 3600 = 12600s`, assuming resolve/unlock/withdraw land
+the instant each gate opens. This run did not measure that: game 0
+`createdAt = 1787435052`, unlock `withdrawals.timestamp = 1787505900`,
+withdraw ready 3600s later → **74448s** (20.68 h) create-to-withdraw.
+Calling 12600s "measured" would understate operational float.
 
 ### Step 0 — throttle to 1h (done before any resolve)
 
@@ -815,12 +820,23 @@ At a 1h interval (~24 games/day):
 Steady-state **float** is bonds locked in the unrecoverable window, not
 a burn rate. R-12 used `7200 + 3600 = 10800s` → 0.24 ETH at 1h. The
 deployed path adds the 1800s finality airgap **between** resolve and
-unlock, so the window is `7200 + 1800 + 3600 = 12600s`:
+unlock. The protocol-delay lower bound is
+`7200 + 1800 + 3600 = 12600s` (3.5 h), not a measured round trip —
+this game's create-to-withdraw was 74448s because resolution waited
+for this task, not for clock expiry.
 
-| Interval | R-12 float (10800s) | Measured float (12600s) |
-|---|---|---|
-| 5m | ~2.77 ETH | **3.36 ETH** |
-| 1h | ~0.24 ETH | **0.28 ETH** |
+A 3.5 h minimum at a 1h interval means posts at hours 0, 1, 2, and 3
+are all still locked when hour 3 posts: **four** 0.08 ETH bonds,
+**0.32 ETH**, before the first can return at 3.5 h. The time-average
+`3.5 × 0.08 = 0.28` is not a funding floor — it leaves the fourth
+`create` unfunded even if every recovery hits the theoretical
+minimum. 5m divides 12600s evenly (42 games), so average and ceiling
+match.
+
+| Interval | R-12 (10800s, average) | Protocol-min average (12600s) | Protocol-min **funding floor** (⌈window/interval⌉ × 0.08) |
+|---|---|---|---|
+| 5m | ~2.77 ETH | 3.36 ETH | **3.36 ETH** (42 bonds) |
+| 1h | ~0.24 ETH | 0.28 ETH | **0.32 ETH** (4 bonds) |
 
 All four questions were answered by transaction, not inference:
 (1) `resolveClaim` succeeded, (2) `resolve` → `DEFENDER_WINS`,
