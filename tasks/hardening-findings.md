@@ -158,3 +158,277 @@ this side.
 **Unrelated pre-existing warning** seen while inspecting: the reconciler reports one aborted prior
 run (`startedAt 2026-08-02`, `finished_at IS NULL`). ChainBank's issue, noted only so it is not
 rediscovered as a ForteL2 symptom.
+
+---
+
+## R-12 (2026-08-22) — Sepolia proposer drain is the type-1 init bond, not gas
+
+Sampled 2026-08-23 05:38 UTC on the operator machine against live Sepolia, repo
+`3a90f1c`. Every command below is a read. Nothing was sent, and the proposer
+process was not restarted or reconfigured.
+
+### 1. What is actually running
+
+Stock `op-proposer` — not `fortel2-proposer`.
+
+| Check | Result |
+|---|---|
+| `USE_CUSTOM_PROPOSER` in `.env.sepolia` | unset (stock path) |
+| `CONFIRM_CUSTOM_PROPOSER_SEPOLIA` | unset |
+| pidfile `$DATA_DIR/pids/op-proposer.pid` | `95838`, alive |
+| `ps -p 95838 -o comm=` | `op-proposer` |
+| binary (lsof, no argv — argv contains the key) | `/Users/steveforte/src/fortel2/optimism/op-proposer/bin/op-proposer` |
+| uptime at sample | 7h53m (started with the post-wipe stack restart ~21:44Z) |
+| `SEPOLIA_PROPOSER_INTERVAL` in `.env.sepolia` | **`5m`** (explicit; matches the script default) |
+| txmgr knobs in `.env.sepolia` | all unset → script defaults: rebroadcast 36s, resubmission 72s, receipt-query 36s |
+| `PROPOSER_GAME_TYPE` in `.env.sepolia` | **`1`** |
+| live log | `proposalInterval=5m0s`; currently looping `insufficient funds for transfer` |
+
+`scripts/06-start-proposer-sepolia.sh` was not edited. The live interval is the
+configured 5m, confirmed independently by the log line and by the on-chain
+cadence below.
+
+### 2. What one proposal costs, and how many confirmed txs land per interval
+
+Source: Blockscout `txlist` for `PROPOSER_ADDRESS`
+`0x350A0F7becCE56598962C501CaA02f900F256803`, then five consecutive receipts
+re-read with `cast receipt` / `cast tx` against `$L1_RPC_URL` (redacted).
+
+The proposer has sent **exactly 36** confirmed L1 transactions since the
+2026-08-22 wipe (nonces 0–35). Every one is:
+
+- `to` = `DisputeGameFactoryProxy` `0x67f9e427c716586ecc0dc0b62baa8cd05e43262f`
+- selector `0x82ecf2f6` = `create(uint32,bytes32,bytes)` (`cast sig` / `cast 4byte`)
+- `value` = **80000000000000000 wei = 0.08 ETH**
+- status `0x1`, type 2
+
+`cast call $FACTORY 'gameCount()(uint256)'` → **`36`**. One factory game per
+outgoing tx; no extras.
+
+**Confirmed txs per ~5-minute window: one.** Consecutive nonces, 35 intervals,
+34 of them **exactly 312 s** (26 × 12 s L1 blocks). The one exception is
+nonce 5→6 at 924 s — the first dry-spell, after which an inbound top-up landed
+and posting resumed. 300-second buckets over the 36 outgoing txs: 36 buckets,
+none with more than one confirmation. Resubmission is **not** producing
+multiple confirmed spends; replacements (if any) did not confirm separately.
+
+Five consecutive cycles (nonces 31–35), `cast receipt` + `cast tx` verbatim
+fields:
+
+| nonce | UTC | tx | gasUsed | effectiveGasPrice | gas ETH | value ETH | wallet drain | confirmed txs in window |
+|---|---|---|---|---|---|---|---|---|
+| 31 | 2026-08-23 00:35:48 | [`0x9af5cc85…42bbc6`](https://sepolia.etherscan.io/tx/0x9af5cc85048a181b2e8599e4add68c0c490d67182373e783203507c5c942bbc6) | 509274 | 2122094506 (2.1221 gwei) | 0.001080728 | **0.080** | 0.081080728 | 1 |
+| 32 | 2026-08-23 00:41:00 | [`0xd3a169f0…eb7311f`](https://sepolia.etherscan.io/tx/0xd3a169f065514ac61d6f732387e1566e0a05953891321c8ef385402baeb7311f) | 509274 | 2054389874 (2.0544 gwei) | 0.001046247 | **0.080** | 0.081046247 | 1 |
+| 33 | 2026-08-23 00:46:12 | [`0xc2c7eb3e…f37f29`](https://sepolia.etherscan.io/tx/0xc2c7eb3e23897e351cbb4b4ed349231181a64390e73f06c3b62d4ab7b2f37f29) | 509274 | 2046690427 (2.0467 gwei) | 0.001042326 | **0.080** | 0.081042326 | 1 |
+| 34 | 2026-08-23 00:51:24 | [`0x642f2185…ae7575`](https://sepolia.etherscan.io/tx/0x642f2185e66c27ca4ec430cace22712383107eba6a469ec649898a15e9ae7575) | 509274 | 1974457123 (1.9745 gwei) | 0.001005540 | **0.080** | 0.081005540 | 1 |
+| 35 | 2026-08-23 00:56:36 | [`0x335e7b66…e9eb51`](https://sepolia.etherscan.io/tx/0x335e7b66133fb8a42ee788bc10f675281a0e513b55a7d9507064b23d02e9eb51) | 509274 | 1996200821 (1.9962 gwei) | 0.001016613 | **0.080** | 0.081016613 | 1 |
+
+Commands for the last of those (the others differ only by hash):
+
+```text
+cast receipt 0x335e7b66133fb8a42ee788bc10f675281a0e513b55a7d9507064b23d02e9eb51 --rpc-url $L1_RPC_URL --json
+  status=0x1  gasUsed=509274  effectiveGasPrice=1996200821  to=0x67f9e427c716586ecc0dc0b62baa8cd05e43262f
+cast tx      0x335e7b66133fb8a42ee788bc10f675281a0e513b55a7d9507064b23d02e9eb51 --rpc-url $L1_RPC_URL --json
+  value=80000000000000000  nonce=35  type=0x2
+```
+
+All 36 outgoing: **2.880 ETH in `value`** + **0.037148 ETH in gas** =
+**2.917148 ETH** wallet drain. Gas is ~1.3% of the drain. The operator's
+"0.08 ETH every 5 minutes" is the **`msg.value`**, not the gas. The brief's
+`0.08 × 12 × 24 = 23.04 ETH/day` is therefore the **bond rate at a 5-minute
+cadence**, and it is arithmetically right. At the measured 312 s interval it
+is `86400/312 × 0.08 = 22.15 ETH/day` in bonds, plus ~0.29 ETH/day gas
+(~22.4 ETH/day total) for as long as the wallet stays funded enough to post.
+
+Posting stopped after nonce 35 (2026-08-23 00:56:36 UTC). Live logs since
+then are estimate-fail retries (`insufficient funds`); those do not confirm
+and do not spend.
+
+### 3. `initBonds` — D-0063 checked on chain, not cited
+
+Factory address re-read from `deployments/sepolia/deployments.json`:
+`DisputeGameFactoryProxy` = `0x67f9e427c716586ecc0dc0b62baa8cd05e43262f`
+(unchanged from the brief).
+
+```text
+$ cast call 0x67f9e427c716586ecc0dc0b62baa8cd05e43262f 'initBonds(uint32)(uint256)' 8 --rpc-url $L1_RPC_URL
+0
+
+$ cast call 0x67f9e427c716586ecc0dc0b62baa8cd05e43262f 'initBonds(uint32)(uint256)' 1 --rpc-url $L1_RPC_URL
+80000000000000000 [8e16]
+
+$ cast call 0x67f9e427c716586ecc0dc0b62baa8cd05e43262f 'gameImpls(uint32)(address)' 8 --rpc-url $L1_RPC_URL
+0x0000000000000000000000000000000000000000
+
+$ cast call 0x67f9e427c716586ecc0dc0b62baa8cd05e43262f 'gameImpls(uint32)(address)' 1 --rpc-url $L1_RPC_URL
+0x103B2CEb06Bb4888d59FaE894023a86020f8fB8c
+```
+
+D-0063 Finding 3(d) is **true right now** for type 8: `initBonds(8) = 0`.
+It is **not** the cause of this drain. The proposer is on type **1**, and
+`initBonds(1) = 0.08 ETH`, which is exactly the `value` on every `create`.
+`gameImpls(8) = 0x0` — type 8 is not registered (step 8b has not run).
+D-0063 does not need a correction entry; a reader who carried "bonds are 0"
+across to the *currently configured* game type would be repeating the
+paraphrase-as-verification failure the brief named.
+
+Local learning already documented this number: `tasks/spike-phase-5-proposer.md`
+("Bond: `initBonds(gameType)` (local learning = `0.08 ether`)").
+
+### Where the 0.08 ETH actually goes
+
+Not to L1 validators, and not gone. Each `create` deposits the bond into
+`DelayedWethPermissionedGameProxy`
+`0xa9db650cd2959a127083bf6448074e6b01b14b80` (current
+`deployments/sepolia/deployments.json`). Evidence on the nonce-35 receipt:
+log[0] is a WETH `Deposit` at that address, `dst` = the new game proxy
+`0xEBd4248164d2D85bdEb83f93E1a81F551F893c4f`; log[1] is
+`DisputeGameCreated` on the factory.
+
+```text
+$ cast balance 0x67f9e427c716586ecc0dc0b62baa8cd05e43262f --ether --rpc-url $L1_RPC_URL
+0.000000000000000000          # factory does not keep it
+
+$ cast balance 0xa9db650cd2959a127083bf6448074e6b01b14b80 --ether --rpc-url $L1_RPC_URL
+2.880000000000000000          # 36 × 0.08, exact
+
+$ cast call $FACTORY 'gameAtIndex(uint256)(uint32,uint64,address)' 35 --rpc-url $L1_RPC_URL
+1
+1787446596
+0xEBd4248164d2D85bdEb83f93E1a81F551F893c4f
+
+$ cast balance 0xEBd4248164d2D85bdEb83f93E1a81F551F893c4f --ether --rpc-url $L1_RPC_URL
+0.000000000000000000          # game proxy immediately deposits into DelayedWETH
+```
+
+Same pattern on games 31–34: type 1, proxy balance 0, DelayedWETH holds the
+sum. The 2.88 ETH is locked as game credit. It is recoverable only through
+whatever DelayedWETH / game-resolution path applies — not by the proposer
+wallet going dry.
+
+### 4. Current proposer balance and Sepolia gas
+
+```text
+$ cast balance 0x350A0F7becCE56598962C501CaA02f900F256803 --rpc-url $L1_RPC_URL
+32852421044487658
+
+$ cast balance 0x350A0F7becCE56598962C501CaA02f900F256803 --ether --rpc-url $L1_RPC_URL
+0.032852421044487658
+
+$ cast nonce 0x350A0F7becCE56598962C501CaA02f900F256803 --rpc-url $L1_RPC_URL
+36
+
+$ cast gas-price --rpc-url $L1_RPC_URL
+980177917
+
+$ cast base-fee --rpc-url $L1_RPC_URL
+979177917
+```
+
+Latest block at that sample: number **11548013**, `baseFeePerGas` `0x3a5d11bd`
+(= 979177917). "Already run dry" as a number: **0.03285 ETH**, below the
+0.15 tooling floor and below the 0.08 ETH the next `create` must attach.
+That is why the live log is `insufficient funds for transfer` rather than
+a high-gas failure.
+
+Sepolia gas during the posting window was ~2.0 gwei effective; at sample
+time it was ~0.98 gwei. Gas-price swing changes the **~0.001 ETH** gas
+leg, not the **0.08 ETH** bond. It does not explain the reported rate.
+
+Wallet accounting over the 36-game window closes:
+
+| | ETH |
+|---|---|
+| inbound (all history on this address, Blockscout) | 2.950 |
+| outbound bonds | 2.880 |
+| outbound gas | 0.037 |
+| residual (cast balance) | 0.033 |
+
+Today's inbound top-ups (0.65 + 1.80 ETH) came from
+`0x16cae6aeed87e00bcbcd60062286ab604cfe8b2b`, which is **not**
+`HARVEST_ADDRESS`, `ADMIN_ADDRESS`, `BATCHER_ADDRESS`, or
+`PROPOSER_ADDRESS`. July inflows included 0.15 from `HARVEST_ADDRESS`.
+`chainbank-wallet-reconciler` is not identified as the sender of today's
+proposer top-ups.
+
+### `gas-runway.sh` / `funding-watch.sh` (verification, not the cost model)
+
+The brief expected a first-run `INSUFFICIENT SAMPLES`. That is **not** what
+happened: `$DATA_DIR/gas-samples.jsonl` already had history.
+
+```text
+$ FORTEL2_ENV=.env.sepolia ./scripts/gas-runway.sh
+# exit 2
+appended sample ts=1787463506 l2_block=15109
+Samples file: …/data-sepolia/gas-samples.jsonl (17 sample(s))
+role=BATCHER  balance_eth=1.790716  burn_eth_per_day=0.032325  days_to_floor=50.757  floor_eth=0.15
+role=PROPOSER balance_eth=0.032852  burn_eth_per_day=0.027187  days_to_floor=-4.309  floor_eth=0.15
+
+$ FORTEL2_ENV=.env.sepolia ./scripts/funding-watch.sh
+# exit 1
+VERDICT: FAIL — the funder's own health endpoint reports status=failing
+         — chainbank-wallet-reconciler … last run 5.6 h ago, our wallet=ok
+batcher: 1.7907 ETH   policy_min: 0.60
+```
+
+`gas-runway.sh`'s proposer `0.027 ETH/day` is **not** the posting-rate
+drain. It skips intervals where the balance rose (the 0.65 / 1.80 top-ups
+erase the 0.08-per-game windows), and the wallet has been too empty to post
+for hours. Trust the tx table, not that burn figure, for a funding decision.
+`funding-watch.sh` FAIL is about the batcher's external funder health
+endpoint, not the proposer; surfaced because the brief asked for the
+verdict.
+
+### Ranked root-cause hypotheses (by evidence, not plausibility)
+
+1. **The configured type-1 init bond is 0.08 ETH, and stock `op-proposer`
+   pays it as `msg.value` on every `create`, every 5 minutes.** Direct:
+   `initBonds(1) = 8e16`, every outgoing tx `value = 8e16`,
+   `PROPOSER_GAME_TYPE=1`, `proposalInterval=5m0s`, 36/36 txs match.
+   This is the cause. Confidence: high.
+
+2. **The ETH is locked in `DelayedWethPermissionedGameProxy`, not burned
+   as L1 gas.** Direct: factory balance 0, game proxies 0, DelayedWETH
+   balance = 2.880 ETH = 36 × 0.08, Deposit logs on each receipt.
+   Confidence: high.
+
+3. **Type-8-is-free (D-0063) is true and irrelevant to today's drain.**
+   `initBonds(8) = 0`, but `gameImpls(8) = 0x0` and the proposer is on
+   type 1. Confidence: high.
+
+4. **Duplicate confirmed resubmissions are not happening.** One
+   confirmation per 312 s window; sequential nonces; `gameCount = 36`.
+   Confidence: high for this window (nonces 0–35, post-wipe).
+
+5. **Sepolia gas price does not explain the 0.08 figure.** Gas ≈ 0.001 ETH
+   at ~2 gwei; current base fee ~1 gwei. Confidence: high.
+
+6. **`gas-runway.sh` 0.027 ETH/day is a measurement artifact**, not a
+   second rate. Confidence: high (see above).
+
+7. **Custom-proposer bug.** Ruled out — stock binary, `USE_CUSTOM_PROPOSER`
+   unset. Confidence: high.
+
+### Mitigation options (menu, not a verdict)
+
+Choosing among these is an operator decision. Effects are against the
+**~23 ETH/day wallet-drain figure while funded and posting type-1 games
+every 5 minutes**. None of these was applied.
+
+| Option | What it would change | Effect on ~23 ETH/day |
+|---|---|---|
+| A. Lengthen `SEPOLIA_PROPOSER_INTERVAL`, stay on type 1 | Still pays 0.08 ETH bond + ~0.001 ETH gas **per game** | 30m → ~3.9 ETH/day; 1h → ~1.94; 6h → ~0.32; 24h → ~0.081. Linear in game count. Does not unlock the 2.88 already in DelayedWETH. |
+| B. Finish step 8b (register type 8) **and** switch `PROPOSER_GAME_TYPE` to 8, then stop+start the proposer (D-0063 Finding 7) | `initBonds(8)` is already 0; `gameImpls(8)` is still `0x0`, so this cannot be done *before* 8b | Gas-only: ~0.29 ETH/day at 5m, ~0.024 at 1h. Drops the 23 ETH/day figure by ~98.7%. Type 1 left running after 8b would keep paying 0.08 **and** post non-respected games (D-0063 Finding 3c). |
+| C. `setInitBond(1, 0)` without registering type 8 | L1PAO call; changes the type-1 security model; does not make type 1 playable (D-0061: types 0/1 cannot play on this pin) | Same gas-only rate as B at type 1. Does not advance 8b. |
+| D. Pause / leave the proposer dry until 8b | Already the de-facto state (0.03285 ETH, estimate-fail loop) | Drain ≈ 0 until refunded. Anchor stops advancing (already stopped). |
+| E. Fund the proposer at the current rate | Faucet ~0.3 ETH/day and reconciler ≤2.4 ETH/day cannot cover ~23 ETH/day. Today's 2.45 ETH from `0x16cae6ae…` bought ~30 games (~2.5 h). | Does not change the rate; only how long until the next dry. |
+| F. Recover the 2.88 ETH from DelayedWETH after games resolve | One-time, path not exercised here; unresolved type-1 games hold the credit | Recovers stock, does not change the posting rate. |
+
+This finding gates step 8b's *economics*, not its other preconditions
+(prestate / F7-12 / operator sequence). Type 8 being free is verified.
+Type 8 being unimplemented is also verified. Whether 8b is "worth
+attempting" on funding grounds: staying on type 1 at 5m is not
+fundable from the documented sources; switching to a registered
+type-8 game is the option that removes the 0.08 ETH `value` without
+giving up a 5-minute cadence. That is a description of the data, not a
+recommendation to run 8b tonight.
