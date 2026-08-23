@@ -729,11 +729,6 @@ execute_selected() {
     return 0
   fi
 
-  local IFS=','
-  # shellcheck disable=SC2086
-  set -- $selected_csv
-  unset IFS
-
   local idx game_json dec_json disposition actions_csv leg sent_n cost_sum game_file
   sent_n=0
   cost_sum=0
@@ -741,7 +736,10 @@ execute_selected() {
   export RESOLVE_GAMES_WETH_DELAY="$weth_delay"
   game_file="$(mktemp "${TMPDIR:-/tmp}/fortel2-resolve-one.XXXXXX")"
 
-  for idx in "$@"; do
+  # Split selected_indexes without assigning IFS (Semgrep bash.lang.security.ifs-tampering).
+  # awk emits one index per line; the while-read keeps counters in this shell.
+  while IFS= read -r idx; do
+    [[ -z "$idx" ]] && continue
     echo "--- game $idx ---"
     while true; do
       RESOLVE_GAMES_NOW="$(date +%s)"
@@ -769,7 +767,9 @@ execute_selected() {
       printf '%s\n' "$game_json" > "$game_file"
       confirm_leg_advanced "$game_file" "$leg"
     done
-  done
+  done <<EOF
+$(printf '%s' "$selected_csv" | awk -F, '{for (i = 1; i <= NF; i++) print $i}')
+EOF
   rm -f "$game_file"
 
   echo "EXECUTE done"
