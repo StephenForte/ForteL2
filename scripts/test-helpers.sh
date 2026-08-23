@@ -2727,6 +2727,58 @@ else
   fi
 fi
 
+cat >"$RG_FIXTURE_DIR/type8.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "init_bond_wei": "80000000000000000",
+  "games": [
+    {
+      "index": 1,
+      "game_type": 8,
+      "address": "0x0000000000000000000000000000000000000008",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    },
+    {
+      "index": 2,
+      "game_type": 1,
+      "address": "0x0000000000000000000000000000000000000002",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_T8_OUT="$(
+  env -u FORTEL2_ENV PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/type8.json" \
+    "$RESOLVE_GAMES" --analyze-only 2>&1
+)" && RG_T8_EC=0 || RG_T8_EC=$?
+if [[ "$RG_T8_EC" -eq 0 ]] \
+  && echo "$RG_T8_OUT" | grep -q 'game 1 SKIP not_type_1' \
+  && echo "$RG_T8_OUT" | grep -q 'game 2 ACTION resolveClaim,resolve' \
+  && echo "$RG_T8_OUT" | grep -q 'selected_indexes=2'; then
+  echo "PASS resolve-games non-type-1 game is not selected"
+else
+  echo "FAIL resolve-games type-8 game should be skipped (ec=$RG_T8_EC)" >&2
+  echo "$RG_T8_OUT" >&2
+  fail=1
+fi
+
 cleanup_rg_fixtures
 trap - EXIT
 

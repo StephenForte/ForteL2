@@ -110,7 +110,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 WEI = 10 ** 18
@@ -166,6 +165,21 @@ def load_json(path):
 def decide_game(game, now, finality_delay, weth_delay):
     """Return disposition for one game. Never infers a claimCredit leg by call count."""
     idx = int(game["index"])
+    # Missing game_type (offline fixtures) defaults to 1; a live fetch always sets it.
+    raw_type = game.get("game_type", 1)
+    try:
+        game_type = int(raw_type)
+    except (TypeError, ValueError):
+        game_type = 1
+    if game_type != 1:
+        return {
+            "index": idx,
+            "selected": False,
+            "disposition": "skip",
+            "reason": "not_type_1",
+            "actions": [],
+            "ready_at": None,
+        }
     status = int(game["status"])
     resolved_at = parse_uint(game.get("resolved_at", 0))
     created_at = parse_uint(game.get("created_at", 0))
@@ -438,6 +452,21 @@ def cast_call(rpc, address, sig, *args):
     return lines
 
 
+def l1_timestamp(rpc):
+    try:
+        out = subprocess.check_output(
+            ["cast", "block", "latest", "--field", "timestamp", "--rpc-url", rpc],
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        raise SystemExit("ERROR: cast block latest --field timestamp failed (rpc redacted)")
+    ts = parse_uint(out.strip().split()[0] if out.strip() else "0")
+    if ts <= 0:
+        raise SystemExit("ERROR: L1 latest block timestamp was empty")
+    return ts
+
+
 def fetch_snapshot(out_path, extra):
     rpc = extra["rpc"]
     factory = extra["factory"]
@@ -447,7 +476,7 @@ def fetch_snapshot(out_path, extra):
 
     count_lines = cast_call(rpc, factory, "gameCount()(uint256)")
     game_count = parse_uint(count_lines[0])
-    now = int(time.time())
+    now = l1_timestamp(rpc)
     finality = parse_uint(cast_call(rpc, asr, "disputeGameFinalityDelaySeconds()(uint256)")[0])
     weth_delay = parse_uint(cast_call(rpc, weth, "delay()(uint256)")[0])
     init_bond = parse_uint(cast_call(rpc, factory, "initBonds(uint32)(uint256)", 1)[0])
@@ -742,7 +771,11 @@ execute_selected() {
     [[ -z "$idx" ]] && continue
     echo "--- game $idx ---"
     while true; do
-      RESOLVE_GAMES_NOW="$(date +%s)"
+      RESOLVE_GAMES_NOW="$(cast block latest --field timestamp --rpc-url "$L1_RPC_URL" | awk '{print $1}')"
+      if [[ -z "$RESOLVE_GAMES_NOW" || "$RESOLVE_GAMES_NOW" == "0" ]]; then
+        echo "ERROR: L1 latest block timestamp was empty" >&2
+        exit 1
+      fi
       export RESOLVE_GAMES_NOW
       game_json="$(resolve_games_py fetch-one "$idx")"
       printf '%s\n' "$game_json" > "$game_file"

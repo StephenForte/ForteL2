@@ -765,6 +765,8 @@ Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **85
 
 **Gas runway:** `FORTEL2_ENV=.env.sepolia ./scripts/gas-runway.sh` appends one L1 balance sample (batcher + proposer) to gitignored `$DATA_DIR/gas-samples.jsonl` each run; once ≥2 samples span ≥1 hour it reports burn/day and days-to-floor (same 0.15 ETH floors as `sepolia-fund-check.sh`, skipping top-up intervals). The first run only records a sample and prints `INSUFFICIENT SAMPLES` (exit 0); exit 2 means either role is under `GAS_RUNWAY_MIN_DAYS` (default 3) days of runway; exit 0 with a burn readout means the buffer looks healthy at the current rate.
 
+**Type-1 bond recovery:** `FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh` dry-runs every factory game and sends nothing. `--execute` broadcasts currently-ready legs (`resolveClaim` / `resolve` / the two `claimCredit`s) using ADMIN for gas; the 0.08 ETH still returns to `PROPOSER_ADDRESS`. The script does not sleep — re-run after the 1800s finality delay and the 3600s DelayedWETH delay. `--max-games N` caps a first real run. Only type-1 games are selected. See `tasks/hardening-findings.md` § R-14.
+
 Set Render’s `L1_RPC_URL` secret to the **Render-only** QuickNode endpoint (not the Mac mini URL). Near credit caps set `L1_USE_PUBLIC_RPC=1` so the replica uses publicnode without wiping the QuickNode secret (see Phase 2d).
 
 ```bash
