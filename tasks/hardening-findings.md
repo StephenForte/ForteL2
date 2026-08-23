@@ -867,3 +867,269 @@ is permissionless (static `resolveClaim` from `address(0)` returned
 `0x`; `onlyAuthorized` does not wrap `resolve` / `resolveClaim` /
 `claimCredit`), so recovery gas need not compete with the proposer's
 bond budget — observed, not acted on.
+
+---
+
+## R-14 (2026-08-23) — reusable resolution script; game 1 resolved; remainder is a re-run
+
+Sequel to **R-13**. Live Sepolia, operator machine, repo `beaebc1` at
+start (still `origin/main` at hand-back). New script
+`scripts/resolve-games-sepolia.sh` (mode 755). Dry-run is the default;
+`--execute` is required to broadcast. Resolution stays permissionless;
+the script signs with `ADMIN_ADDRESS` so it never shares a nonce with
+the hourly proposer. `claimCredit`'s recipient is always
+`PROPOSER_ADDRESS`.
+
+This session proved the planner, the one-game execute, and idempotency
+by transaction. It did **not** finish every leg on every game: the two
+mandatory waits still apply, and the bulk `--execute` of games 2–42 was
+not sent from this session. The script is left so the operator can run
+the same command again.
+
+`PROPOSER_GAME_TYPE` is still `1`. `gameImpls(8)` is still `0x0`.
+Nothing under `data/` is tracked. `scripts/lib.sh` and the proposer
+start script were not edited.
+
+### Independent re-read (before any send)
+
+L1 block 11552668, now `1787520530` (2026-08-23 21:28:50 UTC). RPC
+passed through `redact_rpc_url`.
+
+```text
+$ cast call $FACTORY 'gameCount()(uint256)'
+45
+
+$ cast balance $WETH --ether
+3.520000000000000000          # 44 × 0.08; game 0 already withdrawn in R-13
+
+$ cast call $FACTORY 'initBonds(uint32)(uint256)' 1
+80000000000000000 [8e16]
+
+$ cast call $FACTORY 'gameImpls(uint32)(address)' 8
+0x0000000000000000000000000000000000000000
+
+$ cast call $ASR 'disputeGameFinalityDelaySeconds()(uint256)'
+1800
+$ cast call $WETH 'delay()(uint256)'
+3600
+$ cast call $ASR 'respectedGameType()(uint32)'
+1
+$ cast call $ASR 'anchorGame()(address)'
+0xb5acB19f808296Bb555318cBCF862CbBD9b33c4A
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 1
+0x9cee12dda25fa9d7560f21c748781b6cc2508dc8be6221c8a0664e6905e333fc
+21
+```
+
+Sampled games (clock = 7200s):
+
+| index | createdAt | age | status | credit | claimDataLen |
+|---|---|---|---|---|---|
+| 0 | 1787435052 | 85486s | 2 | 0 | 1 |
+| 1 | 1787435364 | 85174s | 0 | 0 | 1 |
+| 42 | 1787511192 | 9346s | 0 | 0 | 1 |
+| 43 | 1787514816 | 5722s | 0 | 0 | 1 |
+| 44 | 1787518440 | 2098s | 0 | 0 | 1 |
+
+42 games (indexes 1–42) are clock-expired and still `IN_PROGRESS`.
+42 × 0.08 = **3.36 ETH** recoverable this pass. Games 43–44 hold the
+other 0.16 ETH and are not eligible yet. `SEPOLIA_PROPOSER_INTERVAL`
+is still `1h`; pid `29994` (`op-proposer`) has been up since the R-13
+restart. Create spacing on 41→44 is 3624s.
+
+ADMIN `0xBB3E19811B2c3423069B54BDFF3e90Dd8094bb0F` ≠ PROPOSER
+`0x350A0F7becCE56598962C501CaA02f900F256803`. ADMIN 1.542 ETH
+(nonce 47); PROPOSER 0.283 ETH (nonce 49). Enough ADMIN gas; no
+reason found to share the proposer nonce.
+
+### 1. Dry-run (default) — all games, txs_sent=0
+
+```text
+$ FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh
+# exit 0
+mode=dry-run
+gameCount=45
+weth_balance_eth=3.520000000000000000
+selected_count=42
+selected_indexes=1,2,…,42
+actions_ready=84
+txs_sent=0
+recoverable_eth=3.360000000000000000
+locked_unexpired_eth=0.160000000000000000
+estimated_gas_eth=0.006195014662426506   # resolveClaim+resolve only, this pass
+game 0 SKIP zero_credit
+game 1 ACTION resolveClaim,resolve
+…
+game 42 ACTION resolveClaim,resolve
+game 43 SKIP clock_unexpired ready_at=1787522016 age=5760
+game 44 SKIP clock_unexpired ready_at=1787525640 age=2136
+dry-run: sending nothing (pass --execute to broadcast)
+```
+
+Matches the independent read: 42 eligible, 3.36 ETH, 0.16 ETH still
+clock-locked, nothing sent. ADMIN nonce stayed 47.
+
+### 2. `--execute --max-games 1` — game 1, two txs
+
+Game 1 = `0x107f9CF7453FbD55F9b344F4537FAC0Fc3BEb99B`. Sender ADMIN.
+
+```text
+$ FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh --execute --max-games 1
+# exit 0
+selected_indexes=1
+sending game=1 leg=resolveClaim to=0x107f9CF7453FbD55F9b344F4537FAC0Fc3BEb99B
+SENT leg=resolveClaim tx=0xd9d03f87d12d571037b32ded10e22f959f55f7ec3596f9c50dce31b95b816fcd gasUsed=110900 effectiveGasPrice=1047334132 cost_wei=116149355238800
+sending game=1 leg=resolve to=0x107f9CF7453FbD55F9b344F4537FAC0Fc3BEb99B
+SENT leg=resolve tx=0xa3b7b2c4afba7a620c85892cf92744cc3ed8334e93c62e871ce95f803d942ee1 gasUsed=37267 effectiveGasPrice=937714697 cost_wei=34945813613099
+game 1 wait finality
+txs_sent=2
+```
+
+Receipts re-read:
+
+```text
+$ cast receipt 0xd9d03f87d12d571037b32ded10e22f959f55f7ec3596f9c50dce31b95b816fcd --json
+  status=0x1  gasUsed=0x1b134 (110900)  effectiveGasPrice=0x3e6d0cf4
+  from=0xbb3e19811b2c3423069b54bdff3e90dd8094bb0f
+  to=0x107f9cf7453fbd55f9b344f4537fac0fc3beb99b
+
+$ cast receipt 0xa3b7b2c4afba7a620c85892cf92744cc3ed8334e93c62e871ce95f803d942ee1 --json
+  status=0x1  gasUsed=0x9193 (37267)  effectiveGasPrice=0x37e46409
+  from=0xbb3e19811b2c3423069b54bdff3e90dd8094bb0f
+  to=0x107f9cf7453fbd55f9b344f4537fac0fc3beb99b
+```
+
+Immediately after:
+
+```text
+$ cast call $GAME1 'status()(uint8)'
+2
+$ cast call $GAME1 'resolvedAt()(uint64)'
+1787521068
+$ cast call $GAME1 'credit(address)(uint256)' $PROPOSER
+80000000000000000
+$ cast call $ASR 'isGameResolved(address)(bool)' $GAME1
+true
+$ cast call $ASR 'isGameFinalized(address)(bool)' $GAME1
+false
+```
+
+`2 = DEFENDER_WINS`. Gas units match R-13 exactly (110900 / 37267).
+Cost 0.000151095 ETH (gas price a touch under R-13's). ADMIN nonce
+47 → 49. PROPOSER nonce stayed **49**. PROPOSER balance unchanged
+(0.282828 ETH). DelayedWETH still 3.52 ETH — resolve does not move
+the bond. No 0.08 returned yet; that is the two `claimCredit` legs
+after `resolvedAt + 1800` and `unlock + 3600`.
+
+### Anchors — unchanged by resolve, as R-13 said
+
+```text
+# before and after the two game-1 txs
+$ cast call $ASR 'anchorGame()(address)'
+0xb5acB19f808296Bb555318cBCF862CbBD9b33c4A
+$ cast call $ASR 'anchors(uint32)(bytes32,uint256)' 1
+0x9cee12dda25fa9d7560f21c748781b6cc2508dc8be6221c8a0664e6905e333fc
+21
+```
+
+Monotonic-advance watch: **no movement**. `setAnchorState` still
+runs inside `closeGame` on the first `claimCredit`. Type 8 is still
+unregistered. Nothing other than "resolve does not touch the shared
+anchor" was observed; the 8b question stays open until unlocks run.
+
+### 3. Idempotency re-run — txs_sent=0
+
+```text
+$ FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh --execute --max-games 1
+# exit 0
+selected_indexes=1
+action_games=0 wait_games=1
+actions_ready=0
+txs_sent=0
+game 1 WAIT finality ready_at=1787522868 ready_in=1743
+EXECUTE done
+txs_sent=0
+gas_spent_wei=0
+```
+
+ADMIN nonce still 49. The script distinguished "already resolved,
+not finalized" from "needs resolve" by `status` / `resolvedAt` /
+`isGameFinalized` timing, not by counting prior calls. Demonstrated
+by transaction (a second send would have incremented the nonce).
+
+### 4. Remainder — operator re-runs the same script
+
+Games 2–42 were **not** resolved in this session (bulk `--execute`
+was not sent). Games 43–44 were not eligible. Game 1 is waiting on
+finality until `resolvedAt + 1800 = 1787522868`
+(2026-08-23 22:07:48 UTC), then `claimCredit` unlock, then
+`DelayedWETH.delay() = 3600` before withdraw.
+
+```text
+FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh              # dry-run
+FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh --execute    # ready legs only
+```
+
+Each invocation does whatever legs are currently possible and
+reports what it is waiting on. It does not sleep. Re-running after
+either delay is the intended path.
+
+The two `claimCredit` legs are distinguished by
+`DelayedWETH.withdrawals(game, proposer)`:
+amount=0 and timestamp=0 → unlock; amount>0 and delay not met →
+wait; amount>0 and delay met → withdraw; amount=0 and timestamp>0
+and credit=0 → skip (`zero_credit`). A game with
+`claimDataLen() ≠ 1` is skipped as `multi_claim` (none seen).
+
+### Offline tests
+
+`test-helpers.sh` 194 → 202 PASS (8 appended; none removed). Cases
+drive `--analyze-only` over a snapshot JSON, no cast / RPC /
+`.env.sepolia`:
+
+- unexpired clock is not selected
+- `status=2` with `resolvedAt` set is not re-resolved
+- unlocked but inside the WETH delay reports `WAIT weth_delay`
+- zero remaining credit is skipped
+- dry-run / analyze-only reports `txs_sent=0` and never `cast send`
+- `--max-games 3` selects exactly indexes 1,2,3
+- `--execute` is rejected with `--analyze-only`
+
+`bash -n scripts/resolve-games-sepolia.sh` passes. Mode 755.
+
+### `gas-runway.sh` at hand-back
+
+```text
+$ FORTEL2_ENV=.env.sepolia ./scripts/gas-runway.sh
+# exit 0
+appended sample ts=1787521379 l2_block=44045
+Samples file: …/data-sepolia/gas-samples.jsonl (19 sample(s))
+role=BATCHER  balance_eth=1.784749  burn_eth_per_day=0.030777  days_to_floor=53.116  floor_eth=0.15
+role=PROPOSER balance_eth=0.282828  burn_eth_per_day=0.041021  days_to_floor=3.238  floor_eth=0.15
+```
+
+Same artifact as R-12/R-13: the proposer burn figure skips top-up
+intervals and is not the posting-rate drain. Recorded; not the
+answer. PROPOSER 0.283 ETH is above the 0.15 floor and covers the
+next 0.08 create plus gas.
+
+### Measured costs so far (one game, resolve legs only)
+
+| Step | Proven by | Gas | ETH |
+|---|---|---|---|
+| `resolveClaim(0,0)` | `0xd9d03f87…5b816fcd` | 110900 | 0.000116149355238800 |
+| `resolve()` | `0xa3b7b2c4…3d942ee1` | 37267 | 0.000034945813613099 |
+| **this session** | | 148167 | **0.000151095168851899** |
+
+R-13's full four-leg total was 0.000512 ETH/game. This session did
+not reach unlock/withdraw, so it does not replace that number.
+42 remaining resolve-pairs at this gas price are ~0.006 ETH of ADMIN
+gas (dry-run estimate 0.006195 for 42, of which game 1 is done).
+
+### What this does *not* decide
+
+Whether to schedule the script (launchd / cron / daily health), and
+which wallet should own recovery gas long-term. ADMIN worked; that
+is not a standing assignment. What a much newer shared anchor means
+for step 8b is still unanswerable — this run never called
+`closeGame`. Type 8 is still `gameImpls(8) = 0x0`.
