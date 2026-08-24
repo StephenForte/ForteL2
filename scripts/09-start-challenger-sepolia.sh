@@ -122,6 +122,7 @@ require_bin op-challenger
 require_bin jq
 require_bin cast
 require_sepolia_env
+CHALLENGER_L1_RPC_URL="${CHALLENGER_L1_RPC_URL:-$L1_RPC_URL}"
 refuse_foundry_defaults_unless_local_l2 "${CHALLENGER_PRIVATE_KEY:-}" "CHALLENGER_PRIVATE_KEY"
 
 if [[ -z "${CHALLENGER_PRIVATE_KEY:-}" ]]; then
@@ -296,7 +297,7 @@ fi
 CHALLENGER_DATADIR="$(canonical_abs_path "$DATA_DIR/challenger")"
 mkdir -p "$CHALLENGER_DATADIR"
 
-wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
+wait_for_rpc "$CHALLENGER_L1_RPC_URL" "L1 Sepolia"
 wait_for_opnode_rpc "$L2_NODE_RPC_URL" "op-node"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
@@ -310,7 +311,7 @@ run_preflight() {
     return 0
   fi
   echo "Preflight: DisputeGameFactory.gameImpls($type_num) for CHALLENGER_TRACE_TYPE=$TRACE_TYPE"
-  impl="$(cast call "$GAME_FACTORY" "gameImpls(uint32)(address)" "$type_num" --rpc-url "$L1_RPC_URL")"
+  impl="$(cast call "$GAME_FACTORY" "gameImpls(uint32)(address)" "$type_num" --rpc-url "$CHALLENGER_L1_RPC_URL")"
   impl="$(printf '%s' "$impl" | tr -d '[:space:]')"
   if is_zero_hex "$impl"; then
     echo "ERROR: factory $GAME_FACTORY has no implementation registered for game type $type_num ($TRACE_TYPE)" >&2
@@ -332,7 +333,7 @@ run_preflight() {
   # reach the impl-getter fallback. A failed call is not an empty result —
   # predating-gameArgs and RPC failure are indistinguishable here, so refuse
   # rather than guess (D-0055).
-  if ! args="$(cast call "$GAME_FACTORY" "gameArgs(uint32)(bytes)" "$type_num" --rpc-url "$L1_RPC_URL")"; then
+  if ! args="$(cast call "$GAME_FACTORY" "gameArgs(uint32)(bytes)" "$type_num" --rpc-url "$CHALLENGER_L1_RPC_URL")"; then
     echo "ERROR: factory $GAME_FACTORY gameArgs($type_num) call failed" >&2
     echo "  Either this factory predates the gameArgs function, or the RPC call failed." >&2
     echo "  Those two cannot be distinguished from here; refusing rather than guessing (D-0055)." >&2
@@ -358,8 +359,8 @@ run_preflight() {
   else
     preflight_source="implementation getters"
     echo "Preflight: gameArgs($type_num) empty — falling back to implementation vm()/absolutePrestate() (older immutable layout; D-0055)"
-    vm_addr="$(cast call "$impl" "vm()(address)" --rpc-url "$L1_RPC_URL")"
-    prestate="$(cast call "$impl" "absolutePrestate()(bytes32)" --rpc-url "$L1_RPC_URL")"
+    vm_addr="$(cast call "$impl" "vm()(address)" --rpc-url "$CHALLENGER_L1_RPC_URL")"
+    prestate="$(cast call "$impl" "absolutePrestate()(bytes32)" --rpc-url "$CHALLENGER_L1_RPC_URL")"
     vm_addr="$(printf '%s' "$vm_addr" | tr -d '[:space:]')"
     prestate="$(printf '%s' "$prestate" | tr -d '[:space:]')"
   fi
@@ -433,7 +434,7 @@ fi
 export OP_CHALLENGER_PRIVATE_KEY="$CHALLENGER_PRIVATE_KEY"
 
 challenger_args=(
-  --l1-eth-rpc="$L1_RPC_URL"
+  --l1-eth-rpc="$CHALLENGER_L1_RPC_URL"
   --l1-beacon="$L1_BEACON_URL"
   --rollup-rpc="$L2_NODE_RPC_URL"
   --l2-eth-rpc="$L2_RPC_URL"
@@ -488,7 +489,7 @@ fi
 # Chain 852 is not in the superchain registry — never pass --network.
 
 echo "Sepolia challenger starting against DisputeGameFactory=$GAME_FACTORY game-types=$TRACE_TYPE"
-echo "  L1=$(redact_rpc_url "$L1_RPC_URL")  beacon=$(redact_rpc_url "$L1_BEACON_URL")  op-node=$(redact_rpc_url "$L2_NODE_RPC_URL")  L2=$(redact_rpc_url "$L2_RPC_URL")"
+echo "  L1=$(redact_rpc_url "$CHALLENGER_L1_RPC_URL")  beacon=$(redact_rpc_url "$L1_BEACON_URL")  op-node=$(redact_rpc_url "$L2_NODE_RPC_URL")  L2=$(redact_rpc_url "$L2_RPC_URL")"
 echo "  challenger=$CHALLENGER_ADDRESS  datadir=$CHALLENGER_DATADIR  l1-rpc-kind=$L1_RPC_KIND"
 if [[ -n "$CANNON_ROLLUP" ]]; then
   echo "  rollup=$CANNON_ROLLUP  genesis=$CANNON_GENESIS"
