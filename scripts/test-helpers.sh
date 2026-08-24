@@ -1504,12 +1504,54 @@ else
   fail=1
 fi
 
+# --- l1-batch-proxy: split oversized L1 batches for op-challenger ---
+L1_PROXY_PY="$SCRIPT_DIR/l1-batch-proxy.py"
+L1_PROXY_START="$SCRIPT_DIR/start-l1-batch-proxy-sepolia.sh"
+CHALLENGER_START="$SCRIPT_DIR/09-start-challenger-sepolia.sh"
+
+if [[ -f "$L1_PROXY_PY" && -x "$L1_PROXY_START" ]] \
+  && grep -q 'l1-batch-proxy' "$SCRIPT_DIR/stop-all-sepolia.sh" \
+  && grep -q 'CHALLENGER_L1_RPC_URL="${CHALLENGER_L1_RPC_URL:-$L1_RPC_URL}"' "$CHALLENGER_START" \
+  && grep -q 'require_loopback_listen' "$L1_PROXY_PY"; then
+  echo "PASS l1-batch-proxy wired (start/stop/challenger knob; loopback listen)"
+else
+  echo "FAIL l1-batch-proxy must be wired without putting L1_RPC_URL on argv" >&2
+  fail=1
+fi
+
+# Start command must not pass upstream URL on argv (key lives in env).
+if grep -qE 'start_bg l1-batch-proxy python3 "\$PROXY_PY"' "$L1_PROXY_START" \
+  && ! grep -qE 'start_bg l1-batch-proxy .*https?://' "$L1_PROXY_START"; then
+  echo "PASS l1-batch-proxy start_bg has no URL on argv"
+else
+  echo "FAIL l1-batch-proxy start must exec python3 only; upstream from L1_RPC_URL env" >&2
+  fail=1
+fi
+
+# 09-start-challenger uses CHALLENGER_L1_RPC_URL for L1 wait, preflight, and --l1-eth-rpc.
+if grep -q 'wait_for_rpc "$CHALLENGER_L1_RPC_URL"' "$CHALLENGER_START" \
+  && grep -q '\-\-rpc-url "$CHALLENGER_L1_RPC_URL"' "$CHALLENGER_START" \
+  && grep -q '\-\-l1-eth-rpc="$CHALLENGER_L1_RPC_URL"' "$CHALLENGER_START"; then
+  echo "PASS 09-start-challenger honors CHALLENGER_L1_RPC_URL for all L1 dials"
+else
+  echo "FAIL 09-start-challenger-sepolia.sh must route L1 through CHALLENGER_L1_RPC_URL" >&2
+  fail=1
+fi
+
+L1_PROXY_PROP_OUT="$(python3 "$L1_PROXY_PY" --self-test 2>&1)" && L1_PROXY_PROP_EC=0 || L1_PROXY_PROP_EC=$?
+if [[ "$L1_PROXY_PROP_EC" -eq 0 && "$L1_PROXY_PROP_OUT" == *"self-test ok"* ]]; then
+  echo "PASS l1-batch-proxy properties (split/order/id/429/single/unreachable)"
+else
+  echo "FAIL l1-batch-proxy property tests (ec=$L1_PROXY_PROP_EC)" >&2
+  echo "$L1_PROXY_PROP_OUT" >&2
+  fail=1
+fi
+
 # F7-2c / D-0054: cannon / cannon-kona fail closed without a pre-image server.
 # start_bg returns 0 whether the daemon survives, so CheckRequired flags must
 # be refused before wait_for_rpc. Assert properties, not error phrasing.
 # Resolve the example env from SCRIPT_DIR: FORTEL2_ROOT is reassigned to
 # fixture dirs earlier in this file (same reason as the D-0045 rail check).
-CHALLENGER_START="$SCRIPT_DIR/09-start-challenger-sepolia.sh"
 CHALLENGER_ENV="$SCRIPT_DIR/../.env.sepolia.example"
 if [[ -f "$CHALLENGER_START" ]] \
   && awk '
@@ -1758,6 +1800,7 @@ _f711_run_preflight() {
 TRACE_TYPE='$trace_type'
 GAME_FACTORY='$_F711_GAME_FACTORY'
 L1_RPC_URL='http://127.0.0.1:8545'
+CHALLENGER_L1_RPC_URL="${CHALLENGER_L1_RPC_URL:-$L1_RPC_URL}"
 PRESTATE_PATH='${prestate_path:-}'
 CANNON_BIN='$mock_dir/cannon'
 CHALLENGER_SKIP_PREFLIGHT='${skip_flag:-}'
