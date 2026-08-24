@@ -806,7 +806,7 @@ A Sepolia redeploy is an **operational event for every verifier operator**, not 
 > Chain 852 was re-genesised: writers stopped ≈21:05Z, apply completed 21:14:51Z (spend 0.10781 ETH),
 > both datadirs wiped, stack restarted 21:44Z, hash cross-check matched first try 21:50Z,
 > `rail-interface.json` bumped to v7 (#115). **Do not re-run steps 3–8 — step 4 would wipe the network again.**
-> The SOS recovery (PRD step 10) is also **complete** — D-0069, **and step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24**: the type-8 Kona game is registered and respected and the proposer posts type-8, zero-bond games. Outstanding: steps **11–13** (stock proposer posts a valid game, deliberate bad proposal, closeout note).
+> The SOS recovery (PRD step 10) is also **complete** — D-0069, **and step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24**: the type-8 Kona game is registered and respected and the proposer posts type-8, zero-bond games. **Step 11 (valid game watched, unattacked) is complete — D-0082, 2026-08-24.** Outstanding: steps **12–13** (deliberate bad proposal, closeout note).
 > The steps below are retained as the procedure for the *next* reset, which is the mainnet-pilot gate.
 
 Order:
