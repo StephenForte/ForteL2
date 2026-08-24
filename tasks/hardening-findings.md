@@ -1295,3 +1295,124 @@ observed. stderr still holds the 17:31 zsh failure (logs append).
   scope.
 - First unattended `:00` fire not yet observed. Overlap under a
   run that outlasts an hour is untested.
+
+## R-16 (2026-08-24) — recovery watermark; run cost is the working set
+
+Sequel to **R-15**. Live Sepolia, operator Mac mini, repo `d2f87ac`
+(`origin/main`; #131 already merged) at start. Branch
+`feat/r-16-recovery-watermark`. Hourly agent
+`com.steve.fortel2-resolve-games` was `bootout` at 09:40:51 PDT
+before any script edit (D-0074 Finding 7(a) — do not share a
+checkout between a writer and a live `--execute`), then
+`bootstrap`ed back after the script was complete.
+
+### Why (measured, not asserted)
+
+`fetch_snapshot()` called `fetch_one_game()` over `range(game_count)`
+every run. At `gameCount=61` a dry-run was **65.7s** (~1.08 s/game).
+Almost all of that is wasted: 56 of 61 games return `skip
+zero_credit` and will do so forever. At 24 games/day the hourly
+agent would start overlapping itself around month five.
+
+### Mechanism
+
+Persisted low-water mark at `$DATA_DIR/resolve-games-watermark.json`
+(this host: `/Users/steveforte/src/fortel2/data-sepolia/…`,
+gitignored `data/` tree; **nothing under `data/` is tracked**).
+The mark is the lowest game index that is **not** yet terminal.
+Live `fetch` starts there. `--full-scan` ignores the file and
+starts at 0.
+
+Terminal predicates are exactly `decide()`'s two skip reasons:
+`zero_credit` (both return sites share the reason string; the later
+claim-state site is unreachable for `weth_amount>0` given the
+`elif`s, but is handled anyway) and `challenger_wins`.
+
+**Watermark is applied at fetch time** on the live path (that is
+where the RPC cost is) and as a filter inside `analyze()` for
+`--analyze-only` fixtures. `PLAN_JSON.game_count` is the factory
+total; `games_examined` / `scan_from` are the working set. Games
+below the mark are **absent** from the game lines, not listed as
+`SKIP` — a reader of a warm run is looking at in-flight work, not
+the drained prefix. `--full-scan` restores the full listing.
+
+Fail-safe: missing / unreadable / malformed / out-of-range / **factory
+mismatch** mark falls back to a full scan and says so
+(`watermark_fallback=…`); it never treats a bad file as "skip
+everything". The file records the factory address, so a Sepolia
+redeploy that leaves `$DATA_DIR/resolve-games-watermark.json` behind
+cannot skip the replacement factory's games. Advancing only on the
+normal path; `--full-scan` may write a lower mark so a
+corrupted-high file is recoverable without deleting it. A persist
+failure prints `watermark_persist=failed` and exits 1.
+
+### Terminality probe (trap 2)
+
+`challenger_wins` has never occurred on this chain (`WARN
+challenger_wins indexes=` is empty). It is advancing-terminal
+for scan cost — a resolved loss will not grow proposer credit —
+but the index is persisted in the watermark file and reprinted
+every run, so it is not walked past silently.
+
+`zero_credit` is **not proven by on-chain bytecode comparison**.
+It is established from the local `FaultDisputeGame.sol` /
+`DelayedWETH.sol` that this stack was built from:
+
+- `move()` and `resolveClaim()` revert unless `status == IN_PROGRESS`.
+- After `resolve()`, no new bonds and no `_distributeBond`.
+- `claimCredit` zeros both credit mappings on withdraw;
+  `hasUnlockedCredit` prevents a second unlock; a later
+  `claimCredit` with 0 credit reverts `NoCreditToClaim()`.
+- `DelayedWETH.unlock` keys on `msg.sender` (the game). A
+  third party cannot re-credit the game's withdrawal slot.
+
+On-chain sample at hand-back, still drained days after R-13/R-14
+withdrew them:
+
+```
+game 0  status=2 credit=0 weth_amount=0
+game 7  status=2 credit=0 weth_amount=0
+game 20 status=2 credit=0 weth_amount=0
+game 42 status=2 credit=0 weth_amount=0
+```
+
+No lag was added. `--full-scan` is the escape hatch if that
+reading is wrong. An in-range-but-too-high file (manual edit)
+is **not** caught by the out-of-range fallback; that is the
+corruption `--full-scan` exists to repair.
+
+The watermark sits at the lowest **non-terminal** index, including
+`wait finality` and `wait weth_delay`. A wait is mid-pipeline.
+
+### Live timings (`gameCount=61`, 2026-08-24 morning)
+
+| Run | scan_from | games_examined | wall-clock |
+|---|---|---|---|
+| cold (no watermark) | 0 | 61 | **65.699s** |
+| warm (low_water=56) | 56 | 5 | **15.337s** |
+| `--full-scan` | 0 | 61 | **62.355s** (matches cold) |
+
+After the cold run the file was
+`{"low_water": 56, "challenger_wins": [], …}`. Working set at
+measurement: game 56 `WAIT weth_delay`, 57–58 `ACTION`, 59–60
+`SKIP clock_unexpired`. The mark did not move past 56.
+
+Idempotency: `--execute` then `--execute` again. First sent 3
+txs (unlock 57, resolveClaim+resolve 58);
+second `txs_sent=0`. Dry-run remains the default.
+
+`test-helpers.sh` 204 → 213 PASS (9 appended; none removed).
+`bash -n` pass. `check-launchd.sh` OK with 2 warning(s)
+(health + wake fdautil; same before and after; plist not edited).
+
+### Residual
+
+- Overlap lock is still unbuilt. This task removes the calendar
+  pressure that made it urgent; it is a follow-up, not a substitute.
+- After step 8b, type-8 games are `not_type_1` (not a watermark
+  terminal). The mark will sit at the first type-8 index once the
+  type-1 tail is drained, and the type-8 tail will be the working
+  set. That is acceptable: the growing type-1 history is what this
+  change stops re-scanning, and `initBonds(8)=0` so that tail has
+  no bond to recover.
+- Alerting on a dead agent is still unbuilt.

@@ -22,7 +22,12 @@
 #
 #   FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh
 #   FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh --execute --max-games 1
+#   FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh --full-scan
 #   RESOLVE_GAMES_SNAPSHOT=/tmp/snap.json ./scripts/resolve-games-sepolia.sh --analyze-only
+#
+# Live runs persist a low-water mark at $DATA_DIR/resolve-games-watermark.json
+# so each invocation fetches from the lowest non-terminal game, not from 0.
+# --full-scan ignores that file and starts at index 0.
 #
 # Exit 0: plan computed (dry-run) or every attempted send confirmed.
 # Exit 1: usage / env / I/O / a send failed or state did not advance.
@@ -37,11 +42,11 @@ source "$SCRIPT_DIR/lib.sh"
 
 usage() {
   cat <<'EOF'
-Usage: resolve-games-sepolia.sh [--analyze-only] [--execute] [--max-games N]
+Usage: resolve-games-sepolia.sh [--analyze-only] [--execute] [--max-games N] [--full-scan]
 
-  Default (no --execute): fetch every factory game, report what *would* be
-                          sent, and send nothing. An invocation with no
-                          arguments never moves funds.
+  Default (no --execute): fetch the in-flight working set, report what
+                          *would* be sent, and send nothing. An invocation
+                          with no arguments never moves funds.
 
   --analyze-only  Skip fetch; compute the plan from RESOLVE_GAMES_SNAPSHOT
                   only. No network, cast, or Sepolia env required.
@@ -50,21 +55,30 @@ Usage: resolve-games-sepolia.sh [--analyze-only] [--execute] [--max-games N]
   --max-games N   Act on (or report) at most N games that still have
                   remaining recovery work. Games already fully claimed or
                   with an unexpired clock do not count toward N.
+  --full-scan     Ignore the persisted watermark and scan from index 0.
+                  Use to audit the whole history or recover a corrupted
+                  mark without deleting the file.
 
 Env:
-  RESOLVE_GAMES_SNAPSHOT  Snapshot JSON path (--analyze-only requires this)
-  FORTEL2_ENV             Must be .env.sepolia for the live path
+  RESOLVE_GAMES_SNAPSHOT   Snapshot JSON path (--analyze-only requires this)
+  RESOLVE_GAMES_WATERMARK  Watermark JSON path. Live default:
+                           $DATA_DIR/resolve-games-watermark.json.
+                           Analyze-only honors this only when set; otherwise
+                           it scans the snapshot from 0 and writes nothing.
+  FORTEL2_ENV              Must be .env.sepolia for the live path
 EOF
 }
 
 ANALYZE_ONLY=0
 EXECUTE=0
+FULL_SCAN=0
 MAX_GAMES=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --analyze-only) ANALYZE_ONLY=1; shift ;;
     --execute) EXECUTE=1; shift ;;
+    --full-scan) FULL_SCAN=1; shift ;;
     --max-games)
       if [[ $# -lt 2 || -z "${2:-}" || "$2" == -* ]]; then
         echo "ERROR: --max-games requires a non-negative integer" >&2
@@ -114,6 +128,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 WEI = 10 ** 18
@@ -328,6 +343,122 @@ def decide_game(game, now, finality_delay, weth_delay):
     }
 
 
+# Terminal for watermark advance: decide()'s two skip reasons that mean
+# "this game will never need another recovery look."
+# zero_credit covers both return sites in decide_game (early status==2
+# drain, and the later claim-state branch — they share this reason).
+# challenger_wins is also advancing-terminal (a resolved loss will not
+# grow proposer credit) but is recorded and reprinted every run so it
+# is never walked past silently.
+WATERMARK_TERMINAL_REASONS = frozenset(("zero_credit", "challenger_wins"))
+
+
+def snapshot_game_count(snapshot):
+    if snapshot.get("game_count") is not None and snapshot.get("game_count") != "":
+        return parse_uint(snapshot["game_count"])
+    games = snapshot.get("games") or []
+    if not games:
+        return 0
+    return max(int(g["index"]) for g in games) + 1
+
+
+def load_watermark(path, game_count, full_scan, factory=""):
+    """Return (scan_from, status, record).
+
+    Fail safe: missing / unreadable / malformed / out-of-range /
+    factory-mismatch → scan from 0. Never treat a bad file as 'skip everything'.
+    """
+    empty = {"low_water": 0, "challenger_wins": [], "factory": ""}
+    if full_scan:
+        return 0, "full_scan", empty
+    if not path:
+        return 0, "missing", empty
+    if not os.path.isfile(path):
+        return 0, "missing", empty
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.read()
+        data = json.loads(raw)
+    except (OSError, UnicodeDecodeError):
+        return 0, "unreadable", empty
+    except ValueError:
+        return 0, "malformed", empty
+    if not isinstance(data, dict):
+        return 0, "malformed", empty
+    mark = data.get("low_water")
+    if isinstance(mark, bool) or not isinstance(mark, int):
+        return 0, "malformed", empty
+    if mark < 0 or mark > game_count:
+        return 0, "out_of_range", empty
+    rec_factory = str(data.get("factory") or "").strip()
+    want = str(factory or "").strip()
+    if rec_factory and want and rec_factory.lower() != want.lower():
+        return 0, "factory_mismatch", empty
+    cw = data.get("challenger_wins") or []
+    if not isinstance(cw, list):
+        cw = []
+    cleaned = []
+    for item in cw:
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
+            cleaned.append(item)
+    rec = {"low_water": mark, "challenger_wins": cleaned, "factory": rec_factory}
+    return mark, "ok", rec
+
+
+def is_watermark_terminal(dec):
+    return dec.get("disposition") == "skip" and dec.get("reason") in WATERMARK_TERMINAL_REASONS
+
+
+def next_low_water(scan_from, game_count, decisions_by_idx):
+    """Lowest index that is not yet terminal. May equal game_count (all done).
+
+    Stops at the first missing index (fail safe — a hole is not skippable)
+    and at any non-terminal disposition, including wait finality / weth_delay.
+    """
+    idx = scan_from
+    while idx < game_count:
+        dec = decisions_by_idx.get(idx)
+        if dec is None:
+            break
+        if is_watermark_terminal(dec):
+            idx += 1
+            continue
+        break
+    return idx
+
+
+def save_watermark(path, low_water, challenger_wins, old_mark, status, full_scan, factory=""):
+    if not path:
+        return True
+    parent = os.path.dirname(path)
+    if full_scan or status != "ok":
+        write_mark = low_water
+    else:
+        write_mark = max(old_mark, low_water)
+    rec = {
+        "low_water": int(write_mark),
+        "challenger_wins": sorted(set(int(i) for i in challenger_wins)),
+        "updated_at": int(os.environ.get("RESOLVE_GAMES_NOW") or 0) or int(time.time()),
+        "factory": str(factory or ""),
+    }
+    tmp = path + ".tmp"
+    try:
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rec, f)
+            f.write("\n")
+        os.replace(tmp, path)
+    except OSError as exc:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        print("ERROR: failed to persist watermark (refusing to pretend it was saved): %s" % exc, file=sys.stderr)
+        return False
+    return True
+
+
 def remaining_wei(game, init_bond):
     credit = parse_uint(game.get("credit_wei", 0))
     weth_amount = parse_uint(game.get("weth_amount_wei", 0))
@@ -353,9 +484,31 @@ def analyze(snapshot, max_games):
     init_bond = parse_uint(snapshot.get("init_bond_wei", 0))
     gas_price = parse_uint(snapshot.get("gas_price_wei", 0))
     games = snapshot.get("games", [])
+    factory_count = snapshot_game_count(snapshot)
+    full_scan = os.environ.get("RESOLVE_GAMES_FULL_SCAN", "") == "1"
+    wm_path = os.environ.get("RESOLVE_GAMES_WATERMARK") or ""
+    factory = os.environ.get("RESOLVE_GAMES_FACTORY") or snapshot.get("factory") or ""
+
+    # Live fetch stamps scan_from onto the snapshot so analyze sees the same
+    # window fetch already paid for. --full-scan and --analyze-only fixtures
+    # (no stamp) load the watermark file themselves.
+    if (not full_scan) and snapshot.get("scan_from") is not None and snapshot.get("scan_from") != "":
+        scan_from = parse_uint(snapshot["scan_from"])
+        wm_status = str(snapshot.get("watermark_status") or "ok")
+        wm_record = {
+            "low_water": scan_from,
+            "challenger_wins": snapshot.get("watermark_challenger_wins") or [],
+        }
+        if not isinstance(wm_record["challenger_wins"], list):
+            wm_record["challenger_wins"] = []
+    else:
+        scan_from, wm_status, wm_record = load_watermark(wm_path, factory_count, full_scan, factory)
+
+    examined = [g for g in games if int(g["index"]) >= scan_from]
+    games_examined = len(examined)
 
     decisions = []
-    for game in games:
+    for game in examined:
         decisions.append((game, decide_game(game, now, finality_delay, weth_delay)))
 
     candidates = [(g, d) for (g, d) in decisions if d["selected"]]
@@ -400,6 +553,11 @@ def analyze(snapshot, max_games):
     wait_count = sum(1 for (_, d) in selected if d["disposition"] == "wait")
     action_count = sum(1 for (_, d) in selected if d["disposition"] == "action")
 
+    decisions_by_idx = {d["index"]: d for (_, d) in report}
+    watermark_next = next_low_water(scan_from, factory_count, decisions_by_idx)
+    found_cw = [d["index"] for (_, d) in report if d.get("reason") == "challenger_wins"]
+    all_cw = list(wm_record.get("challenger_wins") or []) + found_cw
+
     print("=== ForteL2 resolve-games (%s) ===" % mode)
     print("mode=%s" % mode)
     print("now=%d finality_delay=%d weth_delay=%d" % (now, finality_delay, weth_delay))
@@ -407,7 +565,15 @@ def analyze(snapshot, max_games):
         print("max_games=all")
     else:
         print("max_games=%d" % max_games)
-    print("game_count=%d" % len(games))
+    print("game_count=%d" % factory_count)
+    print("scan_from=%d" % scan_from)
+    print("games_examined=%d" % games_examined)
+    print("watermark_status=%s" % wm_status)
+    if wm_status in ("malformed", "unreadable", "out_of_range", "factory_mismatch"):
+        print("watermark_fallback=%s (scanning from 0; refusing to skip)" % wm_status)
+    print("watermark_next=%d" % watermark_next)
+    if all_cw:
+        print("WARN challenger_wins indexes=%s" % ",".join(str(i) for i in sorted(set(int(i) for i in all_cw))))
     print("selected_count=%d" % len(selected))
     print("selected_indexes=%s" % (",".join(str(i) for i in selected_indexes) if selected_indexes else ""))
     print("action_games=%d wait_games=%d" % (action_count, wait_count))
@@ -444,6 +610,11 @@ def analyze(snapshot, max_games):
         "recoverable_wei": str(recoverable),
         "estimated_gas_wei": str(est),
         "txs_sent": 0,
+        "game_count": factory_count,
+        "scan_from": scan_from,
+        "games_examined": games_examined,
+        "watermark_status": wm_status,
+        "watermark_next": watermark_next,
         "decisions": [
             {
                 "index": d["index"],
@@ -457,6 +628,14 @@ def analyze(snapshot, max_games):
         ],
     }
     print("PLAN_JSON=%s" % json.dumps(plan, separators=(",", ":")))
+    if wm_path:
+        if save_watermark(wm_path, watermark_next, all_cw, scan_from, wm_status, full_scan, factory):
+            print("watermark_persist=ok")
+        else:
+            print("watermark_persist=failed")
+            return 1
+    else:
+        print("watermark_persist=skipped")
     return 0
 
 
@@ -525,16 +704,27 @@ def fetch_snapshot(out_path, extra):
         stderr=subprocess.STDOUT, text=True,
     ).strip().split()[0])
 
-    workers = min(8, max(1, game_count))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        games = list(pool.map(
-            lambda i: fetch_one_game(rpc, factory, weth, recipient, i),
-            range(game_count),
-        ))
+    full_scan = extra.get("full_scan", False)
+    wm_path = extra.get("watermark_path") or ""
+    scan_from, wm_status, wm_record = load_watermark(wm_path, game_count, full_scan, factory)
+    to_fetch = max(0, game_count - scan_from)
+    workers = min(8, max(1, to_fetch))
+    if to_fetch == 0:
+        games = []
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            games = list(pool.map(
+                lambda i: fetch_one_game(rpc, factory, weth, recipient, i),
+                range(scan_from, game_count),
+            ))
 
     snap = {
         "now": now,
         "mode": extra.get("mode", "dry-run"),
+        "scan_from": scan_from,
+        "watermark_status": wm_status,
+        "watermark_challenger_wins": wm_record.get("challenger_wins") or [],
+        "games_examined": len(games),
         "finality_delay": finality,
         "weth_delay": weth_delay,
         "recipient": recipient,
@@ -611,6 +801,8 @@ def main(argv):
             "asr": os.environ["RESOLVE_GAMES_ASR"],
             "recipient": os.environ["RESOLVE_GAMES_RECIPIENT"],
             "mode": os.environ.get("RESOLVE_GAMES_MODE", "dry-run"),
+            "watermark_path": os.environ.get("RESOLVE_GAMES_WATERMARK") or "",
+            "full_scan": os.environ.get("RESOLVE_GAMES_FULL_SCAN", "") == "1",
         }
         raise SystemExit(fetch_snapshot(argv[2], extra))
     if cmd == "fetch-one":
@@ -892,6 +1084,7 @@ if [[ "$ANALYZE_ONLY" -eq 1 ]]; then
   fi
   echo "=== ForteL2 resolve-games (analyze-only) ==="
   echo "snapshot: $SNAP"
+  export RESOLVE_GAMES_FULL_SCAN="$FULL_SCAN"
   resolve_games_py analyze "$SNAP" "$MAX_GAMES"
   exit 0
 fi
@@ -925,6 +1118,8 @@ export RESOLVE_GAMES_FACTORY="$FACTORY"
 export RESOLVE_GAMES_WETH="$WETH"
 export RESOLVE_GAMES_ASR="$ASR"
 export RESOLVE_GAMES_RECIPIENT="$PROPOSER_ADDRESS"
+export RESOLVE_GAMES_FULL_SCAN="$FULL_SCAN"
+export RESOLVE_GAMES_WATERMARK="${RESOLVE_GAMES_WATERMARK:-$DATA_DIR/resolve-games-watermark.json}"
 if [[ "$EXECUTE" -eq 1 ]]; then
   export RESOLVE_GAMES_MODE="execute"
 else
@@ -934,6 +1129,10 @@ fi
 echo "=== ForteL2 resolve-games (live) ==="
 print_live_header
 echo "PROPOSER_GAME_TYPE=${PROPOSER_GAME_TYPE:-<unset>}"
+echo "watermark: $RESOLVE_GAMES_WATERMARK"
+if [[ "$FULL_SCAN" -eq 1 ]]; then
+  echo "scan: full (ignoring watermark)"
+fi
 
 SNAP="$(mktemp "${TMPDIR:-/tmp}/fortel2-resolve-games.XXXXXX")"
 cleanup_snap() { rm -f "$SNAP"; }
@@ -948,6 +1147,9 @@ WEI = 10 ** 18
 s = json.load(open(sys.argv[1]))
 weth_wei = int(s.get("weth_balance_wei", 0))
 print("gameCount=%s" % s.get("game_count"))
+print("scan_from=%s" % s.get("scan_from"))
+print("games_examined=%s" % s.get("games_examined"))
+print("watermark_status=%s" % s.get("watermark_status"))
 print("weth_balance_eth=%d.%018d" % (weth_wei // WEI, weth_wei % WEI))
 print("finality_delay=%s" % s.get("finality_delay"))
 print("weth_delay=%s" % s.get("weth_delay"))
@@ -960,8 +1162,13 @@ print("anchor_root=%s" % s.get("anchor_root"))
 print("anchor_block=%s" % s.get("anchor_block"))
 PY
 
-ANALYZE_OUT="$(resolve_games_py analyze "$SNAP" "$MAX_GAMES")"
+ANALYZE_EC=0
+ANALYZE_OUT="$(resolve_games_py analyze "$SNAP" "$MAX_GAMES")" || ANALYZE_EC=$?
 printf '%s\n' "$ANALYZE_OUT"
+if [[ "$ANALYZE_EC" -ne 0 ]]; then
+  echo "ERROR: analyze/watermark persist failed (ec=$ANALYZE_EC)" >&2
+  exit "$ANALYZE_EC"
+fi
 
 if [[ "$EXECUTE" -eq 0 ]]; then
   echo "dry-run: sending nothing (pass --execute to broadcast)"

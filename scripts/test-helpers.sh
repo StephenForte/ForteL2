@@ -2821,6 +2821,266 @@ else
   fail=1
 fi
 
+# R-16 — recovery watermark. Separate fixture so the original 8-game snapshot
+# (and its 10 existing cases) keep scanning from 0 with no watermark file.
+cat >"$RG_FIXTURE_DIR/wm.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "init_bond_wei": "80000000000000000",
+  "game_count": 8,
+  "games": [
+    {
+      "index": 0, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 992000
+    },
+    {
+      "index": 1, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 2, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 3, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 4, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 999900, "credit_wei": "80000000000000000",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 5, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 6, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "80000000000000000",
+      "claim_data_len": 1, "weth_amount_wei": "80000000000000000", "weth_unlock_ts": 999000
+    },
+    {
+      "index": 7, "created_at": 999000, "max_clock_duration": 7200,
+      "status": 0, "resolved_at": 0, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+
+rg_wm_analyze() {
+  local mark="$1"
+  shift
+  env -u FORTEL2_ENV PATH="$RG_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
+    RESOLVE_GAMES_WATERMARK="$mark" \
+    "$RESOLVE_GAMES" --analyze-only "$@"
+}
+
+WM_NONE="$RG_FIXTURE_DIR/wm-none.json"
+RG_WM_NONE_OUT="$(rg_wm_analyze "$WM_NONE" 2>&1)" && RG_WM_NONE_EC=0 || RG_WM_NONE_EC=$?
+WM_NONE_MARK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["low_water"])' "$WM_NONE" 2>/dev/null || echo missing)"
+if [[ "$RG_WM_NONE_EC" -eq 0 ]] \
+  && echo "$RG_WM_NONE_OUT" | grep -q '^scan_from=0$' \
+  && echo "$RG_WM_NONE_OUT" | grep -q '^games_examined=8$' \
+  && echo "$RG_WM_NONE_OUT" | grep -q '^watermark_status=missing$' \
+  && echo "$RG_WM_NONE_OUT" | grep -q 'game 0 SKIP zero_credit' \
+  && echo "$RG_WM_NONE_OUT" | grep -q '^watermark_next=4$' \
+  && [[ "$WM_NONE_MARK" == "4" ]]; then
+  echo "PASS resolve-games missing watermark scans from 0 and persists next"
+else
+  echo "FAIL resolve-games missing watermark should scan from 0 (ec=$RG_WM_NONE_EC mark=$WM_NONE_MARK)" >&2
+  echo "$RG_WM_NONE_OUT" >&2
+  fail=1
+fi
+
+printf 'not-json{' >"$RG_FIXTURE_DIR/wm-bad.json"
+RG_WM_BAD_OUT="$(rg_wm_analyze "$RG_FIXTURE_DIR/wm-bad.json" 2>&1)" && RG_WM_BAD_EC=0 || RG_WM_BAD_EC=$?
+if [[ "$RG_WM_BAD_EC" -eq 0 ]] \
+  && echo "$RG_WM_BAD_OUT" | grep -q '^scan_from=0$' \
+  && echo "$RG_WM_BAD_OUT" | grep -q '^games_examined=8$' \
+  && echo "$RG_WM_BAD_OUT" | grep -q 'watermark_fallback=malformed' \
+  && echo "$RG_WM_BAD_OUT" | grep -q 'game 0 SKIP zero_credit'; then
+  echo "PASS resolve-games malformed watermark falls back to a full scan"
+else
+  echo "FAIL resolve-games malformed watermark must not skip (ec=$RG_WM_BAD_EC)" >&2
+  echo "$RG_WM_BAD_OUT" >&2
+  fail=1
+fi
+
+printf '%s\n' '{"low_water":99}' >"$RG_FIXTURE_DIR/wm-oor.json"
+RG_WM_OOR_OUT="$(rg_wm_analyze "$RG_FIXTURE_DIR/wm-oor.json" 2>&1)" && RG_WM_OOR_EC=0 || RG_WM_OOR_EC=$?
+if [[ "$RG_WM_OOR_EC" -eq 0 ]] \
+  && echo "$RG_WM_OOR_OUT" | grep -q '^scan_from=0$' \
+  && echo "$RG_WM_OOR_OUT" | grep -q '^games_examined=8$' \
+  && echo "$RG_WM_OOR_OUT" | grep -q 'watermark_fallback=out_of_range' \
+  && echo "$RG_WM_OOR_OUT" | grep -q 'game 0 SKIP zero_credit'; then
+  echo "PASS resolve-games out-of-range watermark falls back to a full scan"
+else
+  echo "FAIL resolve-games out-of-range watermark must not skip (ec=$RG_WM_OOR_EC)" >&2
+  echo "$RG_WM_OOR_OUT" >&2
+  fail=1
+fi
+
+# Contiguous zero_credit 0–3, wait finality at 4, zero_credit at 5 (hole),
+# wait weth_delay at 6. Next mark is 4 — not 5, not 6, not 7.
+if echo "$RG_WM_NONE_OUT" | grep -q 'game 4 WAIT finality' \
+  && echo "$RG_WM_NONE_OUT" | grep -q 'game 6 WAIT weth_delay' \
+  && echo "$RG_WM_NONE_OUT" | grep -q '^watermark_next=4$' \
+  && [[ "$WM_NONE_MARK" == "4" ]]; then
+  echo "PASS resolve-games watermark does not advance past wait finality"
+else
+  echo "FAIL resolve-games watermark must stop at wait finality, not skip it" >&2
+  echo "$RG_WM_NONE_OUT" >&2
+  fail=1
+fi
+
+if echo "$RG_WM_NONE_OUT" | grep -q 'game 5 SKIP zero_credit' \
+  && echo "$RG_WM_NONE_OUT" | grep -q '^watermark_next=4$'; then
+  echo "PASS resolve-games watermark does not skip a hole to a later terminal game"
+else
+  echo "FAIL resolve-games non-contiguous zero_credit must not advance past the wait" >&2
+  echo "$RG_WM_NONE_OUT" >&2
+  fail=1
+fi
+
+# Dedicated weth_delay blocker: 0–2 drained, 3 waiting on DelayedWETH.
+cat >"$RG_FIXTURE_DIR/wm-delay.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "init_bond_wei": "80000000000000000",
+  "game_count": 4,
+  "games": [
+    {
+      "index": 0, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 1, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 2, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 3, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "80000000000000000",
+      "claim_data_len": 1, "weth_amount_wei": "80000000000000000", "weth_unlock_ts": 999000
+    }
+  ]
+}
+EOF
+WM_DELAY="$RG_FIXTURE_DIR/wm-delay-mark.json"
+RG_WM_DELAY_OUT="$(
+  env -u FORTEL2_ENV PATH="$RG_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm-delay.json" \
+    RESOLVE_GAMES_WATERMARK="$WM_DELAY" \
+    "$RESOLVE_GAMES" --analyze-only 2>&1
+)" && RG_WM_DELAY_EC=0 || RG_WM_DELAY_EC=$?
+if [[ "$RG_WM_DELAY_EC" -eq 0 ]] \
+  && echo "$RG_WM_DELAY_OUT" | grep -q 'game 3 WAIT weth_delay' \
+  && echo "$RG_WM_DELAY_OUT" | grep -q '^watermark_next=3$' \
+  && echo "$RG_WM_DELAY_OUT" | grep -q '^games_examined=4$'; then
+  echo "PASS resolve-games watermark does not advance past wait weth_delay"
+else
+  echo "FAIL resolve-games watermark must stop at wait weth_delay (ec=$RG_WM_DELAY_EC)" >&2
+  echo "$RG_WM_DELAY_OUT" >&2
+  fail=1
+fi
+
+printf '%s\n' '{"low_water":4,"challenger_wins":[]}' >"$RG_FIXTURE_DIR/wm-warm.json"
+RG_WM_WARM_OUT="$(rg_wm_analyze "$RG_FIXTURE_DIR/wm-warm.json" 2>&1)" && RG_WM_WARM_EC=0 || RG_WM_WARM_EC=$?
+if [[ "$RG_WM_WARM_EC" -eq 0 ]] \
+  && echo "$RG_WM_WARM_OUT" | grep -q '^scan_from=4$' \
+  && echo "$RG_WM_WARM_OUT" | grep -q '^games_examined=4$' \
+  && echo "$RG_WM_WARM_OUT" | grep -q 'game 4 WAIT finality' \
+  && ! echo "$RG_WM_WARM_OUT" | grep -q 'game 0 ' \
+  && ! echo "$RG_WM_WARM_OUT" | grep -q 'game 3 '; then
+  echo "PASS resolve-games warm watermark examines only the working set"
+else
+  echo "FAIL resolve-games warm watermark must examine 4 games, not the drained prefix (ec=$RG_WM_WARM_EC)" >&2
+  echo "$RG_WM_WARM_OUT" >&2
+  fail=1
+fi
+
+printf '%s\n' '{"low_water":6,"challenger_wins":[]}' >"$RG_FIXTURE_DIR/wm-full.json"
+RG_WM_FULL_OUT="$(rg_wm_analyze "$RG_FIXTURE_DIR/wm-full.json" --full-scan 2>&1)" && RG_WM_FULL_EC=0 || RG_WM_FULL_EC=$?
+if [[ "$RG_WM_FULL_EC" -eq 0 ]] \
+  && echo "$RG_WM_FULL_OUT" | grep -q '^scan_from=0$' \
+  && echo "$RG_WM_FULL_OUT" | grep -q '^games_examined=8$' \
+  && echo "$RG_WM_FULL_OUT" | grep -q '^watermark_status=full_scan$' \
+  && echo "$RG_WM_FULL_OUT" | grep -q 'game 0 SKIP zero_credit' \
+  && echo "$RG_WM_FULL_OUT" | grep -q 'game 4 WAIT finality'; then
+  echo "PASS resolve-games --full-scan ignores an existing watermark"
+else
+  echo "FAIL resolve-games --full-scan must examine all 8 games (ec=$RG_WM_FULL_EC)" >&2
+  echo "$RG_WM_FULL_OUT" >&2
+  fail=1
+fi
+
+# Bounded cost: PLAN_JSON.games_examined must match the line so a later
+# refactor cannot restore a full scan while the human-readable line stays green.
+RG_WM_WARM_PLAN="$(printf '%s\n' "$RG_WM_WARM_OUT" | awk -F= '/^PLAN_JSON=/{print substr($0,11)}')"
+RG_WM_WARM_PLAN_N="$(printf '%s' "$RG_WM_WARM_PLAN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["games_examined"])')"
+if [[ "$RG_WM_WARM_PLAN_N" == "4" ]]; then
+  echo "PASS resolve-games PLAN_JSON games_examined is the working-set size"
+else
+  echo "FAIL resolve-games PLAN_JSON.games_examined should be 4, got $RG_WM_WARM_PLAN_N" >&2
+  fail=1
+fi
+
+printf '%s\n' '{"low_water":4,"factory":"0x0000000000000000000000000000000000000001"}' >"$RG_FIXTURE_DIR/wm-factory.json"
+RG_WM_FAC_OUT="$(
+  env -u FORTEL2_ENV PATH="$RG_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
+    RESOLVE_GAMES_WATERMARK="$RG_FIXTURE_DIR/wm-factory.json" \
+    RESOLVE_GAMES_FACTORY="0x0000000000000000000000000000000000000002" \
+    "$RESOLVE_GAMES" --analyze-only 2>&1
+)" && RG_WM_FAC_EC=0 || RG_WM_FAC_EC=$?
+if [[ "$RG_WM_FAC_EC" -eq 0 ]] \
+  && echo "$RG_WM_FAC_OUT" | grep -q '^scan_from=0$' \
+  && echo "$RG_WM_FAC_OUT" | grep -q '^games_examined=8$' \
+  && echo "$RG_WM_FAC_OUT" | grep -q 'watermark_fallback=factory_mismatch' \
+  && echo "$RG_WM_FAC_OUT" | grep -q 'game 0 SKIP zero_credit'; then
+  echo "PASS resolve-games factory-mismatched watermark falls back to a full scan"
+else
+  echo "FAIL resolve-games stale factory watermark must not skip (ec=$RG_WM_FAC_EC)" >&2
+  echo "$RG_WM_FAC_OUT" >&2
+  fail=1
+fi
+
+printf 'x\n' >"$RG_FIXTURE_DIR/wm-notdir"
+RG_WM_IO_OUT="$(
+  env -u FORTEL2_ENV PATH="$RG_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
+    RESOLVE_GAMES_WATERMARK="$RG_FIXTURE_DIR/wm-notdir/mark.json" \
+    "$RESOLVE_GAMES" --analyze-only 2>&1
+)" && RG_WM_IO_EC=0 || RG_WM_IO_EC=$?
+if [[ "$RG_WM_IO_EC" -ne 0 ]] \
+  && echo "$RG_WM_IO_OUT" | grep -q 'watermark_persist=failed' \
+  && echo "$RG_WM_IO_OUT" | grep -q 'failed to persist watermark'; then
+  echo "PASS resolve-games watermark persist failure is visible and nonzero"
+else
+  echo "FAIL resolve-games persist failure should exit nonzero (ec=$RG_WM_IO_EC)" >&2
+  echo "$RG_WM_IO_OUT" >&2
+  fail=1
+fi
+
 cleanup_rg_fixtures
 trap - EXIT
 
