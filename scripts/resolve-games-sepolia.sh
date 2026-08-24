@@ -10,6 +10,10 @@
 #     → [wait DelayedWETH.delay()]
 #     → claimCredit(recipient)   # withdraw
 #
+# resolveClaim is skipped when resolvedSubgames(0) is already true — credit
+# can still read 0. A ClaimAlreadyResolved revert is treated as already-done
+# so the job continues to resolve() instead of exiting 1.
+#
 # Dry-run is the default. --execute is required to broadcast, same shape as
 # --force-full-deploy elsewhere. Resolution is permissionless; this script
 # signs with ADMIN so it never shares a nonce with the hourly proposer.
@@ -146,6 +150,24 @@ def parse_addr(s):
     return s
 
 
+def parse_bool(s):
+    if isinstance(s, bool):
+        return s
+    if s is None:
+        return False
+    if isinstance(s, int):
+        return s != 0
+    token = str(s).strip().split()[0].lower()
+    return token in ("true", "1", "0x1")
+
+
+def subgame_already_resolved(game):
+    """True / False / None. None = field absent (offline fixtures, pre-fetch)."""
+    if "resolved_subgame" not in game:
+        return None
+    return parse_bool(game.get("resolved_subgame"))
+
+
 def fmt_eth(wei):
     wei = int(wei)
     sign = ""
@@ -248,7 +270,10 @@ def decide_game(game, now, finality_delay, weth_delay):
     disposition = "action"
 
     if status == 0:
-        if credit == 0:
+        already = subgame_already_resolved(game)
+        # credit==0 is not enough: a resolved subgame can still read credit 0
+        # (19:00 job: ClaimAlreadyResolved, then resolve() 96s later).
+        if already is not True and credit == 0:
             actions.append("resolveClaim")
         actions.append("resolve")
         reason = "resolve"
@@ -544,6 +569,7 @@ def fetch_one_game(rpc, factory, weth, recipient, index):
     credit = parse_uint(cast_call(rpc, address, "credit(address)(uint256)", recipient)[0])
     claim_len = parse_uint(cast_call(rpc, address, "claimDataLen()(uint256)")[0])
     max_clock = parse_uint(cast_call(rpc, address, "maxClockDuration()(uint64)")[0])
+    resolved_sub = parse_bool(cast_call(rpc, address, "resolvedSubgames(uint256)(bool)", 0)[0])
     wd = cast_call(rpc, weth, "withdrawals(address,address)(uint256,uint256)", address, recipient)
     weth_amount = parse_uint(wd[0])
     weth_ts = parse_uint(wd[1]) if len(wd) > 1 else 0
@@ -557,6 +583,7 @@ def fetch_one_game(rpc, factory, weth, recipient, index):
         "resolved_at": resolved_at,
         "credit_wei": str(credit),
         "claim_data_len": claim_len,
+        "resolved_subgame": resolved_sub,
         "weth_amount_wei": str(weth_amount),
         "weth_unlock_ts": weth_ts,
     }
@@ -653,6 +680,25 @@ require_sender_ready() {
   fi
 }
 
+# Broadcast via cast send --json. Exit 0 with stdout on success; 2 if the
+# revert is ClaimAlreadyResolved (idempotent); 1 otherwise (stderr printed).
+cast_send_json() {
+  local err_file out
+  err_file="$(mktemp "${TMPDIR:-/tmp}/fortel2-resolve-send.XXXXXX")"
+  if out="$(cast send "$@" --json 2>"$err_file")"; then
+    printf '%s' "$out"
+    rm -f "$err_file"
+    return 0
+  fi
+  if grep -qE 'ClaimAlreadyResolved|0xf1a94581' "$err_file"; then
+    rm -f "$err_file"
+    return 2
+  fi
+  cat "$err_file" >&2
+  rm -f "$err_file"
+  return 1
+}
+
 send_leg() {
   # Broadcast one permissionless recovery call. Caller must have just
   # re-read state and confirmed this leg is the next ready action.
@@ -660,15 +706,23 @@ send_leg() {
   local leg="$2"
   local recipient="$3"
   local tx_json tx_hash receipt status gas_used gas_price cost
+  local send_rc=0
 
   case "$leg" in
     resolveClaim)
       tx_json="$(
-        cast send "$game_addr" 'resolveClaim(uint256,uint256)' 0 0 \
+        cast_send_json "$game_addr" 'resolveClaim(uint256,uint256)' 0 0 \
           --private-key "$ADMIN_PRIVATE_KEY" \
-          --rpc-url "$L1_RPC_URL" \
-          --json
-      )"
+          --rpc-url "$L1_RPC_URL"
+      )" || send_rc=$?
+      if [[ "$send_rc" -eq 2 ]]; then
+        echo "ALREADY leg=$leg"
+        return 0
+      fi
+      if [[ "$send_rc" -ne 0 ]]; then
+        echo "ERROR: send produced no transaction hash for $leg" >&2
+        exit 1
+      fi
       ;;
     resolve)
       tx_json="$(
@@ -759,6 +813,7 @@ execute_selected() {
   fi
 
   local idx game_json dec_json disposition actions_csv leg sent_n cost_sum game_file
+  local claim_already
   sent_n=0
   cost_sum=0
   export RESOLVE_GAMES_FINALITY="$finality"
@@ -770,6 +825,7 @@ execute_selected() {
   while IFS= read -r idx; do
     [[ -z "$idx" ]] && continue
     echo "--- game $idx ---"
+    claim_already=0
     while true; do
       RESOLVE_GAMES_NOW="$(cast block latest --field timestamp --rpc-url "$L1_RPC_URL" | awk '{print $1}')"
       if [[ -z "$RESOLVE_GAMES_NOW" || "$RESOLVE_GAMES_NOW" == "0" ]]; then
@@ -778,6 +834,10 @@ execute_selected() {
       fi
       export RESOLVE_GAMES_NOW
       game_json="$(resolve_games_py fetch-one "$idx")"
+      if [[ "$claim_already" -eq 1 ]]; then
+        # Stale RPC can still report resolved_subgame=false after the revert.
+        game_json="$(printf '%s' "$game_json" | python3 -c 'import json,sys; g=json.load(sys.stdin); g["resolved_subgame"]=True; json.dump(g,sys.stdout)')"
+      fi
       printf '%s\n' "$game_json" > "$game_file"
       dec_json="$(resolve_games_py decide "$game_file")"
       disposition="$(printf '%s' "$dec_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("disposition",""))')"
@@ -787,11 +847,23 @@ execute_selected() {
         break
       fi
       leg="${actions_csv%%,*}"
+      if [[ "$leg" == "resolveClaim" && "$claim_already" -eq 1 ]]; then
+        if [[ "$actions_csv" != *","* ]]; then
+          echo "game $idx skip resolveClaim already on-chain"
+          break
+        fi
+        actions_csv="${actions_csv#*,}"
+        leg="${actions_csv%%,*}"
+      fi
       local game_addr send_out tx_hash cost_wei
       game_addr="$(printf '%s' "$game_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("address",""))')"
       echo "sending game=$idx leg=$leg to=$game_addr"
       send_out="$(send_leg "$game_addr" "$leg" "$recipient")"
       echo "$send_out"
+      if [[ "$send_out" == "ALREADY leg=resolveClaim" ]]; then
+        claim_already=1
+        continue
+      fi
       tx_hash="$(printf '%s' "$send_out" | awk '{for(i=1;i<=NF;i++) if($i ~ /^tx=/){sub(/^tx=/,"",$i); print $i}}')"
       cost_wei="$(printf '%s' "$send_out" | awk '{for(i=1;i<=NF;i++) if($i ~ /^cost_wei=/){sub(/^cost_wei=/,"",$i); print $i}}')"
       sent_n=$((sent_n + 1))
