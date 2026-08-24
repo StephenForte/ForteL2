@@ -1203,16 +1203,21 @@ over `StartInterval=3600`.
 
 ### `check-launchd.sh` does not enumerate dynamically
 
-The brief said the checker picks up `com.steve.fortel2-*.plist`
-dynamically. The repo does not. `check_agent` is called only for the
-hardcoded triple `fortel2-health fortel2-sleep fortel2-wake`
-(`scripts/check-launchd.sh` ~190). The host-side stale walk *is*
-a glob, so an installed plist with a repo counterpart is not STALE.
-Result stayed **OK with 1 warning(s)** — the pre-existing health
-fdautil wrapper — before and after install. The new agent is not
-schedule-checked. Not edited (out of scope). If that loop is later
-made dynamic, last-`ProgramArguments`-is-script will see `--execute`
-as the script path; file-to-file equality would still pass.
+The brief said the checker already enumerated `com.steve.fortel2-*.plist`
+and must not be edited. The repo at `eead943` did **not**: `check_agent`
+was called only for the hardcoded triple
+`fortel2-health fortel2-sleep fortel2-wake`. The host-side stale walk
+*was* a glob, so an installed counterpart was not STALE, and the result
+stayed **OK with 1 warning(s)** while the new agent was invisible.
+
+Codex P1 on #129 asked to add the label and stop treating a trailing
+`--execute` as the script path. That is a strengthening, not "adjust
+the checker to accept the file." Follow-up edit: repo plists are now
+globbed; `plist_script` takes the last non-flag path-like argument.
+After the edit, `check-launchd.sh` reports the new agent
+`schedule=*:0 script=…/resolve-games-sepolia.sh` and the warning
+count is still **1** (health fdautil). LD-01 now also requires the
+glob and `plist_script`.
 
 ### Pre-install dry-run (settled wallet, not mid-bulk-recovery)
 

@@ -1286,6 +1286,8 @@ if [[ ! -f "$LAUNCHD_DIR/com.steve.fortel2-cloudflared.plist" ]] \
   && grep -q '<integer>0</integer>' "$LAUNCHD_DIR/com.steve.fortel2-health.plist" \
   && grep -q 'is_contract_schedule' "$LD_CHECK" \
   && grep -q 'fortel2-sleep|fortel2-wake' "$LD_CHECK" \
+  && grep -q 'com.steve.fortel2-\*.plist' "$LD_CHECK" \
+  && grep -q 'plist_script' "$LD_CHECK" \
   && ! grep -q 'check_keepalive_agent' "$LD_CHECK" \
   && grep -q 'launchctl print' "$LD_CHECK"; then
   echo "PASS LD-01 check-launchd tiered severity; no cloudflared LaunchAgent plist"
