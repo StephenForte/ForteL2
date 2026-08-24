@@ -37,6 +37,9 @@ import re
 import sys
 
 FAILS = 0
+# Set from phase7-gates.json markerConvention.onRed after JSON load.
+# Empty until then so parse/heading failures stay unchanged.
+CONVENTION_POINTER = ""
 
 
 class ExtractError(Exception):
@@ -51,6 +54,12 @@ def fail(msg: str) -> None:
     global FAILS
     print(f"FAIL {msg}")
     FAILS += 1
+
+
+def fail_with_convention(msg: str) -> None:
+    """Same matching/exit path as fail(); suffix points at the documented convention."""
+    suffix = f" — {CONVENTION_POINTER}" if CONVENTION_POINTER else ""
+    fail(f"{msg}{suffix}")
 
 
 def read_text(path: str) -> str:
@@ -245,7 +254,7 @@ def require_markers(
     if body is None:
         found = find_marker_in_steps(steps, markers[0]) if markers else []
         found_s = ",".join(found) if found else "<missing>"
-        fail(
+        fail_with_convention(
             f"{action_id} {loc} numbering (declared={declared} found={found_s})"
         )
         return
@@ -254,11 +263,11 @@ def require_markers(
             continue
         found = find_marker_in_steps(steps, marker)
         if found:
-            fail(
+            fail_with_convention(
                 f"{action_id} {loc} numbering (declared={declared} found={','.join(found)})"
             )
         else:
-            fail(
+            fail_with_convention(
                 f"{action_id} {loc} marker {marker!r} not found (declared step {declared})"
             )
 
@@ -316,7 +325,7 @@ def extract_gate_ids(text: str) -> set[str]:
 def check_gate_ids(label: str, text: str, declared: set[str]) -> None:
     found = extract_gate_ids(text)
     if found != declared:
-        fail(
+        fail_with_convention(
             f"{label} gate ids (declared={fmt_ids(declared)} found={fmt_ids(found)})"
         )
     else:
@@ -387,6 +396,7 @@ def pointer_ok(label: str, text: str) -> None:
 
 
 def main() -> int:
+    global CONVENTION_POINTER
     gates_path = os.environ["PHASE7_GATES_JSON"]
     prd_path = os.environ["PHASE7_PRD"]
     readme_path = os.environ["PHASE7_README"]
@@ -414,12 +424,30 @@ def main() -> int:
         preflight = facts["preflight"]
         actions = facts["steps"]
         gate_ids_facts = facts["gateIds"]
+        marker_convention = facts["markerConvention"]
         prd_heading = loc["prd"]["heading"]
         readme_heading = loc["readme"]["heading"]
     except KeyError as e:
         fail(f"phase7-gates.json missing key {e}")
         print("phase7-gate-parity: 1 FAIL(s)", file=sys.stderr)
         return 1
+
+    if not isinstance(marker_convention, dict):
+        fail("phase7-gates.json markerConvention must be an object")
+        print("phase7-gate-parity: 1 FAIL(s)", file=sys.stderr)
+        return 1
+    missing_mc = [
+        k
+        for k in ("completionMarkers", "gateIdSet", "onRed")
+        if not str(marker_convention.get(k) or "").strip()
+    ]
+    if missing_mc:
+        fail(
+            f"phase7-gates.json markerConvention missing {','.join(missing_mc)}"
+        )
+        print("phase7-gate-parity: 1 FAIL(s)", file=sys.stderr)
+        return 1
+    CONVENTION_POINTER = str(marker_convention["onRed"]).strip()
 
     try:
         prd_text = read_text(prd_path)

@@ -2,6 +2,11 @@
   "schemaVersion": 1,
   "purpose": "Declared Phase 7 operator-sequence facts for scripts/phase7-gate-parity.sh (F7-12). The PRD/README step-number collision is locked here rather than treated as accidental. Renumbering README is an operator decision, not this file's job.",
   "authority": "tasks/prd-phase-7-fault-proofs.md § Operator sequence",
+  "markerConvention": {
+    "completionMarkers": "Completion markers go in the When column. The What column is checker-keyed (prdMustContain / readmeMustContain) and must not be reworded to mark a step complete.",
+    "gateIdSet": "Each Operator sequence section must contain exactly the declared F7-N id set. Removing a mention fails the same as adding an undeclared one.",
+    "onRed": "see markerConvention in tasks/phase7-gates.json (D-0070)"
+  },
   "locations": {
     "prd": {
       "path": "tasks/prd-phase-7-fault-proofs.md",
