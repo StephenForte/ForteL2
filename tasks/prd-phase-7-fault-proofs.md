@@ -81,7 +81,7 @@ Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SO
 > **STATUS 2026-08-22 — steps 2 through 9 are COMPLETE (D-0068). Do not re-run them.**
 > The wipe executed: chain 852 is live on new L1 proxies, the replica derives the same chain, and
 > `rail-interface.json` is at v7. Re-running step 3 would wipe the network a second time.
-> **Step 10 (SOS recovery) is also complete — D-0069. Step 8b (fault-proof game) is complete — D-0077, 2026-08-24.** Outstanding: steps 11–13, with fix-list item 5's `phase7-gates.json` markers landing first.
+> **Step 10 (SOS recovery) is also complete — D-0069. Step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24.** Outstanding: steps 11–13, with fix-list item 5's `phase7-gates.json` markers landing first.
 
 | # | When | What | Story |
 |---|---|---|---|
