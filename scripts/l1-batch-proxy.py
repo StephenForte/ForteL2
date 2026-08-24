@@ -212,6 +212,9 @@ def _forward_raw(body: bytes, content_type: str) -> tuple[int, bytes, str]:
     except urllib.error.URLError as err:
         msg = error_response(None, f"upstream unreachable: {err.reason}")
         return 502, json.dumps(msg).encode(), "application/json"
+    except TimeoutError:
+        msg = error_response(None, "upstream timed out")
+        return 504, json.dumps(msg).encode(), "application/json"
 
 
 def _parse_json_payload(payload: bytes) -> Any:
@@ -323,7 +326,6 @@ def handle_jsonrpc_body(body: bytes, content_type: str) -> tuple[int, bytes, str
 
     chunks = split_batch(parsed, STATE.chunk_size)
     merged: list[Any] = []
-    http_status = 200
     for idx, chunk in enumerate(chunks):
         if idx > 0 and STATE.pace_sec > 0:
             time.sleep(STATE.pace_sec)
@@ -332,9 +334,9 @@ def handle_jsonrpc_body(body: bytes, content_type: str) -> tuple[int, bytes, str
         )
         part = _normalize_chunk_responses(chunk, status, payload)
         merged.extend(part)
-        if not (200 <= status < 300) and http_status == 200:
-            http_status = status
-    return http_status, json.dumps(merged).encode(), "application/json"
+    # JSON-RPC batch responses must use HTTP 2xx so Go clients decode the body.
+    # Per-entry errors carry upstream failure; non-2xx would discard successful chunks.
+    return 200, json.dumps(merged).encode(), "application/json"
 
 
 def _write_json(
@@ -499,7 +501,7 @@ def self_test() -> None:
     upstream_mode["fail_chunk"] = 1
     batch = [{"jsonrpc": "2.0", "id": i, "method": "eth_call", "params": []} for i in range(65)]
     status, payload, _ = handle_jsonrpc_body(json.dumps(batch).encode(), "application/json")
-    assert status == 429
+    assert status == 200
     resp = json.loads(payload)
     assert len(resp) == 65
     for i in range(40):
