@@ -81,7 +81,7 @@ Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SO
 > **STATUS 2026-08-22 — steps 2 through 9 are COMPLETE (D-0068). Do not re-run them.**
 > The wipe executed: chain 852 is live on new L1 proxies, the replica derives the same chain, and
 > `rail-interface.json` is at v7. Re-running step 3 would wipe the network a second time.
-> **Step 10 (SOS recovery) is also complete — D-0069.** Outstanding: **step 8b** (fault-proof game, blocked on F7-12) and steps 11–13.
+> **Step 10 (SOS recovery) is also complete — D-0069. Step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24.** Outstanding: steps 11–13, with fix-list item 5's `phase7-gates.json` markers landing first.
 
 | # | When | What | Story |
 |---|---|---|---|
@@ -161,9 +161,9 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 
 **Acceptance Criteria:**
 
-- [ ] **Step 8b, in order (D-0061 / D-0063):** post-wipe `rollup.json` committed to `deployments/sepolia/`; Kona prestate built from it by the CI workflow; **its commitment verified locally with `cannon witness --input` *before* applying** — registration is once-only twice over (`shouldDeployAdditionalDisputeGames` skips, and on-chain `SetDisputeGameImpl` requires `gameImpls(8) == address(0)`), so a wrong hash is correctable only by a manual L1PAO `setImplementation` or another wipe
-- [ ] Second `op-deployer apply` registers the type-8 game with `MakeRespected`, signed by a key holding **both** L1ProxyAdminOwner and Guardian (`setRespectedGameType` is Guardian-gated, D-0063 Finding 3a)
-- [ ] **`PROPOSER_GAME_TYPE` switched to 8 and the proposer stopped and restarted** — a plain re-run of the start script is a no-op (`start_bg` returns 0 on a live pid, D-0064 Finding 7); games created before the flip keep their respected flag, but a proposer left on type 1 posts games that cannot prove a withdrawal or advance the anchor
+- [x] **Step 8b, in order (D-0061 / D-0063) — done 2026-08-24 (D-0077), commitment `0x034c90f0…796b8d`, first type-8 game at index 63:** post-wipe `rollup.json` committed to `deployments/sepolia/`; Kona prestate built from it by the CI workflow; **its commitment verified locally with `cannon witness --input` *before* applying** — registration is once-only twice over (`shouldDeployAdditionalDisputeGames` skips, and on-chain `SetDisputeGameImpl` requires `gameImpls(8) == address(0)`), so a wrong hash is correctable only by a manual L1PAO `setImplementation` or another wipe
+- [x] Second `op-deployer apply` registers the type-8 game with `MakeRespected`, signed by a key holding **both** L1ProxyAdminOwner and Guardian (`setRespectedGameType` is Guardian-gated, D-0063 Finding 3a) — **done 2026-08-24 (D-0077)**: impl `0x84c0…8584`, `respectedGameType` = 8, `gameArgs(8)` carries the commitment
+- [x] **`PROPOSER_GAME_TYPE` switched to 8 and the proposer stopped and restarted — done 2026-08-24 (D-0077), game 63 is type 8, respected, prestate matches** — a plain re-run of the start script is a no-op (`start_bg` returns 0 on a live pid, D-0064 Finding 7); games created before the flip keep their respected flag, but a proposer left on type 1 posts games that cannot prove a withdrawal or advance the anchor
 - [ ] Stock `op-proposer` (not `USE_CUSTOM_PROPOSER=1`) posts at least one accepted game on the new factory
 - [ ] Native `op-challenger` process documented in README (start/stop, logs, no keys in git)
 - [ ] Challenger does **not** attack the valid game
