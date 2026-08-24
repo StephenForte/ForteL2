@@ -3044,6 +3044,43 @@ else
   fail=1
 fi
 
+printf '%s\n' '{"low_water":4,"factory":"0x0000000000000000000000000000000000000001"}' >"$RG_FIXTURE_DIR/wm-factory.json"
+RG_WM_FAC_OUT="$(
+  env -u FORTEL2_ENV PATH="$RG_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
+    RESOLVE_GAMES_WATERMARK="$RG_FIXTURE_DIR/wm-factory.json" \
+    RESOLVE_GAMES_FACTORY="0x0000000000000000000000000000000000000002" \
+    "$RESOLVE_GAMES" --analyze-only 2>&1
+)" && RG_WM_FAC_EC=0 || RG_WM_FAC_EC=$?
+if [[ "$RG_WM_FAC_EC" -eq 0 ]] \
+  && echo "$RG_WM_FAC_OUT" | grep -q '^scan_from=0$' \
+  && echo "$RG_WM_FAC_OUT" | grep -q '^games_examined=8$' \
+  && echo "$RG_WM_FAC_OUT" | grep -q 'watermark_fallback=factory_mismatch' \
+  && echo "$RG_WM_FAC_OUT" | grep -q 'game 0 SKIP zero_credit'; then
+  echo "PASS resolve-games factory-mismatched watermark falls back to a full scan"
+else
+  echo "FAIL resolve-games stale factory watermark must not skip (ec=$RG_WM_FAC_EC)" >&2
+  echo "$RG_WM_FAC_OUT" >&2
+  fail=1
+fi
+
+printf 'x\n' >"$RG_FIXTURE_DIR/wm-notdir"
+RG_WM_IO_OUT="$(
+  env -u FORTEL2_ENV PATH="$RG_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
+    RESOLVE_GAMES_WATERMARK="$RG_FIXTURE_DIR/wm-notdir/mark.json" \
+    "$RESOLVE_GAMES" --analyze-only 2>&1
+)" && RG_WM_IO_EC=0 || RG_WM_IO_EC=$?
+if [[ "$RG_WM_IO_EC" -ne 0 ]] \
+  && echo "$RG_WM_IO_OUT" | grep -q 'watermark_persist=failed' \
+  && echo "$RG_WM_IO_OUT" | grep -q 'failed to persist watermark'; then
+  echo "PASS resolve-games watermark persist failure is visible and nonzero"
+else
+  echo "FAIL resolve-games persist failure should exit nonzero (ec=$RG_WM_IO_EC)" >&2
+  echo "$RG_WM_IO_OUT" >&2
+  fail=1
+fi
+
 cleanup_rg_fixtures
 trap - EXIT
 

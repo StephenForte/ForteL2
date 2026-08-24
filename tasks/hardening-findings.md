@@ -1336,11 +1336,15 @@ below the mark are **absent** from the game lines, not listed as
 `SKIP` — a reader of a warm run is looking at in-flight work, not
 the drained prefix. `--full-scan` restores the full listing.
 
-Fail-safe: missing / unreadable / malformed / out-of-range mark
-falls back to a full scan and says so (`watermark_fallback=…`);
-it never treats a bad file as "skip everything". Advancing only
-on the normal path; `--full-scan` may write a lower mark so a
-corrupted-high file is recoverable without deleting it.
+Fail-safe: missing / unreadable / malformed / out-of-range / **factory
+mismatch** mark falls back to a full scan and says so
+(`watermark_fallback=…`); it never treats a bad file as "skip
+everything". The file records the factory address, so a Sepolia
+redeploy that leaves `$DATA_DIR/resolve-games-watermark.json` behind
+cannot skip the replacement factory's games. Advancing only on the
+normal path; `--full-scan` may write a lower mark so a
+corrupted-high file is recoverable without deleting it. A persist
+failure prints `watermark_persist=failed` and exits 1.
 
 ### Terminality probe (trap 2)
 

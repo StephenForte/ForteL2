@@ -362,13 +362,13 @@ def snapshot_game_count(snapshot):
     return max(int(g["index"]) for g in games) + 1
 
 
-def load_watermark(path, game_count, full_scan):
+def load_watermark(path, game_count, full_scan, factory=""):
     """Return (scan_from, status, record).
 
-    Fail safe: missing / unreadable / malformed / out-of-range → scan from 0.
-    Never treat a bad file as 'skip everything'.
+    Fail safe: missing / unreadable / malformed / out-of-range /
+    factory-mismatch → scan from 0. Never treat a bad file as 'skip everything'.
     """
-    empty = {"low_water": 0, "challenger_wins": []}
+    empty = {"low_water": 0, "challenger_wins": [], "factory": ""}
     if full_scan:
         return 0, "full_scan", empty
     if not path:
@@ -390,6 +390,10 @@ def load_watermark(path, game_count, full_scan):
         return 0, "malformed", empty
     if mark < 0 or mark > game_count:
         return 0, "out_of_range", empty
+    rec_factory = str(data.get("factory") or "").strip()
+    want = str(factory or "").strip()
+    if rec_factory and want and rec_factory.lower() != want.lower():
+        return 0, "factory_mismatch", empty
     cw = data.get("challenger_wins") or []
     if not isinstance(cw, list):
         cw = []
@@ -397,7 +401,7 @@ def load_watermark(path, game_count, full_scan):
     for item in cw:
         if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
             cleaned.append(item)
-    rec = {"low_water": mark, "challenger_wins": cleaned}
+    rec = {"low_water": mark, "challenger_wins": cleaned, "factory": rec_factory}
     return mark, "ok", rec
 
 
@@ -423,15 +427,10 @@ def next_low_water(scan_from, game_count, decisions_by_idx):
     return idx
 
 
-def save_watermark(path, low_water, challenger_wins, old_mark, status, full_scan):
+def save_watermark(path, low_water, challenger_wins, old_mark, status, full_scan, factory=""):
     if not path:
-        return
+        return True
     parent = os.path.dirname(path)
-    if parent:
-        try:
-            os.makedirs(parent, exist_ok=True)
-        except OSError:
-            return
     if full_scan or status != "ok":
         write_mark = low_water
     else:
@@ -440,18 +439,24 @@ def save_watermark(path, low_water, challenger_wins, old_mark, status, full_scan
         "low_water": int(write_mark),
         "challenger_wins": sorted(set(int(i) for i in challenger_wins)),
         "updated_at": int(os.environ.get("RESOLVE_GAMES_NOW") or 0) or int(time.time()),
+        "factory": str(factory or ""),
     }
     tmp = path + ".tmp"
     try:
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(rec, f)
             f.write("\n")
         os.replace(tmp, path)
-    except OSError:
+    except OSError as exc:
         try:
             os.remove(tmp)
         except OSError:
             pass
+        print("ERROR: failed to persist watermark (refusing to pretend it was saved): %s" % exc, file=sys.stderr)
+        return False
+    return True
 
 
 def remaining_wei(game, init_bond):
@@ -482,6 +487,7 @@ def analyze(snapshot, max_games):
     factory_count = snapshot_game_count(snapshot)
     full_scan = os.environ.get("RESOLVE_GAMES_FULL_SCAN", "") == "1"
     wm_path = os.environ.get("RESOLVE_GAMES_WATERMARK") or ""
+    factory = os.environ.get("RESOLVE_GAMES_FACTORY") or snapshot.get("factory") or ""
 
     # Live fetch stamps scan_from onto the snapshot so analyze sees the same
     # window fetch already paid for. --full-scan and --analyze-only fixtures
@@ -496,7 +502,7 @@ def analyze(snapshot, max_games):
         if not isinstance(wm_record["challenger_wins"], list):
             wm_record["challenger_wins"] = []
     else:
-        scan_from, wm_status, wm_record = load_watermark(wm_path, factory_count, full_scan)
+        scan_from, wm_status, wm_record = load_watermark(wm_path, factory_count, full_scan, factory)
 
     examined = [g for g in games if int(g["index"]) >= scan_from]
     games_examined = len(examined)
@@ -551,7 +557,6 @@ def analyze(snapshot, max_games):
     watermark_next = next_low_water(scan_from, factory_count, decisions_by_idx)
     found_cw = [d["index"] for (_, d) in report if d.get("reason") == "challenger_wins"]
     all_cw = list(wm_record.get("challenger_wins") or []) + found_cw
-    save_watermark(wm_path, watermark_next, all_cw, scan_from, wm_status, full_scan)
 
     print("=== ForteL2 resolve-games (%s) ===" % mode)
     print("mode=%s" % mode)
@@ -564,7 +569,7 @@ def analyze(snapshot, max_games):
     print("scan_from=%d" % scan_from)
     print("games_examined=%d" % games_examined)
     print("watermark_status=%s" % wm_status)
-    if wm_status in ("malformed", "unreadable", "out_of_range"):
+    if wm_status in ("malformed", "unreadable", "out_of_range", "factory_mismatch"):
         print("watermark_fallback=%s (scanning from 0; refusing to skip)" % wm_status)
     print("watermark_next=%d" % watermark_next)
     if all_cw:
@@ -623,6 +628,14 @@ def analyze(snapshot, max_games):
         ],
     }
     print("PLAN_JSON=%s" % json.dumps(plan, separators=(",", ":")))
+    if wm_path:
+        if save_watermark(wm_path, watermark_next, all_cw, scan_from, wm_status, full_scan, factory):
+            print("watermark_persist=ok")
+        else:
+            print("watermark_persist=failed")
+            return 1
+    else:
+        print("watermark_persist=skipped")
     return 0
 
 
@@ -693,7 +706,7 @@ def fetch_snapshot(out_path, extra):
 
     full_scan = extra.get("full_scan", False)
     wm_path = extra.get("watermark_path") or ""
-    scan_from, wm_status, wm_record = load_watermark(wm_path, game_count, full_scan)
+    scan_from, wm_status, wm_record = load_watermark(wm_path, game_count, full_scan, factory)
     to_fetch = max(0, game_count - scan_from)
     workers = min(8, max(1, to_fetch))
     if to_fetch == 0:
@@ -1149,8 +1162,13 @@ print("anchor_root=%s" % s.get("anchor_root"))
 print("anchor_block=%s" % s.get("anchor_block"))
 PY
 
-ANALYZE_OUT="$(resolve_games_py analyze "$SNAP" "$MAX_GAMES")"
+ANALYZE_EC=0
+ANALYZE_OUT="$(resolve_games_py analyze "$SNAP" "$MAX_GAMES")" || ANALYZE_EC=$?
 printf '%s\n' "$ANALYZE_OUT"
+if [[ "$ANALYZE_EC" -ne 0 ]]; then
+  echo "ERROR: analyze/watermark persist failed (ec=$ANALYZE_EC)" >&2
+  exit "$ANALYZE_EC"
+fi
 
 if [[ "$EXECUTE" -eq 0 ]]; then
   echo "dry-run: sending nothing (pass --execute to broadcast)"
