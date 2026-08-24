@@ -2398,6 +2398,9 @@ PY
 # a missing Operator sequence heading fails closed (not a pass); a newly
 # reserved F7-N in the PRD alone fails; an imperative second-wipe instruction
 # in .env.sepolia.example fails; clean repo files pass.
+# markerConvention: stated non-empty in phase7-gates.json; a What-column
+# rewrite still fails and cites it; removing a declared F7-N still fails
+# the exact-set check.
 # env -u: lib.sh is not sourced by the checker, but an inherited FORTEL2_ROOT
 # from this suite's .env.example fallback still must not point the child at
 # another checkout (Codex P2 on #118).
@@ -2507,6 +2510,107 @@ if [[ "$P7_OK_EC" -eq 0 ]] && echo "$P7_OK_OUT" | grep -q 'phase7-gate-parity: a
 else
   echo "FAIL phase7-gate-parity should exit 0 on repo files (ec=$P7_OK_EC)" >&2
   echo "$P7_OK_OUT" >&2
+  fail=1
+fi
+
+# markerConvention (D-0070 Finding 2): stated in phase7-gates.json; What-column
+# rewrites and gate-id set drift still fail closed; FAIL text points at the rule.
+# Codex P2 on #136: a marker moved into When with What rewritten must also fail.
+if python3 -c '
+import json, sys
+from pathlib import Path
+d = json.loads(Path(sys.argv[1]).read_text())
+mc = d.get("markerConvention")
+if not isinstance(mc, dict):
+    sys.exit(1)
+needed = ("completionMarkers", "gateIdSet", "onRed")
+sys.exit(0 if all(str(mc.get(k) or "").strip() for k in needed) else 1)
+' "$SCRIPT_DIR/../tasks/phase7-gates.json"; then
+  echo "PASS phase7-gates.json markerConvention is present and non-empty"
+else
+  echo "FAIL phase7-gates.json must state a non-empty markerConvention (completionMarkers, gateIdSet, onRed)" >&2
+  fail=1
+fi
+
+cp "$SCRIPT_DIR/../tasks/prd-phase-7-fault-proofs.md" "$P7_FIXTURE_DIR/prd-what.md"
+python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+out = []
+for line in p.read_text().splitlines():
+    if line.startswith("| 10 |"):
+        cells = line.split("|")
+        cells[3] = " **DONE (wrong column)** SOS recovery complete "
+        line = "|".join(cells)
+    out.append(line)
+p.write_text("\n".join(out) + "\n")
+' "$P7_FIXTURE_DIR/prd-what.md"
+
+P7_WHAT_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_PRD="$P7_FIXTURE_DIR/prd-what.md" \
+    "$P7_CHECK" 2>&1
+)" && P7_WHAT_EC=0 || P7_WHAT_EC=$?
+if [[ "$P7_WHAT_EC" -ne 0 ]] \
+  && echo "$P7_WHAT_OUT" | grep -q "sos-adopt PRD marker 'SOS redeploys-or-adopts' not found (declared step 10)" \
+  && echo "$P7_WHAT_OUT" | grep -q 'see markerConvention in tasks/phase7-gates.json (D-0070)'; then
+  echo "PASS phase7-gate-parity rejects What-column mutation and cites markerConvention"
+else
+  echo "FAIL phase7-gate-parity should fail a What-column rewrite citing markerConvention (ec=$P7_WHAT_EC)" >&2
+  echo "$P7_WHAT_OUT" >&2
+  fail=1
+fi
+
+cp "$SCRIPT_DIR/../tasks/prd-phase-7-fault-proofs.md" "$P7_FIXTURE_DIR/prd-when-only.md"
+python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+out = []
+for line in p.read_text().splitlines():
+    if line.startswith("| 10 |"):
+        cells = line.split("|")
+        cells[2] = " **DONE 2026-08-22 (D-0069)** — SOS redeploys-or-adopts "
+        cells[3] = " Recovery complete "
+        line = "|".join(cells)
+    out.append(line)
+p.write_text("\n".join(out) + "\n")
+' "$P7_FIXTURE_DIR/prd-when-only.md"
+
+P7_WHEN_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_PRD="$P7_FIXTURE_DIR/prd-when-only.md" \
+    "$P7_CHECK" 2>&1
+)" && P7_WHEN_EC=0 || P7_WHEN_EC=$?
+if [[ "$P7_WHEN_EC" -ne 0 ]] \
+  && echo "$P7_WHEN_OUT" | grep -q "sos-adopt PRD marker 'SOS redeploys-or-adopts' not found (declared step 10)" \
+  && echo "$P7_WHEN_OUT" | grep -q 'see markerConvention in tasks/phase7-gates.json (D-0070)'; then
+  echo "PASS phase7-gate-parity rejects a marker that lives only in When"
+else
+  echo "FAIL phase7-gate-parity should fail when prdMustContain is only in When (ec=$P7_WHEN_EC)" >&2
+  echo "$P7_WHEN_OUT" >&2
+  fail=1
+fi
+
+cp "$SCRIPT_DIR/../tasks/prd-phase-7-fault-proofs.md" "$P7_FIXTURE_DIR/prd-f7rm.md"
+python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace("F7-12", ""))
+' "$P7_FIXTURE_DIR/prd-f7rm.md"
+
+P7_F7RM_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_PRD="$P7_FIXTURE_DIR/prd-f7rm.md" \
+    "$P7_CHECK" 2>&1
+)" && P7_F7RM_EC=0 || P7_F7RM_EC=$?
+if [[ "$P7_F7RM_EC" -ne 0 ]] \
+  && echo "$P7_F7RM_OUT" | grep -q 'PRD Operator sequence gate ids (declared=' \
+  && echo "$P7_F7RM_OUT" | grep -q 'found=F7-6,F7-7,F7-8,F7-10,F7-11)' \
+  && echo "$P7_F7RM_OUT" | grep -q 'see markerConvention in tasks/phase7-gates.json (D-0070)'; then
+  echo "PASS phase7-gate-parity rejects F7-12 removal with exact-set message"
+else
+  echo "FAIL phase7-gate-parity should fail F7-12 removal with exact-set gate ids (ec=$P7_F7RM_EC)" >&2
+  echo "$P7_F7RM_OUT" >&2
   fail=1
 fi
 
