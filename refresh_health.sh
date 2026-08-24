@@ -11,11 +11,14 @@ run_snapshot() {
     python3 scripts/pipeline-snapshot.py -o data/pipeline-health.json.tmp
   fi
 }
-if run_snapshot 2> data/pipeline-health.err.log; then
+# pipeline-snapshot.py writes the JSON *before* returning 1 when both L2 panels
+# fail (stack down after a failed wake). Keep that file — deleting it leaves
+# the Morning Briefing on yesterday's healthy snapshot. Still run the funder
+# watch either way; exit with the snapshot status so launchd records the miss.
+snap_rc=0
+run_snapshot 2> data/pipeline-health.err.log || snap_rc=$?
+if [ -f data/pipeline-health.json.tmp ]; then
   mv data/pipeline-health.json.tmp data/pipeline-health.json
-else
-  rm -f data/pipeline-health.json.tmp
-  exit 1
 fi
 
 # --- Gas sample + external-funder watch -------------------------------------
@@ -28,3 +31,8 @@ if [ -f .env.sepolia ]; then
   FORTEL2_ENV=.env.sepolia ./scripts/funding-watch.sh --json data/funding-health.json \
     > data/funding-watch.out 2>&1 || true
 fi
+
+if [ ! -f data/pipeline-health.json ]; then
+  exit 1
+fi
+exit "$snap_rc"
