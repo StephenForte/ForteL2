@@ -2515,6 +2515,7 @@ fi
 
 # markerConvention (D-0070 Finding 2): stated in phase7-gates.json; What-column
 # rewrites and gate-id set drift still fail closed; FAIL text points at the rule.
+# Codex P2 on #136: a marker moved into When with What rewritten must also fail.
 if python3 -c '
 import json, sys
 from pathlib import Path
@@ -2557,6 +2558,36 @@ if [[ "$P7_WHAT_EC" -ne 0 ]] \
 else
   echo "FAIL phase7-gate-parity should fail a What-column rewrite citing markerConvention (ec=$P7_WHAT_EC)" >&2
   echo "$P7_WHAT_OUT" >&2
+  fail=1
+fi
+
+cp "$SCRIPT_DIR/../tasks/prd-phase-7-fault-proofs.md" "$P7_FIXTURE_DIR/prd-when-only.md"
+python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+out = []
+for line in p.read_text().splitlines():
+    if line.startswith("| 10 |"):
+        cells = line.split("|")
+        cells[2] = " **DONE 2026-08-22 (D-0069)** — SOS redeploys-or-adopts "
+        cells[3] = " Recovery complete "
+        line = "|".join(cells)
+    out.append(line)
+p.write_text("\n".join(out) + "\n")
+' "$P7_FIXTURE_DIR/prd-when-only.md"
+
+P7_WHEN_OUT="$(
+  "${P7_ENV_CLEAR[@]}" PHASE7_PRD="$P7_FIXTURE_DIR/prd-when-only.md" \
+    "$P7_CHECK" 2>&1
+)" && P7_WHEN_EC=0 || P7_WHEN_EC=$?
+if [[ "$P7_WHEN_EC" -ne 0 ]] \
+  && echo "$P7_WHEN_OUT" | grep -q "sos-adopt PRD marker 'SOS redeploys-or-adopts' not found (declared step 10)" \
+  && echo "$P7_WHEN_OUT" | grep -q 'see markerConvention in tasks/phase7-gates.json (D-0070)'; then
+  echo "PASS phase7-gate-parity rejects a marker that lives only in When"
+else
+  echo "FAIL phase7-gate-parity should fail when prdMustContain is only in When (ec=$P7_WHEN_EC)" >&2
+  echo "$P7_WHEN_OUT" >&2
   fail=1
 fi
 

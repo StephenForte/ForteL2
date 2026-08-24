@@ -108,7 +108,10 @@ def extract_section(text: str, heading: str, path: str) -> str:
     return body
 
 
-def parse_prd_table(section: str, path: str) -> dict[str, str]:
+def parse_prd_table(section: str, path: str) -> dict[str, tuple[str, str]]:
+    """Return {step_num: (when, what)}. prdMustContain searches What only so a
+    completion edit cannot move the action phrase into When and stay green.
+    The v7 trigger still concatenates When+What because it lives in When."""
     lines = section.splitlines()
     header_idx = None
     for i, line in enumerate(lines):
@@ -119,7 +122,7 @@ def parse_prd_table(section: str, path: str) -> dict[str, str]:
         raise ExtractError(
             f"could not find Operator sequence table (header '| # |') in {path}"
         )
-    steps: dict[str, str] = {}
+    steps: dict[str, tuple[str, str]] = {}
     for line in lines[header_idx + 2 :]:
         if not line.startswith("|"):
             break
@@ -131,8 +134,7 @@ def parse_prd_table(section: str, path: str) -> dict[str, str]:
         what = cells[3]
         if num in {"", "—", "-", "–"}:
             continue
-        # When + What: v7 trigger lives in When; action markers live in What.
-        steps[num] = f"{when} {what}"
+        steps[num] = (when, what)
     if not steps:
         raise ExtractError(f"Operator sequence table parsed 0 steps in {path}")
     return steps
@@ -524,6 +526,7 @@ def main() -> int:
         else:
             pass_(f"{label} gate ids are a subset of declared")
 
+    prd_whats = {num: what for num, (_when, what) in prd_steps.items()}
     for action in actions:
         aid = action["id"]
         prd_n = action.get("prd")
@@ -532,12 +535,12 @@ def main() -> int:
                 action_id=aid,
                 loc="PRD",
                 declared=prd_n,
-                body=prd_steps.get(prd_n),
+                body=prd_whats.get(prd_n),
                 markers=action.get("prdMustContain") or [],
-                steps=prd_steps,
+                steps=prd_whats,
             )
             if action.get("prdMustContain") and all(
-                m in prd_steps.get(prd_n, "") for m in action["prdMustContain"]
+                m in prd_whats.get(prd_n, "") for m in action["prdMustContain"]
             ):
                 pass_(f"{aid} PRD step {prd_n}")
         readme_n = action.get("readme")
@@ -571,7 +574,9 @@ def main() -> int:
                     pass_(f"{aid} folded into README step {folded}")
 
     # v7 trigger — declared per location (the two runbooks disagree; lock both).
-    prd_v7_body = prd_steps.get(v7["prdStep"], "")
+    # Lives in When; keep concatenating so this check's matching is unchanged.
+    prd_v7_when, prd_v7_what = prd_steps.get(v7["prdStep"], ("", ""))
+    prd_v7_body = f"{prd_v7_when} {prd_v7_what}"
     if v7["prdTrigger"] in prd_v7_body:
         pass_(f"v7 PRD trigger at step {v7['prdStep']}")
     else:
