@@ -2781,6 +2781,46 @@ else
   fail=1
 fi
 
+# status=0 + credit=0 but resolvedSubgames(0)=true → resolve only (19:00 hole).
+# Missing resolved_subgame still means resolveClaim,resolve (game 1 above).
+cat >"$RG_FIXTURE_DIR/already-claim.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "init_bond_wei": "80000000000000000",
+  "games": [
+    {
+      "index": 1,
+      "address": "0x0000000000000000000000000000000000000002",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "resolved_subgame": true,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_ALREADY_OUT="$(
+  env -u FORTEL2_ENV PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/already-claim.json" \
+    "$RESOLVE_GAMES" --analyze-only 2>&1
+)" && RG_ALREADY_EC=0 || RG_ALREADY_EC=$?
+if [[ "$RG_ALREADY_EC" -eq 0 ]] \
+  && echo "$RG_ALREADY_OUT" | grep -q 'game 1 ACTION resolve' \
+  && ! echo "$RG_ALREADY_OUT" | grep -q 'resolveClaim'; then
+  echo "PASS resolve-games resolved subgame skips resolveClaim"
+else
+  echo "FAIL resolve-games resolvedSubgames(0)=true should ACTION resolve only (ec=$RG_ALREADY_EC)" >&2
+  echo "$RG_ALREADY_OUT" >&2
+  fail=1
+fi
+
 cleanup_rg_fixtures
 trap - EXIT
 
