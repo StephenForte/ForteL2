@@ -1,5 +1,5 @@
-timestamp=2026-08-22T21:14:51Z
+timestamp=2026-08-24T18:17:15Z
 admin=0xBB3E19811B2c3423069B54BDFF3e90Dd8094bb0F
-spent_eth≈0.107813103668726942
+spent_eth≈0.000465689023029300
 l1_rpc=https://red-dimensional-dream.ethereum-sepolia.quiknode.pro/…
 l2_chain_id=852
