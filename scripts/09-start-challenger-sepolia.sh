@@ -107,12 +107,13 @@ needs_kona_server() {
 }
 
 # gameImpls(uint32) mapping we will look up. Anything else is skipped, not guessed.
-# (Local optimism tree also has cannon-kona=8, super-cannon-kona=9, fast=254,
-# alphabet=255, zk=10 — not applied here; see E-F7-2-1.)
+# cannon-kona=8 is on-chain fact post step 8b (D-0077). Local optimism tree also
+# has super-cannon-kona=9, fast=254, alphabet=255, zk=10 — not applied here.
 game_impls_type_number() {
   case "$1" in
     cannon) echo 0 ;;
     permissioned) echo 1 ;;
+    cannon-kona) echo 8 ;;
     *) echo "" ;;
   esac
 }
@@ -305,7 +306,7 @@ run_preflight() {
   local type_num impl vm_addr prestate args args_hex preflight_source
   type_num="$(game_impls_type_number "$TRACE_TYPE")"
   if [[ -z "$type_num" ]]; then
-    echo "Preflight: no confident gameImpls(uint32) mapping for CHALLENGER_TRACE_TYPE=$TRACE_TYPE (mapped: cannon=0, permissioned=1); skipping factory lookup."
+    echo "Preflight: no confident gameImpls(uint32) mapping for CHALLENGER_TRACE_TYPE=$TRACE_TYPE (mapped: cannon=0, permissioned=1, cannon-kona=8); skipping factory lookup."
     return 0
   fi
   echo "Preflight: DisputeGameFactory.gameImpls($type_num) for CHALLENGER_TRACE_TYPE=$TRACE_TYPE"
@@ -390,6 +391,30 @@ run_preflight() {
     exit 1
   fi
   echo "Preflight: source=$preflight_source vm=$vm_addr absolutePrestate=$prestate"
+
+  if [[ -n "${PRESTATE_PATH:-}" ]]; then
+    local witness_json local_hash chain_lc local_lc
+    if ! witness_json="$("$CANNON_BIN" witness --input "$PRESTATE_PATH")"; then
+      echo "ERROR: cannon witness failed on CHALLENGER_PRESTATE=$PRESTATE_PATH" >&2
+      exit 1
+    fi
+    local_hash="$(printf '%s' "$witness_json" | jq -r '.witnessHash // empty')"
+    if [[ -z "$local_hash" ]]; then
+      echo "ERROR: cannon witness on CHALLENGER_PRESTATE=$PRESTATE_PATH did not yield witnessHash" >&2
+      exit 1
+    fi
+    chain_lc="$(printf '%s' "$prestate" | tr '[:upper:]' '[:lower:]')"
+    local_lc="$(printf '%s' "$local_hash" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$local_lc" != "$chain_lc" ]]; then
+      echo "ERROR: CHALLENGER_PRESTATE witness hash does not match on-chain absolutePrestate" >&2
+      echo "  local (cannon witness):  $local_hash" >&2
+      echo "  on-chain (gameArgs):     $prestate" >&2
+      echo "  A challenger started with the wrong prestate disagrees with every honest root claim." >&2
+      echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
+      exit 1
+    fi
+    echo "Preflight: CHALLENGER_PRESTATE witness hash matches on-chain absolutePrestate"
+  fi
 }
 
 if [[ "${CHALLENGER_SKIP_PREFLIGHT:-}" == "1" ]]; then

@@ -1537,6 +1537,160 @@ else
   fail=1
 fi
 
+# US-073 step-11 / D-0077: cannon-kona maps to type 8; preflight runs (not skips);
+# zero gameImpls(8) fails closed; unmapped types still skip; local prestate witness
+# hash must match on-chain absolutePrestate unless CHALLENGER_SKIP_PREFLIGHT=1.
+_F711_CHAIN_PRESTATE="0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d"
+_F711_CHAIN_VM="71b4b694a5f522f8ecc6e4f7ac2e966a8ead0f73"
+_F711_GAME_IMPL="0x84c0889A10E2f120F9fE6a27cEE8c6Cf735A8584"
+_F711_GAME_FACTORY="0x1234567890123456789012345678901234567890"
+_F711_PREFLIGHT_FN="$(
+  awk '
+    /^is_zero_hex\(\)/ { fn = 1 }
+    /^game_impls_type_number\(\)/ { fn = 1 }
+    /^run_preflight\(\)/ { fn = 1 }
+    fn { print }
+    fn && /^}/ { fn = 0 }
+  ' "$CHALLENGER_START"
+)"
+
+_f711_setup_mocks() {
+  local mock_dir="$1"
+  local cast_mode="$2"
+  local witness_hash="${3:-}"
+  mkdir -p "$mock_dir"
+  cat > "$mock_dir/cast" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" != "call" ]]; then
+  echo "mock cast: expected call subcommand, got: \${1:-}" >&2
+  exit 1
+fi
+case "\${3:-}" in
+  "gameImpls(uint32)(address)")
+    if [[ "\${CAST_MODE:-}" == "zero_impl_8" && "\${4:-}" == "8" ]]; then
+      echo "0x0000000000000000000000000000000000000000"
+    elif [[ "\${4:-}" == "8" ]]; then
+      echo "$_F711_GAME_IMPL"
+    else
+      echo "0x0000000000000000000000000000000000000001"
+    fi
+    ;;
+  "gameArgs(uint32)(bytes)")
+    echo "0x${_F711_CHAIN_PRESTATE#0x}${_F711_CHAIN_VM}0000000000000000000000000000000000000000"
+    ;;
+  *)
+    echo "mock cast: unexpected signature: \${3:-}" >&2
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$mock_dir/cast"
+  if [[ -n "$witness_hash" ]]; then
+    cat > "$mock_dir/cannon" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "witness" && "\${2:-}" == "--input" ]]; then
+  printf '{"witnessHash":"%s"}\n' "$witness_hash"
+  exit 0
+fi
+echo "mock cannon: unexpected argv: \$*" >&2
+exit 1
+EOF
+    chmod +x "$mock_dir/cannon"
+  fi
+  export CAST_MODE="$cast_mode"
+}
+
+_f711_run_preflight() {
+  local trace_type="$1"
+  local skip_flag="${2:-}"
+  local prestate_path="${3:-}"
+  local mock_dir="$4"
+  local runner rc out
+  runner="$mock_dir/run_preflight.sh"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'set -euo pipefail'
+    printf '%s\n' "$_F711_PREFLIGHT_FN"
+    cat << RUNEOF
+TRACE_TYPE='$trace_type'
+GAME_FACTORY='$_F711_GAME_FACTORY'
+L1_RPC_URL='http://127.0.0.1:8545'
+PRESTATE_PATH='${prestate_path:-}'
+CANNON_BIN='$mock_dir/cannon'
+CHALLENGER_SKIP_PREFLIGHT='${skip_flag:-}'
+if [[ "\${CHALLENGER_SKIP_PREFLIGHT:-}" == "1" ]]; then
+  exit 0
+fi
+run_preflight
+RUNEOF
+  } > "$runner"
+  chmod +x "$runner"
+  rc=0
+  out="$(PATH="$mock_dir:$PATH" CAST_MODE="${CAST_MODE:-}" bash "$runner" 2>&1)" || rc=$?
+  printf '%s' "$out"
+  return "$rc"
+}
+
+if [[ -z "$_F711_PREFLIGHT_FN" ]] || ! awk '
+     /cannon-kona\) echo 8/ { kona = 1 }
+     END { exit !kona }
+   ' "$CHALLENGER_START"; then
+  echo "FAIL 09-start-challenger-sepolia.sh must map cannon-kona to game type 8 (D-0077)" >&2
+  fail=1
+else
+  _f711_tmp="$(mktemp -d)"
+  _f711_setup_mocks "$_f711_tmp" "zero_impl_8" ""
+  _f711_rc=0
+  _f711_out="$(_f711_run_preflight cannon-kona "" "" "$_f711_tmp" 2>&1)" || _f711_rc=$?
+  if [[ "$_f711_rc" != "0" ]] \
+    && printf '%s' "$_f711_out" | grep -q 'gameImpls(8)' \
+    && printf '%s' "$_f711_out" | grep -q 'no implementation registered for game type 8'; then
+    echo "PASS US-073 step-11 cannon-kona type 8 preflight refuses zero gameImpls(8) (D-0077)"
+  else
+    echo "FAIL 09-start-challenger-sepolia.sh must run preflight for cannon-kona (type 8) and exit 1 on zero gameImpls(8), not skip" >&2
+    fail=1
+  fi
+
+  _f711_rc=0
+  _f711_out="$(_f711_run_preflight alphabet "" "" "$_f711_tmp" 2>&1)" || _f711_rc=$?
+  if [[ "$_f711_rc" == "0" ]] \
+    && printf '%s' "$_f711_out" | grep -q 'skipping factory lookup' \
+    && printf '%s' "$_f711_out" | grep -q 'cannon=0, permissioned=1, cannon-kona=8'; then
+    echo "PASS US-073 step-11 unmapped trace type skips preflight and lists mapped types"
+  else
+    echo "FAIL 09-start-challenger-sepolia.sh must skip factory lookup for unmapped types and name mapped cannon=0, permissioned=1, cannon-kona=8" >&2
+    fail=1
+  fi
+
+  touch "$_f711_tmp/prestate.bin"
+  _f711_local_hash="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  _f711_setup_mocks "$_f711_tmp" "" "$_f711_local_hash"
+  _f711_rc=0
+  _f711_out="$(_f711_run_preflight cannon-kona "" "$_f711_tmp/prestate.bin" "$_f711_tmp" 2>&1)" || _f711_rc=$?
+  if [[ "$_f711_rc" != "0" ]] \
+    && printf '%s' "$_f711_out" | grep -Fq "$_F711_CHAIN_PRESTATE" \
+    && printf '%s' "$_f711_out" | grep -Fq "$_f711_local_hash"; then
+    echo "PASS US-073 step-11 prestate witness mismatch refuses with local and on-chain hashes"
+  else
+    echo "FAIL 09-start-challenger-sepolia.sh must refuse when cannon witness hash mismatches on-chain absolutePrestate (both values printed)" >&2
+    fail=1
+  fi
+
+  _f711_rc=0
+  _f711_out="$(_f711_run_preflight cannon-kona "1" "$_f711_tmp/prestate.bin" "$_f711_tmp" 2>&1)" || _f711_rc=$?
+  if [[ "$_f711_rc" == "0" ]] \
+    && ! printf '%s' "$_f711_out" | grep -q 'witness hash does not match'; then
+    echo "PASS US-073 step-11 CHALLENGER_SKIP_PREFLIGHT=1 bypasses prestate witness check"
+  else
+    echo "FAIL 09-start-challenger-sepolia.sh CHALLENGER_SKIP_PREFLIGHT=1 must bypass prestate witness comparison" >&2
+    fail=1
+  fi
+
+  rm -rf "$_f711_tmp"
+fi
+
 # F7-6 / D-0061: type-8 additional dispute game is a second apply, never the wipe.
 # Assert properties of generated intent and of the prestate gate, not error phrasing.
 DEPLOY_SEPOLIA="$SCRIPT_DIR/02-deploy-contracts-sepolia.sh"
@@ -2380,6 +2534,8 @@ allowed = {
     "0x1111111111111111111111111111111111111111111111111111111111111111",
     "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "0x038512e02c4c3f7bdaec27d00edf55b7155e0905301e1a88083e4e0a6764d54c",
+    "0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d",
+    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 }
 bad = []
 for m in re.finditer(r"0x[0-9a-fA-F]{64}", text):
