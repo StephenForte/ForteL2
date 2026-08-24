@@ -147,6 +147,140 @@ else
   fail=1
 fi
 
+# op-node wait: mock JSON-RPC on loopback. No live network.
+# Modes: opnode (optimism_* result, eth_* -32601), reject (both -32601), httpok (HTTP 200, not JSON-RPC).
+_start_mock_jsonrpc() {
+  local mode="$1"
+  local port_file="$2"
+  python3 - "$mode" "$port_file" <<'PY' &
+import json, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+mode, port_file = sys.argv[1], sys.argv[2]
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            req = json.loads(body.decode() or "{}")
+        except Exception:
+            req = {}
+        method = req.get("method", "")
+        rid = req.get("id", 1)
+        if mode == "httpok":
+            raw = b"ok"
+        elif mode == "opnode" and method == "optimism_syncStatus":
+            raw = json.dumps({
+                "jsonrpc": "2.0",
+                "id": rid,
+                "result": {"current_l1": {"number": 11559189}},
+            }).encode()
+        else:
+            raw = json.dumps({
+                "jsonrpc": "2.0",
+                "id": rid,
+                "error": {
+                    "code": -32601,
+                    "message": "the method %s does not exist/is not available" % method,
+                },
+            }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+with open(port_file, "w") as f:
+    f.write(str(server.server_address[1]))
+server.serve_forever()
+PY
+  _MOCK_RPC_PID=$!
+  local i=0
+  while [[ ! -s "$port_file" && $i -lt 50 ]]; do
+    sleep 0.05
+    ((i++)) || true
+  done
+  if [[ ! -s "$port_file" ]]; then
+    echo "FAIL mock JSON-RPC server did not bind" >&2
+    kill "$_MOCK_RPC_PID" >/dev/null 2>&1 || true
+    wait "$_MOCK_RPC_PID" 2>/dev/null || true
+    return 1
+  fi
+}
+
+_stop_mock_jsonrpc() {
+  if [[ -n "${_MOCK_RPC_PID:-}" ]]; then
+    kill "$_MOCK_RPC_PID" >/dev/null 2>&1 || true
+    wait "$_MOCK_RPC_PID" 2>/dev/null || true
+    _MOCK_RPC_PID=""
+  fi
+}
+
+MOCK_RPC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-mock-rpc.XXXXXX")"
+MOCK_PORT_FILE="$MOCK_RPC_DIR/port"
+_start_mock_jsonrpc opnode "$MOCK_PORT_FILE"
+MOCK_URL="http://127.0.0.1:$(cat "$MOCK_PORT_FILE")"
+OPNODE_OUT="$(wait_for_opnode_rpc "$MOCK_URL" "op-node" 2 2>&1)" && OPNODE_EC=0 || OPNODE_EC=$?
+ETH_OUT="$(wait_for_rpc "$MOCK_URL" "op-node" 1 2>&1)" && ETH_EC=0 || ETH_EC=$?
+_stop_mock_jsonrpc
+if [[ "$OPNODE_EC" -eq 0 ]] \
+  && [[ "$OPNODE_OUT" == *"op-node is up (L1 block 11559189)"* ]] \
+  && [[ "$ETH_EC" -ne 0 ]] \
+  && [[ "$ETH_OUT" == *"timed out waiting for op-node"* ]]; then
+  echo "PASS wait_for_opnode_rpc succeeds on optimism_syncStatus; wait_for_rpc eth probe fails"
+else
+  echo "FAIL op-node mock must pass wait_for_opnode_rpc and fail wait_for_rpc (opnode_ec=$OPNODE_EC eth_ec=$ETH_EC)" >&2
+  echo "$OPNODE_OUT" >&2
+  echo "$ETH_OUT" >&2
+  fail=1
+fi
+
+: >"$MOCK_PORT_FILE"
+_start_mock_jsonrpc reject "$MOCK_PORT_FILE"
+MOCK_URL="http://127.0.0.1:$(cat "$MOCK_PORT_FILE")"
+REJECT_OUT="$(wait_for_opnode_rpc "$MOCK_URL" "op-node" 1 2>&1)" && REJECT_EC=0 || REJECT_EC=$?
+_stop_mock_jsonrpc
+if [[ "$REJECT_EC" -eq 1 ]] \
+  && [[ "$REJECT_OUT" == *"timed out waiting for op-node"* ]]; then
+  echo "PASS wait_for_opnode_rpc times out with return 1 when both namespaces reject"
+else
+  echo "FAIL reject-all mock must time out wait_for_opnode_rpc with return 1 (ec=$REJECT_EC)" >&2
+  echo "$REJECT_OUT" >&2
+  fail=1
+fi
+
+: >"$MOCK_PORT_FILE"
+_start_mock_jsonrpc httpok "$MOCK_PORT_FILE"
+MOCK_URL="http://127.0.0.1:$(cat "$MOCK_PORT_FILE")"
+HTTPOK_OUT="$(wait_for_opnode_rpc "$MOCK_URL" "op-node" 1 2>&1)" && HTTPOK_EC=0 || HTTPOK_EC=$?
+_stop_mock_jsonrpc
+if [[ "$HTTPOK_EC" -eq 1 ]] \
+  && [[ "$HTTPOK_OUT" == *"timed out waiting for op-node"* ]]; then
+  echo "PASS wait_for_opnode_rpc does not accept HTTP 200 without a JSON-RPC result"
+else
+  echo "FAIL HTTP 200 body-ok must not pass wait_for_opnode_rpc (ec=$HTTPOK_EC)" >&2
+  echo "$HTTPOK_OUT" >&2
+  fail=1
+fi
+
+rm -rf "$MOCK_RPC_DIR"
+
+# Call sites: L2_NODE_RPC_URL must use the op-node probe, not eth_blockNumber.
+if grep -q 'wait_for_opnode_rpc "$L2_NODE_RPC_URL"' "$SCRIPT_DIR/09-start-challenger-sepolia.sh" \
+  && grep -q 'wait_for_opnode_rpc "$L2_NODE_RPC_URL"' "$SCRIPT_DIR/create-bad-proposal-sepolia.sh" \
+  && ! grep -q 'wait_for_rpc "$L2_NODE_RPC_URL"' "$SCRIPT_DIR/09-start-challenger-sepolia.sh" \
+  && ! grep -q 'wait_for_rpc "$L2_NODE_RPC_URL"' "$SCRIPT_DIR/create-bad-proposal-sepolia.sh"; then
+  echo "PASS op-node waiters use wait_for_opnode_rpc"
+else
+  echo "FAIL L2_NODE_RPC_URL waits must use wait_for_opnode_rpc (eth_blockNumber is not served)" >&2
+  fail=1
+fi
+
 # Phase 2 RPC asserts: remote L1 OK; L2 loopback; chain 852
 L1_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
 L2_RPC_URL="http://127.0.0.1:9545"

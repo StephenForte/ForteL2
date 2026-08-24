@@ -78,7 +78,7 @@ if [[ ! -f "$DEPLOYMENTS" ]]; then
 fi
 
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
-wait_for_rpc "$L2_NODE_RPC_URL" "op-node"
+wait_for_opnode_rpc "$L2_NODE_RPC_URL" "op-node"
 
 echo "WARN: stop stock op-proposer first (shared PROPOSER_PRIVATE_KEY nonce). See proposer/README.md US-074." >&2
 
