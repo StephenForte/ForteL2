@@ -1133,3 +1133,165 @@ which wallet should own recovery gas long-term. ADMIN worked; that
 is not a standing assignment. What a much newer shared anchor means
 for step 8b is still unanswerable — this run never called
 `closeGame`. Type 8 is still `gameImpls(8) = 0x0`.
+
+## R-15 (2026-08-23) — hourly recovery agent + 1h proposer default on every surface
+
+Sequel to **R-14** / **D-0074**. Implements the 2026-08-23 operator
+decision: recovery runs hourly, and a fresh `.env.sepolia` from the
+template must not silently restore a 5m proposer. Repo `eead943`
+(`origin/main`, #128 already merged) at start. Branch
+`feat/r-15-hourly-recovery`. `scripts/resolve-games-sepolia.sh` was
+not edited.
+
+### Why hourly (the numbers, not a preference)
+
+A game needs three sequential runs because the script does not sleep:
+`(resolveClaim + resolve)` → 30m finality → unlock → 60m DelayedWETH
+→ withdraw. Per-game latency is ~3× the recovery interval. At 1h
+that is ~3.5h and a 0.32 ETH peak lock (11× headroom vs ~3.5 ETH).
+Gas is identical at every cadence (24 games/day × 4 legs). Frequency
+costs nothing and buys float.
+
+### What landed
+
+1. `launchd/com.steve.fortel2-resolve-games.plist` — label matches
+   filename. Runs
+   `/Users/steveforte/ForteL2/scripts/resolve-games-sepolia.sh --execute`
+   with `FORTEL2_ENV=.env.sepolia` and a Foundry-bearing `PATH` (same
+   shape as sleep/wake; health does not need these because its wrapper
+   sets them). Interpreter is `/bin/bash`, not health's `/bin/zsh`:
+   the first load copied zsh and failed immediately
+   (`BASH_SOURCE[0]: parameter not set` under `set -u`, then
+   `source …/lib.sh` from the wrong directory, exit 127, empty
+   stdout). The script is bash; zsh does not set `BASH_SOURCE`.
+   Logs under `~/Library/Logs/fortel2-resolve-games.{out,err}.log`.
+   The script default stays dry-run; only this plist passes `--execute`.
+2. `SEPOLIA_PROPOSER_INTERVAL` default **5m → 1h** in the three
+   operator-facing surfaces D-0074 named (fix-list item 8):
+   `.env.sepolia.example:94`,
+   `scripts/06-start-proposer-sepolia.sh:26` (`:-1h`),
+   `README.md` credit-budget table row. The live `.env.sepolia` was
+   not touched (R-13 already set it). The running proposer was not
+   restarted; the new script default takes effect on the next
+   proposer start only.
+3. `scripts/test-helpers.sh` credit-budget grep updated
+   `SEPOLIA_PROPOSER_INTERVAL:-5m` → `:-1h`. That case encoded the
+   old default; leaving it would fail CI the moment the script
+   default moved. Count **203 PASS** before and after (no cases
+   added or removed).
+
+### Hourly expression: `StartCalendarInterval` Minute-only
+
+Picked wall-clock `:00` (`StartCalendarInterval` with only `Minute=0`)
+over `StartInterval=3600`.
+
+- Missing calendar keys are wildcards (`man launchd.plist`): Minute-only
+  fires every hour at :00, including **00:00 / 01:00 / 02:00** while
+  `com.steve.fortel2-sleep` has the Mac stack down. Recovery is L1-only;
+  `require_sepolia_env` checks `L2_CHAIN_ID=852` as a config value, not
+  L2 reachability. Skipping those hours would add ~3 games of locked
+  float for no reason.
+- After Mac sleep, launchd coalesces missed calendar events into one
+  fire on wake. `StartInterval` **misses** firings that occur while
+  asleep (`kqueue(3)` shortcoming, same man page).
+- `check-launchd.sh` `plist_calendar` only understands
+  `StartCalendarInterval`. A `StartInterval`-only plist would read as
+  an empty schedule if that checker later enumerates this file.
+
+`RunAtLoad` is on (same as health) so bootstrap does not wait up to
+59 minutes for the first `:00`.
+
+### `check-launchd.sh` does not enumerate dynamically
+
+The brief said the checker already enumerated `com.steve.fortel2-*.plist`
+and must not be edited. The repo at `eead943` did **not**: `check_agent`
+was called only for the hardcoded triple
+`fortel2-health fortel2-sleep fortel2-wake`. The host-side stale walk
+*was* a glob, so an installed counterpart was not STALE, and the result
+stayed **OK with 1 warning(s)** while the new agent was invisible.
+
+Codex P1 on #129 asked to add the label and stop treating a trailing
+`--execute` as the script path. That is a strengthening, not "adjust
+the checker to accept the file." Follow-up edit: repo plists are now
+globbed; `plist_script` takes the last non-flag path-like argument.
+After the edit, `check-launchd.sh` reports the new agent
+`schedule=*:0 script=…/resolve-games-sepolia.sh` and the warning
+count is still **1** (health fdautil). LD-01 now also requires the
+glob and `plist_script`.
+
+### Pre-install dry-run (settled wallet, not mid-bulk-recovery)
+
+```text
+$ FORTEL2_ENV=.env.sepolia ./scripts/resolve-games-sepolia.sh
+# exit 0, ~42s
+mode=dry-run
+gameCount=48
+weth_balance_eth=0.400000000000000000
+selected_count=3
+selected_indexes=43,44,45
+action_games=0 wait_games=3
+actions_ready=0
+txs_sent=0
+recoverable_eth=0.240000000000000000
+locked_unexpired_eth=0.160000000000000000
+game 0–42 SKIP zero_credit
+game 43 WAIT weth_delay
+game 44 WAIT weth_delay
+game 45 WAIT finality
+game 46–47 SKIP clock_unexpired
+```
+
+Games 0–42 already withdrawn (R-14 bulk done). DelayedWETH 0.40 ETH
+is five in-flight bonds (43–47). No ACTION legs. Safe to load
+`--execute` against this wallet.
+
+### Overlap
+
+No flock / pidfile in `resolve-games-sepolia.sh` (confirmed by
+search; script not modified). `StartInterval` documents
+"if the job is running during an interval firing, that firing is
+missed." `StartCalendarInterval` is silent on a still-running
+instance. A lock was not added. At current `gameCount=48` a dry-run
+is ~42s; a few `cast send`s would still be minutes, not an hour.
+
+Sender remains **ADMIN** (`require_sender_ready`); recipient remains
+`PROPOSER_ADDRESS`. Whether ADMIN is the long-term gas wallet is
+still open.
+
+### Installed, loaded, fired (this machine)
+
+Copied to `~/Library/LaunchAgents/`, then `bootout` + `bootstrap`
+`gui/501`. First load used `/bin/zsh` (health model) and exited
+**127** at 2026-08-23 17:31:12 -0700 — empty stdout, the two-line
+stderr above. Reloaded with `/bin/bash`. `launchctl print` after
+the second run: `state = not running`, `runs = 1`,
+`last exit code = 0`. stdout mtime **2026-08-23 17:47:05 -0700**:
+
+```text
+=== ForteL2 resolve-games (execute) ===
+mode=execute
+now=1787532360
+gameCount=48
+selected_indexes=43,44,45
+action_games=0 wait_games=3
+EXECUTE done
+txs_sent=0
+gas_spent_wei=0
+```
+
+That is a real `--execute` pass with nothing to send, not a
+calendar `:00` yet. The next unattended hourly fire has not been
+observed. stderr still holds the 17:31 zsh failure (logs append).
+
+### Residual
+
+- Alerting on a silently dead recovery job is still unbuilt. A dead
+  agent re-creates the dry-wallet failure. `funding-watch.sh`'s
+  existing FAIL is the same class, still unaddressed.
+- `scripts/demo-checklist.sh` skip-message still falls back to
+  `SEPOLIA_PROPOSER_INTERVAL:-5m` when the env var is unset. Not
+  one of the three D-0074 surfaces; not edited.
+- `PROPOSER_GAME_TYPE` stays `1`. Step 8b / type 8 is still out of
+  scope.
+- First unattended `:00` fire not yet observed. Overlap under a
+  run that outlasts an hour is untested.

@@ -375,7 +375,7 @@ if grep -q 'SEPOLIA_BATCHER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/05-start-batcher-se
   && grep -q 'SEPOLIA_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'SEPOLIA_BATCHER_TXMGR_REBROADCAST_INTERVAL:-36s' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
-  && grep -q 'SEPOLIA_PROPOSER_INTERVAL:-5m' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'SEPOLIA_PROPOSER_INTERVAL:-1h' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_TXMGR_REBROADCAST_INTERVAL:-36s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_L1_HTTP_POLL_INTERVAL:-12s' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
@@ -1286,6 +1286,8 @@ if [[ ! -f "$LAUNCHD_DIR/com.steve.fortel2-cloudflared.plist" ]] \
   && grep -q '<integer>0</integer>' "$LAUNCHD_DIR/com.steve.fortel2-health.plist" \
   && grep -q 'is_contract_schedule' "$LD_CHECK" \
   && grep -q 'fortel2-sleep|fortel2-wake' "$LD_CHECK" \
+  && grep -q 'com.steve.fortel2-\*.plist' "$LD_CHECK" \
+  && grep -q 'plist_script' "$LD_CHECK" \
   && ! grep -q 'check_keepalive_agent' "$LD_CHECK" \
   && grep -q 'launchctl print' "$LD_CHECK"; then
   echo "PASS LD-01 check-launchd tiered severity; no cloudflared LaunchAgent plist"

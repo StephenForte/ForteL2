@@ -7,6 +7,10 @@
 # loaded job differs from both repo and installed file has occurred twice (D-0026).
 # After re-copying a plist, bootout + bootstrap is required; file equality is necessary
 # but not sufficient.
+#
+# Repo agents are enumerated from launchd/com.steve.fortel2-*.plist (not a
+# hardcoded label list). Script path is the last non-flag ProgramArguments
+# entry that looks like a path, so a trailing --execute is not the script.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -42,6 +46,7 @@ plist_xml() {
 
 # Print "Hour:Minute" for StartCalendarInterval (dict or single-element array).
 # Empty string if missing/unparseable; "MULTI" if array length != 1.
+# A missing Hour is a wildcard ("*:0" = every hour at minute 0).
 plist_calendar() {
   plist_xml "$1" | python3 -c '
 import sys, plistlib
@@ -58,17 +63,42 @@ if isinstance(sci, list):
 if not isinstance(sci, dict):
     print("")
     raise SystemExit(0)
-print("%s:%s" % (sci.get("Hour"), sci.get("Minute", 0)))
+hour = sci.get("Hour")
+minute = sci.get("Minute", 0)
+print("%s:%s" % ("*" if hour is None else hour, minute))
 '
 }
 
-# Print ProgramArguments joined by SOH (\x01), last field is the repo script path.
+# Print ProgramArguments joined by SOH (\x01).
 plist_prog_args() {
   plist_xml "$1" | python3 -c '
 import sys, plistlib
 data = plistlib.loads(sys.stdin.buffer.read())
 args = data.get("ProgramArguments") or []
 sys.stdout.write("\x01".join(args))
+'
+}
+
+# Script path: last non-flag ProgramArguments entry that looks like a path.
+# Trailing flags (--execute) must not be treated as the script (R-15).
+plist_script() {
+  plist_xml "$1" | python3 -c '
+import sys, plistlib
+data = plistlib.loads(sys.stdin.buffer.read())
+args = data.get("ProgramArguments") or []
+script = ""
+for a in reversed(args):
+    if not a or a.startswith("-"):
+        continue
+    if "/" in a:
+        script = a
+        break
+if not script:
+    for a in reversed(args):
+        if a and not a.startswith("-"):
+            script = a
+            break
+sys.stdout.write(script)
 '
 }
 
@@ -110,16 +140,9 @@ check_agent() {
   repo_args="$(plist_prog_args "$repo_plist")"
   host_args="$(plist_prog_args "$host_plist")"
 
-  # Last ProgramArguments entry is the repo wrapper script path.
   local repo_script host_script
-  repo_script="${repo_args##*$'\x01'}"
-  if [[ "$repo_args" != *$'\x01'* ]]; then
-    repo_script="$repo_args"
-  fi
-  host_script="${host_args##*$'\x01'}"
-  if [[ "$host_args" != *$'\x01'* ]]; then
-    host_script="$host_args"
-  fi
+  repo_script="$(plist_script "$repo_plist")"
+  host_script="$(plist_script "$host_plist")"
 
   local status="OK"
   local detail=""
@@ -187,9 +210,18 @@ if [[ ! -d "$AGENTS_DIR" ]]; then
   FAILS=$((FAILS + 1))
 fi
 
-for short in fortel2-health fortel2-sleep fortel2-wake; do
-  check_agent "$short"
-done
+shopt -s nullglob
+_repo_plists=("$LAUNCHD_DIR"/com.steve.fortel2-*.plist)
+shopt -u nullglob
+if [[ ${#_repo_plists[@]} -eq 0 ]]; then
+  echo "FAIL  no com.steve.fortel2-*.plist under $LAUNCHD_DIR"
+  FAILS=$((FAILS + 1))
+else
+  for _repo_plist in "${_repo_plists[@]}"; do
+    _base="$(basename "$_repo_plist" .plist)"
+    check_agent "${_base#com.steve.}"
+  done
+fi
 
 echo
 echo "--- STALE host plists (no counterpart under launchd/) ---"

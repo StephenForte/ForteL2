@@ -720,7 +720,7 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 | Batcher batch type | `span` (`--batch-type=1`) | `BATCHER_BATCH_TYPE` (`span`/`1` or `singular`/`0`) |
 | Batcher max channel duration | `30` L1 blocks (~6 min) | `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION` |
 | Batcher txmgr receipt / rebroadcast | `36s` | `SEPOLIA_BATCHER_TXMGR_*_INTERVAL` |
-| Proposer interval | `5m` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`) |
+| Proposer interval | `1h` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`) |
 | Proposer poll | `12s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
 | Proposer txmgr receipt / rebroadcast / resubmission | `36s` / `36s` / `72s` | `SEPOLIA_PROPOSER_TXMGR_*` / `SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT` |
 | Mac op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
@@ -744,6 +744,8 @@ FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh status
 Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clients is enough).
 
 **Scheduled on the Mac mini (launchd):** checked-in agents run health at **05:00**, Sepolia sleep at **23:45**, and wake at **03:00** local (`launchd/com.steve.fortel2-{health,sleep,wake}.plist`). The write tunnel is a dashboard-managed system LaunchDaemon (not a user LaunchAgent) — see [Authenticated Cloudflare tunnel](#authenticated-cloudflare-tunnel-t5-step-3--d-0034). Install once per the steps in `launchd/README.md` (replace any old `crontab` entries so jobs do not double-fire). User LaunchAgents require a logged-in session on the mini. Render Suspend / QuickNode pause remain manual dashboard steps when you are remote.
+
+**Hourly bond recovery (D-0074):** `com.steve.fortel2-resolve-games` runs `scripts/resolve-games-sepolia.sh --execute` at minute **0** of every hour, including the 23:45–03:00 sleep window. The script talks to Sepolia L1 only (DisputeGameFactory + DelayedWETH); it does not need the local L2 stack. Dry-run remains the script default — only this agent passes `--execute`. Logs: `~/Library/Logs/fortel2-resolve-games.{out,err}.log`.
 
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 
