@@ -115,6 +115,63 @@ wait_for_rpc() {
   return 1
 }
 
+# Parse a successful optimism_syncStatus JSON-RPC result.
+# Prints the current L1 number, or "-" when the result is present but has no number.
+# Exit 1 when the payload is not a JSON-RPC result (null, error envelope, non-JSON).
+_opnode_syncstatus_l1() {
+  python3 -c '
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(1)
+if data is None:
+    sys.exit(1)
+if isinstance(data, dict) and "jsonrpc" in data:
+    if "result" not in data:
+        sys.exit(1)
+    data = data["result"]
+    if data is None:
+        sys.exit(1)
+n = None
+if isinstance(data, dict):
+    cur = data.get("current_l1")
+    if isinstance(cur, dict) and cur.get("number") is not None:
+        n = cur["number"]
+print("-" if n is None else n)
+' "${1:-}"
+}
+
+# op-node serves the optimism namespace, not eth_*. Probing with eth_blockNumber
+# (wait_for_rpc) times out against a healthy node — D-0055/D-0057 shape.
+# Succeeds only on a JSON-RPC *result* from optimism_syncStatus, not TCP/HTTP 200.
+wait_for_opnode_rpc() {
+  local url="$1"
+  local label="${2:-op-node}"
+  local tries="${3:-60}"
+  local i=0
+  local display
+  local sync_json
+  local l1
+  display="$(redact_rpc_url "$url")"
+  echo "Waiting for $label at $display ..."
+  while (( i < tries )); do
+    if sync_json="$(cast rpc optimism_syncStatus --rpc-url "$url" 2>/dev/null)" \
+      && l1="$(_opnode_syncstatus_l1 "$sync_json")"; then
+      if [[ "$l1" != "-" ]]; then
+        echo "$label is up (L1 block $l1)"
+      else
+        echo "$label is up (optimism_syncStatus ok)"
+      fi
+      return 0
+    fi
+    sleep 1
+    ((i++)) || true
+  done
+  echo "ERROR: timed out waiting for $label at $display" >&2
+  return 1
+}
+
 start_bg() {
   local name="$1"
   shift

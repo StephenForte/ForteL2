@@ -297,7 +297,7 @@ CHALLENGER_DATADIR="$(canonical_abs_path "$DATA_DIR/challenger")"
 mkdir -p "$CHALLENGER_DATADIR"
 
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
-wait_for_rpc "$L2_NODE_RPC_URL" "op-node"
+wait_for_opnode_rpc "$L2_NODE_RPC_URL" "op-node"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
 require_min_balance_eth "$CHALLENGER_ADDRESS" "${SEPOLIA_CHALLENGER_MIN_ETH:-0.15}" "CHALLENGER"
