@@ -393,27 +393,32 @@ run_preflight() {
   echo "Preflight: source=$preflight_source vm=$vm_addr absolutePrestate=$prestate"
 
   if [[ -n "${PRESTATE_PATH:-}" ]]; then
-    local witness_json local_hash chain_lc local_lc
-    if ! witness_json="$("$CANNON_BIN" witness --input "$PRESTATE_PATH")"; then
-      echo "ERROR: cannon witness failed on CHALLENGER_PRESTATE=$PRESTATE_PATH" >&2
-      exit 1
+    local witness_json local_hash chain_lc local_lc witness_rc
+    witness_rc=0
+    witness_json="$("$CANNON_BIN" witness --input "$PRESTATE_PATH" 2>&1)" || witness_rc=$?
+    if (( witness_rc != 0 )); then
+      echo "WARN: cannot compute CHALLENGER_PRESTATE witness hash (cannon witness exited $witness_rc) — proceeding without local prestate comparison (D-0057)." >&2
+      echo "  path: $PRESTATE_PATH" >&2
+      echo "  cannon witness accepts only stateVersion-8 binary prestates; .json and other formats op-challenger accepts may be unhashable here." >&2
+    else
+      local_hash="$(printf '%s' "$witness_json" | jq -r '.witnessHash // empty')"
+      if [[ -z "$local_hash" ]]; then
+        echo "WARN: cannot compute CHALLENGER_PRESTATE witness hash (cannon witness did not yield witnessHash) — proceeding without local prestate comparison (D-0057)." >&2
+        echo "  path: $PRESTATE_PATH" >&2
+      else
+        chain_lc="$(printf '%s' "$prestate" | tr '[:upper:]' '[:lower:]')"
+        local_lc="$(printf '%s' "$local_hash" | tr '[:upper:]' '[:lower:]')"
+        if [[ "$local_lc" != "$chain_lc" ]]; then
+          echo "ERROR: CHALLENGER_PRESTATE witness hash does not match on-chain absolutePrestate" >&2
+          echo "  local (cannon witness):  $local_hash" >&2
+          echo "  on-chain (gameArgs):     $prestate" >&2
+          echo "  A challenger started with the wrong prestate disagrees with every honest root claim." >&2
+          echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
+          exit 1
+        fi
+        echo "Preflight: CHALLENGER_PRESTATE witness hash matches on-chain absolutePrestate"
+      fi
     fi
-    local_hash="$(printf '%s' "$witness_json" | jq -r '.witnessHash // empty')"
-    if [[ -z "$local_hash" ]]; then
-      echo "ERROR: cannon witness on CHALLENGER_PRESTATE=$PRESTATE_PATH did not yield witnessHash" >&2
-      exit 1
-    fi
-    chain_lc="$(printf '%s' "$prestate" | tr '[:upper:]' '[:lower:]')"
-    local_lc="$(printf '%s' "$local_hash" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$local_lc" != "$chain_lc" ]]; then
-      echo "ERROR: CHALLENGER_PRESTATE witness hash does not match on-chain absolutePrestate" >&2
-      echo "  local (cannon witness):  $local_hash" >&2
-      echo "  on-chain (gameArgs):     $prestate" >&2
-      echo "  A challenger started with the wrong prestate disagrees with every honest root claim." >&2
-      echo "  Bypass only if you mean it: CHALLENGER_SKIP_PREFLIGHT=1" >&2
-      exit 1
-    fi
-    echo "Preflight: CHALLENGER_PRESTATE witness hash matches on-chain absolutePrestate"
   fi
 }
 

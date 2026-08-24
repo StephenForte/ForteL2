@@ -1586,7 +1586,14 @@ case "\${3:-}" in
 esac
 EOF
   chmod +x "$mock_dir/cast"
-  if [[ -n "$witness_hash" ]]; then
+  if [[ "$witness_hash" == "FAIL" ]]; then
+    cat > "$mock_dir/cannon" << 'EOF'
+#!/usr/bin/env bash
+echo "unknown version: 110" >&2
+exit 1
+EOF
+    chmod +x "$mock_dir/cannon"
+  elif [[ -n "$witness_hash" ]]; then
     cat > "$mock_dir/cannon" << EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1685,6 +1692,18 @@ else
     echo "PASS US-073 step-11 CHALLENGER_SKIP_PREFLIGHT=1 bypasses prestate witness check"
   else
     echo "FAIL 09-start-challenger-sepolia.sh CHALLENGER_SKIP_PREFLIGHT=1 must bypass prestate witness comparison" >&2
+    fail=1
+  fi
+
+  _f711_setup_mocks "$_f711_tmp" "" "FAIL"
+  _f711_rc=0
+  _f711_out="$(_f711_run_preflight cannon-kona "" "$_f711_tmp/prestate.bin" "$_f711_tmp" 2>&1)" || _f711_rc=$?
+  if [[ "$_f711_rc" == "0" ]] \
+    && printf '%s' "$_f711_out" | grep -q 'cannot compute CHALLENGER_PRESTATE witness hash' \
+    && printf '%s' "$_f711_out" | grep -q 'D-0057'; then
+    echo "PASS US-073 step-11 unhashable prestate warns and proceeds (D-0057)"
+  else
+    echo "FAIL 09-start-challenger-sepolia.sh must WARN and proceed when cannon witness cannot compute (D-0057)" >&2
     fail=1
   fi
 
