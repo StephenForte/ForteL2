@@ -112,7 +112,7 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 | **US-070** | Choose all immutables + write the operator brief (no on-chain spend) | **Done except the notice date.** Values confirmed (D-0049); `tasks/spike-phase-7-immutables.md` written; local `.env.sepolia` written and verified 2026-08-21 (**D-0065**) — all six present, no duplicate assignments, the script's own clock gate passes. Notice sent **2026-08-21 13:00 PDT / 20:00Z** (D-0067); the D-0049 rule resolved to that date. **US-070 complete.** |
 | **US-071** | Announce (≥1 day) + stop writers + redeploy Sepolia L1 + new genesis | **DONE 2026-08-22 (D-0068).** Notice 2026-08-21 20:00Z (D-0067); writers stopped ≈21:05Z; apply completed 21:14:51Z, spend 0.10781 ETH; 13 L1 proxies rotated |
 | **US-072** | Pack / publish replica artifacts + coordinated wipe + hash cross-check | **DONE 2026-08-22 (D-0068).** Published to fortel2-replica at `bebddc3`; both datadirs wiped; stack restarted 21:44Z; hash cross-check matched first try 21:50Z; `rail-interface.json` at v7 (#115). **Step 10 also complete — D-0069** |
-| **US-073** | Stock proposer posts a valid game; `op-challenger` watches and does not fault it | Not started |
+| **US-073** | Stock proposer posts a valid game; `op-challenger` watches and does not fault it | **Done 2026-08-24 (D-0082)** — game 66 unattacked through its full lifecycle, resolved DEFENDER_WINS |
 | **US-074** | Deliberately bad proposal; `op-challenger` wins the dispute | Not started |
 | **US-075** | Operator write-up: what the game proved, what is still trusted | Not started |
 
