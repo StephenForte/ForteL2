@@ -19,11 +19,11 @@ if [[ -z "$GAME_FACTORY" || "$GAME_FACTORY" == "null" ]]; then
   exit 1
 fi
 
-# Credit-budget defaults. Use SEPOLIA_PROPOSER_INTERVAL (default 5m) — do not inherit
+# Credit-budget defaults. Use SEPOLIA_PROPOSER_INTERVAL (default 1h; D-0074) — do not inherit
 # legacy PROPOSER_INTERVAL=12s from older .env.sepolia templates (Phase 1 Anvil knob).
 # Pin txmgr receipt/rebroadcast (upstream defaults are 12s) so in-flight fee bumps
 # do not outpace the batcher's credit-budget cadence.
-PROPOSER_INTERVAL="${SEPOLIA_PROPOSER_INTERVAL:-5m}"
+PROPOSER_INTERVAL="${SEPOLIA_PROPOSER_INTERVAL:-1h}"
 PROPOSER_POLL="${SEPOLIA_PROPOSER_POLL_INTERVAL:-12s}"
 PROPOSER_RECEIPT_QUERY="${SEPOLIA_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s}"
 PROPOSER_REBROADCAST="${SEPOLIA_PROPOSER_TXMGR_REBROADCAST_INTERVAL:-36s}"

@@ -375,7 +375,7 @@ if grep -q 'SEPOLIA_BATCHER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/05-start-batcher-se
   && grep -q 'SEPOLIA_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'SEPOLIA_BATCHER_TXMGR_REBROADCAST_INTERVAL:-36s' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
-  && grep -q 'SEPOLIA_PROPOSER_INTERVAL:-5m' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
+  && grep -q 'SEPOLIA_PROPOSER_INTERVAL:-1h' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_TXMGR_REBROADCAST_INTERVAL:-36s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_L1_HTTP_POLL_INTERVAL:-12s' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
