@@ -114,7 +114,7 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 | **US-072** | Pack / publish replica artifacts + coordinated wipe + hash cross-check | **DONE 2026-08-22 (D-0068).** Published to fortel2-replica at `bebddc3`; both datadirs wiped; stack restarted 21:44Z; hash cross-check matched first try 21:50Z; `rail-interface.json` at v7 (#115). **Step 10 also complete — D-0069** |
 | **US-073** | Stock proposer posts a valid game; `op-challenger` watches and does not fault it | **Done 2026-08-24 (D-0082)** — game 66 unattacked through its full lifecycle, resolved DEFENDER_WINS |
 | **US-074** | Deliberately bad proposal; `op-challenger` wins the dispute | **Done 2026-08-24 (D-0083)** — game 69 defeated CHALLENGER_WINS |
-| **US-075** | Operator write-up: what the game proved, what is still trusted | Not started |
+| **US-075** | Operator write-up: what the game proved, what is still trusted | **Done 2026-08-24 (D-0085)** — README closeout note |
 
 ## User stories
 
