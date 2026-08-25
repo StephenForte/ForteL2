@@ -81,7 +81,7 @@ Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SO
 > **STATUS 2026-08-22 — steps 2 through 9 are COMPLETE (D-0068). Do not re-run them.**
 > The wipe executed: chain 852 is live on new L1 proxies, the replica derives the same chain, and
 > `rail-interface.json` is at v7. Re-running step 3 would wipe the network a second time.
-> **Step 10 (SOS recovery) is also complete — D-0069. Step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24. Step 11 (valid game watched, unattacked) is complete — D-0082. Step 12 (bad proposal defeated) is complete — D-0083.** Outstanding: step 13 (closeout note); item 5's markers landed in #136.
+> **Step 10 (SOS recovery) is also complete — D-0069. Step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24. Step 11 (valid game watched, unattacked) is complete — D-0082. Step 12 (bad proposal defeated) is complete — D-0083. Step 13 (closeout note) is complete — D-0085.** The full reset → fault-proof sequence is done; no steps outstanding. Item 5's markers landed in #136.
 
 | # | When | What | Story |
 |---|---|---|---|
@@ -101,7 +101,7 @@ Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SO
 | 10 | **DONE 2026-08-22 (D-0069)** — SOS-owned. Full deploy, *not* adopt: the overlay survived while the contracts did not. Settlement pair escrow `0x1f75f257…4c96` / settlement `0x4a17351c…a5cc`, both `status=0x1`; explorer re-keyed (settlementos-explorer#58). **The old contract addresses are reassigned, not empty** — two invert token decimals (D-0069 Finding 2) | SOS redeploys-or-adopts on 852, re-seeds wallets, re-verifies one settlement, republishes their address book | G5 |
 | 11 | **DONE 2026-08-24 16:23 PDT (D-0082)** — network healthy | Stock proposer posts a valid game; `op-challenger` does not fault it | **US-073** |
 | 12 | **DONE 2026-08-24 18:52 PDT (D-0083)** — isolated | Deliberately bad proposal; challenger wins; kill the bad path | **US-074** |
-| 13 | Closeout | README note: what the game proved vs what is still trusted | **US-075** |
+| 13 | **DONE 2026-08-24 (D-0085)** — closeout | README note: what the game proved vs what is still trusted | **US-075** |
 
 What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155111, public read URLs, unpublished Access write path, nightly 23:45–03:00 window. What is **rewritten**: every `bridge.*` proxy, SOS escrow / mocks / `TokenizedMMF`, cited tx hashes.
 
@@ -114,7 +114,7 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 | **US-072** | Pack / publish replica artifacts + coordinated wipe + hash cross-check | **DONE 2026-08-22 (D-0068).** Published to fortel2-replica at `bebddc3`; both datadirs wiped; stack restarted 21:44Z; hash cross-check matched first try 21:50Z; `rail-interface.json` at v7 (#115). **Step 10 also complete — D-0069** |
 | **US-073** | Stock proposer posts a valid game; `op-challenger` watches and does not fault it | **Done 2026-08-24 (D-0082)** — game 66 unattacked through its full lifecycle, resolved DEFENDER_WINS |
 | **US-074** | Deliberately bad proposal; `op-challenger` wins the dispute | **Done 2026-08-24 (D-0083)** — game 69 defeated CHALLENGER_WINS |
-| **US-075** | Operator write-up: what the game proved, what is still trusted | Not started |
+| **US-075** | Operator write-up: what the game proved, what is still trusted | **Done 2026-08-24 (D-0085)** — README closeout note |
 
 ## User stories
 
@@ -186,8 +186,8 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 
 **Acceptance Criteria:**
 
-- [ ] README Phase 7 subsection: commands, what a pass looks like, pointer at the recorded game
-- [ ] Explicit leftover: `derivation/` still compares to the operator node unless US-P7-005 lands — a won dispute is not independent verification for a counterparty
+- [x] README Phase 7 subsection: commands, what a pass looks like, pointer at the recorded game — **done (D-0085)**: README § "Fault proofs: what this proved" points at games 66 and 69
+- [x] Explicit leftover: `derivation/` still compares to the operator node unless US-P7-005 lands — a won dispute is not independent verification for a counterparty — **done (D-0085)**: stated in the closeout note
 
 ## Success metrics
 

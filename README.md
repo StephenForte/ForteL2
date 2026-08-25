@@ -40,7 +40,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | ✅ Done — [`tasks/prd-phase-5-proposer.md`](tasks/prd-phase-5-proposer.md) + [`proposer/`](proposer/); `USE_CUSTOM_PROPOSER=1` opt-in |
 | **6** | **Derivation / minimal sequencer** + simple Blockchair-style **block viewer** (latest blocks → block detail); Blockscout stays much later | ✅ Done (2026-08-04) — [`tasks/prd-phase-6-derivation.md`](tasks/prd-phase-6-derivation.md) + [`derivation/`](derivation/) + [`blocks/`](blocks/) |
 | **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
-| **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal — begins with a **coordinated redeploy** (all new fault-game immutables chosen in one sitting) + network-wide reset | In progress — redeploy done 2026-08-22 (D-0068); type-8 game registered and respected (D-0077); challenger live, valid game watched unattacked (D-0082), bad proposal defeated CHALLENGER_WINS (D-0083); outstanding: closeout note. Spec [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) (do not execute the wipe from this row) |
+| **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal — begins with a **coordinated redeploy** (all new fault-game immutables chosen in one sitting) + network-wide reset | Complete (demonstration) — redeploy done 2026-08-22 (D-0068); type-8 game registered and respected (D-0077); challenger live, valid game watched unattacked (D-0082), bad proposal defeated CHALLENGER_WINS (D-0083), closeout note written (D-0085); **demonstration complete**. Spec [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) (do not execute the wipe from this row) |
 | **8** | **Decentralized sequencer** exploration: multiple candidates, leader election | Planned |
 | **9** | **Mainnet (tentative)**: graduate to Ethereum mainnet as L1, production key management, real ETH economics — gated on earlier phases + committed distributed node network | Decision not locked — P7-0 leftovers expanded in [`tasks/prd-mainnet-pilot.md`](tasks/prd-mainnet-pilot.md) |
 
@@ -806,7 +806,7 @@ A Sepolia redeploy is an **operational event for every verifier operator**, not 
 > Chain 852 was re-genesised: writers stopped ≈21:05Z, apply completed 21:14:51Z (spend 0.10781 ETH),
 > both datadirs wiped, stack restarted 21:44Z, hash cross-check matched first try 21:50Z,
 > `rail-interface.json` bumped to v7 (#115). **Do not re-run steps 3–8 — step 4 would wipe the network again.**
-> The SOS recovery (PRD step 10) is also **complete** — D-0069, **and step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24**: the type-8 Kona game is registered and respected and the proposer posts type-8, zero-bond games. **Step 11 (valid game watched, unattacked) is complete — D-0082, 2026-08-24. Step 12 (deliberate bad proposal defeated, CHALLENGER_WINS) is complete — D-0083, 2026-08-24.** Outstanding: step **13** (closeout note).
+> The SOS recovery (PRD step 10) is also **complete** — D-0069, **and step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24**: the type-8 Kona game is registered and respected and the proposer posts type-8, zero-bond games. **Step 11 (valid game watched, unattacked) is complete — D-0082, 2026-08-24. Step 12 (deliberate bad proposal defeated, CHALLENGER_WINS) is complete — D-0083, 2026-08-24. Step 13 (closeout note) is complete — D-0085, 2026-08-24; the full reset → fault-proof sequence is done.** No steps outstanding.
 > The steps below are retained as the procedure for the *next* reset, which is the mainnet-pilot gate.
 
 Order:
@@ -967,3 +967,40 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 **Preflight:** before launch the script looks up `gameImpls` for trace types it maps confidently (`cannon=0`, `permissioned=1`, `cannon-kona=8` — on-chain fact for type 8 as of step 8b, D-0077). Other types skip factory lookup rather than guess (D-0055). For mapped types it reads `vm` and `absolutePrestate` from `DisputeGameFactory.gameArgs(gameType)` (clone-with-immutable-args tail). If `gameArgs` is empty it falls back to the implementation getters (older immutable layout). Either source must yield a non-zero VM and a non-zero prestate or the script exits. When `CHALLENGER_PRESTATE` is set, the script runs `cannon witness --input` on that file: a computed match proceeds, a computed mismatch refuses, and an inability to compute (unparseable version, `.json` artifact, etc.) warns and proceeds (D-0057). Bypass only if you mean it: `CHALLENGER_SKIP_PREFLIGHT=1`.
 
 Spec: [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) US-073.
+
+## Fault proofs: what this proved, and what I still trust (US-075)
+
+On 2026-08-24 I ran both halves of a fault-proof dispute against the live chain 852 and watched them resolve the way the design says they should.
+
+**The honest case (D-0082).** The stock proposer posted an ordinary output root; `op-challenger`, running the Kona prestate for game type 8, watched it and left it alone. Game 66 (`0xBEBDC78fA5BcBCfB9a31510036718eD8B6c27609`) ran its full clock with one claim and resolved DEFENDER_WINS. The challenger's only transactions were resolution bookkeeping — it never attacked a game it agreed with.
+
+**The dishonest case (D-0083).** I posted a deliberately corrupted output root as the proposer (`create-bad-proposal-sepolia.sh`, double-gated so it can't fire by accident). The challenger detected it within three minutes, countered at depth 1 with the *true* root, and won: game 69 (`0xd39B5353e3A9bbc3547160407F1CE427E73B9349`) resolved CHALLENGER_WINS, and the false root never touched the anchor. Transactions: create `0xe669394f…55ac`, challenger counter `0x95fe72bb…7b36`, resolve `0x27afa0fd…9e32`.
+
+**How to reproduce.** The honest case needs nothing beyond a running stock proposer and a running challenger — see [§ Phase 7 challenger (US-073)](#phase-7-challenger-us-073) above for the challenger's start/stop, its `OP_NODE_SAFEDB_PATH` prerequisite, and the small ETH balance it needs for a counter-claim bond.
+
+The dishonest case is a one-shot tool. Stop the stock proposer first (it shares the proposer key), fire the bad proposal, then restart the proposer:
+
+```bash
+# 1. stop the stock proposer (shared PROPOSER_PRIVATE_KEY nonce)
+kill "$(cat "$DATA_DIR/pids/op-proposer.pid")" && rm -f "$DATA_DIR/pids/op-proposer.pid"
+
+# 2. post one deliberately corrupted output root (double-gated; PROPOSER_GAME_TYPE must be the respected type)
+CONFIRM_BAD_PROPOSAL_SEPOLIA=1 I_UNDERSTAND_THIS_POSTS_A_FALSE_CLAIM=true   FORTEL2_ENV=.env.sepolia ./scripts/create-bad-proposal-sepolia.sh
+
+# 3. restart the stock proposer so honest proposing resumes
+FORTEL2_ENV=.env.sepolia ./scripts/06-start-proposer-sepolia.sh
+```
+
+The tool prints the game `index`, `proxy`, and create `tx`, then exits — it never keeps running. A pass looks like: the honest game resolves DEFENDER_WINS with the challenger silent; the bad game resolves CHALLENGER_WINS after the challenger posts a single counter-claim carrying the real output root. The challenger judges a game only once its L1 head postdates `OP_NODE_SAFEDB_PATH` being enabled.
+
+**What this proved:** an independent party running `op-challenger` against this chain can catch a false state claim on the respected game type and defeat it permissionlessly, before it finalizes. That is the one thing fault proofs are for, and it now works here.
+
+**What I still trust — this is not trustless yet:**
+
+- **Sequencer honesty for ordering and liveness.** The fault proof only judges whether an output root is *correct*. It does nothing about a sequencer that censors or reorders transactions — that remains trusted. A won dispute stops a wrong state, not an unfair one.
+- **Data availability.** Batches are posted as calldata to Sepolia L1. Derivation — and therefore any challenge — depends on that L1 history staying retrievable. On Sepolia I am trusting that; it is not a guarantee I control.
+- **Key custody.** Proposer, challenger, and the ADMIN key that also holds L1ProxyAdminOwner and Guardian are single operator-held keys, not a multisig. A stolen proposer key alone cannot finalize a bad root — the challenger defeats it — but a stolen L1PAO/Guardian key can change the implementation or the respected game type outright. That is the sharpest remaining single point of failure.
+- **The verifier still compares to my own node.** `derivation/` checks the chain against the operator's op-node, not against an independent trust-minimized source. A dispute I win proves *I* can win — it is not, by itself, independent verification for a counterparty. A counterparty who wants that assurance must run their own challenger, or wait for US-P7-005.
+
+Phase 7 is complete as a demonstration. It is a bridge to a trust-minimized chain, not the destination.
+
