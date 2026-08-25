@@ -747,6 +747,34 @@ Does **not** wipe datadir. Does **not** pause QuickNode endpoints (stopping clie
 
 **Hourly bond recovery (D-0074):** `com.steve.fortel2-resolve-games` runs `scripts/resolve-games-sepolia.sh --execute` at minute **0** of every hour, including the 23:45–03:00 sleep window. The script talks to Sepolia L1 only (DisputeGameFactory + DelayedWETH); it does not need the local L2 stack. Dry-run remains the script default — only this agent passes `--execute`. Logs: `~/Library/Logs/fortel2-resolve-games.{out,err}.log`.
 
+**Ops alerting:** `scripts/alert-watch.sh` (hourly at **:30**, `com.steve.fortel2-alerts`) watches `data/funding-health.json` for a **FAIL** verdict and for a health pipeline older than 26 h, and watches the resolve-games agent for silence (≤ 2 hourly cycles, with grace after a Mac-sleep gap) or persistent nonzero exits. **OK / WARN / INSUFFICIENT do not alert.** Channels are a macOS notification banner and a Resend email; either fires if the other is missing or broken. Fill `RESEND_API_TOKEN`, `ALERT_EMAIL_FROM` (optional; default `onboarding@resend.dev`), and `ALERT_EMAIL_TO` in local `.env.sepolia` — not in the tracked example.
+
+Install & shakeout (Mac mini; file copy alone does not load the job):
+
+```bash
+cp /Users/steveforte/ForteL2/launchd/com.steve.fortel2-alerts.plist ~/Library/LaunchAgents/
+```
+
+```bash
+UID_GUI="$(id -u)"
+plist="$HOME/Library/LaunchAgents/com.steve.fortel2-alerts.plist"
+launchctl bootout "gui/${UID_GUI}" "$plist" 2>/dev/null || true
+launchctl bootstrap "gui/${UID_GUI}" "$plist"
+```
+
+To undo that install (unload; does not delete the copied plist):
+
+```bash
+UID_GUI="$(id -u)"
+launchctl bootout "gui/${UID_GUI}" "$HOME/Library/LaunchAgents/com.steve.fortel2-alerts.plist"
+```
+
+```bash
+FORTEL2_ENV=.env.sepolia ./scripts/alert-watch.sh --test
+```
+
+`--test` sends a synthetic alert tagged TEST on both channels. Banner still fires if `RESEND_API_TOKEN` / `ALERT_EMAIL_TO` are unset; email is skipped with a warning and the command exits nonzero until those are set.
+
 **QuickNode security notes:** IP allowlist the **Mac** endpoint to your home/static IP. Render outbound IPs are not stably allowlistable on ordinary plans — rely on a **separate** Render-only endpoint token, rotate if leaked, and keep the replica **Private Service** (no public L2 RPC). Method-level rate limits need Accelerate+; on Build, use credit alerts instead.
 
 **Not in 2d:** Render as L1 (Phase 3 = L2 replica only). Native geth/reth+consensus on the Mac mini (Phase **3a**, after 4–6).

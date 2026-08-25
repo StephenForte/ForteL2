@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.steve.fortel2-alerts</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/steveforte/ForteL2/scripts/alert-watch.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/steveforte/ForteL2</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FORTEL2_ENV</key>
+    <string>.env.sepolia</string>
+    <key>PATH</key>
+    <string>/Users/steveforte/.foundry/bin:/Users/steveforte/ForteL2/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <!--
+    Hourly at minute 30 (Hour omitted). StartCalendarInterval, not StartInterval:
+    offset from resolve-games' :00 so a recovery-agent miss is visible within
+    the same hour, and so this watcher is not racing the :00 job for logs.
+    After sleep, launchd fires one missed calendar event rather than drifting
+    an elapsed timer. check-launchd.sh parses StartCalendarInterval;
+    StartInterval-only would look like a missing schedule.
+  -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <!--
+    Log under ~/Library/Logs (always present on macOS). Do NOT use repo data/:
+    that dir is gitignored and only created inside start scripts; launchd
+    opens StandardOutPath/StandardErrorPath before the program runs, so a
+    missing parent directory fails the job on a fresh clone.
+  -->
+  <key>StandardOutPath</key>
+  <string>/Users/steveforte/Library/Logs/fortel2-alerts.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/steveforte/Library/Logs/fortel2-alerts.err.log</string>
+</dict>
+</plist>
