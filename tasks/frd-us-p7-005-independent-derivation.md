@@ -41,7 +41,7 @@ Path B (counterparty-replica anchor) was rejected as primary: independence would
 
 **Owns:** `derivation/` Go (new files, e.g. `proposals.go`, `outputroot.go`; `cmd/verify` flags). Must not edit `batcher/*.go` (import-only rule stands). May append tests.
 
-- Fetch proposals: enumerate DisputeGameFactory games of the configured game type (default 8), decode `rootClaim` + `l2BlockNumber` (extraData); factory address from the deploy artifacts, overridable by flag.
+- Fetch proposals: enumerate DisputeGameFactory games of the **respected game type resolved on-chain** (`AnchorStateRegistry.respectedGameType()` — precedent `scripts/resolve-games-sepolia.sh:701`), overridable by an explicit flag for auditing a previously-respected type. **No silent numeric default** — a hard-coded type goes stale at the next respected-type change and the audit silently reads the wrong games (same policy as `create-bad-proposal-sepolia.sh`, D-0063 Finding 3c / D-0083). Factory address from the deploy artifacts, overridable by flag.
 - Compute output root at a proposal height from the **seal EL**: version-0 preimage `keccak(version ‖ stateRoot ‖ messagePasserStorageRoot ‖ blockHash)`, storage root via `eth_getProof` on `0x…4200…0016`.
 - New mode (e.g. `-compare proposals`): derived output root vs claimed root at each proposal height in the window; report per-proposal MATCH/MISMATCH plus the game's resolution status (comparison is against the claim regardless of resolution; status is context, not a gate).
 - `-ref-l2` remains for the legacy consistency mode; proposal mode must run without it.
@@ -60,7 +60,7 @@ Path B (counterparty-replica anchor) was rejected as primary: independence would
 - **Branching:** per D-0093-era protocol — the brief assigns branch name + baseline sha; the **worker cuts the branch off main itself**; stop-and-ask if it exists.
 - **Models:** T1, T3 Sonnet. T2 Sonnet + **Codex review** (metered budget justified: this is the honesty/audit path).
 - **Decision ids:** allocated at review time from the next free id (D-0095 onward after D-0094). decisions.md entries stack in id order at the Escalations marker (the #149 lesson).
-- **Gates (every task):** `bash -n` on touched scripts, `./scripts/test-helpers.sh` 0 FAIL, `phase7-gate-parity.sh` exit 0, `cd derivation && go test ./...` where Go is touched. Live shakeout per task in the brief (never-run-live scripts break live).
+- **Gates (every task):** `bash -n` on touched scripts, `./scripts/test-helpers.sh` 0 FAIL, `./scripts/phase7-gate-parity.sh` exit 0, `cd derivation && go test ./...` where Go is touched. Live shakeout per task in the brief (never-run-live scripts break live).
 
 ## 6. Risks
 
