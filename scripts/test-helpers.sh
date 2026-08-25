@@ -4664,6 +4664,33 @@ p.write_text(t.replace("require_key_matches_address()", "require_key_matches_add
   cleanup_pf
   trap - EXIT
 fi
+
+# Regression: GNU `stat -f` is --file-system and succeeds, so `stat -f || stat -c`
+# never falls through on Ubuntu CI (Bugbot on #151).
+if ! grep -q 'mode=$(stat -f' "$SCRIPT_DIR/phase7-preflight.sh" \
+  && grep -q 'S_IMODE' "$SCRIPT_DIR/phase7-preflight.sh"; then
+  echo "PASS phase7-preflight mode check does not use GNU-broken stat -f fallback"
+else
+  echo "FAIL phase7-preflight must not use stat -f || stat -c (GNU -f is --file-system)" >&2
+  fail=1
+fi
+
+# Regression: ADMIN_PRIVATE_KEY must not land on env argv or a leftover temp file (Codex P1 on #151).
+if ! grep -q '_admin=' "$SCRIPT_DIR/phase7-preflight.sh" \
+  && ! grep -qE 'env \$\(grep -E .ADMIN_' "$SCRIPT_DIR/phase7-preflight.sh" \
+  && grep -F -q 'ADMIN_PRIVATE_KEY=*' "$SCRIPT_DIR/phase7-preflight.sh"; then
+  echo "PASS phase7-preflight loads ADMIN_* from the env file, not argv or a leftover temp"
+else
+  echo "FAIL phase7-preflight must not copy ADMIN_PRIVATE_KEY onto env argv or a temp file" >&2
+  fail=1
+fi
+
+if grep -q 'refuses a duplicated active assignment of any variable' "$SCRIPT_DIR/../README.md"; then
+  echo "PASS README documents loader-wide duplicate-assignment refusal"
+else
+  echo "FAIL README must document that lib.sh refuses any duplicated env assignment" >&2
+  fail=1
+fi
 unset _kg_fn _kg_dup_fn _kg_rc _kg_out _kg_mismatch _kg_key _kg_addr _kg_addr_lc _kg_other
 unset CHALLENGER_SEPOLIA
 

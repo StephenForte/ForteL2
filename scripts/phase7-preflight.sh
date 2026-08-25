@@ -12,7 +12,15 @@ cd "${FORTEL2_ROOT:-$SCRIPT_DIR/..}" || exit 1
 S=scripts/02-deploy-contracts-sepolia.sh; L=scripts/lib.sh; E=.env.sepolia; fail=0
 p(){ printf '  %-50s %s\n' "$1" "$2"; }
 bad(){ p "$1" "$2"; fail=1; }
-mode=$(stat -f '%Sp' "$E" 2>/dev/null || stat -c '%A' "$E")
+# GNU `stat -f` is --file-system and succeeds, so `stat -f || stat -c`
+# never falls through on Ubuntu CI. Compare permission bits in Python.
+mode=$(python3 -c 'import os,stat,sys
+try:
+    m=stat.S_IMODE(os.stat(sys.argv[1]).st_mode)
+except OSError:
+    print("missing")
+    raise SystemExit
+print("-rw-------" if m==0o600 else "other")' "$E")
 [ "$mode" = "-rw-------" ] && p "env file mode 600" "PASS" || bad "env file mode 600" "FAIL"
 dup=$(mktemp "${TMPDIR:-/tmp}/dup.XXXXXX"); awk '/^# >>> env-dup$/,/^# <<< env-dup$/' "$L" > "$dup"
 if grep -q '^refuse_duplicate_env_assignments()' "$dup" && grep -q '^_scan_env_assignments()' "$dup"; then
@@ -39,18 +47,17 @@ else bad "F7-11 guards" "COULD NOT RUN - treat as failure"; fi
 rm -f "$g"
 k=$(mktemp "${TMPDIR:-/tmp}/k.XXXXXX"); awk '/^require_key_matches_address\(\)/,/^}/' "$L" > "$k"
 if grep -q 'cast wallet address' "$k"; then
-  _admin=$(mktemp "${TMPDIR:-/tmp}/admin.XXXXXX")
-  grep -E '^ADMIN_(PRIVATE_KEY|ADDRESS)=' "$E" > "$_admin"
-  chmod 600 "$_admin" 2>/dev/null || true
+  # ADMIN_* reach the helper through the child's environment. Argv holds paths
+  # only — never copy the key to a second file (a leftover temp is a leak).
   if bash -c 'set -uo pipefail
     source "$1"
-    set -a
-    # shellcheck disable=SC1090
-    source "$2"
-    set +a
-    require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS' _ "$k" "$_admin" >/dev/null 2>&1
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        ADMIN_PRIVATE_KEY=*|ADMIN_ADDRESS=*) eval "$line" ;;
+      esac
+    done < "$2"
+    require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS' _ "$k" "$PWD/$E" >/dev/null 2>&1
   then p "F7-10 ADMIN key derives ADMIN_ADDRESS" "PASS"; else bad "F7-10 ADMIN key derives ADMIN_ADDRESS" "FAIL"; fi
-  rm -f "$_admin"
 else bad "F7-10 guard" "COULD NOT RUN - treat as failure"; fi
 rm -f "$k"
 echo; [ "$fail" = 0 ] && echo "  ALL CHECKS PASSED - clear to run step 2" || echo "  *** NOT CLEAR TO PROCEED ***"
