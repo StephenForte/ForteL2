@@ -9,6 +9,15 @@
 # away. At step 8b the operator replaces the file with the post-wipe config
 # and re-runs for the real prestate. Do not treat a smoke-test hash as the
 # value to pin in the type-8 game.
+#
+# Check 2 (F7-9 / D-0062): a second, stock-config build is the negative
+# control. Image-grep of the L2 genesis hash was probabilistic (page-straddle
+# false FAIL; encoding drift is unprovable) and was chosen when a second
+# Docker build was believed to cost 45–90 minutes. Measured runtime is ~4 min
+# per build (cannon-builder image is digest-pinned and prebuilt), so the
+# doubled-runtime objection is void. The grep and its stock-source
+# discriminator step are gone — keeping the grep would reintroduce the
+# false-FAIL F7-9 exists to remove.
 name: build prestate
 
 on:
@@ -31,10 +40,10 @@ jobs:
     name: kona-client cannon prestate
     runs-on: ubuntu-latest
     # Native amd64: do not add QEMU/binfmt — that would silently emulate.
-    # 180 minutes: rust nightly + MIPS64 LTO of kona-client from scratch,
-    # plus a native `cannon` rebuild for the witness check. Upstream's
-    # cannon-builder image and the cargo LTO stage dominate; 90 minutes is
-    # a plausible happy path, 180 is hang-detection not a target.
+    # 180 minutes: two Docker prestates (custom + stock negative control)
+    # plus a native `cannon` rebuild for the witness check. The
+    # cannon-builder image is digest-pinned and prebuilt (D-0062: ~4 min
+    # each); the happy path is ~10 min. 180 is hang-detection not a target.
     timeout-minutes: 180
 
     env:
@@ -87,24 +96,7 @@ jobs:
             --out "${RUNNER_TEMP}/kona-custom-configs"
           echo "CUSTOM_CONFIGS_DIR=${RUNNER_TEMP}/kona-custom-configs" >> "${GITHUB_ENV}"
 
-      - name: Stock-source negative control (check 2 can fail)
-        env:
-          ROLLUP_CONFIG: ${{ inputs.rollup_config }}
-        run: |
-          set -euo pipefail
-          # Check 2 searches the prestate memory image for the L2 genesis
-          # hash. That is only a discriminator if the *stock* kona registry
-          # does not already contain it. Prove the absence against this
-          # checkout before spending an hour on the Docker build.
-          HASH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["genesis"]["l2"]["hash"])' "${ROLLUP_CONFIG}")"
-          HASH="${HASH#0x}"
-          if grep -R -F -n --binary-files=without-match "${HASH}" optimism/rust/kona; then
-            echo "stock kona tree already contains L2 genesis hash ${HASH}; image inspection cannot prove custom configs landed" >&2
-            exit 1
-          fi
-          echo "stock kona tree does not contain ${HASH} (check 2 discriminator is valid)"
-
-      - name: Build kona-client reproducible prestate
+      - name: Build kona-client reproducible prestate (custom configs)
         env:
           KONA_CUSTOM_CONFIGS: "true"
           KONA_CUSTOM_CONFIGS_DIR: ${{ env.CUSTOM_CONFIGS_DIR }}
@@ -115,6 +107,20 @@ jobs:
           # Do not build kona-client-int — we have no interop depset and it
           # doubles the runtime.
           just build-kona-reproducible-prestate-variant kona-client prestate-artifacts-cannon
+          # Both builds write to the same justfile OUTPUT. Copy immediately
+          # so the upload/summary cannot pick up the stock overwrite (a
+          # stock prestate pinned into the type-8 game cannot be corrected
+          # through op-deployer — D-0063 Finding 5).
+          SRC="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon"
+          DST="${GITHUB_WORKSPACE}/prestate-custom"
+          PROOF="${SRC}/prestate-proof.json"
+          HASH="$(jq -r .pre "${PROOF}")"
+          mkdir -p "${DST}"
+          cp "${SRC}/prestate.bin.gz" "${DST}/prestate.bin.gz"
+          cp "${PROOF}" "${DST}/prestate-proof.json"
+          cp "${SRC}/${HASH}.bin.gz" "${DST}/${HASH}.bin.gz"
+          echo "CUSTOM_PRESTATE_DIR=${DST}" >> "${GITHUB_ENV}"
+          echo "preserved custom prestate ${HASH} at ${DST}"
 
       - name: Check 1 — commitment integrity and stateVersion 8
         id: check1
@@ -128,8 +134,8 @@ jobs:
           # that produced D-0059's correction.
           cd optimism/cannon
           just cannon
-          PRESTATE="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon/prestate.bin.gz"
-          PROOF="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon/prestate-proof.json"
+          PRESTATE="${GITHUB_WORKSPACE}/prestate-custom/prestate.bin.gz"
+          PROOF="${GITHUB_WORKSPACE}/prestate-custom/prestate-proof.json"
           WITNESS_JSON="$(./bin/cannon witness --input "${PRESTATE}")"
           echo "${WITNESS_JSON}"
           WITNESS_HASH="$(echo "${WITNESS_JSON}" | jq -r .witnessHash)"
@@ -150,47 +156,68 @@ jobs:
             echo "state_version=${STATE_VERSION}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Check 2 — custom config landed in the image
-        id: check2
-        env:
-          ROLLUP_CONFIG: ${{ inputs.rollup_config }}
+      - name: Build kona-client reproducible prestate (stock — negative control)
+        working-directory: optimism/rust
         run: |
           set -euo pipefail
-          # Image inspection, not a second (stock) Docker build: a negative
-          # control would roughly double this job. Failability is proven two
-          # ways: (1) the stock-source step above showed the L2 genesis hash
-          # is absent from the pinned kona tree, so finding it here cannot
-          # be a stock-registry hit; (2) a synthetic 32-byte sentinel is
-          # asserted *absent* from the same image, so the scanner is not
-          # an always-true grep.
-          PRESTATE="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon/prestate.bin.gz"
-          python3 - "${ROLLUP_CONFIG}" "${PRESTATE}" <<'PY'
-          import gzip, json, sys
-          rollup_path, prestate_path = sys.argv[1], sys.argv[2]
-          rollup = json.load(open(rollup_path))
-          genesis = rollup["genesis"]["l2"]["hash"].lower()
-          if genesis.startswith("0x"):
-              hex_body = genesis[2:]
-          else:
-              hex_body = genesis
-          if len(hex_body) != 64:
-              sys.exit(f"expected 32-byte L2 genesis hash, got {genesis!r}")
-          image = gzip.open(prestate_path, "rb").read()
-          # Sentinel: 32 0xA5 bytes as hex. Not a valid genesis we inject,
-          # and not present in stock registry JSON.
-          sentinel = "a5" * 32
-          if sentinel.encode("ascii") in image:
-              sys.exit("check 2 FAIL: sentinel is present — scanner cannot fail")
-          print("sentinel absent from image (scanner can fail)")
-          needles = [hex_body.encode("ascii"), ("0x" + hex_body).encode("ascii")]
-          found = [n for n in needles if n in image]
-          if not found:
-              sys.exit(
-                  "check 2 FAIL: L2 genesis hash "
-                  f"{genesis} is not in the prestate image — custom configs did not land"
-              )
-          print(f"check 2 PASS: found {found[0]!r} in prestate image")
-          PY
+          # rust/justfile build-kona-reproducible-prestate-variant gates
+          # injection on a *non-empty* KONA_CUSTOM_CONFIGS_DIR and derives
+          # the Docker --build-arg from that. KONA_CUSTOM_CONFIGS=false
+          # with DIR still set would still inject. CUSTOM_CONFIGS_DIR on
+          # GITHUB_ENV is a different name and must not be forwarded.
+          unset KONA_CUSTOM_CONFIGS KONA_CUSTOM_CONFIGS_DIR
+          just build-kona-reproducible-prestate-variant kona-client prestate-artifacts-cannon
+          SRC="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon"
+          DST="${GITHUB_WORKSPACE}/prestate-stock"
+          PROOF="${SRC}/prestate-proof.json"
+          HASH="$(jq -r .pre "${PROOF}")"
+          mkdir -p "${DST}"
+          cp "${SRC}/prestate.bin.gz" "${DST}/prestate.bin.gz"
+          cp "${PROOF}" "${DST}/prestate-proof.json"
+          cp "${SRC}/${HASH}.bin.gz" "${DST}/${HASH}.bin.gz"
+          echo "STOCK_PRESTATE_DIR=${DST}" >> "${GITHUB_ENV}"
+          echo "preserved stock prestate ${HASH} at ${DST}"
+
+      - name: Check 2 — custom commitment differs from stock (negative control)
+        id: check2
+        run: |
+          set -euo pipefail
+          well_formed() {
+            local value="$1"
+            local label="$2"
+            if [[ ! "${value}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+              echo "check 2 FAIL: ${label} commitment is not a 32-byte hex hash: ${value}" >&2
+              exit 1
+            fi
+          }
+          CUSTOM_PROOF="${GITHUB_WORKSPACE}/prestate-custom/prestate-proof.json"
+          STOCK_PROOF="${GITHUB_WORKSPACE}/prestate-stock/prestate-proof.json"
+          if [[ ! -f "${CUSTOM_PROOF}" ]]; then
+            echo "check 2 FAIL: missing custom prestate-proof.json at ${CUSTOM_PROOF}" >&2
+            exit 1
+          fi
+          if [[ ! -f "${STOCK_PROOF}" ]]; then
+            echo "check 2 FAIL: missing stock prestate-proof.json at ${STOCK_PROOF}" >&2
+            exit 1
+          fi
+          CUSTOM_PRE="$(jq -r .pre "${CUSTOM_PROOF}")"
+          STOCK_PRE="$(jq -r .pre "${STOCK_PROOF}")"
+          well_formed "${CUSTOM_PRE}" "custom"
+          well_formed "${STOCK_PRE}" "stock"
+          echo "custom_commitment=${CUSTOM_PRE}" >> "${GITHUB_OUTPUT}"
+          echo "stock_commitment=${STOCK_PRE}" >> "${GITHUB_OUTPUT}"
+          CHECK1="${{ steps.check1.outputs.commitment }}"
+          if [[ "${CUSTOM_PRE}" != "${CHECK1}" ]]; then
+            echo "check 2 FAIL: preserved custom .pre ${CUSTOM_PRE} != check 1 commitment ${CHECK1}" >&2
+            echo "check2=fail" >> "${GITHUB_OUTPUT}"
+            exit 1
+          fi
+          if [[ "${CUSTOM_PRE}" == "${STOCK_PRE}" ]]; then
+            echo "check 2 FAIL: custom and stock commitments are identical (${CUSTOM_PRE}); custom configs did not land" >&2
+            echo "check2=fail" >> "${GITHUB_OUTPUT}"
+            exit 1
+          fi
+          echo "check 2 PASS: custom ${CUSTOM_PRE} != stock ${STOCK_PRE}"
           echo "check2=pass" >> "${GITHUB_OUTPUT}"
 
       - name: Report registry comparison (informational, must not fail the job)
@@ -220,24 +247,40 @@ jobs:
           echo "note=${NOTE}" >> "${GITHUB_OUTPUT}"
           echo "registry comparison: ${MATCH} — ${NOTE}"
 
+      - name: Assert upload source is the custom prestate
+        run: |
+          set -euo pipefail
+          # Same paths the upload step reads. Must equal the custom
+          # commitment the summary reports — not whatever currently sits
+          # in prestate-artifacts-cannon (the stock build's output).
+          PROOF="${GITHUB_WORKSPACE}/prestate-custom/prestate-proof.json"
+          PRE="$(jq -r .pre "${PROOF}")"
+          CHECK1="${{ steps.check1.outputs.commitment }}"
+          if [[ "${PRE}" != "${CHECK1}" ]]; then
+            echo "upload source .pre ${PRE} != custom/check 1 commitment ${CHECK1}" >&2
+            exit 1
+          fi
+          echo "upload source commitment ${PRE} matches custom/check 1"
+
       - name: Job summary
         if: always() && steps.check1.outputs.commitment != ''
         env:
           ROLLUP_CONFIG: ${{ inputs.rollup_config }}
         run: |
           set -euo pipefail
-          ARTIFACT_DIR="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon"
+          ARTIFACT_DIR="${GITHUB_WORKSPACE}/prestate-custom"
           HASH_FILE="$(find "${ARTIFACT_DIR}" -maxdepth 1 -name '0x*.bin.gz' -print -quit || true)"
           {
-            echo "## Kona absolute prestate (F7-7)"
+            echo "## Kona absolute prestate (F7-7 / F7-9)"
             echo
             echo "A dispatch against the *current* \`deployments/sepolia/rollup.json\` is a **smoke test**; throw that commitment away. The real prestate is built at step **8b** after the post-wipe config replaces that file."
             echo
             echo "| | |"
             echo "| --- | --- |"
             echo "| commitment (\`.pre\`) | \`${{ steps.check1.outputs.commitment }}\` |"
+            echo "| stock commitment (negative control; not for pinning) | \`${{ steps.check2.outputs.stock_commitment }}\` |"
             echo "| check 1 (witnessHash == .pre / stateVersion 8) | ${{ steps.check1.outputs.check1 }} |"
-            echo "| check 2 (chain 852 config in image) | ${{ steps.check2.outputs.check2 }} |"
+            echo "| check 2 (custom ≠ stock commitment) | ${{ steps.check2.outputs.check2 }} |"
             echo "| registry comparison | ${{ steps.registry.outputs.match }} — ${{ steps.registry.outputs.note }} |"
             echo "| monorepo SHA | \`${OP_MONOREPO_SHA}\` |"
             echo "| rollup config | \`${ROLLUP_CONFIG}\` |"
@@ -249,7 +292,7 @@ jobs:
         with:
           name: kona-prestate-cannon
           path: |
-            optimism/rust/kona/prestate-artifacts-cannon/prestate.bin.gz
-            optimism/rust/kona/prestate-artifacts-cannon/prestate-proof.json
-            optimism/rust/kona/prestate-artifacts-cannon/0x*.bin.gz
+            prestate-custom/prestate.bin.gz
+            prestate-custom/prestate-proof.json
+            prestate-custom/0x*.bin.gz
           if-no-files-found: error
