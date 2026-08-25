@@ -2209,7 +2209,8 @@ fi
 
 # F7-10: ADMIN_PRIVATE_KEY must derive ADMIN_ADDRESS before spend or wipe.
 # Generate the keypair at runtime — never a key literal in this file.
-_f710_fn="$(awk '/^require_admin_key_matches_address\(\)/,/^}/' "$DEPLOY_SEPOLIA")"
+# Helper lives in lib.sh (call-site swap in 02-deploy-contracts-sepolia.sh).
+_f710_fn="$(awk '/^require_key_matches_address\(\)/,/^}/' "$SCRIPT_DIR/lib.sh")"
 _f710_rc=""
 _f710_out=""
 _f710_run() {
@@ -2227,7 +2228,7 @@ _f710_run() {
       fi
       ADMIN_ADDRESS="$addr"
       export ADMIN_ADDRESS
-      require_admin_key_matches_address
+      require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS
     ) 2>&1
   )" || _f710_rc=$?
 }
@@ -2260,7 +2261,7 @@ if ! command -v cast >/dev/null 2>&1; then
   echo "FAIL F7-10 tests require cast on PATH (Foundry)" >&2
   fail=1
 elif [[ -z "$_f710_fn" ]]; then
-  echo "FAIL 02-deploy-contracts-sepolia.sh must define require_admin_key_matches_address" >&2
+  echo "FAIL lib.sh must define require_key_matches_address" >&2
   fail=1
 else
   _f710_wallet="$(cast wallet new)"
@@ -2312,15 +2313,14 @@ else
   fi
 
   if awk '
-       /^require_admin_key_matches_address\(\)/ { def = NR }
-       /^require_admin_key_matches_address$/ { call = NR }
+       /require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS/ { call = NR }
        /require_min_balance_eth/ && !bal { bal = NR }
        /rm -rf "\$DEPLOY_DIR"/ && !rm { rm = NR }
-       END { exit !(def && call && bal && rm && def < call && call < bal && call < rm) }
+       END { exit !(call && bal && rm && call < bal && call < rm) }
      ' "$DEPLOY_SEPOLIA"; then
     echo "PASS F7-10 pairing check is called before require_min_balance_eth and before the wipe"
   else
-    echo "FAIL require_admin_key_matches_address must run before require_min_balance_eth and before rm -rf \"\$DEPLOY_DIR\"" >&2
+    echo "FAIL require_key_matches_address must run before require_min_balance_eth and before rm -rf \"\$DEPLOY_DIR\"" >&2
     fail=1
   fi
 
@@ -2329,12 +2329,13 @@ else
          saw = 1
          if ($0 ~ /--private-key/) flag = 1
          if ($0 ~ /cast wallet address[[:space:]]+"\$ADMIN_PRIVATE_KEY"/) pos = 1
+         if ($0 ~ /cast wallet address[[:space:]]+"\$key"/) pos = 1
        }
        END { exit !(saw && flag && !pos) }
-     ' "$DEPLOY_SEPOLIA"; then
+     ' "$SCRIPT_DIR/lib.sh"; then
     echo "PASS F7-10 derives the address with cast wallet address --private-key"
   else
-    echo "FAIL 02-deploy-contracts-sepolia.sh must call cast wallet address --private-key, not a positional key" >&2
+    echo "FAIL lib.sh must call cast wallet address --private-key, not a positional key" >&2
     fail=1
   fi
 
@@ -3831,8 +3832,9 @@ trap - EXIT
 # deposit-eth-sepolia.sh: refuse a mismatched ADMIN_PRIVATE_KEY / ADMIN_ADDRESS
 # before any L1 send (D-0064 Finding 4 / D-0069 Finding 6). Generate the
 # keypair at runtime — never a key literal in this file. Mirror F7-10.
+# Helper lives in lib.sh (call-site swap in deposit-eth-sepolia.sh).
 DEPOSIT_SEPOLIA="$SCRIPT_DIR/deposit-eth-sepolia.sh"
-_dep_fn="$(awk '/^require_admin_key_matches_address\(\)/,/^}/' "$DEPOSIT_SEPOLIA")"
+_dep_fn="$(awk '/^require_key_matches_address\(\)/,/^}/' "$SCRIPT_DIR/lib.sh")"
 _dep_rc=""
 _dep_out=""
 _dep_run() {
@@ -3850,7 +3852,7 @@ _dep_run() {
       fi
       ADMIN_ADDRESS="$addr"
       export ADMIN_ADDRESS
-      require_admin_key_matches_address
+      require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS
     ) 2>&1
   )" || _dep_rc=$?
 }
@@ -3859,7 +3861,7 @@ if ! command -v cast >/dev/null 2>&1; then
   echo "FAIL deposit-eth-sepolia pairing tests require cast on PATH (Foundry)" >&2
   fail=1
 elif [[ -z "$_dep_fn" ]]; then
-  echo "FAIL deposit-eth-sepolia.sh must define require_admin_key_matches_address" >&2
+  echo "FAIL lib.sh must define require_key_matches_address (deposit-eth-sepolia pairing)" >&2
   fail=1
 else
   _dep_wallet="$(cast wallet new)"
@@ -3901,20 +3903,19 @@ else
        /require_eth_address "ADMIN"/ { admin = NR }
        /ADMIN_PRIVATE_KEY missing or malformed/ { mal = NR }
        /refuse_foundry_defaults_unless_local_l2/ && !refuse { refuse = NR }
-       /^require_admin_key_matches_address\(\)/ { def = NR }
-       /^require_admin_key_matches_address$/ { call = NR }
+       /require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS/ { call = NR }
        /wait_for_rpc "/ && !wait { wait = NR }
        /\$\(cast balance/ && !bal { bal = NR }
        /\$\(cast send/ && !send { send = NR }
        END {
-         exit !(admin && mal && refuse && def && call && wait && bal && send \
-           && admin < call && mal < call && refuse < call && def < call \
+         exit !(admin && mal && refuse && call && wait && bal && send \
+           && admin < call && mal < call && refuse < call \
            && call < wait && call < bal && call < send)
        }
      ' "$DEPOSIT_SEPOLIA"; then
     echo "PASS deposit-eth-sepolia pairing check is called before wait_for_rpc, balance, and send"
   else
-    echo "FAIL deposit-eth-sepolia require_admin_key_matches_address must run after key/address validation and before wait_for_rpc, cast balance, and cast send" >&2
+    echo "FAIL deposit-eth-sepolia require_key_matches_address must run after key/address validation and before wait_for_rpc, cast balance, and cast send" >&2
     fail=1
   fi
 
@@ -4348,6 +4349,323 @@ trap - EXIT
 unset AW_CHECK AW_FIX AW_SHIM AW_MOCK AW_TOKEN AW_REASON AW_TO AW_OUT AW_EC AW_HAY
 unset AW_C1 AW_C2 AW_C3 AW_B2 AW_B3 AW_WARN_OUT AW_WARN_EC AW_INS_OUT AW_INS_EC
 unset AW_BAD_OUT AW_BAD_EC AW_MISS_B
+
+# --- lib-key-guards: parameterized pairing helper, loader duplicate detection,
+#     phase7-preflight.sh (additive; do not reorder the tests above). ---
+CHALLENGER_SEPOLIA="$SCRIPT_DIR/09-start-challenger-sepolia.sh"
+_kg_fn="$(awk '/^require_key_matches_address\(\)/,/^}/' "$SCRIPT_DIR/lib.sh")"
+_kg_dup_fn="$(awk '/^# >>> env-dup$/,/^# <<< env-dup$/' "$SCRIPT_DIR/lib.sh")"
+_kg_rc=""
+_kg_out=""
+_kg_run() {
+  local key_var="$1" addr_var="$2" key="$3" addr="$4"
+  _kg_rc=0
+  _kg_out="$(
+    (
+      eval "$_kg_fn"
+      printf -v "$key_var" '%s' "$key"
+      export "$key_var"
+      printf -v "$addr_var" '%s' "$addr"
+      export "$addr_var"
+      require_key_matches_address "$key_var" "$addr_var"
+    ) 2>&1
+  )" || _kg_rc=$?
+}
+
+if awk '
+     /require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS/ { call = NR }
+     /require_min_balance_eth/ && !bal { bal = NR }
+     /rm -rf "\$DEPLOY_DIR"/ && !rm { rm = NR }
+     END { exit !(call && bal && rm && call < bal && call < rm) }
+   ' "$DEPLOY_SEPOLIA" \
+  && awk '
+     /require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS/ { call = NR }
+     /wait_for_rpc "/ && !wait { wait = NR }
+     /\$\(cast send/ && !send { send = NR }
+     END { exit !(call && wait && send && call < wait && call < send) }
+   ' "$DEPOSIT_SEPOLIA" \
+  && awk '
+     /require_key_matches_address CHALLENGER_PRIVATE_KEY CHALLENGER_ADDRESS/ { call = NR }
+     /wait_for_rpc/ && !wait { wait = NR }
+     /start_bg op-challenger/ { start = NR }
+     END { exit !(call && wait && start && call < wait && call < start) }
+   ' "$CHALLENGER_SEPOLIA"; then
+  echo "PASS pairing helper is called before network/spend in deploy, deposit, and challenger"
+else
+  echo "FAIL require_key_matches_address must run before spend/network in all three scripts" >&2
+  fail=1
+fi
+
+if ! command -v cast >/dev/null 2>&1; then
+  echo "FAIL lib-key-guards helper tests require cast on PATH (Foundry)" >&2
+  fail=1
+elif [[ -z "$_kg_fn" ]]; then
+  echo "FAIL lib.sh must define require_key_matches_address" >&2
+  fail=1
+else
+  _kg_wallet="$(cast wallet new)"
+  _kg_addr="$(printf '%s\n' "$_kg_wallet" | awk '/^Address:/{print $2}')"
+  _kg_key="$(printf '%s\n' "$_kg_wallet" | awk '/^Private key:/{print $3}')"
+  _kg_addr_lc="$(printf '%s' "$_kg_addr" | tr '[:upper:]' '[:lower:]')"
+  _kg_other="$(cast wallet new | awk '/^Address:/{print $2}')"
+  unset _kg_wallet
+
+  _kg_run CHALLENGER_PRIVATE_KEY CHALLENGER_ADDRESS "$_kg_key" "$_kg_addr_lc"
+  _kg_match="$_kg_out"
+  if [[ "$_kg_rc" == "0" ]]; then
+    echo "PASS pairing helper matching CHALLENGER pair (checksummed vs lowercase) exits 0"
+  else
+    echo "FAIL require_key_matches_address must accept a matching CHALLENGER pair" >&2
+    fail=1
+  fi
+
+  _kg_run CHALLENGER_PRIVATE_KEY CHALLENGER_ADDRESS "$_kg_key" "$_kg_other"
+  _kg_mismatch="$_kg_out"
+  if [[ "$_kg_rc" != "0" ]] \
+    && printf '%s' "$_kg_mismatch" | grep -F -q -- "$_kg_addr" \
+    && printf '%s' "$_kg_mismatch" | grep -F -q -- "$_kg_other" \
+    && printf '%s' "$_kg_mismatch" | grep -q 'CHALLENGER_PRIVATE_KEY does not match CHALLENGER_ADDRESS'; then
+    echo "PASS pairing helper mismatched CHALLENGER pair exits non-zero naming both addresses"
+  else
+    echo "FAIL require_key_matches_address must refuse a mismatched CHALLENGER pair naming both addresses" >&2
+    fail=1
+  fi
+
+  if ! _f710_key_leaked "${_kg_match}${_kg_mismatch}" "$_kg_key" "${_kg_addr}${_kg_addr_lc}${_kg_other}"; then
+    echo "PASS pairing helper output does not contain the key or an 8-character substring of it"
+  else
+    echo "FAIL require_key_matches_address must not print the key or any 8-character substring of it" >&2
+    fail=1
+  fi
+fi
+
+# Loader duplicate detection: extract the marked block (names only; never values).
+_kg_dup_dir="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-env-dup.XXXXXX")"
+cleanup_kg_dup() { rm -rf "$_kg_dup_dir"; }
+trap cleanup_kg_dup EXIT
+_kg_dup_run() {
+  local file="$1"
+  local snippet="$_kg_dup_dir/snippet.sh"
+  printf '%s\n' "$_kg_dup_fn" > "$snippet"
+  _kg_rc=0
+  _kg_out="$(
+    (
+      # shellcheck disable=SC1090
+      source "$snippet"
+      FORTEL2_ENV_FILE="$file"
+      refuse_duplicate_env_assignments
+    ) 2>&1
+  )" || _kg_rc=$?
+}
+
+if [[ -z "$_kg_dup_fn" ]] || ! printf '%s' "$_kg_dup_fn" | grep -q '^refuse_duplicate_env_assignments()'; then
+  echo "FAIL lib.sh must define refuse_duplicate_env_assignments (env-dup markers)" >&2
+  fail=1
+else
+  printf '%s\n' 'FOO=1' 'BAR=2' 'BAZ=a=b=c' > "$_kg_dup_dir/clean.env"
+  _kg_dup_run "$_kg_dup_dir/clean.env"
+  if [[ "$_kg_rc" == "0" ]]; then
+    echo "PASS loader accepts a clean env file"
+  else
+    echo "FAIL refuse_duplicate_env_assignments must accept a file with unique assignments" >&2
+    echo "$_kg_out" >&2
+    fail=1
+  fi
+
+  printf '%s\n' '# FOO=1' '# FOO=2' 'FOO=1' 'BAR=2' > "$_kg_dup_dir/commented.env"
+  _kg_dup_run "$_kg_dup_dir/commented.env"
+  if [[ "$_kg_rc" == "0" ]]; then
+    echo "PASS loader accepts a commented duplicate"
+  else
+    echo "FAIL refuse_duplicate_env_assignments must ignore commented assignments" >&2
+    echo "$_kg_out" >&2
+    fail=1
+  fi
+
+  printf '%s\n' 'FOO=secretvalueAAAA' 'BAR=1' 'FOO=secretvalueBBBB' > "$_kg_dup_dir/dup.env"
+  _kg_dup_run "$_kg_dup_dir/dup.env"
+  if [[ "$_kg_rc" != "0" ]] \
+    && printf '%s' "$_kg_out" | grep -q 'FOO' \
+    && ! printf '%s' "$_kg_out" | grep -q 'secretvalueAAAA' \
+    && ! printf '%s' "$_kg_out" | grep -q 'secretvalueBBBB' \
+    && ! printf '%s' "$_kg_out" | grep -q 'BAR'; then
+    echo "PASS loader refuses a duplicate active assignment naming the variable only"
+  else
+    echo "FAIL refuse_duplicate_env_assignments must refuse duplicates and name the variable only (ec=$_kg_rc)" >&2
+    echo "$_kg_out" >&2
+    fail=1
+  fi
+
+  printf '%s\n' 'export FOO=1' 'BAR=2' > "$_kg_dup_dir/export.env"
+  _kg_dup_run "$_kg_dup_dir/export.env"
+  if [[ "$_kg_rc" == "0" ]]; then
+    echo "PASS loader accepts a single export assignment"
+  else
+    echo "FAIL refuse_duplicate_env_assignments must treat export FOO= as one assignment, not a duplicate" >&2
+    echo "$_kg_out" >&2
+    fail=1
+  fi
+
+  printf '%s\n' '  FOO=1' 'FOO=2' > "$_kg_dup_dir/ws.env"
+  _kg_dup_run "$_kg_dup_dir/ws.env"
+  if [[ "$_kg_rc" != "0" ]] && printf '%s' "$_kg_out" | grep -q 'FOO'; then
+    echo "PASS loader refuses a whitespace-prefixed duplicate of the same name"
+  else
+    echo "FAIL refuse_duplicate_env_assignments must count a leading-whitespace assignment" >&2
+    echo "$_kg_out" >&2
+    fail=1
+  fi
+
+  _kg_dup_run "$SCRIPT_DIR/../.env.example"
+  if [[ "$_kg_rc" == "0" ]]; then
+    echo "PASS loader accepts .env.example (no duplicate assignments)"
+  else
+    echo "FAIL refuse_duplicate_env_assignments must accept .env.example" >&2
+    echo "$_kg_out" >&2
+    fail=1
+  fi
+
+  _kg_dup_run "$SCRIPT_DIR/../.env.sepolia.example"
+  if [[ "$_kg_rc" == "0" ]]; then
+    echo "PASS loader accepts .env.sepolia.example (no duplicate assignments)"
+  else
+    echo "FAIL refuse_duplicate_env_assignments must accept .env.sepolia.example" >&2
+    echo "$_kg_out" >&2
+    fail=1
+  fi
+
+  # Wiring: sourcing lib.sh with a duplicated env must refuse before last-wins.
+  mkdir -p "$_kg_dup_dir/wire/data" "$_kg_dup_dir/wire/deployments/sepolia/.deployer"
+  cat > "$_kg_dup_dir/wire/.env.sepolia" <<EOF
+FORTEL2_ROOT=$_kg_dup_dir/wire
+DATA_DIR=$_kg_dup_dir/wire/data
+BIN_DIR=$_kg_dup_dir/wire/bin
+DEPLOY_DIR=$_kg_dup_dir/wire/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_RPC_URL=https://example.invalid
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+FOO=secretvalueAAAA
+FOO=secretvalueBBBB
+EOF
+  _kg_wire_out="$(
+    FORTEL2_ROOT="$_kg_dup_dir/wire" FORTEL2_ENV=.env.sepolia \
+      bash -c 'source "'"$SCRIPT_DIR"'/lib.sh"' 2>&1
+  )" && _kg_wire_rc=0 || _kg_wire_rc=$?
+  if [[ "$_kg_wire_rc" != "0" ]] \
+    && printf '%s' "$_kg_wire_out" | grep -q 'FOO' \
+    && ! printf '%s' "$_kg_wire_out" | grep -q 'secretvalueAAAA' \
+    && ! printf '%s' "$_kg_wire_out" | grep -q 'secretvalueBBBB'; then
+    echo "PASS lib.sh load path refuses a duplicate assignment (names only)"
+  else
+    echo "FAIL sourcing lib.sh must refuse a duplicated env variable and not print its value (ec=$_kg_wire_rc)" >&2
+    echo "$_kg_wire_out" >&2
+    fail=1
+  fi
+fi
+cleanup_kg_dup
+trap - EXIT
+
+# phase7-preflight.sh: fixture FORTEL2_ROOT, never the operator's .env.sepolia.
+# Generate the keypair at runtime — never a key literal in this file.
+if ! command -v cast >/dev/null 2>&1; then
+  echo "FAIL phase7-preflight tests require cast on PATH (Foundry)" >&2
+  fail=1
+elif [[ ! -x "$SCRIPT_DIR/phase7-preflight.sh" ]]; then
+  echo "FAIL scripts/phase7-preflight.sh must be executable (mode 755; D-0068 Finding 1)" >&2
+  fail=1
+else
+  _pf_root="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-preflight.XXXXXX")"
+  cleanup_pf() { rm -rf "$_pf_root"; }
+  trap cleanup_pf EXIT
+  mkdir -p "$_pf_root/scripts"
+  cp "$SCRIPT_DIR/phase7-preflight.sh" "$_pf_root/scripts/phase7-preflight.sh"
+  cp "$SCRIPT_DIR/lib.sh" "$_pf_root/scripts/lib.sh"
+  cp "$SCRIPT_DIR/02-deploy-contracts-sepolia.sh" "$_pf_root/scripts/02-deploy-contracts-sepolia.sh"
+  chmod 755 "$_pf_root/scripts/phase7-preflight.sh"
+
+  _pf_wallet="$(cast wallet new)"
+  _pf_addr="$(printf '%s\n' "$_pf_wallet" | awk '/^Address:/{print $2}')"
+  _pf_key="$(printf '%s\n' "$_pf_wallet" | awk '/^Private key:/{print $3}')"
+  _pf_other="$(cast wallet new | awk '/^Address:/{print $2}')"
+  unset _pf_wallet
+
+  _pf_write_env() {
+    local addr="$1"
+    cat > "$_pf_root/.env.sepolia" <<EOF
+FAULT_GAME_CLOCK_EXTENSION=600
+FAULT_GAME_MAX_CLOCK_DURATION=7200
+PREIMAGE_ORACLE_CHALLENGE_PERIOD=3600
+PROOF_MATURITY_DELAY_SECONDS=1800
+DISPUTE_GAME_FINALITY_DELAY_SECONDS=1800
+FAULT_GAME_WITHDRAWAL_DELAY=3600
+ADMIN_ADDRESS=$addr
+ADMIN_PRIVATE_KEY=$_pf_key
+EOF
+    chmod 600 "$_pf_root/.env.sepolia"
+  }
+
+  _pf_run() {
+    (
+      cd "$_pf_root"
+      env -u FORTEL2_ENV -u FORTEL2_ENV_FILE -u FORTEL2_ROOT \
+        -u ADMIN_PRIVATE_KEY -u ADMIN_ADDRESS \
+        scripts/phase7-preflight.sh
+    ) 2>&1
+  }
+
+  _pf_write_env "$_pf_addr"
+  _pf_out="$(_pf_run)" && _pf_rc=0 || _pf_rc=$?
+  if printf '%s' "$_pf_out" | grep -q 'ALL CHECKS PASSED' \
+    && ! printf '%s' "$_pf_out" | grep -q 'NOT CLEAR TO PROCEED' \
+    && ! _f710_key_leaked "$_pf_out" "$_pf_key" "${_pf_addr}${_pf_other}"; then
+    echo "PASS phase7-preflight green path prints ALL CHECKS PASSED"
+  else
+    echo "FAIL phase7-preflight matching fixture must print ALL CHECKS PASSED (ec=$_pf_rc)" >&2
+    echo "$_pf_out" >&2
+    fail=1
+  fi
+
+  _pf_write_env "$_pf_other"
+  _pf_bad="$(_pf_run)" && _pf_bad_rc=0 || _pf_bad_rc=$?
+  if printf '%s' "$_pf_bad" | grep -q 'NOT CLEAR TO PROCEED' \
+    && ! printf '%s' "$_pf_bad" | grep -q 'ALL CHECKS PASSED' \
+    && ! _f710_key_leaked "$_pf_bad" "$_pf_key" "${_pf_addr}${_pf_other}"; then
+    echo "PASS phase7-preflight mismatched key prints NOT CLEAR TO PROCEED"
+  else
+    echo "FAIL phase7-preflight mismatched ADMIN pair must print NOT CLEAR TO PROCEED (ec=$_pf_bad_rc)" >&2
+    echo "$_pf_bad" >&2
+    fail=1
+  fi
+
+  _pf_write_env "$_pf_addr"
+  # Mangle the extraction anchor in a scratch copy of lib.sh.
+  python3 -c '
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text()
+p.write_text(t.replace("require_key_matches_address()", "require_key_matches_address_BROKEN()", 1))
+' "$_pf_root/scripts/lib.sh"
+  _pf_brk="$(_pf_run)" && _pf_brk_rc=0 || _pf_brk_rc=$?
+  if printf '%s' "$_pf_brk" | grep -q 'COULD NOT RUN' \
+    && printf '%s' "$_pf_brk" | grep -q 'NOT CLEAR TO PROCEED' \
+    && ! printf '%s' "$_pf_brk" | grep -q 'ALL CHECKS PASSED' \
+    && ! _f710_key_leaked "$_pf_brk" "$_pf_key" "${_pf_addr}${_pf_other}"; then
+    echo "PASS phase7-preflight broken extraction anchor is COULD NOT RUN / NOT CLEAR TO PROCEED"
+  else
+    echo "FAIL phase7-preflight mangled F7-10 anchor must be COULD NOT RUN and NOT CLEAR TO PROCEED (ec=$_pf_brk_rc)" >&2
+    echo "$_pf_brk" >&2
+    fail=1
+  fi
+
+  unset _pf_key _pf_addr _pf_other _pf_out _pf_bad _pf_brk
+  cleanup_pf
+  trap - EXIT
+fi
+unset _kg_fn _kg_dup_fn _kg_rc _kg_out _kg_mismatch _kg_key _kg_addr _kg_addr_lc _kg_other
+unset CHALLENGER_SEPOLIA
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2
