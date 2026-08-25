@@ -15,6 +15,28 @@ if [[ -z "${ADMIN_PRIVATE_KEY:-}" || ! "$ADMIN_PRIVATE_KEY" =~ ^0x[0-9a-fA-F]{64
   exit 1
 fi
 refuse_foundry_defaults_unless_local_l2 "$ADMIN_PRIVATE_KEY" "ADMIN_PRIVATE_KEY"
+# This is the one place the key touches argv before the deposit send, for a
+# single short-lived `cast` process. `cast wallet address` has no env-var form
+# (ETH_PRIVATE_KEY is not accepted). That bounded exposure is deliberately
+# accepted to close a silent-wrong-signer failure; the deposit send already
+# passes the same key on argv, so this adds no new class of exposure.
+require_admin_key_matches_address() {
+  if [[ -z "${ADMIN_PRIVATE_KEY:-}" ]]; then
+    echo "ERROR: ADMIN_PRIVATE_KEY is required (must derive ADMIN_ADDRESS)" >&2
+    exit 1
+  fi
+  local derived derived_lc configured_lc
+  derived="$(cast wallet address --private-key "$ADMIN_PRIVATE_KEY")"
+  derived_lc="$(printf '%s' "$derived" | tr '[:upper:]' '[:lower:]')"
+  configured_lc="$(printf '%s' "$ADMIN_ADDRESS" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$derived_lc" != "$configured_lc" ]]; then
+    echo "ERROR: ADMIN_PRIVATE_KEY does not match ADMIN_ADDRESS" >&2
+    echo "  derived:    $derived" >&2
+    echo "  configured: $ADMIN_ADDRESS" >&2
+    exit 1
+  fi
+}
+require_admin_key_matches_address
 
 AMOUNT="${DEPOSIT_AMOUNT:-0.01ether}"
 MIN_GAS="${DEPOSIT_MIN_GAS:-200000}"

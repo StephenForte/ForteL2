@@ -3828,6 +3828,165 @@ fi
 cleanup_bp_fix
 trap - EXIT
 
+# deposit-eth-sepolia.sh: refuse a mismatched ADMIN_PRIVATE_KEY / ADMIN_ADDRESS
+# before any L1 send (D-0064 Finding 4 / D-0069 Finding 6). Generate the
+# keypair at runtime — never a key literal in this file. Mirror F7-10.
+DEPOSIT_SEPOLIA="$SCRIPT_DIR/deposit-eth-sepolia.sh"
+_dep_fn="$(awk '/^require_admin_key_matches_address\(\)/,/^}/' "$DEPOSIT_SEPOLIA")"
+_dep_rc=""
+_dep_out=""
+_dep_run() {
+  local key="${1-}"
+  local addr="${2-}"
+  _dep_rc=0
+  _dep_out="$(
+    (
+      eval "$_dep_fn"
+      if [[ "$key" == "__UNSET__" ]]; then
+        unset ADMIN_PRIVATE_KEY
+      else
+        ADMIN_PRIVATE_KEY="$key"
+        export ADMIN_PRIVATE_KEY
+      fi
+      ADMIN_ADDRESS="$addr"
+      export ADMIN_ADDRESS
+      require_admin_key_matches_address
+    ) 2>&1
+  )" || _dep_rc=$?
+}
+
+if ! command -v cast >/dev/null 2>&1; then
+  echo "FAIL deposit-eth-sepolia pairing tests require cast on PATH (Foundry)" >&2
+  fail=1
+elif [[ -z "$_dep_fn" ]]; then
+  echo "FAIL deposit-eth-sepolia.sh must define require_admin_key_matches_address" >&2
+  fail=1
+else
+  _dep_wallet="$(cast wallet new)"
+  _dep_addr="$(printf '%s\n' "$_dep_wallet" | awk '/^Address:/{print $2}')"
+  _dep_key="$(printf '%s\n' "$_dep_wallet" | awk '/^Private key:/{print $3}')"
+  _dep_addr_lc="$(printf '%s' "$_dep_addr" | tr '[:upper:]' '[:lower:]')"
+  _dep_other_addr="$(cast wallet new | awk '/^Address:/{print $2}')"
+  unset _dep_wallet
+
+  _dep_run "$_dep_key" "$_dep_addr_lc"
+  if [[ "$_dep_rc" == "0" ]]; then
+    echo "PASS deposit-eth-sepolia matching pair (checksummed vs lowercase) exits 0"
+  else
+    echo "FAIL deposit-eth-sepolia require_admin_key_matches_address must accept a checksummed-vs-lowercase pair of the same account" >&2
+    fail=1
+  fi
+
+  _dep_run "$_dep_key" "$_dep_other_addr"
+  _dep_mismatch_out="$_dep_out"
+  if [[ "$_dep_rc" != "0" ]] \
+    && printf '%s' "$_dep_mismatch_out" | grep -F -q -- "$_dep_addr" \
+    && printf '%s' "$_dep_mismatch_out" | grep -F -q -- "$_dep_other_addr"; then
+    echo "PASS deposit-eth-sepolia mismatched pair exits non-zero"
+  else
+    echo "FAIL deposit-eth-sepolia require_admin_key_matches_address must refuse when ADMIN_PRIVATE_KEY does not derive ADMIN_ADDRESS" >&2
+    fail=1
+  fi
+
+  _dep_run "$_dep_key" "$_dep_addr_lc"
+  _dep_match_out="$_dep_out"
+  if ! _f710_key_leaked "${_dep_match_out}${_dep_mismatch_out}" "$_dep_key" "${_dep_addr}${_dep_addr_lc}${_dep_other_addr}"; then
+    echo "PASS deposit-eth-sepolia error output does not contain the key or an 8-character substring of it"
+  else
+    echo "FAIL deposit-eth-sepolia require_admin_key_matches_address must not print ADMIN_PRIVATE_KEY or any 8-character substring of it" >&2
+    fail=1
+  fi
+
+  if awk '
+       /require_eth_address "ADMIN"/ { admin = NR }
+       /ADMIN_PRIVATE_KEY missing or malformed/ { mal = NR }
+       /refuse_foundry_defaults_unless_local_l2/ && !refuse { refuse = NR }
+       /^require_admin_key_matches_address\(\)/ { def = NR }
+       /^require_admin_key_matches_address$/ { call = NR }
+       /wait_for_rpc "/ && !wait { wait = NR }
+       /\$\(cast balance/ && !bal { bal = NR }
+       /\$\(cast send/ && !send { send = NR }
+       END {
+         exit !(admin && mal && refuse && def && call && wait && bal && send \
+           && admin < call && mal < call && refuse < call && def < call \
+           && call < wait && call < bal && call < send)
+       }
+     ' "$DEPOSIT_SEPOLIA"; then
+    echo "PASS deposit-eth-sepolia pairing check is called before wait_for_rpc, balance, and send"
+  else
+    echo "FAIL deposit-eth-sepolia require_admin_key_matches_address must run after key/address validation and before wait_for_rpc, cast balance, and cast send" >&2
+    fail=1
+  fi
+
+  # Full-script stub path: a missing check would reach cast send. sleep is a
+  # no-op so a misplaced check after wait_for_rpc still fails fast via markers.
+  _DEP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-deposit-pair.XXXXXX")"
+  cleanup_dep_fix() { rm -rf "$_DEP_FIX"; }
+  trap cleanup_dep_fix EXIT
+  mkdir -p "$_DEP_FIX/deployments/sepolia/.deployer" "$_DEP_FIX/data"
+  printf '%s\n' '{"L1StandardBridgeProxy":"0x0000000000000000000000000000000000000001","OptimismPortalProxy":"0x0000000000000000000000000000000000000002"}' \
+    > "$_DEP_FIX/deployments/sepolia/deployments.json"
+  cat > "$_DEP_FIX/.env.sepolia" <<EOF
+FORTEL2_ROOT=$_DEP_FIX
+DATA_DIR=$_DEP_FIX/data
+DEPLOY_DIR=$_DEP_FIX/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_RPC_URL=https://example.invalid
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+ADMIN_ADDRESS=$_dep_other_addr
+ADMIN_PRIVATE_KEY=$_dep_key
+EOF
+  cat > "$_DEP_FIX/bashenv.sh" <<'EOS'
+sleep() { :; }
+cast() {
+  printf '%s\n' "$@" >> "$DEP_STUB_DIR/cast-argv"
+  case "${1:-}" in
+    wallet)
+      command cast "$@"
+      ;;
+    send)
+      echo SEND >> "$DEP_STUB_DIR/cast-send"
+      return 1
+      ;;
+    balance)
+      echo BALANCE >> "$DEP_STUB_DIR/cast-balance"
+      echo 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+EOS
+  _dep_script_out="$(
+    env -u ADMIN_PRIVATE_KEY -u ADMIN_ADDRESS \
+      DEP_STUB_DIR="$_DEP_FIX" \
+      BASH_ENV="$_DEP_FIX/bashenv.sh" \
+      FORTEL2_ENV="$_DEP_FIX/.env.sepolia" \
+      FORTEL2_ROOT="$_DEP_FIX" \
+      "$DEPOSIT_SEPOLIA" 2>&1
+  )" && _dep_script_rc=0 || _dep_script_rc=$?
+  if [[ "$_dep_script_rc" != "0" ]] \
+    && [[ ! -f "$_DEP_FIX/cast-send" ]] \
+    && [[ ! -f "$_DEP_FIX/cast-balance" ]] \
+    && printf '%s' "$_dep_script_out" | grep -q 'ADMIN_PRIVATE_KEY does not match ADMIN_ADDRESS' \
+    && printf '%s' "$_dep_script_out" | grep -F -q -- "$_dep_addr" \
+    && printf '%s' "$_dep_script_out" | grep -F -q -- "$_dep_other_addr" \
+    && ! _f710_key_leaked "$_dep_script_out" "$_dep_key" "${_dep_addr}${_dep_addr_lc}${_dep_other_addr}"; then
+    echo "PASS deposit-eth-sepolia mismatch refuses before any send"
+  else
+    echo "FAIL deposit-eth-sepolia must exit non-zero on a mismatched pair before cast send/balance (ec=$_dep_script_rc)" >&2
+    fail=1
+  fi
+  cleanup_dep_fix
+  trap - EXIT
+
+  unset _dep_key _dep_addr _dep_addr_lc _dep_other_addr _dep_match_out _dep_mismatch_out _dep_script_out _dep_script_rc
+fi
+unset _dep_fn _dep_rc _dep_out
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
