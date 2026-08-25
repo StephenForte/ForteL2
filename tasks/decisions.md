@@ -802,6 +802,14 @@
 - **Decision:** **#148 approved.** The caveats are the operator-owned shakeout steps, not defects.
 - **Consequence:** The R-12 blind-spot class is closed once the operator installs the agent and runs `--test` (README § Ops alerting: fill `RESEND_API_TOKEN` / `ALERT_EMAIL_TO` in local `.env.sepolia`, copy plist, bootout+bootstrap, `--test`). Whether `onboarding@resend.dev` delivers to the configured recipient is answered by that `--test`; if it bounces, swap `ALERT_EMAIL_FROM` after domain verification. Remaining tail unchanged: lib.sh dedup of `require_admin_key_matches_address`, the item-6 set, the DEMO_*/FUNDING_* template gap, the README deposit-pairing sentence. Next free decision id is **D-0090**.
 
+### D-0091 — **The deposit pairing precondition is documented and the funding-watch knobs are templated — the last docs gaps from the D-0088 tail**
+- **Context:** Task A of the three-way tail dispatch: the README sentence Codex asked for on #147 (deferred as D-0088 Finding 4), and `.env.sepolia.example` templating for funding-watch's six operator-settable keys. Returned as ForteL2#149; reviewed here.
+- **Finding 1 — secret-safe by construction and by probe.** Five knobs commented (per D-0065: an empty active `KEY=` must not override a script default), only `FUNDING_HEALTH_TOKEN=` active-empty; `FUNDING_HEALTH_JSON` excluded as test-only with the reason in-file. Reviewer probe: populating the new token line makes `test-helpers.sh` exit 1 — the #145 tripwire covers the new secret slot. Documented defaults recomputed against funding-watch source (0.6 / 12 / 10) — correct.
+- **Finding 2 — verification reproduced on the moved base.** Main had advanced to #151's merge after the worker's hand-back; re-ran in a scratch clone with current main merged in: clean auto-merge, example sources exit 0, **281 PASS 0 FAIL**, parity 60/exit 0.
+- **Finding 3 — two honest disclosures worth keeping.** (a) `funding-watch.sh --help` truncates at the Usage line (`sed -n '2,30p'`), omitting the env-key table — pre-existing, correctly out of scope, a one-liner for a future scripts task. (b) The shared checkout was contested mid-session by the sibling C task; the worker moved the diff to the assigned branch before committing. Parallel workers in one checkout can collide — operator may want to stagger launches or accept the recovery pattern.
+- **Decision:** **#149 approved.**
+- **Consequence:** D-0088 Finding 4 and the DEMO_*/FUNDING_* template gap are closed (DEMO_* was already templated at main lines 81–84; measured, not inherited). Remaining tail: task C (ci/prestate-negative-control, F7-9) in review. Micro-follow-up recorded, unassigned: extend `--help`'s sed range to cover the env-key table. Next free decision id is **D-0092**.
+
 ---
 
 ## Escalations
