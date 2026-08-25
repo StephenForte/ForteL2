@@ -18,23 +18,7 @@ require_eth_address "ADMIN_ADDRESS" "${ADMIN_ADDRESS:-}"
 # (ETH_PRIVATE_KEY is not accepted). That bounded exposure is deliberately
 # accepted to close a silent-wrong-signer failure; apply already passes the
 # same key on argv to op-deployer, so this adds no new class of exposure.
-require_admin_key_matches_address() {
-  if [[ -z "${ADMIN_PRIVATE_KEY:-}" ]]; then
-    echo "ERROR: ADMIN_PRIVATE_KEY is required (must derive ADMIN_ADDRESS)" >&2
-    exit 1
-  fi
-  local derived derived_lc configured_lc
-  derived="$(cast wallet address --private-key "$ADMIN_PRIVATE_KEY")"
-  derived_lc="$(printf '%s' "$derived" | tr '[:upper:]' '[:lower:]')"
-  configured_lc="$(printf '%s' "$ADMIN_ADDRESS" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$derived_lc" != "$configured_lc" ]]; then
-    echo "ERROR: ADMIN_PRIVATE_KEY does not match ADMIN_ADDRESS" >&2
-    echo "  derived:    $derived" >&2
-    echo "  configured: $ADMIN_ADDRESS" >&2
-    exit 1
-  fi
-}
-require_admin_key_matches_address
+require_key_matches_address ADMIN_PRIVATE_KEY ADMIN_ADDRESS
 
 # F7-11 / D-0065: the six Phase 7 immutables are loaded with `set -a; source`, so
 # the last assignment wins. A duplicate makes the file lie about its effective

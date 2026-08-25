@@ -175,6 +175,8 @@ FORTEL2_ENV=.env.sepolia ./scripts/demo-live.sh --sepolia
 python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pipeline health JSON
 ```
 
+`scripts/lib.sh` refuses a duplicated active assignment of any variable when it loads the env file (commented `# KEY=` lines are ignored). The error names the variable only. Every script sources lib.sh — including unattended recovery — so a duplicate bricks them all until the extra assignment is removed.
+
 ### Tests / merge guardrails
 
 ```bash
@@ -828,7 +830,7 @@ fortel2-replica RUNNING.md  ← full laptop/VPS walkthrough
 
 A Sepolia redeploy is an **operational event for every verifier operator**, not a Mac-only action — new L1 contracts mean a new genesis and `rollup.json`, so all nodes must reset together. Not expected before the **Phase 7 gate** while the deployment is pinned.
 
-**Full Phase 7 order (knobs → notice → wipe → rail v7 → challenger):** [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) § “Operator sequence”. This section is that same runbook in operator-facing form (challenger stories stay in the PRD). Choose all six immutables in `.env.sepolia` **before** announcing (US-070). `ADMIN_PRIVATE_KEY` must derive `ADMIN_ADDRESS` (any case) — `02-deploy-contracts-sepolia.sh` refuses a mismatch or empty key before any spend or `$DEPLOY_DIR` wipe (F7-10). A duplicated assignment of any of the six immutables is refused on every run, and an absent or empty one is refused when `FORCE_SEPOLIA_REDEPLOY=1` or `FAULT_GAME_ABSOLUTE_PRESTATE` is set (F7-11). Resolve the **prestate gate** (step 1b, D-0056) **before announcing** — it is a code change to `02-deploy-contracts-sepolia.sh`, not an operator edit, so it must land before the notice window opens. Leave `rail-interface.json` at **v6** until the new `bridge.*` proxies exist, then bump to **v7**.
+**Full Phase 7 order (knobs → notice → wipe → rail v7 → challenger):** [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) § “Operator sequence”. This section is that same runbook in operator-facing form (challenger stories stay in the PRD). Choose all six immutables in `.env.sepolia` **before** announcing (US-070). `ADMIN_PRIVATE_KEY` must derive `ADMIN_ADDRESS` (any case) — `02-deploy-contracts-sepolia.sh` refuses a mismatch or empty key before any spend or `$DEPLOY_DIR` wipe (F7-10). A duplicated *active* assignment of **any** variable in `.env` / `.env.sepolia` is refused when `scripts/lib.sh` loads the file (every script, including unattended recovery); the error names the variable only. F7-11 additionally refuses a duplicate of any of the six Phase 7 immutables on the deploy path, and an absent or empty one when `FORCE_SEPOLIA_REDEPLOY=1` or `FAULT_GAME_ABSOLUTE_PRESTATE` is set. Resolve the **prestate gate** (step 1b, D-0056) **before announcing** — it is a code change to `02-deploy-contracts-sepolia.sh`, not an operator edit, so it must land before the notice window opens. Leave `rail-interface.json` at **v6** until the new `bridge.*` proxies exist, then bump to **v7**.
 
 > **STATUS 2026-08-22 — this reset has been EXECUTED. Steps 1 through 8 are complete (D-0068).**
 > Chain 852 was re-genesised: writers stopped ≈21:05Z, apply completed 21:14:51Z (spend 0.10781 ETH),

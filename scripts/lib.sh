@@ -31,8 +31,69 @@ _fortel2_resolve_env_file() {
   printf '%s' "$candidate"
 }
 
+# >>> env-dup
+# Active assignments only: uncommented lines, optional leading whitespace,
+# optional `export ` prefix. Name is the identifier before the first `=`.
+# Never prints values — a value containing `=` is still one assignment of the
+# name. Commented lines (`# KEY=`) are ignored. D-0066 Finding 5: duplicates
+# belong in the loader; absence does not (F7-11 stays deploy-path-only).
+_scan_env_assignments() {
+  local file="${1:-${FORTEL2_ENV_FILE:-}}"
+  local lineno=0 line trimmed name
+  [[ -n "$file" && -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    line="${line%$'\r'}"
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$trimmed" ]] && continue
+    [[ "$trimmed" == \#* ]] && continue
+    if [[ "$trimmed" == export[[:space:]]* ]]; then
+      trimmed="${trimmed#export}"
+      trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+    fi
+    [[ "$trimmed" == *=* ]] || continue
+    name="${trimmed%%=*}"
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] || continue
+    printf '%s %s\n' "$lineno" "$name"
+  done < "$file"
+}
+
+# Refuse a duplicate active assignment of any variable. Error text names
+# variables and line numbers only — never a value. Fail closed: missing file
+# is an error, not a pass (every consumer sources this).
+refuse_duplicate_env_assignments() {
+  local file="${1:-${FORTEL2_ENV_FILE:-}}"
+  local name lines dups
+  if [[ -z "$file" ]]; then
+    echo "ERROR: FORTEL2_ENV_FILE is unset; cannot check for duplicate assignments" >&2
+    exit 1
+  fi
+  if [[ ! -f "$file" || ! -r "$file" ]]; then
+    echo "ERROR: env file is missing or unreadable; cannot check for duplicate assignments" >&2
+    exit 1
+  fi
+  dups="$(_scan_env_assignments "$file" | awk '
+    { lines[$2] = lines[$2] $1 ", "; count[$2]++ }
+    END {
+      for (n in count) if (count[n] > 1) {
+        gsub(/, $/, "", lines[n])
+        print n, lines[n]
+      }
+    }')"
+  if [[ -n "$dups" ]]; then
+    while read -r name lines; do
+      [[ -z "$name" ]] && continue
+      echo "ERROR: $name is assigned more than once in the env file (lines $lines)." >&2
+      echo "  The last assignment wins when the file is sourced; remove the extra assignment(s) (D-0066)." >&2
+    done <<< "$dups"
+    exit 1
+  fi
+}
+# <<< env-dup
+
 FORTEL2_ENV_FILE="$(_fortel2_resolve_env_file)"
 export FORTEL2_ENV_FILE
+refuse_duplicate_env_assignments
 # shellcheck disable=SC1090
 set -a
 source "$FORTEL2_ENV_FILE"
@@ -265,6 +326,38 @@ require_eth_address() {
   local addr="$2"
   if ! is_eth_address "$addr"; then
     echo "ERROR: invalid $label address: ${addr:-<empty>}" >&2
+    exit 1
+  fi
+}
+
+# Pair a private-key env var to its address env var before any spend or wipe
+# (F7-10). Args are the *names* of the variables, not the values.
+# `cast wallet address` has no env-var form (ETH_PRIVATE_KEY is not accepted);
+# the key touches argv for one short-lived process. That bounded exposure is
+# the accepted class — do not invent a new mechanism. Error text names the
+# derived and configured addresses and the variable names; never any part of
+# the key. Optional 3rd arg is an extra stderr line on mismatch (challenger).
+require_key_matches_address() {
+  local key_var="$1"
+  local addr_var="$2"
+  local extra="${3:-}"
+  local key addr derived derived_lc configured_lc
+  key="${!key_var:-}"
+  addr="${!addr_var:-}"
+  if [[ -z "$key" ]]; then
+    echo "ERROR: $key_var is required (must derive $addr_var)" >&2
+    exit 1
+  fi
+  derived="$(cast wallet address --private-key "$key")"
+  derived_lc="$(printf '%s' "$derived" | tr '[:upper:]' '[:lower:]')"
+  configured_lc="$(printf '%s' "$addr" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$derived_lc" != "$configured_lc" ]]; then
+    echo "ERROR: $key_var does not match $addr_var" >&2
+    echo "  derived:    $derived" >&2
+    echo "  configured: $addr" >&2
+    if [[ -n "$extra" ]]; then
+      echo "  $extra" >&2
+    fi
     exit 1
   fi
 }
