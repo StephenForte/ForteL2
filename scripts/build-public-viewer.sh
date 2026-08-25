@@ -19,14 +19,24 @@ if [[ ! -f "$CSP_FILE" ]]; then
   exit 1
 fi
 
-# Refuse to use the gitignored local config as a source, even if someone
-# points PUBLIC_VIEWER_OUT at a surprising path.
-if [[ -e "$SRC/config.js" ]]; then
-  if [[ "$(cd "$SRC" && pwd)" == "$(cd "$OUT" 2>/dev/null && pwd)" ]]; then
-    echo "ERROR: refusing to write the public bundle into viewer/ (local config.js lives there)" >&2
-    exit 1
-  fi
+# Resolve OUT before any rm. Refuse SRC/ROOT (and any parent of SRC) so a
+# mistaken PUBLIC_VIEWER_OUT cannot delete tracked viewer sources. This check
+# must not depend on gitignored viewer/config.js (absent in CI/Render clones).
+ROOT_ABS="$(cd "$ROOT" && pwd)"
+SRC_ABS="$(cd "$SRC" && pwd)"
+OUT_PARENT="$(dirname "$OUT")"
+mkdir -p "$OUT_PARENT"
+OUT_ABS="$(cd "$OUT_PARENT" && pwd)/$(basename "$OUT")"
+if [[ "$OUT_ABS" == "$SRC_ABS" || "$OUT_ABS" == "$ROOT_ABS" ]]; then
+  echo "ERROR: refusing to write the public bundle over $OUT_ABS" >&2
+  exit 1
 fi
+case "$SRC_ABS" in
+  "$OUT_ABS"/*)
+    echo "ERROR: refusing PUBLIC_VIEWER_OUT=$OUT_ABS (would delete $SRC_ABS)" >&2
+    exit 1
+    ;;
+esac
 
 rm -rf "$OUT"
 mkdir -p "$OUT/fonts" "$OUT/vendor"

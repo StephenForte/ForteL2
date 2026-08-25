@@ -163,11 +163,14 @@ async function refreshSequencerInterval(l2) {
 }
 
 function applySequencerSummary(summary) {
-  els.seqUnsafe.textContent = summary.degraded
-    ? "unavailable"
-    : headLine(summary.unsafe, summary.unsafeAge);
-  els.seqSafe.textContent = headLine(summary.safe, summary.safeAge);
-  els.seqFinalized.textContent = headLine(summary.finalized, summary.finalizedAge);
+  els.seqUnsafe.textContent =
+    summary.unsafe == null ? "unavailable" : headLine(summary.unsafe, summary.unsafeAge);
+  els.seqSafe.textContent =
+    summary.safe == null ? "unavailable" : headLine(summary.safe, summary.safeAge);
+  els.seqFinalized.textContent =
+    summary.finalized == null
+      ? "unavailable"
+      : headLine(summary.finalized, summary.finalizedAge);
   els.seqLag.textContent =
     summary.lagUnsafeSafe == null ? "—" : String(summary.lagUnsafeSafe);
 }

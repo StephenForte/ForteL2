@@ -419,4 +419,22 @@ describe("summarizePublicSequencerHeads", () => {
     assert.equal(s.safe, 16);
     assert.equal(s.finalized, 8);
   });
+
+  it("degrades when replica safe/finalized tags fail while unsafe is live", () => {
+    const s = summarizePublicSequencerHeads(
+      {
+        unsafe: { number: 100, timestamp: 1_700_000_180 },
+        safe: { error: "method not allowed" },
+        finalized: null,
+      },
+      now,
+    );
+    assert.equal(s.unsafe, 100);
+    assert.equal(s.safe, null);
+    assert.equal(s.finalized, null);
+    assert.equal(s.safeAge, "unavailable");
+    assert.equal(s.finalizedAge, "unavailable");
+    assert.equal(s.degraded, true);
+    assert.match(s.degradeLabel, /Replica safe\/finalized/);
+  });
 });

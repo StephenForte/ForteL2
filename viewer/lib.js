@@ -428,36 +428,45 @@ function headFromTaggedBlock(block) {
   };
 }
 
+function taggedHeadFailed(block) {
+  return headFromTaggedBlock(block) == null;
+}
+
 /**
  * Sequencer panel from eth_getBlockByNumber tags (public mode; no optimism_syncStatus).
  * `unsafe` is sequencer-gateway `latest`; `safe` / `finalized` are replica tags.
  * A failed unsafe fetch degrades the panel without discarding replica heads.
+ * Missing safe/finalized is also a visible partial degradation.
  *
  * @param {{ unsafe?: object|null, safe?: object|null, finalized?: object|null }} heads
  */
 export function summarizePublicSequencerHeads(heads, nowMs = Date.now()) {
   const src = heads && typeof heads === "object" ? heads : {};
-  const unsafeFailed =
-    src.unsafe == null ||
-    typeof src.unsafe !== "object" ||
-    Boolean(src.unsafe.error) ||
-    headFromTaggedBlock(src.unsafe) == null;
+  const unsafeFailed = taggedHeadFailed(src.unsafe);
+  const safeFailed = taggedHeadFailed(src.safe);
+  const finalizedFailed = taggedHeadFailed(src.finalized);
   const unsafe = headFromTaggedBlock(src.unsafe);
   const safe = headFromTaggedBlock(src.safe);
   const finalized = headFromTaggedBlock(src.finalized);
   let lagUnsafeSafe = null;
   if (unsafe && safe) lagUnsafeSafe = unsafe.number - safe.number;
+  const replicaFailed = safeFailed || finalizedFailed;
+  let degradeLabel = null;
+  if (unsafeFailed) {
+    degradeLabel =
+      "Sequencer tip unavailable (gateway down or nightly 23:45–03:00 window)";
+  } else if (replicaFailed) {
+    degradeLabel = "Replica safe/finalized tags unavailable";
+  }
   return {
     unsafe: unsafe?.number ?? null,
     safe: safe?.number ?? null,
     finalized: finalized?.number ?? null,
     unsafeAge: unsafeFailed ? "unavailable" : formatAge(unsafe?.timestamp, nowMs),
-    safeAge: formatAge(safe?.timestamp, nowMs),
-    finalizedAge: formatAge(finalized?.timestamp, nowMs),
+    safeAge: safeFailed ? "unavailable" : formatAge(safe?.timestamp, nowMs),
+    finalizedAge: finalizedFailed ? "unavailable" : formatAge(finalized?.timestamp, nowMs),
     lagUnsafeSafe,
-    degraded: unsafeFailed,
-    degradeLabel: unsafeFailed
-      ? "Sequencer tip unavailable (gateway down or nightly 23:45–03:00 window)"
-      : null,
+    degraded: unsafeFailed || replicaFailed,
+    degradeLabel,
   };
 }
