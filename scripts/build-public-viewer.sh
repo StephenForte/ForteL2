@@ -66,6 +66,7 @@ cp "$CSP_FILE" "$OUT/Content-Security-Policy.txt"
 mkdir -p "$OUT/fonts" "$OUT/vendor"
 
 cp "$SRC/index.html" "$SRC/app.js" "$SRC/lib.js" "$SRC/styles.css" "$OUT/"
+cp "$SRC/favicon.ico" "$SRC/favicon.svg" "$OUT/"
 cp "$SRC/fonts/fonts.css" "$OUT/fonts/"
 # Fonts are binary; copy if present so the hosted page matches local typography.
 for font in "$SRC/fonts/"*.ttf; do
@@ -75,18 +76,37 @@ cp "$SRC/vendor/ethers-6.13.7.min.js" "$SRC/vendor/README.md" "$OUT/vendor/"
 cp "$CONFIG_PUBLIC" "$OUT/config.js"
 
 CSP="$(tr -d '\n' < "$CSP_FILE")"
-# Inject a complete meta CSP into the public copy only. Local index.html stays
-# header-only so serve-viewer.sh CSP is not AND-combined with a meta policy.
+# Inject a meta CSP into the public copy only. Local index.html stays header-only
+# so serve-viewer.sh CSP is not AND-combined with a meta policy.
+# Browsers ignore frame-ancestors on <meta> and log a warning; strip that
+# directive here. Content-Security-Policy.txt keeps the full policy (copy-paste
+# source for a future Render dashboard header, where frame-ancestors works).
 python3 - "$OUT/index.html" "$CSP" <<'PY'
 import pathlib, sys
+
+META_IGNORED = {"frame-ancestors"}
+
+def csp_for_meta(policy: str) -> str:
+    parts = []
+    for raw in policy.split(";"):
+        d = raw.strip()
+        if not d:
+            continue
+        name = d.split(None, 1)[0].lower()
+        if name in META_IGNORED:
+            continue
+        parts.append(d)
+    return ("; ".join(parts) + ";") if parts else ""
+
 path = pathlib.Path(sys.argv[1])
 csp = sys.argv[2]
+meta_csp = csp_for_meta(csp)
 html = path.read_text()
 needle = '<meta charset="utf-8" />'
 meta = (
     needle
     + '\n  <meta http-equiv="Content-Security-Policy" content="'
-    + csp.replace('"', "&quot;")
+    + meta_csp.replace('"', "&quot;")
     + '" />'
 )
 if needle not in html:

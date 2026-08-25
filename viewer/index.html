@@ -6,8 +6,12 @@
   <meta name="color-scheme" content="light" />
   <!-- CSP is HTTP-only via serve-viewer.sh → viewer/.csp-header. A meta policy
        with default-src 'self' (and no connect-src) would block L1/L2 RPC fetch
-       even when the header allows those origins (policies are AND-combined). -->
+       even when the header allows those origins (policies are AND-combined).
+       The public build injects a meta CSP with frame-ancestors stripped
+       (browsers ignore that directive on <meta> and warn). -->
   <title>ForteL2 Pipeline viewer</title>
+  <link rel="icon" href="./favicon.ico" sizes="32x32" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./fonts/fonts.css" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -15,13 +19,12 @@
   <div class="atmosphere" aria-hidden="true"></div>
   <main class="shell">
     <header class="hero">
-      <p class="brand">ForteL2</p>
-      <h1 class="headline">Pipeline viewer</h1>
+      <div class="hero-top">
+        <p class="brand">ForteL2</p>
+        <h1 class="headline">Pipeline viewer</h1>
+      </div>
       <p class="lede" id="lede">
-        Watch the OP Stack pipeline: sequencer heads, batcher posts to L1, proposer
-        dispute games, L2 tx throughput, and mempool pending. Deposits show up as
-        L2 inclusion / sync heads; withdrawals need a proposer output before
-        prove/finalize. Not a block explorer.
+        Watch the OP Stack pipeline: sequencer, batcher, proposer, and L2 throughput.
       </p>
       <div class="livebar" aria-live="polite">
         <span id="live-pill" class="live-pill" data-state="idle">
@@ -90,6 +93,16 @@
         </dl>
       </article>
     </section>
+
+    <details class="about">
+      <summary id="about-summary">Replica ~3 min lag · sequencer tip off 23:45–03:00 PT</summary>
+      <p id="about-body">
+        Safe/finalized heads come from the replica (~3 min lag). The sequencer
+        public gateway is down 23:45–03:00 America/Los_Angeles. Deposits show up
+        as L2 inclusion / sync heads; withdrawals need a proposer output before
+        prove/finalize. Not a block explorer.
+      </p>
+    </details>
   </main>
   <script type="module" src="./app.js"></script>
 </body>

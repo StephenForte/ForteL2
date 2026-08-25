@@ -57,50 +57,60 @@ body {
   z-index: 1;
   max-width: 80rem;
   margin: 0 auto;
-  padding: clamp(2rem, 6vw, 3.75rem) clamp(1.25rem, 4vw, 3rem) 6rem;
+  padding: 1.1rem clamp(1.25rem, 3vw, 2rem) 2.5rem;
 }
 
 .hero {
-  margin-bottom: 2.5rem;
+  margin-bottom: 0.7rem;
+}
+
+.hero-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.85rem;
+  margin: 0 0 0.3rem;
 }
 
 /* Eyebrow: mono taxonomy label, uppercase, positive tracking */
 .brand {
-  margin: 0 0 1rem;
+  margin: 0;
   font-family: var(--mono);
-  font-size: 1rem;
+  font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.3;
   letter-spacing: 0.54px;
   text-transform: uppercase;
 }
 
-/* Display headline: oversized, light weight, tight negative tracking */
 .headline {
-  margin: 0 0 1rem;
+  margin: 0;
   font-family: var(--sans);
   font-weight: 340;
-  font-size: clamp(2.75rem, 7vw, 5.375rem);
-  line-height: 1;
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  line-height: 1.15;
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
 .lede {
-  margin: 0 0 1.5rem;
-  max-width: 42rem;
-  font-size: 1.25rem;
+  margin: 0 0 0.45rem;
+  max-width: 54rem;
+  font-size: 0.9375rem;
   font-weight: 330;
   letter-spacing: -0.14px;
-  line-height: 1.4;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .livebar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.65rem 1rem;
-  padding: 1rem 0 0;
+  gap: 0.4rem 0.85rem;
+  padding: 0.5rem 0 0;
   border-top: 1px solid var(--hairline);
 }
 
@@ -108,7 +118,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.4rem 1rem;
+  padding: 0.28rem 0.85rem;
   border-radius: var(--r-pill);
   border: 1px solid var(--hairline);
   background: var(--canvas);
@@ -156,9 +166,9 @@ body {
 
 .status {
   flex: 1 1 12rem;
-  min-height: 1.2rem;
+  min-height: 1.05rem;
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.875rem;
   font-weight: 330;
   word-break: break-word;
 }
@@ -189,11 +199,11 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem 0.75rem;
-  margin: 0 0 1.5rem;
-  padding: 0.55rem 0;
+  gap: 0.35rem 0.65rem;
+  margin: 0 0 0.7rem;
+  padding: 0.2rem 0;
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   font-weight: 400;
   letter-spacing: 0.54px;
   text-transform: uppercase;
@@ -208,7 +218,7 @@ body {
 .pipeline {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.5rem;
+  gap: 0.75rem;
 }
 
 @media (min-width: 820px) {
@@ -221,7 +231,7 @@ body {
    The color is the depth device (DESIGN.md: sticky-note board pattern). */
 .panel {
   position: relative;
-  padding: 2rem;
+  padding: 0.85rem 1rem 0.9rem;
   border: none;
   border-radius: var(--r-lg);
   box-shadow: none;
@@ -262,12 +272,12 @@ body {
 
 /* Story-block title inside a color block: sans, weight 540 */
 .panel-title {
-  margin: 0 0 1.25rem;
+  margin: 0 0 0.45rem;
   font-family: var(--sans);
-  font-size: 1.375rem;
+  font-size: 1.0625rem;
   font-weight: 540;
   letter-spacing: -0.26px;
-  line-height: 1.35;
+  line-height: 1.25;
 }
 
 .panel-err {
@@ -285,15 +295,15 @@ body {
 .metrics {
   margin: 0;
   display: grid;
-  gap: 0.55rem;
+  gap: 0.1rem;
 }
 
 .metrics > div {
   display: grid;
   grid-template-columns: minmax(7.5rem, 38%) 1fr;
-  gap: 0.55rem;
+  gap: 0.45rem;
   align-items: baseline;
-  padding: 0.45rem 0;
+  padding: 0.18rem 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
 }
 
@@ -314,11 +324,52 @@ body {
 /* Weight, not size or opacity, carries the value emphasis */
 .metrics dd {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 480;
   font-variant-numeric: tabular-nums;
   word-break: break-all;
   letter-spacing: -0.14px;
+}
+
+.about {
+  margin: 0.85rem 0 0;
+  max-width: 48rem;
+  font-size: 0.8125rem;
+  font-weight: 330;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.about summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  list-style: none;
+}
+
+.about summary::-webkit-details-marker {
+  display: none;
+}
+
+.about summary::before {
+  content: "▸ ";
+}
+
+.about[open] summary::before {
+  content: "▾ ";
+}
+
+.about p {
+  margin: 0.45rem 0 0;
+}
+
+@media (max-width: 819px) {
+  .lede {
+    white-space: normal;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
