@@ -40,7 +40,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | ✅ Done — [`tasks/prd-phase-5-proposer.md`](tasks/prd-phase-5-proposer.md) + [`proposer/`](proposer/); `USE_CUSTOM_PROPOSER=1` opt-in |
 | **6** | **Derivation / minimal sequencer** + simple Blockchair-style **block viewer** (latest blocks → block detail); Blockscout stays much later | ✅ Done (2026-08-04) — [`tasks/prd-phase-6-derivation.md`](tasks/prd-phase-6-derivation.md) + [`derivation/`](derivation/) + [`blocks/`](blocks/) |
 | **3a** | Native Mac mini Sepolia L1 (optional; was 2e) — after 4–6 unless RPC forces earlier | Deferred |
-| **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal — begins with a **coordinated redeploy** (all new fault-game immutables chosen in one sitting) + network-wide reset | In progress — redeploy done 2026-08-22 (D-0068); type-8 game registered and respected (D-0077); challenger live, valid game watched unattacked (D-0082), bad proposal defeated CHALLENGER_WINS (D-0083), closeout note written (D-0085); **demonstration complete**. Spec [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) (do not execute the wipe from this row) |
+| **7** | **Fault proofs**: run op-challenger, exercise a dispute game against a deliberately bad proposal — begins with a **coordinated redeploy** (all new fault-game immutables chosen in one sitting) + network-wide reset | Complete (demonstration) — redeploy done 2026-08-22 (D-0068); type-8 game registered and respected (D-0077); challenger live, valid game watched unattacked (D-0082), bad proposal defeated CHALLENGER_WINS (D-0083), closeout note written (D-0085); **demonstration complete**. Spec [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) (do not execute the wipe from this row) |
 | **8** | **Decentralized sequencer** exploration: multiple candidates, leader election | Planned |
 | **9** | **Mainnet (tentative)**: graduate to Ethereum mainnet as L1, production key management, real ETH economics — gated on earlier phases + committed distributed node network | Decision not locked — P7-0 leftovers expanded in [`tasks/prd-mainnet-pilot.md`](tasks/prd-mainnet-pilot.md) |
 
@@ -976,7 +976,22 @@ On 2026-08-24 I ran both halves of a fault-proof dispute against the live chain 
 
 **The dishonest case (D-0083).** I posted a deliberately corrupted output root as the proposer (`create-bad-proposal-sepolia.sh`, double-gated so it can't fire by accident). The challenger detected it within three minutes, countered at depth 1 with the *true* root, and won: game 69 (`0xd39B5353e3A9bbc3547160407F1CE427E73B9349`) resolved CHALLENGER_WINS, and the false root never touched the anchor. Transactions: create `0xe669394f…55ac`, challenger counter `0x95fe72bb…7b36`, resolve `0x27afa0fd…9e32`.
 
-**How to reproduce.** The commands and prerequisites live in [§ Phase 7 challenger (US-073)](#phase-7-challenger-us-073) above — the challenger needs `OP_NODE_SAFEDB_PATH` set and a small ETH balance for its counter-claim bond. A pass looks like: an honest game resolves DEFENDER_WINS with the challenger silent; a bad game resolves CHALLENGER_WINS with a single counter-claim carrying the real output root.
+**How to reproduce.** The honest case needs nothing beyond a running stock proposer and a running challenger — see [§ Phase 7 challenger (US-073)](#phase-7-challenger-us-073) above for the challenger's start/stop, its `OP_NODE_SAFEDB_PATH` prerequisite, and the small ETH balance it needs for a counter-claim bond.
+
+The dishonest case is a one-shot tool. Stop the stock proposer first (it shares the proposer key), fire the bad proposal, then restart the proposer:
+
+```bash
+# 1. stop the stock proposer (shared PROPOSER_PRIVATE_KEY nonce)
+kill "$(cat "$DATA_DIR/pids/op-proposer.pid")" && rm -f "$DATA_DIR/pids/op-proposer.pid"
+
+# 2. post one deliberately corrupted output root (double-gated; PROPOSER_GAME_TYPE must be the respected type)
+CONFIRM_BAD_PROPOSAL_SEPOLIA=1 I_UNDERSTAND_THIS_POSTS_A_FALSE_CLAIM=true   FORTEL2_ENV=.env.sepolia ./scripts/create-bad-proposal-sepolia.sh
+
+# 3. restart the stock proposer so honest proposing resumes
+FORTEL2_ENV=.env.sepolia ./scripts/06-start-proposer-sepolia.sh
+```
+
+The tool prints the game `index`, `proxy`, and create `tx`, then exits — it never keeps running. A pass looks like: the honest game resolves DEFENDER_WINS with the challenger silent; the bad game resolves CHALLENGER_WINS after the challenger posts a single counter-claim carrying the real output root. The challenger judges a game only once its L1 head postdates `OP_NODE_SAFEDB_PATH` being enabled.
 
 **What this proved:** an independent party running `op-challenger` against this chain can catch a false state claim on the respected game type and defeat it permissionlessly, before it finalizes. That is the one thing fault proofs are for, and it now works here.
 
