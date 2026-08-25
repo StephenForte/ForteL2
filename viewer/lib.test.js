@@ -29,6 +29,9 @@ import {
   viewerL1ScanBlocks,
   viewerRefreshMs,
   viewerRpcPlan,
+  cspForMeta,
+  PUBLIC_VIEWER_CSP_META,
+  META_IGNORED_CSP_DIRECTIVES,
 } from "./lib.js";
 
 const viewerDir = dirname(fileURLToPath(import.meta.url));
@@ -300,6 +303,27 @@ describe("viewer public-mode refresh floor", () => {
   });
 });
 
+describe("viewer L1 scan window is mode-split on 852", () => {
+  it("keeps 12 blocks in local mode (QuickNode budget)", () => {
+    assert.equal(viewerL1ScanBlocks(852), 12);
+    assert.equal(viewerL1ScanBlocks(852, false), 12);
+  });
+
+  it("widens to 36 blocks in public mode (one ~25-block interval plus slack)", () => {
+    assert.equal(viewerL1ScanBlocks(852, true), 36);
+  });
+
+  it("does not widen chain 901 when publicMode is true", () => {
+    assert.equal(viewerL1ScanBlocks(901, true), 40);
+    assert.equal(viewerL1ScanBlocks(901, false), 40);
+  });
+
+  it("app.js passes PUBLIC_MODE into viewerL1ScanBlocks", () => {
+    const src = readFileSync(join(viewerDir, "app.js"), "utf8");
+    assert.match(src, /viewerL1ScanBlocks\(\s*L2_CHAIN_ID\s*,\s*PUBLIC_MODE\s*\)/);
+  });
+});
+
 describe("public origin allowlist", () => {
   it("fails a config that contains a QuickNode-shaped URL", () => {
     const leaked = `
@@ -325,6 +349,34 @@ describe("public origin allowlist", () => {
     assert.equal(csp, PUBLIC_VIEWER_CSP);
     const fromCsp = httpOriginsInText(csp);
     assert.deepEqual(fromCsp, [...PUBLIC_VIEWER_ALLOWED_ORIGINS].sort());
+  });
+});
+
+describe("cspForMeta strips only meta-ignored directives", () => {
+  it("drops frame-ancestors and preserves every other PUBLIC_VIEWER_CSP directive", () => {
+    assert.equal(META_IGNORED_CSP_DIRECTIVES.includes("frame-ancestors"), true);
+    assert.match(PUBLIC_VIEWER_CSP, /frame-ancestors 'none'/);
+    assert.equal(PUBLIC_VIEWER_CSP_META.includes("frame-ancestors"), false);
+    assert.equal(cspForMeta(PUBLIC_VIEWER_CSP), PUBLIC_VIEWER_CSP_META);
+
+    const parse = (policy) => {
+      const out = {};
+      for (const raw of policy.split(";")) {
+        const d = raw.trim();
+        if (!d) continue;
+        const name = d.split(/\s+/)[0].toLowerCase();
+        out[name] = d.slice(name.length).trim();
+      }
+      return out;
+    };
+    const full = parse(PUBLIC_VIEWER_CSP);
+    const meta = parse(PUBLIC_VIEWER_CSP_META);
+    assert.equal("frame-ancestors" in full, true);
+    assert.equal("frame-ancestors" in meta, false);
+    for (const [name, value] of Object.entries(full)) {
+      if (name === "frame-ancestors") continue;
+      assert.equal(meta[name], value, name);
+    }
   });
 });
 

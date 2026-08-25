@@ -464,7 +464,7 @@ Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from t
 
 **Mempool vs heads:** Sequencer unsafe/safe is what already landed (or is safe via L1). Aggregate mempool is txs still waiting in op-geth — useful right after MetaMask submit, before the next L2 block. Not a full mempool dump or tx search.
 
-Refresh cadence defaults to **5s** locally and **15s** on Sepolia (override with `VIEWER_REFRESH_MS`). Sepolia mode also uses a 12-block incremental L1 scan so Batcher/Proposer do not re-fetch dozens of full blocks every tick. Panel RPC failures surface as plain status text — panels do not silently go stale.
+Refresh cadence defaults to **5s** locally and **15s** on Sepolia (override with `VIEWER_REFRESH_MS`). Local Sepolia mode (`:8081`) uses a **12-block** incremental L1 scan so Batcher/Proposer do not re-fetch dozens of full blocks every tick (operator QuickNode budget). The public build uses a **36-block** L1 scan so the batcher panel covers one ~25-block posting interval on free publicnode. Panel RPC failures surface as plain status text — panels do not silently go stale.
 
 Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer — see the **block viewer** (`:8082`) below for latest-blocks browsing. Blockscout stays much later.
 
@@ -472,7 +472,7 @@ Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the
 
 A static copy of this dashboard for hosting (Render static site). It talks only to the two D-0047 public L2 read gateways and a public Sepolia L1 RPC — never to loopback, never to the operator QuickNode URL. Local `./scripts/serve-viewer.sh` on `:8081` is unchanged.
 
-**Known degradations (D-0047 — no extra public RPC):** mempool is `n/a` (gateways reject `txpool_status`); sequencer heads come from `eth_getBlockByNumber` tags, not `optimism_syncStatus`. Unsafe tip is the sequencer gateway’s `latest`; safe/finalized are replica tags (~3 min lag). During the nightly **23:45–03:00** `America/Los_Angeles` window the sequencer gateway is down — the Sequencer panel labels the tip unavailable; other panels keep updating. Poll interval is **≥30 s**.
+**Known degradations (D-0047 — no extra public RPC):** mempool is `n/a` (gateways reject `txpool_status`); sequencer heads come from `eth_getBlockByNumber` tags, not `optimism_syncStatus`. Unsafe tip is the sequencer gateway’s `latest`; safe/finalized are replica tags (~3 min lag). During the nightly **23:45–03:00** `America/Los_Angeles` window the sequencer gateway is down — the Sequencer panel labels the tip unavailable; other panels keep updating. Poll interval is **≥30 s**. Batcher L1 scan is **36 blocks** (covers one ~25-block posting interval); local `:8081` stays at 12.
 
 **Build** (committed constants only; does not read `.env.sepolia` or `viewer/config.js`):
 

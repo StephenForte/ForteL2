@@ -39,7 +39,7 @@ import {
 const PUBLIC_MODE = cfg.PUBLIC_MODE === true;
 const L2_SEQUENCER_RPC_URL = cfg.L2_SEQUENCER_RPC_URL || L2_RPC_URL;
 
-const L1_SCAN_BLOCKS = viewerL1ScanBlocks(L2_CHAIN_ID);
+const L1_SCAN_BLOCKS = viewerL1ScanBlocks(L2_CHAIN_ID, PUBLIC_MODE);
 const L2_WINDOW_BLOCKS = Number(L2_CHAIN_ID) === 852 ? 15 : 30;
 
 const els = {
@@ -402,22 +402,46 @@ async function tick() {
 
 function applyModeCopy() {
   const lede = document.getElementById("lede");
+  const aboutSummary = document.getElementById("about-summary");
+  const aboutBody = document.getElementById("about-body");
   if (!lede) return;
   if (PUBLIC_MODE) {
     lede.textContent =
-      `Public read-only (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer tip from the ` +
-      "public gateway, safe/finalized from the replica (~3 min lag), batcher posts and " +
-      "proposer games on Ethereum Sepolia. Mempool and op-node sync-status are not available. " +
-      "Sequencer tip is down 23:45–03:00 America/Los_Angeles. Not a block explorer.";
+      `Public read-only dashboard for L2 ${L2_CHAIN_ID} — sequencer, batcher, proposer, and throughput.`;
+    if (aboutSummary) {
+      aboutSummary.textContent =
+        "Replica ~3 min lag · sequencer tip off 23:45–03:00 PT";
+    }
+    if (aboutBody) {
+      aboutBody.textContent =
+        "Safe/finalized heads come from the replica (~3 min lag). Sequencer tip is from the " +
+        "public gateway and is down 23:45–03:00 America/Los_Angeles. Batcher posts and proposer " +
+        "games are on Ethereum Sepolia. Mempool and op-node sync-status are not available on the " +
+        "public gateways. Not a block explorer.";
+    }
   } else if (Number(L2_CHAIN_ID) === 852) {
     lede.textContent =
-      `Sepolia mode (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer heads on loopback, ` +
-      "batcher posts and proposer games on Ethereum Sepolia, L2 tx throughput and mempool. " +
-      "Not a block explorer.";
+      `Sepolia ops dashboard (L2 ${L2_CHAIN_ID}) — sequencer, batcher, proposer, throughput, and mempool.`;
+    if (aboutSummary) {
+      aboutSummary.textContent = "About this dashboard";
+    }
+    if (aboutBody) {
+      aboutBody.textContent =
+        `Sepolia mode (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer heads on loopback, ` +
+        "batcher posts and proposer games on Ethereum Sepolia, L2 tx throughput and mempool. " +
+        "Not a block explorer.";
+    }
   } else {
     lede.textContent =
-      `Local Anvil mode (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer heads, batcher posts to L1, ` +
-      "proposer dispute games, L2 tx throughput, and mempool pending. Not a block explorer.";
+      `Local Anvil dashboard (L2 ${L2_CHAIN_ID}) — sequencer, batcher, proposer, throughput, and mempool.`;
+    if (aboutSummary) {
+      aboutSummary.textContent = "About this dashboard";
+    }
+    if (aboutBody) {
+      aboutBody.textContent =
+        `Local Anvil mode (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer heads, batcher posts to L1, ` +
+        "proposer dispute games, L2 tx throughput, and mempool pending. Not a block explorer.";
+    }
   }
 }
 

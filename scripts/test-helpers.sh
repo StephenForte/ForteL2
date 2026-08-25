@@ -5001,12 +5001,75 @@ else
   fail=1
 fi
 
+# Meta CSP omits frame-ancestors (browsers warn on <meta>); .txt stays complete.
+BP_PUB="$BP_ROOT/viewer/public"
+BP_CSP_CHECK="$(
+  python3 - "$BP_PUB" <<'PY'
+from pathlib import Path
+import re, sys
+
+pub = Path(sys.argv[1])
+html = (pub / "index.html").read_text()
+txt = (pub / "Content-Security-Policy.txt").read_text().replace("\n", "").strip()
+m = re.search(r'http-equiv="Content-Security-Policy"\s+content="([^"]*)"', html)
+if not m:
+    print("missing-meta")
+    sys.exit(0)
+meta = m.group(1)
+
+def directives(policy):
+    out = {}
+    for raw in policy.split(";"):
+        d = raw.strip()
+        if not d:
+            continue
+        name = d.split(None, 1)[0].lower()
+        rest = d[len(name):].strip()
+        out[name] = rest
+    return out
+
+full = directives(txt)
+meta_d = directives(meta)
+errors = []
+if "frame-ancestors" not in full:
+    errors.append("txt-missing-frame-ancestors")
+if "frame-ancestors" in meta_d or "frame-ancestors" in meta:
+    errors.append("meta-has-frame-ancestors")
+for name, value in full.items():
+    if name == "frame-ancestors":
+        continue
+    if meta_d.get(name) != value:
+        errors.append(f"weakened:{name}")
+if not (pub / "favicon.ico").is_file():
+    errors.append("missing-favicon-ico")
+if not (pub / "favicon.svg").is_file():
+    errors.append("missing-favicon-svg")
+# index.html is the public copy; check it still links a same-origin icon.
+if 'rel="icon"' not in html or "favicon" not in html:
+    errors.append("html-missing-icon-link")
+print("ok" if not errors else ",".join(errors))
+PY
+)"
+if [[ "$BP_CSP_CHECK" == "ok" ]]; then
+  echo "PASS public meta CSP omits frame-ancestors; .txt and other directives intact"
+else
+  echo "FAIL public meta CSP must drop frame-ancestors without weakening the rest ($BP_CSP_CHECK)" >&2
+  fail=1
+fi
+
+if [[ -f "$BP_PUB/favicon.ico" ]] && [[ -f "$BP_PUB/favicon.svg" ]]; then
+  echo "PASS public bundle ships favicon.ico and favicon.svg"
+else
+  echo "FAIL public bundle must copy favicon.ico and favicon.svg" >&2
+  fail=1
+fi
+
 cleanup_bp_pub
 trap - EXIT
 unset BP_BUILD BP_ROOT BP_SCRIPTS_SENTINEL BP_SCRIPTS_HASH BP_SCRIPTS_OUT BP_SCRIPTS_EC \
   BP_FONTS_SENTINEL BP_FONTS_HASH BP_FONTS_OUT BP_FONTS_EC BP_FIX BP_UNMARKED_OUT \
   BP_UNMARKED_EC BP_EMPTY BP_EMPTY_OUT BP_EMPTY_EC BP_MARKED_OUT BP_MARKED_EC \
-  BP_DEFAULT_OUT BP_DEFAULT_EC BP_DEFAULT2_OUT BP_DEFAULT2_EC
+  BP_DEFAULT_OUT BP_DEFAULT_EC BP_DEFAULT2_OUT BP_DEFAULT2_EC BP_PUB BP_CSP_CHECK
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2

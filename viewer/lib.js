@@ -309,9 +309,26 @@ export function applyBatcherScanSuccess(cache, range, collected, windowBlocks) {
   };
 }
 
-/** Sepolia viewer defaults: fewer L1 blocks, slower poll (QuickNode credit budget). */
-export function viewerL1ScanBlocks(l2ChainId) {
-  return Number(l2ChainId) === 852 ? 12 : 40;
+/**
+ * Inclusive L1 block window for the batcher panel scan.
+ *
+ * Chain 901 (local Anvil): 40 blocks — L1 is free and fast.
+ * Chain 852 local (:8081): 12 blocks. That path hits the operator's metered
+ * QuickNode L1; widening it multiplies getBlock calls per refresh.
+ * Chain 852 public: 36 blocks. Measured 2026-08-25, inbox posts at L1
+ * 11565828 / 11565852 / 11565877 (~25-block / ~5 min spacing). 12 blocks
+ * (~2.4 min) miss a healthy batcher about half the time. 36 = one 25-block
+ * interval plus 11-block slack (~2 min) so the latest post still shows when
+ * a batch is slightly late. Public mode hits free publicnode, not QuickNode.
+ *
+ * @param {number|string} l2ChainId
+ * @param {boolean} [publicMode=false]
+ */
+export function viewerL1ScanBlocks(l2ChainId, publicMode = false) {
+  if (Number(l2ChainId) === 852) {
+    return publicMode ? 36 : 12;
+  }
+  return 40;
 }
 
 export function viewerRefreshMs(l2ChainId, configuredMs, publicMode = false) {
@@ -342,6 +359,34 @@ export const PUBLIC_VIEWER_CSP =
   "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; " +
   "style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src " +
   `${PUBLIC_VIEWER_ALLOWED_ORIGINS.join(" ")}; img-src 'self' data:;`;
+
+/**
+ * Directives browsers ignore (and warn on) when CSP is delivered via <meta>.
+ * `frame-ancestors` still belongs in the HTTP / dashboard-header copy
+ * (`public.csp` / Content-Security-Policy.txt).
+ */
+export const META_IGNORED_CSP_DIRECTIVES = Object.freeze(["frame-ancestors"]);
+
+/**
+ * Strip meta-ignored directives without changing any other directive's value.
+ * @param {string} policy
+ * @param {readonly string[]} [ignored]
+ */
+export function cspForMeta(policy, ignored = META_IGNORED_CSP_DIRECTIVES) {
+  if (typeof policy !== "string" || !policy) return "";
+  const skip = new Set([...ignored].map((d) => d.toLowerCase()));
+  const parts = [];
+  for (const raw of policy.split(";")) {
+    const d = raw.trim();
+    if (!d) continue;
+    const name = d.split(/\s+/)[0].toLowerCase();
+    if (skip.has(name)) continue;
+    parts.push(d);
+  }
+  return parts.length ? `${parts.join("; ")};` : "";
+}
+
+export const PUBLIC_VIEWER_CSP_META = cspForMeta(PUBLIC_VIEWER_CSP);
 
 /** JSON-RPC methods each panel issues. Public mode must never list the forbidden pair. */
 export function viewerRpcPlan(publicMode) {
