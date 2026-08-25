@@ -4,7 +4,7 @@
 //
 //	go run ./cmd/bad-proposal \
 //	  -l1 "$L1_RPC_URL" -rollup "$L2_NODE_RPC_URL" \
-//	  -factory 0x... -game-type 1 \
+//	  -factory 0x... -game-type "$PROPOSER_GAME_TYPE" \
 //	  -i-understand-this-posts-a-false-claim=true
 //
 // Signs with PROPOSER_PRIVATE_KEY (or -private-key) — the factory proposer
@@ -47,7 +47,7 @@ func main() {
 	factoryFlag := flag.String("factory", "", "DisputeGameFactoryProxy")
 	deployments := flag.String("deployments", "", "optional deployments.json")
 	keyFlag := flag.String("private-key", "", "proposer EOA key (prefer PROPOSER_PRIVATE_KEY env; never CHALLENGER_PRIVATE_KEY)")
-	gameType := flag.Uint("game-type", envOrUint("PROPOSER_GAME_TYPE", 1), "dispute game type")
+	gameTypeFlag := flag.String("game-type", "", "dispute game type (required; or PROPOSER_GAME_TYPE — no silent default)")
 	blockFlag := flag.Uint64("block", 0, "L2 block to claim (0 = current safe head)")
 	confirmFlag := flag.Bool("i-understand-this-posts-a-false-claim", false, "required to broadcast; without it, print the plan and exit 1")
 	receiptTimeout := flag.Duration("receipt-timeout", 3*time.Minute, "wait for the create tx to be mined")
@@ -69,6 +69,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "requires PROPOSER_PRIVATE_KEY or -private-key")
 		os.Exit(2)
 	}
+	gt, err := resolveGameType(*gameTypeFlag, os.Getenv("PROPOSER_GAME_TYPE"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(2)
+	}
 	factoryAddr, err := resolveFactory(*factoryFlag, *deployments)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "factory: %v\n", err)
@@ -80,7 +85,6 @@ func main() {
 		os.Exit(1)
 	}
 	from := crypto.PubkeyToAddress(priv.PublicKey)
-	gt := uint32(*gameType)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -367,14 +371,20 @@ func envOr(key, def string) string {
 	return def
 }
 
-func envOrUint(key string, def uint) uint {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
+// resolveGameType requires an explicit -game-type or PROPOSER_GAME_TYPE.
+// There is no silent default: a missing or unparseable value refuses, because
+// posting a non-respected type is inert and unchallenged (D-0063 Finding 3c).
+func resolveGameType(flagVal, env string) (uint32, error) {
+	raw := strings.TrimSpace(flagVal)
+	if raw == "" {
+		raw = strings.TrimSpace(env)
 	}
-	n, err := strconv.ParseUint(v, 10, 32)
+	if raw == "" {
+		return 0, errors.New("game-type required: set -game-type or PROPOSER_GAME_TYPE (refusing a silent default)")
+	}
+	n, err := strconv.ParseUint(raw, 10, 32)
 	if err != nil {
-		return def
+		return 0, fmt.Errorf("game-type %q: %w", raw, err)
 	}
-	return uint(n)
+	return uint32(n), nil
 }
