@@ -137,7 +137,7 @@ These close the skeleton’s “no acceptance criteria” gap for the four open 
 
 **Acceptance Criteria:**
 
-- [ ] Spec chooses **one**: self-derived state from genesis, **or** an anchor taken from the **counterparty’s** replica (not a copy of the operator datadir)
+- [x] Spec chooses **one**: self-derived state from genesis — **done (D-0094)**: `tasks/frd-us-p7-005-independent-derivation.md`
 - [ ] `derivation/README.md` § Limitations updated when the chosen path lands
 - [ ] Until then, counterparty docs must not claim independent honesty — only consistency
 
