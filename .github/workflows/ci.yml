@@ -65,6 +65,9 @@ jobs:
       - name: Pipeline viewer + dApp unit tests
         run: node --test viewer/lib.test.js dapp/lib.test.js
 
+      - name: Public viewer origin allowlist
+        run: ./scripts/build-public-viewer.sh
+
       - name: Block viewer unit tests
         run: node --test blocks/lib.test.js
 

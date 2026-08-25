@@ -314,8 +314,150 @@ export function viewerL1ScanBlocks(l2ChainId) {
   return Number(l2ChainId) === 852 ? 12 : 40;
 }
 
-export function viewerRefreshMs(l2ChainId, configuredMs) {
+export function viewerRefreshMs(l2ChainId, configuredMs, publicMode = false) {
   const configured = Number(configuredMs);
-  if (Number.isFinite(configured) && configured > 0) return configured;
-  return Number(l2ChainId) === 852 ? 15_000 : 5_000;
+  let ms;
+  if (Number.isFinite(configured) && configured > 0) {
+    ms = configured;
+  } else {
+    ms = Number(l2ChainId) === 852 ? 15_000 : 5_000;
+  }
+  if (publicMode) return Math.max(ms, 30_000);
+  return ms;
+}
+
+/** D-0047 public read origins — the only hosts a hosted viewer may contact. */
+export const PUBLIC_VIEWER_ALLOWED_ORIGINS = Object.freeze([
+  "https://fortel2-replica-rpc.onrender.com",
+  "https://fortel2-sequencer-rpc.onrender.com",
+  "https://ethereum-sepolia-rpc.publicnode.com",
+]);
+
+export const PUBLIC_FORBIDDEN_RPC_METHODS = Object.freeze([
+  "txpool_status",
+  "optimism_syncStatus",
+]);
+
+export const PUBLIC_VIEWER_CSP =
+  "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; " +
+  "style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src " +
+  `${PUBLIC_VIEWER_ALLOWED_ORIGINS.join(" ")}; img-src 'self' data:;`;
+
+/** JSON-RPC methods each panel issues. Public mode must never list the forbidden pair. */
+export function viewerRpcPlan(publicMode) {
+  if (publicMode) {
+    return {
+      sequencer: ["eth_getBlockByNumber"],
+      batcher: ["eth_getBlockByNumber"],
+      proposer: ["eth_call"],
+      aggregate: ["eth_getBlockByNumber"],
+    };
+  }
+  return {
+    sequencer: ["optimism_syncStatus", "eth_getBlockByNumber"],
+    batcher: ["eth_getBlockByNumber"],
+    proposer: ["eth_call"],
+    aggregate: ["eth_getBlockByNumber", "txpool_status"],
+  };
+}
+
+export function assertPublicRpcMethod(method, publicMode) {
+  if (publicMode && PUBLIC_FORBIDDEN_RPC_METHODS.includes(method)) {
+    throw new Error(`public viewer must not call ${method}`);
+  }
+}
+
+/**
+ * Collect http(s) origins from arbitrary text (config, HTML, first-party JS).
+ * Trailing punctuation from prose is stripped so a URL in a sentence still parses.
+ */
+export function httpOriginsInText(text) {
+  if (typeof text !== "string" || !text) return [];
+  const re = /https?:\/\/[^\s"'\\<>]+/gi;
+  const origins = new Set();
+  for (const raw of text.matchAll(re)) {
+    const cleaned = raw[0].replace(/[),.;]+$/g, "");
+    try {
+      const u = new URL(cleaned);
+      if (u.protocol === "http:" || u.protocol === "https:") {
+        origins.add(`${u.protocol}//${u.host}`);
+      }
+    } catch {
+      // ignore unparseable matches
+    }
+  }
+  return [...origins].sort();
+}
+
+/**
+ * Origin allowlist guard for the public viewer artifact.
+ * `ok` is false when any origin is outside PUBLIC_VIEWER_ALLOWED_ORIGINS
+ * (QuickNode-shaped hosts fail here). Missing allowlisted origins are reported
+ * but do not fail — first-party JS need not repeat the three URLs.
+ */
+export function assertPublicViewerAllowlist(text, allowed = PUBLIC_VIEWER_ALLOWED_ORIGINS) {
+  const found = httpOriginsInText(text);
+  const allowedSet = new Set(allowed);
+  const unexpected = found.filter((o) => !allowedSet.has(o));
+  const missing = [...allowedSet].filter((o) => !found.includes(o)).sort();
+  return {
+    ok: unexpected.length === 0,
+    found,
+    unexpected,
+    missing,
+  };
+}
+
+/** Stricter: public config must name exactly the allowlisted origins, no extras. */
+export function assertPublicViewerConfigOrigins(text, allowed = PUBLIC_VIEWER_ALLOWED_ORIGINS) {
+  const result = assertPublicViewerAllowlist(text, allowed);
+  const extraMissing = result.missing.length > 0;
+  return {
+    ...result,
+    ok: result.ok && !extraMissing,
+  };
+}
+
+function headFromTaggedBlock(block) {
+  if (block == null || typeof block !== "object" || block.error) return null;
+  const number = parseHexQuantity(block.number);
+  if (number == null) return null;
+  return {
+    number,
+    timestamp: parseHexQuantity(block.timestamp),
+  };
+}
+
+/**
+ * Sequencer panel from eth_getBlockByNumber tags (public mode; no optimism_syncStatus).
+ * `unsafe` is sequencer-gateway `latest`; `safe` / `finalized` are replica tags.
+ * A failed unsafe fetch degrades the panel without discarding replica heads.
+ *
+ * @param {{ unsafe?: object|null, safe?: object|null, finalized?: object|null }} heads
+ */
+export function summarizePublicSequencerHeads(heads, nowMs = Date.now()) {
+  const src = heads && typeof heads === "object" ? heads : {};
+  const unsafeFailed =
+    src.unsafe == null ||
+    typeof src.unsafe !== "object" ||
+    Boolean(src.unsafe.error) ||
+    headFromTaggedBlock(src.unsafe) == null;
+  const unsafe = headFromTaggedBlock(src.unsafe);
+  const safe = headFromTaggedBlock(src.safe);
+  const finalized = headFromTaggedBlock(src.finalized);
+  let lagUnsafeSafe = null;
+  if (unsafe && safe) lagUnsafeSafe = unsafe.number - safe.number;
+  return {
+    unsafe: unsafe?.number ?? null,
+    safe: safe?.number ?? null,
+    finalized: finalized?.number ?? null,
+    unsafeAge: unsafeFailed ? "unavailable" : formatAge(unsafe?.timestamp, nowMs),
+    safeAge: formatAge(safe?.timestamp, nowMs),
+    finalizedAge: formatAge(finalized?.timestamp, nowMs),
+    lagUnsafeSafe,
+    degraded: unsafeFailed,
+    degradeLabel: unsafeFailed
+      ? "Sequencer tip unavailable (gateway down or nightly 23:45–03:00 window)"
+      : null,
+  };
 }

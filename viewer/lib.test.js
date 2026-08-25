@@ -1,23 +1,37 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   aggregateTxWindow,
   applyBatcherScanSuccess,
+  assertPublicRpcMethod,
+  assertPublicViewerAllowlist,
+  assertPublicViewerConfigOrigins,
   contiguousScanTip,
   filterBatchTxs,
   formatAge,
   formatRate,
+  httpOriginsInText,
   nextBatcherScanRange,
   parseHexQuantity,
   pruneBatchTxsToWindow,
+  PUBLIC_FORBIDDEN_RPC_METHODS,
+  PUBLIC_VIEWER_ALLOWED_ORIGINS,
+  PUBLIC_VIEWER_CSP,
   scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
+  summarizePublicSequencerHeads,
   summarizeSyncStatus,
   summarizeTxpoolStatus,
   viewerL1ScanBlocks,
   viewerRefreshMs,
+  viewerRpcPlan,
 } from "./lib.js";
+
+const viewerDir = dirname(fileURLToPath(import.meta.url));
 
 describe("formatAge", () => {
   const now = 1_700_000_100_000; // ms
@@ -275,5 +289,134 @@ describe("viewer Sepolia defaults", () => {
     assert.equal(viewerRefreshMs(852, undefined), 15_000);
     assert.equal(viewerRefreshMs(901, undefined), 5_000);
     assert.equal(viewerRefreshMs(852, 20_000), 20_000);
+  });
+});
+
+describe("viewer public-mode refresh floor", () => {
+  it("clamps public mode to at least 30s even when configured lower", () => {
+    assert.equal(viewerRefreshMs(852, 15_000, true), 30_000);
+    assert.equal(viewerRefreshMs(901, 5_000, true), 30_000);
+    assert.equal(viewerRefreshMs(852, 45_000, true), 45_000);
+  });
+});
+
+describe("public origin allowlist", () => {
+  it("fails a config that contains a QuickNode-shaped URL", () => {
+    const leaked = `
+      export const L1_RPC_URL = "https://some-name.quiknode.pro/abcdef0123456789token/";
+      export const L2_RPC_URL = "https://fortel2-replica-rpc.onrender.com";
+    `;
+    const result = assertPublicViewerAllowlist(leaked);
+    assert.equal(result.ok, false);
+    assert.ok(result.unexpected.includes("https://some-name.quiknode.pro"));
+  });
+
+  it("accepts only the three D-0047 / publicnode origins in committed public config", () => {
+    const text = readFileSync(join(viewerDir, "config.public.js"), "utf8");
+    const result = assertPublicViewerConfigOrigins(text);
+    assert.deepEqual(result.found, [...PUBLIC_VIEWER_ALLOWED_ORIGINS].sort());
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.unexpected, []);
+    assert.deepEqual(result.missing, []);
+  });
+
+  it("matches public.csp connect-src to PUBLIC_VIEWER_CSP", () => {
+    const csp = readFileSync(join(viewerDir, "public.csp"), "utf8").trim();
+    assert.equal(csp, PUBLIC_VIEWER_CSP);
+    const fromCsp = httpOriginsInText(csp);
+    assert.deepEqual(fromCsp, [...PUBLIC_VIEWER_ALLOWED_ORIGINS].sort());
+  });
+});
+
+describe("public RPC plan never calls forbidden methods", () => {
+  it("omits txpool_status and optimism_syncStatus in public mode", () => {
+    const plan = viewerRpcPlan(true);
+    const methods = Object.values(plan).flat();
+    for (const forbidden of PUBLIC_FORBIDDEN_RPC_METHODS) {
+      assert.equal(methods.includes(forbidden), false, forbidden);
+    }
+  });
+
+  it("keeps those methods in local mode", () => {
+    const plan = viewerRpcPlan(false);
+    const methods = Object.values(plan).flat();
+    assert.ok(methods.includes("txpool_status"));
+    assert.ok(methods.includes("optimism_syncStatus"));
+  });
+
+  it("throws if public mode attempts a forbidden RPC method", () => {
+    assert.throws(
+      () => assertPublicRpcMethod("txpool_status", true),
+      /must not call txpool_status/,
+    );
+    assert.throws(
+      () => assertPublicRpcMethod("optimism_syncStatus", true),
+      /must not call optimism_syncStatus/,
+    );
+    assert.doesNotThrow(() => assertPublicRpcMethod("eth_getBlockByNumber", true));
+    assert.doesNotThrow(() => assertPublicRpcMethod("txpool_status", false));
+  });
+
+  it("public sequencer helper in app.js does not name the forbidden methods", () => {
+    const src = readFileSync(join(viewerDir, "app.js"), "utf8");
+    const start = src.indexOf("async function refreshSequencerPublic");
+    const end = src.indexOf("async function refreshSequencer(");
+    assert.ok(start >= 0 && end > start);
+    const publicFn = src.slice(start, end);
+    assert.equal(publicFn.includes("optimism_syncStatus"), false);
+    assert.equal(publicFn.includes("txpool_status"), false);
+  });
+});
+
+describe("summarizePublicSequencerHeads", () => {
+  const now = 1_700_000_200_000;
+
+  it("derives heads from block tags including hex quantities", () => {
+    const s = summarizePublicSequencerHeads(
+      {
+        unsafe: { number: "0x17d25", timestamp: "0x6565d0a8" },
+        safe: { number: "0x17d25", timestamp: "0x6565d0a8" },
+        finalized: { number: "0x17b84", timestamp: "0x6565c000" },
+      },
+      now,
+    );
+    assert.equal(s.unsafe, 97573);
+    assert.equal(s.safe, 97573);
+    assert.equal(s.finalized, 97156);
+    assert.equal(s.lagUnsafeSafe, 0);
+    assert.equal(s.degraded, false);
+    assert.equal(s.degradeLabel, null);
+  });
+
+  it("degrades when the sequencer gateway latest head is missing", () => {
+    const s = summarizePublicSequencerHeads(
+      {
+        unsafe: { error: "HTTP 502" },
+        safe: { number: 97606, timestamp: 1_700_000_100 },
+        finalized: { number: 97132, timestamp: 1_700_000_000 },
+      },
+      now,
+    );
+    assert.equal(s.unsafe, null);
+    assert.equal(s.safe, 97606);
+    assert.equal(s.finalized, 97132);
+    assert.equal(s.unsafeAge, "unavailable");
+    assert.equal(s.degraded, true);
+    assert.match(s.degradeLabel, /nightly 23:45–03:00/);
+    assert.equal(s.lagUnsafeSafe, null);
+  });
+
+  it("degrades when latest is null without discarding replica tags", () => {
+    const s = summarizePublicSequencerHeads(
+      {
+        unsafe: null,
+        safe: { number: "0x10", timestamp: 50 },
+        finalized: { number: "0x8", timestamp: 40 },
+      },
+      now,
+    );
+    assert.equal(s.degraded, true);
+    assert.equal(s.safe, 16);
+    assert.equal(s.finalized, 8);
   });
 });

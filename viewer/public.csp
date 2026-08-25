@@ -1,0 +1,1 @@
+default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src https://fortel2-replica-rpc.onrender.com https://fortel2-sequencer-rpc.onrender.com https://ethereum-sepolia-rpc.publicnode.com; img-src 'self' data:;

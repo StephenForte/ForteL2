@@ -468,6 +468,27 @@ Refresh cadence defaults to **5s** locally and **15s** on Sepolia (override with
 
 Guestbook (`:8080`) is the demo write path; the pipeline viewer (`:8081`) is the ops/learning surface. Neither is an address/tx search explorer — see the **block viewer** (`:8082`) below for latest-blocks browsing. Blockscout stays much later.
 
+### Public read-only pipeline viewer
+
+A static copy of this dashboard for hosting (Render static site). It talks only to the two D-0047 public L2 read gateways and a public Sepolia L1 RPC — never to loopback, never to the operator QuickNode URL. Local `./scripts/serve-viewer.sh` on `:8081` is unchanged.
+
+**Known degradations (D-0047 — no extra public RPC):** mempool is `n/a` (gateways reject `txpool_status`); sequencer heads come from `eth_getBlockByNumber` tags, not `optimism_syncStatus`. Unsafe tip is the sequencer gateway’s `latest`; safe/finalized are replica tags (~3 min lag). During the nightly **23:45–03:00** `America/Los_Angeles` window the sequencer gateway is down — the Sequencer panel labels the tip unavailable; other panels keep updating. Poll interval is **≥30 s**.
+
+**Build** (committed constants only; does not read `.env.sepolia` or `viewer/config.js`):
+
+```bash
+./scripts/build-public-viewer.sh   # writes viewer/public/
+```
+
+**Render static site** (operator, after merge):
+
+1. New Static Site from this repo (default `*.onrender.com` is fine).
+2. Build command: `./scripts/build-public-viewer.sh`
+3. Publish directory: `viewer/public`
+4. Dashboard → **Headers** → add `Content-Security-Policy` with the exact value in [`viewer/public.csp`](viewer/public.csp) (also copied to `viewer/public/Content-Security-Policy.txt` by the build).
+
+Do **not** point Render at `viewer/`. On the operator’s disk that directory can contain a gitignored `config.js` with the private QuickNode L1 URL.
+
 ## Block viewer (Phase 6)
 
 Blockchair-shaped **latest blocks → block detail** UI for the L2. Client-side L2 RPC polls only (no indexer, no search, no address pages). Distinct from the Phase 1c **pipeline viewer** above — that one tracks sequencer/batcher/proposer ops; this one browses block headers and tx rows.

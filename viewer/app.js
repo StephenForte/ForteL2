@@ -3,6 +3,7 @@
  * Client-side RPC polls only; ethers vendored under ./vendor/.
  */
 import { Contract, JsonRpcProvider, isAddress } from "./vendor/ethers-6.13.7.min.js";
+import * as cfg from "./config.js";
 import {
   L1_CHAIN_ID,
   L2_CHAIN_ID,
@@ -18,6 +19,7 @@ import {
 import {
   aggregateTxWindow,
   applyBatcherScanSuccess,
+  assertPublicRpcMethod,
   contiguousScanTip,
   filterBatchTxs,
   formatAge,
@@ -26,11 +28,16 @@ import {
   scanFromBlock,
   shortHex,
   summarizeBatcherActivity,
+  summarizePublicSequencerHeads,
   summarizeSyncStatus,
   summarizeTxpoolStatus,
   viewerL1ScanBlocks,
   viewerRefreshMs,
 } from "./lib.js";
+
+/** Local gen-viewer-config.sh does not export this; public config.public.js does. */
+const PUBLIC_MODE = cfg.PUBLIC_MODE === true;
+const L2_SEQUENCER_RPC_URL = cfg.L2_SEQUENCER_RPC_URL || L2_RPC_URL;
 
 const L1_SCAN_BLOCKS = viewerL1ScanBlocks(L2_CHAIN_ID);
 const L2_WINDOW_BLOCKS = Number(L2_CHAIN_ID) === 852 ? 15 : 30;
@@ -68,7 +75,7 @@ const els = {
   panelAggregate: document.getElementById("panel-aggregate"),
 };
 
-const refreshMs = viewerRefreshMs(L2_CHAIN_ID, REFRESH_MS);
+const refreshMs = viewerRefreshMs(L2_CHAIN_ID, REFRESH_MS, PUBLIC_MODE);
 let pollTimer = null;
 let inFlight = false;
 let l1Provider = null;
@@ -99,15 +106,16 @@ function setStatus(msg, isError = false) {
   }
 }
 
-function setPanelError(errEl, panelEl, message) {
+function setPanelError(errEl, panelEl, message, degraded = false) {
   if (message) {
     errEl.hidden = false;
     errEl.textContent = message;
-    panelEl.classList.add("is-stale");
+    panelEl.classList.toggle("is-degraded", Boolean(degraded));
+    panelEl.classList.toggle("is-stale", !degraded);
   } else {
     errEl.hidden = true;
     errEl.textContent = "";
-    panelEl.classList.remove("is-stale");
+    panelEl.classList.remove("is-stale", "is-degraded");
   }
 }
 
@@ -124,6 +132,7 @@ function assertViewerConfig() {
 }
 
 async function rpcJson(url, method, params = []) {
+  assertPublicRpcMethod(method, PUBLIC_MODE);
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -142,15 +151,7 @@ function headLine(num, age) {
   return `#${num} (${age})`;
 }
 
-async function refreshSequencer(l2, nodeUrl) {
-  const status = await rpcJson(nodeUrl, "optimism_syncStatus", []);
-  const summary = summarizeSyncStatus(status);
-  els.seqUnsafe.textContent = headLine(summary.unsafe, summary.unsafeAge);
-  els.seqSafe.textContent = headLine(summary.safe, summary.safeAge);
-  els.seqFinalized.textContent = headLine(summary.finalized, summary.finalizedAge);
-  els.seqLag.textContent =
-    summary.lagUnsafeSafe == null ? "—" : String(summary.lagUnsafeSafe);
-
+async function refreshSequencerInterval(l2) {
   const tip = await l2.getBlockNumber();
   const from = scanFromBlock(tip, 5);
   const blockNums = [];
@@ -159,6 +160,63 @@ async function refreshSequencer(l2, nodeUrl) {
   const agg = aggregateTxWindow(blocks);
   els.seqInterval.textContent =
     agg.avgIntervalSec == null ? "—" : `${formatRate(agg.avgIntervalSec, 1)}s`;
+}
+
+function applySequencerSummary(summary) {
+  els.seqUnsafe.textContent = summary.degraded
+    ? "unavailable"
+    : headLine(summary.unsafe, summary.unsafeAge);
+  els.seqSafe.textContent = headLine(summary.safe, summary.safeAge);
+  els.seqFinalized.textContent = headLine(summary.finalized, summary.finalizedAge);
+  els.seqLag.textContent =
+    summary.lagUnsafeSafe == null ? "—" : String(summary.lagUnsafeSafe);
+}
+
+async function refreshSequencerPublic(l2) {
+  const [unsafeRes, safeRes, finalizedRes] = await Promise.allSettled([
+    rpcJson(L2_SEQUENCER_RPC_URL, "eth_getBlockByNumber", ["latest", false]),
+    rpcJson(L2_RPC_URL, "eth_getBlockByNumber", ["safe", false]),
+    rpcJson(L2_RPC_URL, "eth_getBlockByNumber", ["finalized", false]),
+  ]);
+  const summary = summarizePublicSequencerHeads({
+    unsafe:
+      unsafeRes.status === "fulfilled"
+        ? unsafeRes.value
+        : { error: unsafeRes.reason?.message || String(unsafeRes.reason) },
+    safe:
+      safeRes.status === "fulfilled"
+        ? safeRes.value
+        : { error: safeRes.reason?.message || String(safeRes.reason) },
+    finalized:
+      finalizedRes.status === "fulfilled"
+        ? finalizedRes.value
+        : { error: finalizedRes.reason?.message || String(finalizedRes.reason) },
+  });
+  applySequencerSummary(summary);
+  try {
+    await refreshSequencerInterval(l2);
+  } catch {
+    els.seqInterval.textContent = "—";
+  }
+  if (summary.degraded) {
+    return { note: summary.degradeLabel, degraded: true };
+  }
+  return undefined;
+}
+
+async function refreshSequencer(l2, nodeUrl) {
+  if (PUBLIC_MODE) {
+    return refreshSequencerPublic(l2);
+  }
+  const status = await rpcJson(nodeUrl, "optimism_syncStatus", []);
+  const summary = summarizeSyncStatus(status);
+  els.seqUnsafe.textContent = headLine(summary.unsafe, summary.unsafeAge);
+  els.seqSafe.textContent = headLine(summary.safe, summary.safeAge);
+  els.seqFinalized.textContent = headLine(summary.finalized, summary.finalizedAge);
+  els.seqLag.textContent =
+    summary.lagUnsafeSafe == null ? "—" : String(summary.lagUnsafeSafe);
+
+  await refreshSequencerInterval(l2);
 }
 
 async function refreshBatcher(l1) {
@@ -257,12 +315,17 @@ async function refreshAggregate(l2) {
     agg.txPerMin == null ? "—" : formatRate(agg.txPerMin, 1);
 
   // Mempool is best-effort inside Aggregate so inclusion metrics still update
-  // if txpool_* is disabled or errors.
-  try {
-    const pool = await rpcJson(L2_RPC_URL, "txpool_status", []);
-    els.aggMempool.textContent = summarizeTxpoolStatus(pool).label;
-  } catch (err) {
-    els.aggMempool.textContent = `unavailable (${err?.message || err})`;
+  // if txpool_* is disabled or errors. Public gateways reject txpool_status
+  // (D-0047) — never call it; show n/a instead.
+  if (PUBLIC_MODE) {
+    els.aggMempool.textContent = "n/a";
+  } else {
+    try {
+      const pool = await rpcJson(L2_RPC_URL, "txpool_status", []);
+      els.aggMempool.textContent = summarizeTxpoolStatus(pool).label;
+    } catch (err) {
+      els.aggMempool.textContent = `unavailable (${err?.message || err})`;
+    }
   }
 }
 
@@ -275,8 +338,13 @@ async function tick() {
     const { l1, l2 } = getProviders();
 
     const results = await Promise.allSettled([
-      refreshSequencer(l2, L2_NODE_RPC_URL).then(() =>
-        setPanelError(els.seqErr, els.panelSequencer, null),
+      refreshSequencer(l2, L2_NODE_RPC_URL).then((result) =>
+        setPanelError(
+          els.seqErr,
+          els.panelSequencer,
+          result?.note || null,
+          Boolean(result?.degraded),
+        ),
       ),
       refreshBatcher(l1).then(() => setPanelError(els.batErr, els.panelBatcher, null)),
       refreshProposer(l1).then(() => setPanelError(els.propErr, els.panelProposer, null)),
@@ -302,11 +370,20 @@ async function tick() {
     });
 
     if (failures === 4) {
-      setStatus("All panels failed — is the stack up? ./scripts/status.sh", true);
+      setStatus(
+        PUBLIC_MODE
+          ? "All panels failed — public gateways or Sepolia L1 unreachable."
+          : "All panels failed — is the stack up? ./scripts/status.sh",
+        true,
+      );
     } else if (failures > 0) {
       setStatus(`${failures} panel(s) failed; others updated.`, true);
     } else {
-      setStatus("Live — polling L1, L2, and op-node.");
+      setStatus(
+        PUBLIC_MODE
+          ? "Live — public replica, sequencer-tip, and Sepolia L1."
+          : "Live — polling L1, L2, and op-node.",
+      );
     }
   } catch (err) {
     setStatus(err?.message || String(err), true);
@@ -323,7 +400,13 @@ async function tick() {
 function applyModeCopy() {
   const lede = document.getElementById("lede");
   if (!lede) return;
-  if (Number(L2_CHAIN_ID) === 852) {
+  if (PUBLIC_MODE) {
+    lede.textContent =
+      `Public read-only (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer tip from the ` +
+      "public gateway, safe/finalized from the replica (~3 min lag), batcher posts and " +
+      "proposer games on Ethereum Sepolia. Mempool and op-node sync-status are not available. " +
+      "Sequencer tip is down 23:45–03:00 America/Los_Angeles. Not a block explorer.";
+  } else if (Number(L2_CHAIN_ID) === 852) {
     lede.textContent =
       `Sepolia mode (L2 ${L2_CHAIN_ID} / L1 ${L1_CHAIN_ID}): sequencer heads on loopback, ` +
       "batcher posts and proposer games on Ethereum Sepolia, L2 tx throughput and mempool. " +
