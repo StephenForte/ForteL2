@@ -3987,6 +3987,368 @@ EOS
 fi
 unset _dep_fn _dep_rc _dep_out
 
+# --- alert-watch.sh: funding FAIL + dead recovery agent (offline, PATH shims) ---
+AW_CHECK="$SCRIPT_DIR/alert-watch.sh"
+AW_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-alert-watch.XXXXXX")"
+cleanup_aw_fix() { rm -rf "$AW_FIX"; }
+trap cleanup_aw_fix EXIT
+AW_SHIM="$AW_FIX/shim"
+AW_MOCK="$AW_FIX/mock"
+mkdir -p "$AW_SHIM" "$AW_MOCK" "$AW_FIX/data" "$AW_FIX/bin" "$AW_FIX/deploy"
+# Distinctive token: leak checks cover the full value and every 8-char slice.
+AW_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x'
+AW_REASON='batcher below policy for 24.0 h with no top-up (chainbank-wallet-reconciler)'
+AW_TO='fortel2-alert-watch@example.invalid'
+
+cat > "$AW_FIX/env" <<EOF
+FORTEL2_ROOT=$AW_FIX
+DATA_DIR=$AW_FIX/data
+BIN_DIR=$AW_FIX/bin
+DEPLOY_DIR=$AW_FIX/deploy
+EOF
+
+cat > "$AW_SHIM/curl" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+{
+  printf 'ARG:%s\n' "$@"
+  printf 'END\n'
+} >> "$dir/curl.argv"
+# stdin is the Authorization header — do not copy it to stdout
+cat > "$dir/curl.stdin"
+n=0
+[ -f "$dir/curl.calls" ] && n=$(cat "$dir/curl.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/curl.calls"
+out=""
+writeout=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then out="$a"; fi
+  if [ "$prev" = "-w" ] || [ "$prev" = "--write-out" ]; then writeout="$a"; fi
+  prev="$a"
+done
+body='{"id":"mock-resend"}'
+[ -n "$out" ] && printf '%s\n' "$body" > "$out"
+[ -n "$writeout" ] && printf '%s' "${ALERT_WATCH_CURL_HTTP:-200}"
+exit 0
+EOS
+cat > "$AW_SHIM/osascript" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+{
+  printf 'ARG:%s\n' "$@"
+  printf 'END\n'
+} >> "$dir/osascript.argv"
+n=0
+[ -f "$dir/osascript.calls" ] && n=$(cat "$dir/osascript.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/osascript.calls"
+exit 0
+EOS
+cat > "$AW_SHIM/launchctl" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+{
+  printf 'ARG:%s\n' "$@"
+  printf 'END\n'
+} >> "$dir/launchctl.argv"
+case "$1" in
+  print) ;;
+  bootout|bootstrap|kickstart)
+    echo "alert-watch must not call launchctl $1" >&2
+    exit 99
+    ;;
+  *)
+    echo "unexpected launchctl $1" >&2
+    exit 99
+    ;;
+esac
+if [ "${ALERT_WATCH_LAUNCHCTL_MISSING:-}" = "1" ]; then
+  echo "Could not find service" >&2
+  exit 1
+fi
+printf 'gui/501/com.steve.fortel2-resolve-games = {\n\tstate = not running\n\tlast exit code = %s\n\truns = 10\n}\n' \
+  "${ALERT_WATCH_LAUNCHCTL_EXIT:-0}"
+exit 0
+EOS
+chmod +x "$AW_SHIM/curl" "$AW_SHIM/osascript" "$AW_SHIM/launchctl"
+
+aw_reset_mock() {
+  rm -f "$AW_MOCK"/curl.argv "$AW_MOCK"/curl.stdin "$AW_MOCK"/curl.calls \
+    "$AW_MOCK"/osascript.argv "$AW_MOCK"/osascript.calls "$AW_MOCK"/launchctl.argv
+}
+aw_touch_logs() {
+  : > "$AW_FIX/resolve.out.log"
+  : > "$AW_FIX/resolve.err.log"
+}
+aw_write_json() {
+  local verdict="$1" reason="$2"
+  printf '{"verdict":"%s","reason":"%s"}\n' "$verdict" "$reason" > "$AW_FIX/funding-health.json"
+}
+aw_run() {
+  # FORTEL2_ENV fixture has no TOKEN/email keys, so caller-supplied values survive set -a.
+  env -u RESEND_API_TOKEN \
+    PATH="$AW_SHIM:$PATH" \
+    FORTEL2_ENV="$AW_FIX/env" \
+    ALERT_WATCH_MOCK_DIR="$AW_MOCK" \
+    ALERT_WATCH_FUNDING_JSON="$AW_FIX/funding-health.json" \
+    ALERT_WATCH_STATE="$AW_FIX/state.json" \
+    ALERT_WATCH_RESOLVE_OUT="$AW_FIX/resolve.out.log" \
+    ALERT_WATCH_RESOLVE_ERR="$AW_FIX/resolve.err.log" \
+    ALERT_WATCH_CURL="$AW_SHIM/curl" \
+    ALERT_WATCH_OSASCRIPT="$AW_SHIM/osascript" \
+    ALERT_WATCH_LAUNCHCTL="$AW_SHIM/launchctl" \
+    ALERT_EMAIL_TO="$AW_TO" \
+    "$@"
+}
+
+# (1) FAIL verdict → both channels; email payload carries the reason.
+aw_reset_mock
+aw_touch_logs
+aw_write_json "FAIL" "$AW_REASON"
+rm -f "$AW_FIX/state.json"
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+AW_HAY="${AW_OUT}$(cat "$AW_MOCK/curl.argv" 2>/dev/null)$(cat "$AW_MOCK/osascript.argv" 2>/dev/null)"
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && [[ "$(cat "$AW_MOCK/curl.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -F -q -- "$AW_REASON" "$AW_MOCK/curl.argv" \
+   && grep -F -q -- "$AW_REASON" "$AW_MOCK/osascript.argv"; then
+  echo "PASS alert-watch FAIL verdict invokes both channels and emails the reason"
+else
+  echo "FAIL alert-watch FAIL verdict should send banner+email containing the reason (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+
+# (5) Token never on argv or in script output (full value + 8-char slices).
+if ! _f710_key_leaked "$AW_HAY" "$AW_TOKEN" ""; then
+  echo "PASS alert-watch token absent from curl/osascript argv and script output"
+else
+  echo "FAIL alert-watch leaked RESEND_API_TOKEN (or an 8-char slice) into argv/output" >&2
+  fail=1
+fi
+if grep -qF -- '--header' "$AW_MOCK/curl.argv" && grep -qF -- '@-' "$AW_MOCK/curl.argv" \
+   && ! grep -qi 'Authorization' "$AW_MOCK/curl.argv"; then
+  echo "PASS alert-watch passes Authorization via --header @- not argv"
+else
+  echo "FAIL alert-watch must pass the Resend token via --header @- (not -H argv)" >&2
+  fail=1
+fi
+
+# (2) Stale funding-health.json (even with OK verdict) → alert.
+aw_reset_mock
+aw_touch_logs
+aw_write_json "OK" "balance at or above the funding policy minimum"
+python3 - "$AW_FIX/funding-health.json" <<'PY'
+import os, sys, time
+p = sys.argv[1]
+now = time.time()
+os.utime(p, (now - 27 * 3600, now - 27 * 3600))
+PY
+rm -f "$AW_FIX/state.json"
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && [[ "$(cat "$AW_MOCK/curl.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -qi 'stale' "$AW_MOCK/osascript.argv"; then
+  echo "PASS alert-watch stale funding-health.json alerts"
+else
+  echo "FAIL alert-watch should alert on a >26h funding-health.json (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+
+# (3) Fresh OK + fresh agent logs → no alert, exit 0.
+aw_reset_mock
+aw_touch_logs
+aw_write_json "OK" "balance at or above the funding policy minimum"
+rm -f "$AW_FIX/state.json"
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ ! -f "$AW_MOCK/osascript.calls" ]] \
+   && [[ ! -f "$AW_MOCK/curl.calls" ]]; then
+  echo "PASS alert-watch fresh OK JSON + fresh agent logs is quiet"
+else
+  echo "FAIL alert-watch should exit 0 with no sends on fresh OK + fresh logs (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+
+# (4) Same condition twice inside cooldown → one send; distinct second still alerts.
+aw_reset_mock
+aw_touch_logs
+aw_write_json "FAIL" "$AW_REASON"
+rm -f "$AW_FIX/state.json"
+aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" >/dev/null 2>&1 || true
+AW_C1="$(cat "$AW_MOCK/curl.calls" 2>/dev/null || echo 0)"
+aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" >/dev/null 2>&1 || true
+AW_C2="$(cat "$AW_MOCK/curl.calls" 2>/dev/null || echo 0)"
+AW_B2="$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)"
+if [[ "$AW_C1" -eq 1 && "$AW_C2" -eq 1 && "$AW_B2" -eq 1 ]]; then
+  echo "PASS alert-watch cooldown suppresses a second send of the same condition"
+else
+  echo "FAIL alert-watch should send once per condition inside ALERT_REALERT_HOURS (c1=$AW_C1 c2=$AW_C2 b2=$AW_B2)" >&2
+  fail=1
+fi
+# Age the FAIL file so health-stale is a new condition while funding-fail is cooled.
+python3 - "$AW_FIX/funding-health.json" <<'PY'
+import os, sys, time
+p = sys.argv[1]
+now = time.time()
+os.utime(p, (now - 27 * 3600, now - 27 * 3600))
+PY
+aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" >/dev/null 2>&1 || true
+AW_C3="$(cat "$AW_MOCK/curl.calls" 2>/dev/null || echo 0)"
+AW_B3="$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)"
+if [[ "$AW_C3" -eq 2 && "$AW_B3" -eq 2 ]]; then
+  echo "PASS alert-watch distinct second condition alerts during cooldown"
+else
+  echo "FAIL alert-watch should send immediately for a new condition (c3=$AW_C3 b3=$AW_B3)" >&2
+  fail=1
+fi
+
+# (6) Missing RESEND_API_TOKEN → banner fires, email skipped loudly, nonzero exit.
+aw_reset_mock
+aw_touch_logs
+aw_write_json "FAIL" "$AW_REASON"
+rm -f "$AW_FIX/state.json"
+AW_OUT="$(aw_run "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -ne 0 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && [[ ! -f "$AW_MOCK/curl.calls" ]] \
+   && [[ "$AW_OUT" == *"RESEND_API_TOKEN"* ]] \
+   && [[ "$AW_OUT" == *"email skipped"* ]]; then
+  echo "PASS alert-watch missing token still banners and exits nonzero"
+else
+  echo "FAIL alert-watch missing RESEND_API_TOKEN must banner, skip email loudly, exit nonzero (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+
+# WARN / INSUFFICIENT are inside the documented tolerance — no alert.
+aw_reset_mock
+aw_touch_logs
+aw_write_json "WARN" "below policy, inside tolerance"
+rm -f "$AW_FIX/state.json"
+AW_WARN_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_WARN_EC=0 || AW_WARN_EC=$?
+aw_write_json "INSUFFICIENT" "no samples file"
+AW_INS_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_INS_EC=0 || AW_INS_EC=$?
+if [[ "$AW_WARN_EC" -eq 0 && "$AW_INS_EC" -eq 0 ]] \
+   && [[ ! -f "$AW_MOCK/osascript.calls" ]] \
+   && [[ ! -f "$AW_MOCK/curl.calls" ]]; then
+  echo "PASS alert-watch WARN and INSUFFICIENT do not alert"
+else
+  echo "FAIL alert-watch must not alert on WARN/INSUFFICIENT (warn=$AW_WARN_EC ins=$AW_INS_EC)" >&2
+  echo "$AW_WARN_OUT" >&2
+  echo "$AW_INS_OUT" >&2
+  fail=1
+fi
+
+# Fresh JSON whose verdict is missing or not OK/WARN/INSUFFICIENT/FAIL is unknown, not quiet.
+aw_reset_mock
+aw_touch_logs
+printf '{"reason":"no verdict field"}\n' > "$AW_FIX/funding-health.json"
+rm -f "$AW_FIX/state.json"
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+AW_MISS_B="$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)"
+aw_reset_mock
+printf '{"verdict":"failing","reason":"advisory label is not a watcher verdict"}\n' > "$AW_FIX/funding-health.json"
+rm -f "$AW_FIX/state.json"
+AW_BAD_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_BAD_EC=0 || AW_BAD_EC=$?
+if [[ "$AW_EC" -eq 0 && "$AW_BAD_EC" -eq 0 ]] \
+   && [[ "$AW_MISS_B" -eq 1 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -qi 'unrecognized verdict' "$AW_MOCK/osascript.argv"; then
+  echo "PASS alert-watch unknown fresh verdict alerts rather than failing open"
+else
+  echo "FAIL alert-watch must alert on a missing/unknown verdict (ec=$AW_EC bad=$AW_BAD_EC miss_b=$AW_MISS_B)" >&2
+  echo "$AW_OUT" >&2
+  echo "$AW_BAD_OUT" >&2
+  fail=1
+fi
+
+# :00 agent / :30 watcher: 1.5 h (one miss) is quiet; 2 h 25 m (two misses at 02:30) alerts.
+# The old 2.5 h threshold missed that 02:30 check.
+aw_age_logs() {
+  python3 - "$AW_FIX/resolve.out.log" "$AW_FIX/resolve.err.log" "$1" <<'PY'
+import os, sys, time
+age = int(sys.argv[3])
+now = time.time()
+for p in sys.argv[1:3]:
+    os.utime(p, (now - age, now - age))
+PY
+}
+aw_reset_mock
+aw_touch_logs
+aw_write_json "OK" "balance at or above the funding policy minimum"
+rm -f "$AW_FIX/state.json"
+aw_age_logs 5400   # 1.5 h
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ ! -f "$AW_MOCK/osascript.calls" ]] \
+   && [[ ! -f "$AW_MOCK/curl.calls" ]]; then
+  echo "PASS alert-watch one missed resolve-games cycle (1.5 h) is quiet"
+else
+  echo "FAIL alert-watch must not alert after a single missed :00 cycle (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+aw_reset_mock
+aw_touch_logs
+aw_write_json "OK" "balance at or above the funding policy minimum"
+rm -f "$AW_FIX/state.json"
+aw_age_logs 8700   # 2 h 25 m — 02:30 after last success at ~00:05
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -qi 'resolve-games' "$AW_MOCK/osascript.argv"; then
+  echo "PASS alert-watch two missed resolve-games cycles (2 h 25 m) alerts"
+else
+  echo "FAIL alert-watch must alert by the 02:30 check after two missed :00 runs (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+
+# --test is a first-class shakeout path, tagged TEST, both channels.
+aw_reset_mock
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" --test 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && [[ "$(cat "$AW_MOCK/curl.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -q 'TEST' "$AW_MOCK/osascript.argv" \
+   && grep -q 'TEST' "$AW_MOCK/curl.argv"; then
+  echo "PASS alert-watch --test tags TEST and hits both channels"
+else
+  echo "FAIL alert-watch --test should send a TEST-tagged alert on both channels (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+
+# Read-only launchctl: the watcher source must not mention mutating verbs as commands.
+# (The word "bootstrap" in a comment about the operator's install is the trap — allow
+# comments; forbid the tokens as launchctl arguments in the executable path.)
+if ! grep -E 'launchctl[[:space:]]+(bootout|bootstrap|kickstart)' "$AW_CHECK" \
+   && grep -q 'launchctl' "$AW_CHECK" \
+   && grep -q 'StartCalendarInterval' "$SCRIPT_DIR/../launchd/com.steve.fortel2-alerts.plist" \
+   && grep -q 'Library/Logs/fortel2-alerts' "$SCRIPT_DIR/../launchd/com.steve.fortel2-alerts.plist" \
+   && ! grep -q 'data/.*\.log' "$SCRIPT_DIR/../launchd/com.steve.fortel2-alerts.plist"; then
+  echo "PASS alert-watch is launchctl-print-only; alerts plist uses calendar + Library/Logs"
+else
+  echo "FAIL alert-watch/plist must be read-only launchctl, StartCalendarInterval, ~/Library/Logs" >&2
+  fail=1
+fi
+
+cleanup_aw_fix
+trap - EXIT
+unset AW_CHECK AW_FIX AW_SHIM AW_MOCK AW_TOKEN AW_REASON AW_TO AW_OUT AW_EC AW_HAY
+unset AW_C1 AW_C2 AW_C3 AW_B2 AW_B3 AW_WARN_OUT AW_WARN_EC AW_INS_OUT AW_INS_EC
+unset AW_BAD_OUT AW_BAD_EC AW_MISS_B
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
