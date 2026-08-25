@@ -252,6 +252,14 @@ body {
   letter-spacing: 0.6px;
 }
 
+.panel.is-degraded .panel-title::after {
+  content: " · UNAVAILABLE";
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.6px;
+}
+
 /* Story-block title inside a color block: sans, weight 540 */
 .panel-title {
   margin: 0 0 1.25rem;

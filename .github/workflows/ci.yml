@@ -65,6 +65,31 @@ jobs:
       - name: Pipeline viewer + dApp unit tests
         run: node --test viewer/lib.test.js dapp/lib.test.js
 
+      - name: Public viewer origin allowlist
+        run: ./scripts/build-public-viewer.sh
+
+      - name: Public viewer refuses tracked output paths
+        run: |
+          set -euo pipefail
+          scripts_sentinel=scripts/test-helpers.sh
+          scripts_hash=$(cksum < "$scripts_sentinel")
+          fonts_sentinel=viewer/fonts/fonts.css
+          fonts_hash=$(cksum < "$fonts_sentinel")
+          if PUBLIC_VIEWER_OUT=scripts ./scripts/build-public-viewer.sh; then
+            echo "FAIL: expected refusal for PUBLIC_VIEWER_OUT=scripts" >&2
+            exit 1
+          fi
+          test -f "$scripts_sentinel"
+          test "$(cksum < "$scripts_sentinel")" = "$scripts_hash"
+          if PUBLIC_VIEWER_OUT=viewer/fonts ./scripts/build-public-viewer.sh; then
+            echo "FAIL: expected refusal for PUBLIC_VIEWER_OUT=viewer/fonts" >&2
+            exit 1
+          fi
+          test -f "$fonts_sentinel"
+          test "$(cksum < "$fonts_sentinel")" = "$fonts_hash"
+          test -f viewer/fonts/inter-var.ttf
+          test -f viewer/fonts/jetbrains-mono-var.ttf
+
       - name: Block viewer unit tests
         run: node --test blocks/lib.test.js
 
