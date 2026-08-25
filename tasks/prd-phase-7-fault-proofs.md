@@ -81,7 +81,7 @@ Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SO
 > **STATUS 2026-08-22 — steps 2 through 9 are COMPLETE (D-0068). Do not re-run them.**
 > The wipe executed: chain 852 is live on new L1 proxies, the replica derives the same chain, and
 > `rail-interface.json` is at v7. Re-running step 3 would wipe the network a second time.
-> **Step 10 (SOS recovery) is also complete — D-0069. Step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24. Step 11 (valid game watched, unattacked) is complete — D-0082.** Outstanding: steps 12–13; item 5's markers landed in #136.
+> **Step 10 (SOS recovery) is also complete — D-0069. Step 8b (fault-proof game, gate F7-12) is complete — D-0077, 2026-08-24. Step 11 (valid game watched, unattacked) is complete — D-0082. Step 12 (bad proposal defeated) is complete — D-0083.** Outstanding: step 13 (closeout note); item 5's markers landed in #136.
 
 | # | When | What | Story |
 |---|---|---|---|
@@ -100,7 +100,7 @@ Keep `deployments/rail-interface.json` at **v6** until step 9. v6 is the live SO
 | 9 | **DONE 2026-08-22** (PR #115) — after step 3 addresses are in git | Bump `rail-interface.json` to **v7** with the new `bridge.*` proxies. Leave v6 until this step | **US-072** |
 | 10 | **DONE 2026-08-22 (D-0069)** — SOS-owned. Full deploy, *not* adopt: the overlay survived while the contracts did not. Settlement pair escrow `0x1f75f257…4c96` / settlement `0x4a17351c…a5cc`, both `status=0x1`; explorer re-keyed (settlementos-explorer#58). **The old contract addresses are reassigned, not empty** — two invert token decimals (D-0069 Finding 2) | SOS redeploys-or-adopts on 852, re-seeds wallets, re-verifies one settlement, republishes their address book | G5 |
 | 11 | **DONE 2026-08-24 16:23 PDT (D-0082)** — network healthy | Stock proposer posts a valid game; `op-challenger` does not fault it | **US-073** |
-| 12 | Isolated | Deliberately bad proposal; challenger wins; kill the bad path | **US-074** |
+| 12 | **DONE 2026-08-24 18:52 PDT (D-0083)** — isolated | Deliberately bad proposal; challenger wins; kill the bad path | **US-074** |
 | 13 | Closeout | README note: what the game proved vs what is still trusted | **US-075** |
 
 What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155111, public read URLs, unpublished Access write path, nightly 23:45–03:00 window. What is **rewritten**: every `bridge.*` proxy, SOS escrow / mocks / `TokenizedMMF`, cited tx hashes.
@@ -113,7 +113,7 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 | **US-071** | Announce (≥1 day) + stop writers + redeploy Sepolia L1 + new genesis | **DONE 2026-08-22 (D-0068).** Notice 2026-08-21 20:00Z (D-0067); writers stopped ≈21:05Z; apply completed 21:14:51Z, spend 0.10781 ETH; 13 L1 proxies rotated |
 | **US-072** | Pack / publish replica artifacts + coordinated wipe + hash cross-check | **DONE 2026-08-22 (D-0068).** Published to fortel2-replica at `bebddc3`; both datadirs wiped; stack restarted 21:44Z; hash cross-check matched first try 21:50Z; `rail-interface.json` at v7 (#115). **Step 10 also complete — D-0069** |
 | **US-073** | Stock proposer posts a valid game; `op-challenger` watches and does not fault it | **Done 2026-08-24 (D-0082)** — game 66 unattacked through its full lifecycle, resolved DEFENDER_WINS |
-| **US-074** | Deliberately bad proposal; `op-challenger` wins the dispute | Not started |
+| **US-074** | Deliberately bad proposal; `op-challenger` wins the dispute | **Done 2026-08-24 (D-0083)** — game 69 defeated CHALLENGER_WINS |
 | **US-075** | Operator write-up: what the game proved, what is still trusted | Not started |
 
 ## User stories
@@ -175,10 +175,10 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 
 **Acceptance Criteria:**
 
-- [ ] A bad proposal is created in a documented, isolated way (stock test hook or a one-shot script). Do not leave a hostile proposer running
-- [ ] `op-challenger` takes the challenger side and the game resolves in favor of the honest claim
-- [ ] Tx hashes + game address recorded
-- [ ] Kill switch: stop the bad-proposal path; stock proposer remains the only writer
+- [x] A bad proposal is created in a documented, isolated way (stock test hook or a one-shot script). Do not leave a hostile proposer running — **done (D-0083)**: one-shot `create-bad-proposal-sepolia.sh` with `CONFIRM_BAD_PROPOSAL_SEPOLIA=1` + `-i-understand-this-posts-a-false-claim`; exits after one create
+- [x] `op-challenger` takes the challenger side and the game resolves in favor of the honest claim — **done (D-0083)**: game 69 attacked at depth 1 with the true root, resolved status 1 CHALLENGER_WINS; `respectedGameType` stayed 8, anchor unpoisoned
+- [x] Tx hashes + game address recorded — **done (D-0083)**: proxy `0xd39B5353…9349`, L2 seq 90970, corrupted root `0x9fe3…f27a` vs true `0x9fe3…f285`; **create** `0xe669394f…55ac`, **challenger counter (attack)** `0x95fe72bb…7b36`, **resolveClaim** `0x1708686a…a910` + `0xaf69a2ce…d4d6`, **resolve** `0x27afa0fd…9e32`
+- [x] Kill switch: stop the bad-proposal path; stock proposer remains the only writer — **done (D-0083)**: one-shot tool leaves nothing running; stock proposer restarted post-run
 
 ### US-075: Trust-model write-up
 
