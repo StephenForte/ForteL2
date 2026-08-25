@@ -4249,6 +4249,71 @@ else
   fail=1
 fi
 
+# Fresh JSON whose verdict is missing or not OK/WARN/INSUFFICIENT/FAIL is unknown, not quiet.
+aw_reset_mock
+aw_touch_logs
+printf '{"reason":"no verdict field"}\n' > "$AW_FIX/funding-health.json"
+rm -f "$AW_FIX/state.json"
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+AW_MISS_B="$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)"
+aw_reset_mock
+printf '{"verdict":"failing","reason":"advisory label is not a watcher verdict"}\n' > "$AW_FIX/funding-health.json"
+rm -f "$AW_FIX/state.json"
+AW_BAD_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_BAD_EC=0 || AW_BAD_EC=$?
+if [[ "$AW_EC" -eq 0 && "$AW_BAD_EC" -eq 0 ]] \
+   && [[ "$AW_MISS_B" -eq 1 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -qi 'unrecognized verdict' "$AW_MOCK/osascript.argv"; then
+  echo "PASS alert-watch unknown fresh verdict alerts rather than failing open"
+else
+  echo "FAIL alert-watch must alert on a missing/unknown verdict (ec=$AW_EC bad=$AW_BAD_EC miss_b=$AW_MISS_B)" >&2
+  echo "$AW_OUT" >&2
+  echo "$AW_BAD_OUT" >&2
+  fail=1
+fi
+
+# :00 agent / :30 watcher: 1.5 h (one miss) is quiet; 2 h 25 m (two misses at 02:30) alerts.
+# The old 2.5 h threshold missed that 02:30 check.
+aw_age_logs() {
+  python3 - "$AW_FIX/resolve.out.log" "$AW_FIX/resolve.err.log" "$1" <<'PY'
+import os, sys, time
+age = int(sys.argv[3])
+now = time.time()
+for p in sys.argv[1:3]:
+    os.utime(p, (now - age, now - age))
+PY
+}
+aw_reset_mock
+aw_touch_logs
+aw_write_json "OK" "balance at or above the funding policy minimum"
+rm -f "$AW_FIX/state.json"
+aw_age_logs 5400   # 1.5 h
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ ! -f "$AW_MOCK/osascript.calls" ]] \
+   && [[ ! -f "$AW_MOCK/curl.calls" ]]; then
+  echo "PASS alert-watch one missed resolve-games cycle (1.5 h) is quiet"
+else
+  echo "FAIL alert-watch must not alert after a single missed :00 cycle (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+aw_reset_mock
+aw_touch_logs
+aw_write_json "OK" "balance at or above the funding policy minimum"
+rm -f "$AW_FIX/state.json"
+aw_age_logs 8700   # 2 h 25 m — 02:30 after last success at ~00:05
+AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" 2>&1)" && AW_EC=0 || AW_EC=$?
+if [[ "$AW_EC" -eq 0 ]] \
+   && [[ "$(cat "$AW_MOCK/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -qi 'resolve-games' "$AW_MOCK/osascript.argv"; then
+  echo "PASS alert-watch two missed resolve-games cycles (2 h 25 m) alerts"
+else
+  echo "FAIL alert-watch must alert by the 02:30 check after two missed :00 runs (ec=$AW_EC)" >&2
+  echo "$AW_OUT" >&2
+  fail=1
+fi
+
 # --test is a first-class shakeout path, tagged TEST, both channels.
 aw_reset_mock
 AW_OUT="$(aw_run RESEND_API_TOKEN="$AW_TOKEN" "$AW_CHECK" --test 2>&1)" && AW_EC=0 || AW_EC=$?
@@ -4282,6 +4347,7 @@ cleanup_aw_fix
 trap - EXIT
 unset AW_CHECK AW_FIX AW_SHIM AW_MOCK AW_TOKEN AW_REASON AW_TO AW_OUT AW_EC AW_HAY
 unset AW_C1 AW_C2 AW_C3 AW_B2 AW_B3 AW_WARN_OUT AW_WARN_EC AW_INS_OUT AW_INS_EC
+unset AW_BAD_OUT AW_BAD_EC AW_MISS_B
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2

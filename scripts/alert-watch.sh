@@ -10,8 +10,8 @@
 #
 # Conditions (each is a distinct cooldown key):
 #   funding-fail          data/funding-health.json verdict is FAIL (reason is copied)
-#   health-stale          that JSON is missing, unreadable, or older than 26 h
-#   resolve-games-stale   recovery-agent logs older than ~2.5 h (≤ 2 hourly cycles)
+#   health-stale          that JSON is missing, unreadable, unknown-verdict, or >26 h
+#   resolve-games-stale   recovery-agent logs older than 2 h (≤ 2 hourly cycles)
 #   resolve-games-unloaded  launchctl print cannot find the job (read-only)
 #   resolve-games-nonzero   last exit code nonzero on 2 consecutive watcher runs
 #
@@ -76,7 +76,9 @@ STATE_FILE="${ALERT_WATCH_STATE:-$FORTEL2_ROOT/data/alert-watch-state.json}"
 RESOLVE_OUT="${ALERT_WATCH_RESOLVE_OUT:-$HOME/Library/Logs/fortel2-resolve-games.out.log}"
 RESOLVE_ERR="${ALERT_WATCH_RESOLVE_ERR:-$HOME/Library/Logs/fortel2-resolve-games.err.log}"
 HEALTH_STALE_SECS="${ALERT_WATCH_HEALTH_STALE_SECS:-$((26 * 3600))}"
-RESOLVE_STALE_SECS="${ALERT_WATCH_RESOLVE_STALE_SECS:-9000}"  # 2.5 h: two missed :00 runs
+RESOLVE_STALE_SECS="${ALERT_WATCH_RESOLVE_STALE_SECS:-$((2 * 3600))}"
+# Agent :00, watcher :30. One miss → 01:30 sees ~1.5 h (quiet). Two misses →
+# 02:30 sees ~2.5 h. A 2.5 h threshold misses that check (third cycle at 03:30).
 SLEEP_GRACE_SECS="${ALERT_WATCH_SLEEP_GRACE_SECS:-$((3 * 3600))}"
 REALERT_HOURS="${ALERT_REALERT_HOURS:-6}"
 EMAIL_FROM="${ALERT_EMAIL_FROM:-onboarding@resend.dev}"
@@ -271,7 +273,13 @@ else:
         add("funding-fail",
             "ForteL2 funding-watch FAIL",
             "funding-watch verdict FAIL: %s" % (reason or "(no reason in JSON)"))
-    # OK / WARN / INSUFFICIENT / anything else on a fresh file: no funding alert.
+    elif verdict in ("OK", "WARN", "INSUFFICIENT"):
+        pass
+    else:
+        add("health-stale",
+            "ForteL2 health pipeline stale",
+            "health pipeline stale: %s has unrecognized verdict %r — treating as unknown."
+            % (funding_json, verdict))
 
 # --- resolve-games liveness ---
 def log_mtime(path):
