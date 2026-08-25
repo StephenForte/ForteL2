@@ -177,7 +177,7 @@ What **survives** the wipe: `networkId` `fortel2-sepolia`, chain IDs 852 / 11155
 
 - [x] A bad proposal is created in a documented, isolated way (stock test hook or a one-shot script). Do not leave a hostile proposer running — **done (D-0083)**: one-shot `create-bad-proposal-sepolia.sh` with `CONFIRM_BAD_PROPOSAL_SEPOLIA=1` + `-i-understand-this-posts-a-false-claim`; exits after one create
 - [x] `op-challenger` takes the challenger side and the game resolves in favor of the honest claim — **done (D-0083)**: game 69 attacked at depth 1 with the true root, resolved status 1 CHALLENGER_WINS; `respectedGameType` stayed 8, anchor unpoisoned
-- [x] Tx hashes + game address recorded — **done (D-0083)**: proxy `0xd39B5353…9349`, create tx `0xe669394f…55ac`, corrupted root `0x9fe3…f27a` vs true `0x9fe3…f285`, L2 seq 90970
+- [x] Tx hashes + game address recorded — **done (D-0083)**: proxy `0xd39B5353…9349`, L2 seq 90970, corrupted root `0x9fe3…f27a` vs true `0x9fe3…f285`; **create** `0xe669394f…55ac`, **challenger counter (attack)** `0x95fe72bb…7b36`, **resolveClaim** `0x1708686a…a910` + `0xaf69a2ce…d4d6`, **resolve** `0x27afa0fd…9e32`
 - [x] Kill switch: stop the bad-proposal path; stock proposer remains the only writer — **done (D-0083)**: one-shot tool leaves nothing running; stock proposer restarted post-run
 
 ### US-075: Trust-model write-up
