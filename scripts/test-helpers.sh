@@ -3617,14 +3617,20 @@ _bp_run() {
     "$BP_WRAPPER" "$@"
 }
 
-# Focused idiom check: the safe expansion must not crash under set -u with an
-# empty array. On bash 3.2 the bare form is the live crash; on 4.4+ it is not,
-# so a 4.x-only run cannot prove the fix — the wrapper execution below does,
-# and this host's bash version is printed with the result.
-if (set -euo pipefail; _bp_a=(); : "${_bp_a[@]+"${_bp_a[@]}"}"); then
-  echo "PASS safe empty-array expansion under set -u (bash $BASH_VERSION)"
+# Focused idiom check: the *unquoted* ${arr[@]+"${arr[@]}"} form must expand
+# to zero words (not one empty word) under set -u. Outer quotes on bash 4.4+
+# can yield a blank argv that flag.Parse treats as a non-flag.
+if (
+  set -euo pipefail
+  _bp_a=()
+  _bp_n=99
+  _bp_count() { _bp_n=$#; }
+  _bp_count ${_bp_a[@]+"${_bp_a[@]}"}
+  [[ "$_bp_n" -eq 0 ]]
+); then
+  echo "PASS unquoted empty-array idiom expands to zero words (bash $BASH_VERSION)"
 else
-  echo "FAIL safe empty-array idiom must succeed under set -u (bash $BASH_VERSION)" >&2
+  echo "FAIL unquoted empty-array idiom must expand to zero words (bash $BASH_VERSION)" >&2
   fail=1
 fi
 if (set -euo pipefail; _bp_a=(); : "${_bp_a[@]}"); then
@@ -3638,13 +3644,26 @@ else
   echo "PASS bare empty-array expansion is unbound under set -u (bash $BASH_VERSION)"
 fi
 
-# Documented no-arg form: empty FORWARD must reach go run, not crash.
+# CI (bash 4+) cannot turn the empty-array crash red. This grep fails if the
+# wrapper reverts to bare "${FORWARD[@]}" — green on 4.x, crash on 3.2.
+if grep -q 'FORWARD\[@\]+' "$BP_WRAPPER" \
+  && ! grep -E '^[[:space:]]*"\$\{FORWARD\[@\]\}"[[:space:]]*\\[[:space:]]*$' "$BP_WRAPPER"; then
+  echo "PASS wrapper go-run uses the bash-3.2-safe FORWARD expansion"
+else
+  echo "FAIL wrapper must not revert to bare \"\${FORWARD[@]}\" (green on bash 4+, crash on 3.2)" >&2
+  fail=1
+fi
+
+# Documented no-arg form: empty FORWARD must reach go run with ZERO extra
+# words (./cmd/bad-proposal immediately followed by -l1), not crash, and
+# not insert a blank argv that would stop flag.Parse.
 BP_EMPTY_OUT="$(_bp_run "$BP_FIX/.env.sepolia" 2>&1)" && BP_EMPTY_EC=0 || BP_EMPTY_EC=$?
 if [[ "$BP_EMPTY_EC" -eq 0 ]] \
   && [[ -f "$BP_FIX/go-args" ]] \
   && ! echo "$BP_EMPTY_OUT" | grep -q 'unbound variable' \
   && ! grep -qx -- '-block' "$BP_FIX/go-args" \
-  && _bp_args_seq "$BP_FIX/go-args" run ./cmd/bad-proposal \
+  && ! grep -qx '' "$BP_FIX/go-args" \
+  && _bp_args_seq "$BP_FIX/go-args" run ./cmd/bad-proposal -l1 \
   && _bp_args_seq "$BP_FIX/go-args" -game-type 8 \
   && _bp_args_seq "$BP_FIX/go-args" -i-understand-this-posts-a-false-claim=true \
   && ! _bp_args_seq "$BP_FIX/go-args" -game-type 1; then
@@ -3652,14 +3671,20 @@ if [[ "$BP_EMPTY_EC" -eq 0 ]] \
 else
   echo "FAIL create-bad-proposal no-arg form must reach go without crashing (ec=$BP_EMPTY_EC bash=$BASH_VERSION)" >&2
   echo "$BP_EMPTY_OUT" >&2
+  if [[ -f "$BP_FIX/go-args" ]]; then
+    echo "go-args:" >&2
+    cat -A "$BP_FIX/go-args" >&2 || cat "$BP_FIX/go-args" >&2
+  fi
   fail=1
 fi
 
-# Working path: -block N still forwards exactly those two words.
+# Working path: -block N still forwards exactly those two words, immediately
+# after the package path, then the guarded -l1.
 BP_BLOCK_OUT="$(_bp_run "$BP_FIX/.env.sepolia" -block 42 2>&1)" && BP_BLOCK_EC=0 || BP_BLOCK_EC=$?
 if [[ "$BP_BLOCK_EC" -eq 0 ]] \
   && [[ -f "$BP_FIX/go-args" ]] \
-  && _bp_args_seq "$BP_FIX/go-args" -block 42 \
+  && ! grep -qx '' "$BP_FIX/go-args" \
+  && _bp_args_seq "$BP_FIX/go-args" run ./cmd/bad-proposal -block 42 -l1 \
   && _bp_args_seq "$BP_FIX/go-args" -game-type 8; then
   echo "PASS create-bad-proposal -block 42 forwards exactly -block 42"
 else

@@ -92,10 +92,11 @@ wait_for_opnode_rpc "$L2_NODE_RPC_URL" "op-node"
 echo "WARN: stop stock op-proposer first (shared PROPOSER_PRIVATE_KEY nonce). See proposer/README.md US-074." >&2
 
 # -block first (allowlisted); guarded endpoints last so they cannot be overridden.
-# bash 3.2 + set -u: empty "${FORWARD[@]}" is unbound (D-0083); the ${arr[@]+...}
-# idiom expands to nothing when empty and is a no-op on bash 4.4+.
+# bash 3.2 + set -u: empty "${FORWARD[@]}" is unbound (D-0083). Use the unquoted
+# ${arr[@]+"${arr[@]}"} idiom: outer quotes on bash 4.4+ can yield a single
+# empty word, which flag.Parse treats as a non-flag and drops -l1/-deployments.
 (cd "$FORTEL2_ROOT/proposer" && go run ./cmd/bad-proposal \
-  "${FORWARD[@]+"${FORWARD[@]}"}" \
+  ${FORWARD[@]+"${FORWARD[@]}"} \
   -l1 "$L1_RPC_URL" \
   -rollup "$L2_NODE_RPC_URL" \
   -deployments "$DEPLOYMENTS" \
