@@ -837,6 +837,11 @@
 - **Decision:** **#152 approved.**
 - **Consequence:** D-0090 F2 and D-0091 3a are closed; **the backlog is empty.** One portability fact worth carrying: `_scan_quote_state_after` uses bash-only `${s:i:1}` substring indexing — every lib.sh consumer has a bash shebang, so fine today, but lib.sh must not be sourced from zsh (a reviewer probe in zsh failed on exactly this). Next free decision id is **D-0094**.
 
+### D-0094 — **US-P7-005 commits to Path A: self-derived genesis replay, compared against the operator's on-chain proposals**
+- **Context:** Backlog empty after #152; scoping the counterparty-verification gap D-0085 left open. Code reading found the verifier tethered to the operator's node **twice**: the expected hash comes from `-ref-l2` (the operator's own EL, `verify.go:84`), and mid-chain anchors are copies of the operator's datadir. Path B (counterparty-replica anchor) alone fixes neither honestly: independence would rest on stock op-node, it needs counterparty infra that is itself blocked on this story, and the answer key would still be the operator's hashes.
+- **Decision:** **Path A.** One-time genesis replay (chain is 3 days post-wipe, ~130k blocks — it will never be cheaper), then the derivation EL's own datadir is the anchor forever (self-anchored incremental audits). The comparison oracle becomes the operator's **type-8 dispute-game proposals on L1** (root claim vs output root computed from the seal EL) — the staked claim is what a counterparty needs audited. Spec: `tasks/frd-us-p7-005-independent-derivation.md` (T1 replay spike → T2 proposal-compare → T3 docs; T1∥T2 allowed, disjoint files). PRD checkbox 1 ("spec chooses one") is satisfied by this entry + the FRD.
+- **Consequence:** Counterparty docs keep consistency-only language until T3 (PRD checkbox 3 unchanged). The replica pack stays blocked until T3. T2 gets the metered Codex review (honesty path). Review ids allocate sequentially from here. Next free decision id is **D-0095**.
+
 ---
 
 ## Escalations
