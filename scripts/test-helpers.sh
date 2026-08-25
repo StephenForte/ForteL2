@@ -4694,6 +4694,176 @@ fi
 unset _kg_fn _kg_dup_fn _kg_rc _kg_out _kg_mismatch _kg_key _kg_addr _kg_addr_lc _kg_other
 unset CHALLENGER_SEPOLIA
 
+# --- help-range (content-anchored --help) + quoted multi-line env scanner -----
+_hr_help_out=""
+_hr_help_rc=0
+_hr_help_out="$(FORTEL2_ENV=.env.sepolia.example "$SCRIPT_DIR/funding-watch.sh" --help 2>&1)" || _hr_help_rc=$?
+if [[ "$_hr_help_rc" == "0" ]] \
+  && printf '%s' "$_hr_help_out" | grep -q 'FUNDING_STALE_HOURS' \
+  && printf '%s' "$_hr_help_out" | grep -q 'FUNDING_HEALTH_TIMEOUT' \
+  && ! printf '%s' "$_hr_help_out" | grep -q 'set -euo pipefail'; then
+  echo "PASS funding-watch.sh --help prints the env-key table (exit 0)"
+else
+  echo "FAIL funding-watch.sh --help must print FUNDING_STALE_HOURS and FUNDING_HEALTH_TIMEOUT, exit 0, and not dump the script body (ec=$_hr_help_rc)" >&2
+  fail=1
+fi
+
+_hr_help_rc=0
+_hr_help_out="$(FORTEL2_ENV=.env.sepolia.example "$SCRIPT_DIR/alert-watch.sh" --help 2>&1)" || _hr_help_rc=$?
+if [[ "$_hr_help_rc" == "0" ]] \
+  && printf '%s' "$_hr_help_out" | grep -q 'RESEND_API_TOKEN' \
+  && printf '%s' "$_hr_help_out" | grep -q 'ALERT_WATCH_HEALTH_STALE_SECS' \
+  && printf '%s' "$_hr_help_out" | grep -q 'ALERT_WATCH_CURL' \
+  && ! printf '%s' "$_hr_help_out" | grep -q 'set -euo pipefail'; then
+  echo "PASS alert-watch.sh --help prints the full header including test-only env keys (exit 0)"
+else
+  echo "FAIL alert-watch.sh --help must print the env-key table through ALERT_WATCH_CURL, exit 0, and not dump the script body (ec=$_hr_help_rc)" >&2
+  fail=1
+fi
+
+if grep -qE "sed -n '2,[0-9]+p'" "$SCRIPT_DIR/funding-watch.sh" \
+  || grep -qE "sed -n '2,[0-9]+p'" "$SCRIPT_DIR/alert-watch.sh"; then
+  echo "FAIL funding-watch.sh / alert-watch.sh --help must not use a hard-coded sed line range" >&2
+  fail=1
+else
+  echo "PASS funding-watch.sh and alert-watch.sh --help bounds are not hard-coded line ranges"
+fi
+unset _hr_help_out _hr_help_rc
+
+_ml_dup_fn="$(awk '/^# >>> env-dup$/,/^# <<< env-dup$/' "$SCRIPT_DIR/lib.sh")"
+_ml_dup_dir="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-env-ml.XXXXXX")"
+cleanup_ml_dup() { rm -rf "$_ml_dup_dir"; }
+trap cleanup_ml_dup EXIT
+_ml_dup_run() {
+  local file="$1"
+  local snippet="$_ml_dup_dir/snippet.sh"
+  printf '%s\n' "$_ml_dup_fn" > "$snippet"
+  _ml_rc=0
+  _ml_out="$(
+    (
+      # shellcheck disable=SC1090
+      source "$snippet"
+      FORTEL2_ENV_FILE="$file"
+      refuse_duplicate_env_assignments
+    ) 2>&1
+  )" || _ml_rc=$?
+}
+_ml_scan() {
+  local file="$1"
+  local snippet="$_ml_dup_dir/snippet.sh"
+  printf '%s\n' "$_ml_dup_fn" > "$snippet"
+  (
+    # shellcheck disable=SC1090
+    source "$snippet"
+    _scan_env_assignments "$file"
+  )
+}
+_ml_load() {
+  local file="$1"
+  _ml_load_rc=0
+  _ml_load_out="$(
+    bash -c 'set -euo pipefail
+      set -a
+      # shellcheck disable=SC1090
+      source "$1"
+      set +a
+      if [[ -z "${FOO:-}" ]]; then echo "FOO unset" >&2; exit 2; fi
+      if [[ -n "${BAR:-}" ]]; then echo "BAR leaked" >&2; exit 3; fi
+      printf %s "$FOO"
+    ' bash "$file" 2>&1
+  )" || _ml_load_rc=$?
+}
+
+if [[ -z "$_ml_dup_fn" ]] \
+  || ! printf '%s' "$_ml_dup_fn" | grep -q '^refuse_duplicate_env_assignments()' \
+  || ! printf '%s' "$_ml_dup_fn" | grep -q '^_scan_env_assignments()' \
+  || ! printf '%s' "$_ml_dup_fn" | grep -q '^_scan_quote_state_after()'; then
+  echo "FAIL env-dup markers must extract the scanner, quote-state helper, and refusal (phase7-preflight path)" >&2
+  fail=1
+else
+  cat > "$_ml_dup_dir/dquote.env" <<'EOF'
+FOO="first line
+BAR=looks_like_one
+BAR=looks_like_one
+last line"
+BAZ=ok
+EOF
+  _ml_dup_run "$_ml_dup_dir/dquote.env"
+  _ml_names="$(_ml_scan "$_ml_dup_dir/dquote.env")"
+  _ml_load "$_ml_dup_dir/dquote.env"
+  if [[ "$_ml_rc" == "0" ]] \
+    && [[ "$_ml_load_rc" == "0" ]] \
+    && printf '%s' "$_ml_names" | grep -q 'FOO' \
+    && printf '%s' "$_ml_names" | grep -q 'BAZ' \
+    && ! printf '%s' "$_ml_names" | grep -q 'BAR' \
+    && printf '%s' "$_ml_load_out" | grep -q 'looks_like_one'; then
+    echo "PASS loader accepts a double-quoted multi-line value whose continuation looks like name=value"
+  else
+    echo "FAIL quoted multi-line double-quoted value must not count continuation name=value as assignments (refuse_ec=$_ml_rc load_ec=$_ml_load_rc)" >&2
+    echo "$_ml_out" >&2
+    echo "$_ml_names" >&2
+    echo "$_ml_load_out" >&2
+    fail=1
+  fi
+
+  cat > "$_ml_dup_dir/squote.env" <<'EOF'
+FOO='first line
+BAR=looks_like_one
+BAR=looks_like_one
+last line'
+BAZ=ok
+EOF
+  _ml_dup_run "$_ml_dup_dir/squote.env"
+  _ml_names="$(_ml_scan "$_ml_dup_dir/squote.env")"
+  _ml_load "$_ml_dup_dir/squote.env"
+  if [[ "$_ml_rc" == "0" ]] \
+    && [[ "$_ml_load_rc" == "0" ]] \
+    && printf '%s' "$_ml_names" | grep -q 'FOO' \
+    && ! printf '%s' "$_ml_names" | grep -q 'BAR'; then
+    echo "PASS loader accepts a single-quoted multi-line value whose continuation looks like name=value"
+  else
+    echo "FAIL quoted multi-line single-quoted value must not count continuation name=value as assignments (refuse_ec=$_ml_rc load_ec=$_ml_load_rc)" >&2
+    echo "$_ml_out" >&2
+    echo "$_ml_names" >&2
+    fail=1
+  fi
+
+  cat > "$_ml_dup_dir/realdup.env" <<'EOF'
+FOO="first line
+LOOKSLIKE=1
+LOOKSLIKE=1
+last line"
+DUP=a
+DUP=b
+EOF
+  _ml_dup_run "$_ml_dup_dir/realdup.env"
+  if [[ "$_ml_rc" != "0" ]] \
+    && printf '%s' "$_ml_out" | grep -q 'DUP' \
+    && ! printf '%s' "$_ml_out" | grep -q 'LOOKSLIKE' \
+    && ! printf '%s' "$_ml_out" | grep -q 'FOO'; then
+    echo "PASS loader refuses a real duplicate in a file that also has a multi-line value, naming the real dup only"
+  else
+    echo "FAIL a real duplicate alongside a multi-line value must refuse naming only the real dup (ec=$_ml_rc)" >&2
+    echo "$_ml_out" >&2
+    fail=1
+  fi
+
+  printf '%s\n' 'export FOO=1' 'BAR=2' 'FOO=3' > "$_ml_dup_dir/exportdup.env"
+  _ml_dup_run "$_ml_dup_dir/exportdup.env"
+  if [[ "$_ml_rc" != "0" ]] \
+    && printf '%s' "$_ml_out" | grep -q 'FOO' \
+    && ! printf '%s' "$_ml_out" | grep -q 'BAR'; then
+    echo "PASS loader refuses an export-prefixed duplicate naming the variable only"
+  else
+    echo "FAIL export FOO= then FOO= must refuse naming FOO only (ec=$_ml_rc)" >&2
+    echo "$_ml_out" >&2
+    fail=1
+  fi
+fi
+cleanup_ml_dup
+trap - EXIT
+unset _ml_dup_fn _ml_dup_dir _ml_rc _ml_out _ml_names _ml_load_rc _ml_load_out
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

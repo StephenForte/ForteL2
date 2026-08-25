@@ -63,7 +63,7 @@ DO_TEST=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --test) DO_TEST=1; shift ;;
-    -h|--help) sed -n '2,50p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR==1{next} /^#/{print; next} {exit}' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 64 ;;
   esac
 done

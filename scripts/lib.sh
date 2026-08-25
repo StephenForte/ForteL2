@@ -35,15 +35,39 @@ _fortel2_resolve_env_file() {
 # Active assignments only: uncommented lines, optional leading whitespace,
 # optional `export ` prefix. Name is the identifier before the first `=`.
 # Never prints values — a value containing `=` is still one assignment of the
-# name. Commented lines (`# KEY=`) are ignored. D-0066 Finding 5: duplicates
-# belong in the loader; absence does not (F7-11 stays deploy-path-only).
+# name. Commented lines (`# KEY=`) are ignored. Lines inside an unclosed
+# quoted value are not assignments. D-0066 Finding 5: duplicates belong in
+# the loader; absence does not (F7-11 stays deploy-path-only).
+
+# Quote state after scanning s. $1 is the current state (empty, ' or ").
+# Toggles on the matching quote character; not a full shell parser.
+_scan_quote_state_after() {
+  local state="${1-}" s="$2" i=0 c
+  while [[ $i -lt ${#s} ]]; do
+    c="${s:i:1}"
+    if [[ -z "$state" ]]; then
+      case "$c" in
+        \'|\") state="$c" ;;
+      esac
+    elif [[ "$c" == "$state" ]]; then
+      state=""
+    fi
+    i=$((i + 1))
+  done
+  printf '%s' "$state"
+}
+
 _scan_env_assignments() {
   local file="${1:-${FORTEL2_ENV_FILE:-}}"
-  local lineno=0 line trimmed name
+  local lineno=0 line trimmed name in_quote=""
   [[ -n "$file" && -f "$file" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
     lineno=$((lineno + 1))
     line="${line%$'\r'}"
+    if [[ -n "$in_quote" ]]; then
+      in_quote="$(_scan_quote_state_after "$in_quote" "$line")"
+      continue
+    fi
     trimmed="${line#"${line%%[![:space:]]*}"}"
     [[ -z "$trimmed" ]] && continue
     [[ "$trimmed" == \#* ]] && continue
@@ -55,6 +79,7 @@ _scan_env_assignments() {
     name="${trimmed%%=*}"
     [[ "$name" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] || continue
     printf '%s %s\n' "$lineno" "$name"
+    in_quote="$(_scan_quote_state_after "" "$trimmed")"
   done < "$file"
 }
 
