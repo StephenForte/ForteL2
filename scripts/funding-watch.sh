@@ -57,7 +57,7 @@ JSON_OUT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) JSON_OUT="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,48p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 64 ;;
   esac
 done
