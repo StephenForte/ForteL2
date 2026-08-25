@@ -5170,6 +5170,15 @@ fi
 unset _sa_help _sa_make_out _sa_make_ec _sa_ad_out _sa_ad_ec _sa_fn _sa_eval \
   _sa_ns0 _sa_ns20 _sa_ok_g _sa_bad_g _sa_ok_r _sa_bad_r _sa_gap
 
+# Rate math must not run on legacy success paths (python3 missing → skip PASS).
+if ! grep -q 'python3' "$DERIV_CHECK" \
+  && grep -B20 'VERIFY_RATE=' "$DERIV_CHECK" | grep -q 'SELF_ANCHOR'; then
+  echo "PASS self-anchor rate math is awk-only and confined to --self-anchor"
+else
+  echo "FAIL seal-rate math must not run (or require python3) on legacy derivation-check paths" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

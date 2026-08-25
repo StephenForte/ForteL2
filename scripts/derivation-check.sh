@@ -349,7 +349,9 @@ if [[ "$SCAN_FROM_GENESIS" -eq 1 ]]; then
 fi
 
 echo "Running derivation verifier blocks ${START_L2}-${END_L2} ..."
-VERIFY_T0="$(date +%s)"
+if [[ "$SELF_ANCHOR" -eq 1 ]]; then
+  VERIFY_T0="$(date +%s)"
+fi
 if [[ -n "$JSON_OUT" ]]; then
   mkdir -p "$(dirname "$JSON_OUT")"
   VERIFY_ARGS+=(-json)
@@ -358,14 +360,14 @@ if [[ -n "$JSON_OUT" ]]; then
 else
   (cd "$FORTEL2_ROOT/derivation" && go run ./cmd/verify "${VERIFY_ARGS[@]}")
 fi
-VERIFY_T1="$(date +%s)"
-VERIFY_ELAPSED=$((VERIFY_T1 - VERIFY_T0))
-if [[ "$VERIFY_ELAPSED" -le 0 ]]; then
-  VERIFY_ELAPSED=1
-fi
-VERIFY_COUNT=$((END_L2 - START_L2 + 1))
-VERIFY_RATE="$(python3 -c "print('{:.4f}'.format($VERIFY_COUNT / float($VERIFY_ELAPSED)))")"
 if [[ "$SELF_ANCHOR" -eq 1 ]]; then
+  VERIFY_T1="$(date +%s)"
+  VERIFY_ELAPSED=$((VERIFY_T1 - VERIFY_T0))
+  if [[ "$VERIFY_ELAPSED" -le 0 ]]; then
+    VERIFY_ELAPSED=1
+  fi
+  VERIFY_COUNT=$((END_L2 - START_L2 + 1))
+  VERIFY_RATE="$(awk -v c="$VERIFY_COUNT" -v e="$VERIFY_ELAPSED" 'BEGIN { printf "%.4f", c / e }')"
   echo "derivation-check: sealed $VERIFY_COUNT blocks in ${VERIFY_ELAPSED}s ($VERIFY_RATE blocks/s) window ${START_L2}-${END_L2}"
 fi
 echo "derivation-check: PASS"
