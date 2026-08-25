@@ -100,3 +100,43 @@ func TestConfirmRequested(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveGameType(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		flag    string
+		env     string
+		want    uint32
+		wantErr bool
+	}{
+		{name: "both empty refuses — no silent type 1", flag: "", env: "", wantErr: true},
+		{name: "whitespace only refuses", flag: "  ", env: "\n", wantErr: true},
+		{name: "unparseable env refuses (not a default)", flag: "", env: "nope", wantErr: true},
+		{name: "unparseable flag refuses", flag: "x", env: "8", wantErr: true},
+		{name: "env 8", flag: "", env: "8", want: 8},
+		{name: "env 8 trimmed", flag: "", env: "  8\n", want: 8},
+		{name: "flag wins over env", flag: "8", env: "1", want: 8},
+		{name: "explicit type 1 is allowed (operator choice)", flag: "1", env: "", want: 1},
+		{name: "explicit type 0 is allowed", flag: "0", env: "", want: 0},
+		{name: "env type 0 is allowed", flag: "", env: "0", want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveGameType(tc.flag, tc.env)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("resolveGameType(%q, %q)=%d, want error", tc.flag, tc.env, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveGameType(%q, %q) unexpected err: %v", tc.flag, tc.env, err)
+			}
+			if got != tc.want {
+				t.Fatalf("resolveGameType(%q, %q)=%d want %d", tc.flag, tc.env, got, tc.want)
+			}
+		})
+	}
+}

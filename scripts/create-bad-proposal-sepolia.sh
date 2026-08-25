@@ -71,6 +71,15 @@ if [[ -z "${PROPOSER_PRIVATE_KEY:-}" ]]; then
   exit 1
 fi
 
+# No silent game-type default. Type 1 is no longer respected post-8b; posting
+# a non-respected type is inert and unchallenged (D-0063 Finding 3c / D-0083).
+# Do not hardcode 8 — the operator must set PROPOSER_GAME_TYPE to the current
+# respected type (or the Go tool refuses the same way if invoked directly).
+if [[ -z "${PROPOSER_GAME_TYPE:-}" ]]; then
+  echo "ERROR: PROPOSER_GAME_TYPE is required (no silent default — a wrong type is inert and unchallenged)" >&2
+  exit 1
+fi
+
 DEPLOYMENTS="$(deployments_json_path)"
 if [[ ! -f "$DEPLOYMENTS" ]]; then
   echo "ERROR: missing $DEPLOYMENTS — run Phase 2b / post-wipe deploy first" >&2
@@ -83,10 +92,12 @@ wait_for_opnode_rpc "$L2_NODE_RPC_URL" "op-node"
 echo "WARN: stop stock op-proposer first (shared PROPOSER_PRIVATE_KEY nonce). See proposer/README.md US-074." >&2
 
 # -block first (allowlisted); guarded endpoints last so they cannot be overridden.
+# bash 3.2 + set -u: empty "${FORWARD[@]}" is unbound (D-0083); the ${arr[@]+...}
+# idiom expands to nothing when empty and is a no-op on bash 4.4+.
 (cd "$FORTEL2_ROOT/proposer" && go run ./cmd/bad-proposal \
-  "${FORWARD[@]}" \
+  "${FORWARD[@]+"${FORWARD[@]}"}" \
   -l1 "$L1_RPC_URL" \
   -rollup "$L2_NODE_RPC_URL" \
   -deployments "$DEPLOYMENTS" \
-  -game-type "${PROPOSER_GAME_TYPE:-1}" \
+  -game-type "${PROPOSER_GAME_TYPE}" \
   -i-understand-this-posts-a-false-claim=true)

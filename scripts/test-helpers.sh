@@ -3540,6 +3540,172 @@ fi
 cleanup_rg_fixtures
 trap - EXIT
 
+# create-bad-proposal-sepolia.sh: empty FORWARD[@] crash (D-0083 Finding 1) and
+# silent game-type default (Finding 5). Structural greps cannot catch the crash;
+# this harness stubs go/cast/jq via BASH_ENV so the wrapper reaches `go run`
+# without broadcasting. Approach: stub on PATH-equivalent (function wins over
+# lib.sh's /opt/homebrew/bin prepend).
+BP_WRAPPER="$SCRIPT_DIR/create-bad-proposal-sepolia.sh"
+BP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-bad-proposal.XXXXXX")"
+cleanup_bp_fix() { rm -rf "$BP_FIX"; }
+trap cleanup_bp_fix EXIT
+
+mkdir -p "$BP_FIX/proposer" "$BP_FIX/data" "$BP_FIX/deployments/sepolia/.deployer"
+printf '%s\n' '{"DisputeGameFactoryProxy":"0x0000000000000000000000000000000000000001"}' \
+  > "$BP_FIX/deployments/sepolia/deployments.json"
+
+cat > "$BP_FIX/.env.sepolia" <<EOF
+FORTEL2_ROOT=$BP_FIX
+DATA_DIR=$BP_FIX/data
+DEPLOY_DIR=$BP_FIX/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_RPC_URL=https://example.invalid
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+PROPOSER_PRIVATE_KEY=0x1111111111111111111111111111111111111111111111111111111111111111
+PROPOSER_GAME_TYPE=8
+EOF
+grep -v '^PROPOSER_GAME_TYPE=' "$BP_FIX/.env.sepolia" > "$BP_FIX/.env.sepolia.nogt"
+
+cat > "$BP_FIX/bashenv.sh" <<'EOS'
+go() {
+  printf '%s\n' "$@" > "$BP_STUB_DIR/go-args"
+  return 0
+}
+cast() {
+  case "${1:-}" in
+    block-number) echo 1 ;;
+    rpc) echo '{"current_l1":{"number":1}}' ;;
+    *) echo 0 ;;
+  esac
+  return 0
+}
+jq() { echo '{}'; return 0; }
+EOS
+
+# Consecutive argv check against the stub's one-arg-per-line dump.
+_bp_args_seq() {
+  local file="$1"
+  shift
+  python3 - "$file" "$@" <<'PY'
+import sys
+path, want = sys.argv[1], sys.argv[2:]
+try:
+    lines = open(path).read().splitlines()
+except OSError:
+    sys.exit(1)
+n = len(want)
+for i in range(0, len(lines) - n + 1):
+    if lines[i:i + n] == want:
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+
+_bp_run() {
+  local envfile="$1"
+  shift
+  rm -f "$BP_FIX/go-args"
+  env -u I_UNDERSTAND_THIS_POSTS_A_FALSE_CLAIM \
+    -u PROPOSER_GAME_TYPE \
+    BP_STUB_DIR="$BP_FIX" \
+    BASH_ENV="$BP_FIX/bashenv.sh" \
+    FORTEL2_ENV="$envfile" \
+    FORTEL2_ROOT="$BP_FIX" \
+    CONFIRM_BAD_PROPOSAL_SEPOLIA=1 \
+    "$BP_WRAPPER" "$@"
+}
+
+# Focused idiom check: the safe expansion must not crash under set -u with an
+# empty array. On bash 3.2 the bare form is the live crash; on 4.4+ it is not,
+# so a 4.x-only run cannot prove the fix — the wrapper execution below does,
+# and this host's bash version is printed with the result.
+if (set -euo pipefail; _bp_a=(); : "${_bp_a[@]+"${_bp_a[@]}"}"); then
+  echo "PASS safe empty-array expansion under set -u (bash $BASH_VERSION)"
+else
+  echo "FAIL safe empty-array idiom must succeed under set -u (bash $BASH_VERSION)" >&2
+  fail=1
+fi
+if (set -euo pipefail; _bp_a=(); : "${_bp_a[@]}"); then
+  if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    echo "FAIL bash $BASH_VERSION should reject empty \${arr[@]} under set -u" >&2
+    fail=1
+  else
+    echo "PASS bare empty-array expansion is bound on bash $BASH_VERSION (crash is 3.2-only)"
+  fi
+else
+  echo "PASS bare empty-array expansion is unbound under set -u (bash $BASH_VERSION)"
+fi
+
+# Documented no-arg form: empty FORWARD must reach go run, not crash.
+BP_EMPTY_OUT="$(_bp_run "$BP_FIX/.env.sepolia" 2>&1)" && BP_EMPTY_EC=0 || BP_EMPTY_EC=$?
+if [[ "$BP_EMPTY_EC" -eq 0 ]] \
+  && [[ -f "$BP_FIX/go-args" ]] \
+  && ! echo "$BP_EMPTY_OUT" | grep -q 'unbound variable' \
+  && ! grep -qx -- '-block' "$BP_FIX/go-args" \
+  && _bp_args_seq "$BP_FIX/go-args" run ./cmd/bad-proposal \
+  && _bp_args_seq "$BP_FIX/go-args" -game-type 8 \
+  && _bp_args_seq "$BP_FIX/go-args" -i-understand-this-posts-a-false-claim=true \
+  && ! _bp_args_seq "$BP_FIX/go-args" -game-type 1; then
+  echo "PASS create-bad-proposal empty FORWARD reaches stub go (bash $BASH_VERSION)"
+else
+  echo "FAIL create-bad-proposal no-arg form must reach go without crashing (ec=$BP_EMPTY_EC bash=$BASH_VERSION)" >&2
+  echo "$BP_EMPTY_OUT" >&2
+  fail=1
+fi
+
+# Working path: -block N still forwards exactly those two words.
+BP_BLOCK_OUT="$(_bp_run "$BP_FIX/.env.sepolia" -block 42 2>&1)" && BP_BLOCK_EC=0 || BP_BLOCK_EC=$?
+if [[ "$BP_BLOCK_EC" -eq 0 ]] \
+  && [[ -f "$BP_FIX/go-args" ]] \
+  && _bp_args_seq "$BP_FIX/go-args" -block 42 \
+  && _bp_args_seq "$BP_FIX/go-args" -game-type 8; then
+  echo "PASS create-bad-proposal -block 42 forwards exactly -block 42"
+else
+  echo "FAIL create-bad-proposal -block must forward exactly (ec=$BP_BLOCK_EC)" >&2
+  echo "$BP_BLOCK_OUT" >&2
+  fail=1
+fi
+
+# Unset PROPOSER_GAME_TYPE must refuse (not silently pass type 1). Pass -block
+# so a pre-fix wrapper would get past the empty-array crash and post type 1.
+BP_NOGT_OUT="$(_bp_run "$BP_FIX/.env.sepolia.nogt" -block 1 2>&1)" && BP_NOGT_EC=0 || BP_NOGT_EC=$?
+if [[ "$BP_NOGT_EC" -ne 0 ]] \
+  && [[ ! -f "$BP_FIX/go-args" ]] \
+  && echo "$BP_NOGT_OUT" | grep -q 'PROPOSER_GAME_TYPE is required' \
+  && ! echo "$BP_NOGT_OUT" | grep -q 'unbound variable'; then
+  echo "PASS create-bad-proposal refuses unset PROPOSER_GAME_TYPE (no silent type 1)"
+else
+  echo "FAIL unset PROPOSER_GAME_TYPE must refuse before go run (ec=$BP_NOGT_EC)" >&2
+  echo "$BP_NOGT_OUT" >&2
+  fail=1
+fi
+
+# Confirm gate still fires before the expansion / go run (must survive).
+rm -f "$BP_FIX/go-args"
+BP_GATE_OUT="$(
+  env -u I_UNDERSTAND_THIS_POSTS_A_FALSE_CLAIM \
+    -u CONFIRM_BAD_PROPOSAL_SEPOLIA \
+    BP_STUB_DIR="$BP_FIX" \
+    BASH_ENV="$BP_FIX/bashenv.sh" \
+    FORTEL2_ENV="$BP_FIX/.env.sepolia" \
+    FORTEL2_ROOT="$BP_FIX" \
+    "$BP_WRAPPER" 2>&1
+)" && BP_GATE_EC=0 || BP_GATE_EC=$?
+if [[ "$BP_GATE_EC" -ne 0 ]] \
+  && [[ ! -f "$BP_FIX/go-args" ]] \
+  && echo "$BP_GATE_OUT" | grep -q 'CONFIRM_BAD_PROPOSAL_SEPOLIA'; then
+  echo "PASS create-bad-proposal confirm gate still blocks before go run"
+else
+  echo "FAIL confirm gate must still fire (ec=$BP_GATE_EC)" >&2
+  echo "$BP_GATE_OUT" >&2
+  fail=1
+fi
+
+cleanup_bp_fix
+trap - EXIT
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
