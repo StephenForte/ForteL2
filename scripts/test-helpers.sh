@@ -2139,6 +2139,12 @@ for _k in "${_env_ex_keys[@]}"; do
     echo "FAIL .env.sepolia.example duplicate uncommented assignment of ${_k}" >&2
     _env_ex_ok=0
   fi
+  # Commented `# KEY=` plus later `KEY=` is the D-0065 overwrite trap (Codex on #145).
+  _c="$(grep -cE "^# ${_k}=" "$ENV_SEPOLIA_EXAMPLE" || true)"
+  if [[ "${_c}" -gt 0 && "${_n}" -gt 0 ]]; then
+    echo "FAIL .env.sepolia.example documents ${_k} as both commented and uncommented" >&2
+    _env_ex_ok=0
+  fi
 done
 if ((_env_ex_ok)); then
   echo "PASS .env.sepolia.example documents challenger/proxy/safedb/8b env vars"
@@ -2146,12 +2152,15 @@ else
   echo "FAIL .env.sepolia.example must document each challenger/proxy/safedb/8b var once (empty or commented)" >&2
   fail=1
 fi
-unset _env_ex_keys _env_ex_ok _k _n
+unset _env_ex_keys _env_ex_ok _k _n _c
 
 # Tripwire: a PRIVATE_KEY= or TOKEN= line (commented or not) must not carry a
-# value. The live .env.sepolia is gitignored; pasting from it is a leak.
-if grep -nE '(PRIVATE_KEY|TOKEN)=.+' "$ENV_SEPOLIA_EXAMPLE"; then
+# value. Report names only — never the value (Codex P2 on #145). The live
+# .env.sepolia is gitignored; pasting from it is a leak.
+if grep -qE '(PRIVATE_KEY|TOKEN)=.+' "$ENV_SEPOLIA_EXAMPLE"; then
   echo "FAIL .env.sepolia.example must not contain a populated PRIVATE_KEY or TOKEN (placeholders only)" >&2
+  grep -E '(PRIVATE_KEY|TOKEN)=.+' "$ENV_SEPOLIA_EXAMPLE" \
+    | sed -E 's/=.*$//; s/^[[:space:]]*#[[:space:]]*//; s/^[[:space:]]*export[[:space:]]+//' >&2 || true
   fail=1
 else
   echo "PASS .env.sepolia.example PRIVATE_KEY/TOKEN values are empty"
