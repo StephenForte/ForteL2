@@ -40,15 +40,30 @@ _fortel2_resolve_env_file() {
 # the loader; absence does not (F7-11 stays deploy-path-only).
 
 # Quote state after scanning s. $1 is the current state (empty, ' or ").
-# Toggles on the matching quote character; not a full shell parser.
+# Toggles on the matching quote character. Unquoted `#` preceded by whitespace
+# (or at column 0) starts a comment and is not quote context. Inside double
+# quotes, `\` skips the next character so `\"` does not close the string.
+# Not a full shell parser.
 _scan_quote_state_after() {
-  local state="${1-}" s="$2" i=0 c
+  local state="${1-}" s="$2" i=0 c prev prevc
   while [[ $i -lt ${#s} ]]; do
     c="${s:i:1}"
     if [[ -z "$state" ]]; then
+      if [[ "$c" == "#" ]]; then
+        if [[ $i -eq 0 ]]; then
+          break
+        fi
+        prev=$((i - 1))
+        prevc="${s:prev:1}"
+        if [[ "$prevc" == [[:blank:]] ]]; then
+          break
+        fi
+      fi
       case "$c" in
         \'|\") state="$c" ;;
       esac
+    elif [[ "$state" == '"' && "$c" == "\\" ]]; then
+      i=$((i + 1))
     elif [[ "$c" == "$state" ]]; then
       state=""
     fi

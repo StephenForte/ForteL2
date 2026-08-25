@@ -4695,9 +4695,11 @@ unset _kg_fn _kg_dup_fn _kg_rc _kg_out _kg_mismatch _kg_key _kg_addr _kg_addr_lc
 unset CHALLENGER_SEPOLIA
 
 # --- help-range (content-anchored --help) + quoted multi-line env scanner -----
+# Use the env file test-helpers already loaded. Forcing .env.sepolia.example
+# makes lib.sh mkdir DATA_DIR under /Users/steveforte/... which fails on CI Linux.
 _hr_help_out=""
 _hr_help_rc=0
-_hr_help_out="$(FORTEL2_ENV=.env.sepolia.example "$SCRIPT_DIR/funding-watch.sh" --help 2>&1)" || _hr_help_rc=$?
+_hr_help_out="$(FORTEL2_ENV="$FORTEL2_ENV_FILE" "$SCRIPT_DIR/funding-watch.sh" --help 2>&1)" || _hr_help_rc=$?
 if [[ "$_hr_help_rc" == "0" ]] \
   && printf '%s' "$_hr_help_out" | grep -q 'FUNDING_STALE_HOURS' \
   && printf '%s' "$_hr_help_out" | grep -q 'FUNDING_HEALTH_TIMEOUT' \
@@ -4705,11 +4707,12 @@ if [[ "$_hr_help_rc" == "0" ]] \
   echo "PASS funding-watch.sh --help prints the env-key table (exit 0)"
 else
   echo "FAIL funding-watch.sh --help must print FUNDING_STALE_HOURS and FUNDING_HEALTH_TIMEOUT, exit 0, and not dump the script body (ec=$_hr_help_rc)" >&2
+  printf '%s\n' "$_hr_help_out" >&2
   fail=1
 fi
 
 _hr_help_rc=0
-_hr_help_out="$(FORTEL2_ENV=.env.sepolia.example "$SCRIPT_DIR/alert-watch.sh" --help 2>&1)" || _hr_help_rc=$?
+_hr_help_out="$(FORTEL2_ENV="$FORTEL2_ENV_FILE" "$SCRIPT_DIR/alert-watch.sh" --help 2>&1)" || _hr_help_rc=$?
 if [[ "$_hr_help_rc" == "0" ]] \
   && printf '%s' "$_hr_help_out" | grep -q 'RESEND_API_TOKEN' \
   && printf '%s' "$_hr_help_out" | grep -q 'ALERT_WATCH_HEALTH_STALE_SECS' \
@@ -4718,6 +4721,7 @@ if [[ "$_hr_help_rc" == "0" ]] \
   echo "PASS alert-watch.sh --help prints the full header including test-only env keys (exit 0)"
 else
   echo "FAIL alert-watch.sh --help must print the env-key table through ALERT_WATCH_CURL, exit 0, and not dump the script body (ec=$_hr_help_rc)" >&2
+  printf '%s\n' "$_hr_help_out" >&2
   fail=1
 fi
 
@@ -4856,6 +4860,33 @@ EOF
     echo "PASS loader refuses an export-prefixed duplicate naming the variable only"
   else
     echo "FAIL export FOO= then FOO= must refuse naming FOO only (ec=$_ml_rc)" >&2
+    echo "$_ml_out" >&2
+    fail=1
+  fi
+
+  printf '%s\n' "FOO=one # don't change" 'DUP=secretA' 'DUP=secretB' > "$_ml_dup_dir/commentquote.env"
+  _ml_dup_run "$_ml_dup_dir/commentquote.env"
+  if [[ "$_ml_rc" != "0" ]] \
+    && printf '%s' "$_ml_out" | grep -q 'DUP' \
+    && ! printf '%s' "$_ml_out" | grep -q 'FOO' \
+    && ! printf '%s' "$_ml_out" | grep -q 'secretA' \
+    && ! printf '%s' "$_ml_out" | grep -q 'secretB'; then
+    echo "PASS loader refuses a duplicate after a trailing comment that contains an apostrophe"
+  else
+    echo "FAIL an apostrophe in a trailing comment must not suppress later duplicate detection (ec=$_ml_rc)" >&2
+    echo "$_ml_out" >&2
+    fail=1
+  fi
+
+  printf '%s\n' 'FOO="a\"b"' 'DUP=secretA' 'DUP=secretB' > "$_ml_dup_dir/escapedquote.env"
+  _ml_dup_run "$_ml_dup_dir/escapedquote.env"
+  if [[ "$_ml_rc" != "0" ]] \
+    && printf '%s' "$_ml_out" | grep -q 'DUP' \
+    && ! printf '%s' "$_ml_out" | grep -q 'FOO' \
+    && ! printf '%s' "$_ml_out" | grep -q 'secretA'; then
+    echo "PASS loader refuses a duplicate after a double-quoted value containing escaped quotes"
+  else
+    echo "FAIL escaped quotes inside a double-quoted value must not leave the scanner in-quote (ec=$_ml_rc)" >&2
     echo "$_ml_out" >&2
     fail=1
   fi
