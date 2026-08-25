@@ -1163,16 +1163,17 @@ else
   fail=1
 fi
 
-# A funder that declares itself broken outranks a healthy-looking local balance:
-# the wallet sits above policy for hours after the job dies.
+# Stale lastRun is a derived fact and still FAILs even when the aggregate label
+# is also "failing". The label itself is advisory; a fresh failing label is
+# asserted separately below. The 2026-08-01 timestamp is months stale.
 printf '{"ts":%d,"batcher_wei":"700000000000000000","proposer_wei":"500000000000000000","l2_block":1}\n' \
   "$FW_NOW" > "$FW_FIXTURE_DIR/rich.jsonl"
 echo '{"status":"failing","lastRun":{"finishedAt":"2026-08-01T00:00:00Z"}}' > "$FW_FIXTURE_DIR/ep-failing.json"
 FW_EP_OUT="$(GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-failing.json" "$FW_CHECK" 2>&1)" && FW_EP_EC=0 || FW_EP_EC=$?
-if [[ "$FW_EP_EC" -ne 0 && "$FW_EP_OUT" == *"status=failing"* ]]; then
-  echo "PASS funding-watch fails on funder endpoint status=failing despite healthy balance"
+if [[ "$FW_EP_EC" -ne 0 && "$FW_EP_OUT" == *"VERDICT: FAIL"* && "$FW_EP_OUT" == *"last finished run"* ]]; then
+  echo "PASS funding-watch fails on a stale last-run even when the rollup also says failing"
 else
-  echo "FAIL funding-watch should fail when the endpoint reports failing (ec=$FW_EP_EC)" >&2
+  echo "FAIL funding-watch must fail a stale run regardless of the rollup label (ec=$FW_EP_EC)" >&2
   echo "$FW_EP_OUT" >&2
   fail=1
 fi
@@ -1261,6 +1262,46 @@ if [[ "$FW_NR3_EC" -eq 0 && "$FW_NR3_OUT" != *"WARNING"* ]]; then
 else
   echo "FAIL another wallet's not_reconciled must not affect us (ec=$FW_NR3_EC)" >&2
   echo "$FW_NR3_OUT" >&2
+  fail=1
+fi
+
+# Isolated advisory-label path: aggregate status=failing, our wallet ok, last run
+# fresh, balance above policy. Must be WARN (exit 0), not FAIL. Pre-fix this
+# fixture exited 1 with VERDICT: FAIL on the rollup label alone.
+printf '{"status":"failing","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"%s","status":"ok"}]}\n' \
+  "$FW_NEW_RUN" "$FW_ADDR" > "$FW_FIXTURE_DIR/ep-failing-fresh.json"
+FW_AFF_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-failing-fresh.json" "$FW_CHECK" 2>&1)" && FW_AFF_EC=0 || FW_AFF_EC=$?
+if [[ "$FW_AFF_EC" -eq 0 && "$FW_AFF_OUT" == *"VERDICT: WARN"* && "$FW_AFF_OUT" == *"status=failing"* ]]; then
+  echo "PASS funding-watch treats a bare advisory status=failing as WARN, not FAIL"
+else
+  echo "FAIL advisory status=failing with a healthy wallet must WARN (ec=$FW_AFF_EC)" >&2
+  echo "$FW_AFF_OUT" >&2
+  fail=1
+fi
+
+# Fact path intact: aggregate failing + our wallet blocked still FAILs.
+printf '{"status":"failing","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"%s","status":"blocked"}]}\n' \
+  "$FW_NEW_RUN" "$FW_ADDR" > "$FW_FIXTURE_DIR/ep-failing-blocked.json"
+FW_FB_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/rich.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-failing-blocked.json" "$FW_CHECK" 2>&1)" && FW_FB_EC=0 || FW_FB_EC=$?
+if [[ "$FW_FB_EC" -ne 0 && "$FW_FB_OUT" == *"VERDICT: FAIL"* && "$FW_FB_OUT" == *"blocked"* ]]; then
+  echo "PASS funding-watch still fails when our wallet is blocked under a failing rollup"
+else
+  echo "FAIL status=failing must not mask a blocked wallet (ec=$FW_FB_EC)" >&2
+  echo "$FW_FB_OUT" >&2
+  fail=1
+fi
+
+# Below-policy ladder intact: advisory failing must not short-circuit a
+# below-policy-past-tolerance FAIL. lastRun is fresh so the stale-run fact
+# does not fire; the local samples have been below 0.6 ETH for a day.
+printf '{"status":"failing","lastRun":{"finishedAt":"%s"},"wallets":[{"address":"%s","status":"ok"}]}\n' \
+  "$FW_NEW_RUN" "$FW_ADDR" > "$FW_FIXTURE_DIR/ep-failing-below.json"
+FW_FBP_OUT="$(FUNDING_WATCH_ADDRESS="$FW_ADDR" GAS_RUNWAY_SAMPLES_FILE="$FW_FIXTURE_DIR/stale.jsonl" FUNDING_HEALTH_JSON="$FW_FIXTURE_DIR/ep-failing-below.json" "$FW_CHECK" 2>&1)" && FW_FBP_EC=0 || FW_FBP_EC=$?
+if [[ "$FW_FBP_EC" -ne 0 && "$FW_FBP_OUT" == *"VERDICT: FAIL"* && "$FW_FBP_OUT" == *"below the"* && "$FW_FBP_OUT" == *"funding policy"* ]]; then
+  echo "PASS funding-watch still fails below policy past tolerance under a failing rollup"
+else
+  echo "FAIL advisory failing must not short-circuit the below-policy ladder (ec=$FW_FBP_EC)" >&2
+  echo "$FW_FBP_OUT" >&2
   fail=1
 fi
 

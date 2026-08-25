@@ -232,8 +232,9 @@ extra = {"batcher_eth": round(latest_bal, 6), "samples": len(rows),
                                      if last_topup else None),
          "last_topup_eth": round(last_topup[2], 6) if last_topup else None}
 
-# The funder declaring itself broken outranks a healthy-looking local balance: the wallet
-# can sit above policy for hours after the job dies.
+# Derived facts outrank a healthy-looking local balance: the wallet can sit above
+# policy for hours after the job dies. Rollup labels do not — they aggregate other
+# wallets and are advisory only (WARN when the balance still holds; see below).
 # Derived fact 1: the job has not finished a run in longer than the tolerance. This is a
 # global condition — if the cron is dead, our wallet stops being funded regardless of labels.
 if ep_run_stale_h is not None and ep_run_stale_h > stale_hours:
@@ -268,15 +269,12 @@ if endpoint.get("our_wallet_found") is False:
     print("WARNING: batcher address is absent from the funder's wallet list — "
           "it may not be covered by the funding policy at all")
 
-# Their rollup label is advisory: it aggregates four wallets and is known to under-report.
-if endpoint.get("status") == "failing":
-    emit("FAIL", "the funder's own health endpoint reports status=failing — %s has stopped "
-         "or is erroring; check its recent runs" % FUNDER, extra)
-
 if latest_bal >= policy_min:
-    if endpoint.get("status") == "degraded":
+    # Advisory aggregate: "failing" and "degraded" may be about someone else's
+    # wallet. Our own facts (stale run / blocked / not_reconciled) already ran.
+    if endpoint.get("status") in ("degraded", "failing"):
         emit("WARN", "balance is above policy, but the funder's endpoint reports "
-             "status=degraded", extra)
+             "status=%s" % endpoint.get("status"), extra)
     emit("OK", "balance at or above the funding policy minimum", extra)
 
 # Below policy: how long has it been continuously below?
