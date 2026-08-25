@@ -10,6 +10,10 @@ OUT="${PUBLIC_VIEWER_OUT:-$SRC/public}"
 CONFIG_PUBLIC="$SRC/config.public.js"
 CSP_FILE="$SRC/public.csp"
 
+if [[ -z "$OUT" ]]; then
+  echo "ERROR: PUBLIC_VIEWER_OUT is empty" >&2
+  exit 1
+fi
 if [[ ! -f "$CONFIG_PUBLIC" ]]; then
   echo "ERROR: missing $CONFIG_PUBLIC" >&2
   exit 1
@@ -19,26 +23,46 @@ if [[ ! -f "$CSP_FILE" ]]; then
   exit 1
 fi
 
-# Resolve OUT before any rm. Refuse SRC/ROOT (and any parent of SRC) so a
-# mistaken PUBLIC_VIEWER_OUT cannot delete tracked viewer sources. This check
-# must not depend on gitignored viewer/config.js (absent in CI/Render clones).
+# Resolve OUT before any rm. Never rm -rf a pre-existing directory this
+# script did not create: dest must be absent, empty, or a previous public
+# bundle (marked by Content-Security-Policy.txt). Also refuse SRC/ROOT
+# (and any parent of SRC) even when empty. Must not depend on gitignored
+# viewer/config.js (absent in CI/Render clones).
 ROOT_ABS="$(cd "$ROOT" && pwd)"
 SRC_ABS="$(cd "$SRC" && pwd)"
 OUT_PARENT="$(dirname "$OUT")"
 mkdir -p "$OUT_PARENT"
-OUT_ABS="$(cd "$OUT_PARENT" && pwd)/$(basename "$OUT")"
-if [[ "$OUT_ABS" == "$SRC_ABS" || "$OUT_ABS" == "$ROOT_ABS" ]]; then
-  echo "ERROR: refusing to write the public bundle over $OUT_ABS" >&2
+OUT="$(cd "$OUT_PARENT" && pwd)/$(basename "$OUT")"
+# Collapse trailing /. so PUBLIC_VIEWER_OUT=. matches ROOT_ABS.
+if [[ -d "$OUT" ]]; then
+  OUT="$(cd "$OUT" && pwd)"
+fi
+if [[ "$OUT" == "$SRC_ABS" || "$OUT" == "$ROOT_ABS" ]]; then
+  echo "ERROR: refusing to write the public bundle over $OUT" >&2
   exit 1
 fi
 case "$SRC_ABS" in
-  "$OUT_ABS"/*)
-    echo "ERROR: refusing PUBLIC_VIEWER_OUT=$OUT_ABS (would delete $SRC_ABS)" >&2
+  "$OUT"/*)
+    echo "ERROR: refusing PUBLIC_VIEWER_OUT=$OUT (would delete $SRC_ABS)" >&2
     exit 1
     ;;
 esac
+if [[ -e "$OUT" ]]; then
+  if [[ ! -d "$OUT" ]]; then
+    echo "ERROR: refusing PUBLIC_VIEWER_OUT=$OUT (not a directory)" >&2
+    exit 1
+  fi
+  if [[ -n "$(ls -A "$OUT")" && ! -f "$OUT/Content-Security-Policy.txt" ]]; then
+    echo "ERROR: refusing to rm -rf $OUT (not a public-viewer output dir)" >&2
+    echo "  target must be absent, empty, or contain Content-Security-Policy.txt" >&2
+    exit 1
+  fi
+fi
 
 rm -rf "$OUT"
+mkdir -p "$OUT"
+# Marker first so a crashed rebuild stays eligible for regeneration.
+cp "$CSP_FILE" "$OUT/Content-Security-Policy.txt"
 mkdir -p "$OUT/fonts" "$OUT/vendor"
 
 cp "$SRC/index.html" "$SRC/app.js" "$SRC/lib.js" "$SRC/styles.css" "$OUT/"
@@ -49,7 +73,6 @@ for font in "$SRC/fonts/"*.ttf; do
 done
 cp "$SRC/vendor/ethers-6.13.7.min.js" "$SRC/vendor/README.md" "$OUT/vendor/"
 cp "$CONFIG_PUBLIC" "$OUT/config.js"
-cp "$CSP_FILE" "$OUT/Content-Security-Policy.txt"
 
 CSP="$(tr -d '\n' < "$CSP_FILE")"
 # Inject a complete meta CSP into the public copy only. Local index.html stays

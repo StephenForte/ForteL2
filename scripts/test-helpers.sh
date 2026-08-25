@@ -4895,6 +4895,119 @@ cleanup_ml_dup
 trap - EXIT
 unset _ml_dup_fn _ml_dup_dir _ml_rc _ml_out _ml_names _ml_load_rc _ml_load_out
 
+# build-public-viewer.sh: never rm -rf a directory this script did not create.
+BP_BUILD="$SCRIPT_DIR/build-public-viewer.sh"
+BP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+BP_SCRIPTS_SENTINEL="$SCRIPT_DIR/test-helpers.sh"
+BP_SCRIPTS_HASH="$(cksum < "$BP_SCRIPTS_SENTINEL")"
+BP_SCRIPTS_OUT="$(
+  cd "$BP_ROOT" && PUBLIC_VIEWER_OUT=scripts "$BP_BUILD" 2>&1
+)" && BP_SCRIPTS_EC=0 || BP_SCRIPTS_EC=$?
+if [[ "$BP_SCRIPTS_EC" -ne 0 ]] \
+  && [[ -f "$BP_SCRIPTS_SENTINEL" ]] \
+  && [[ "$(cksum < "$BP_SCRIPTS_SENTINEL")" == "$BP_SCRIPTS_HASH" ]] \
+  && [[ -f "$BP_BUILD" ]] \
+  && echo "$BP_SCRIPTS_OUT" | grep -q 'refusing'; then
+  echo "PASS PUBLIC_VIEWER_OUT=scripts refuses without deleting scripts/"
+else
+  echo "FAIL PUBLIC_VIEWER_OUT=scripts must refuse before rm -rf (ec=$BP_SCRIPTS_EC)" >&2
+  echo "$BP_SCRIPTS_OUT" >&2
+  fail=1
+fi
+
+BP_FONTS_SENTINEL="$BP_ROOT/viewer/fonts/fonts.css"
+BP_FONTS_HASH="$(cksum < "$BP_FONTS_SENTINEL")"
+BP_FONTS_OUT="$(
+  cd "$BP_ROOT" && PUBLIC_VIEWER_OUT=viewer/fonts "$BP_BUILD" 2>&1
+)" && BP_FONTS_EC=0 || BP_FONTS_EC=$?
+if [[ "$BP_FONTS_EC" -ne 0 ]] \
+  && [[ -f "$BP_FONTS_SENTINEL" ]] \
+  && [[ "$(cksum < "$BP_FONTS_SENTINEL")" == "$BP_FONTS_HASH" ]] \
+  && [[ -f "$BP_ROOT/viewer/fonts/inter-var.ttf" ]] \
+  && [[ -f "$BP_ROOT/viewer/fonts/jetbrains-mono-var.ttf" ]] \
+  && echo "$BP_FONTS_OUT" | grep -q 'refusing'; then
+  echo "PASS PUBLIC_VIEWER_OUT=viewer/fonts refuses without deleting tracked fonts"
+else
+  echo "FAIL PUBLIC_VIEWER_OUT=viewer/fonts must refuse before rm -rf (ec=$BP_FONTS_EC)" >&2
+  echo "$BP_FONTS_OUT" >&2
+  fail=1
+fi
+
+BP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-public-viewer.XXXXXX")"
+cleanup_bp_pub() { rm -rf "$BP_FIX"; }
+trap cleanup_bp_pub EXIT
+
+mkdir -p "$BP_FIX/unmarked"
+printf 'keep-me\n' > "$BP_FIX/unmarked/keep-me.txt"
+BP_UNMARKED_OUT="$(
+  cd "$BP_ROOT" && PUBLIC_VIEWER_OUT="$BP_FIX/unmarked" "$BP_BUILD" 2>&1
+)" && BP_UNMARKED_EC=0 || BP_UNMARKED_EC=$?
+if [[ "$BP_UNMARKED_EC" -ne 0 ]] \
+  && [[ -f "$BP_FIX/unmarked/keep-me.txt" ]] \
+  && [[ "$(cat "$BP_FIX/unmarked/keep-me.txt")" == "keep-me" ]] \
+  && echo "$BP_UNMARKED_OUT" | grep -q 'refusing'; then
+  echo "PASS PUBLIC_VIEWER_OUT refuses a non-empty unmarked directory"
+else
+  echo "FAIL a non-empty unmarked dest must be refused without deletion (ec=$BP_UNMARKED_EC)" >&2
+  echo "$BP_UNMARKED_OUT" >&2
+  fail=1
+fi
+
+BP_EMPTY="$BP_FIX/empty"
+mkdir -p "$BP_EMPTY"
+BP_EMPTY_OUT="$(
+  cd "$BP_ROOT" && PUBLIC_VIEWER_OUT="$BP_EMPTY" "$BP_BUILD" 2>&1
+)" && BP_EMPTY_EC=0 || BP_EMPTY_EC=$?
+if [[ "$BP_EMPTY_EC" -eq 0 ]] \
+  && [[ -f "$BP_EMPTY/Content-Security-Policy.txt" ]] \
+  && [[ -f "$BP_EMPTY/config.js" ]]; then
+  echo "PASS PUBLIC_VIEWER_OUT accepts an empty directory"
+else
+  echo "FAIL an empty dest must be accepted (ec=$BP_EMPTY_EC)" >&2
+  echo "$BP_EMPTY_OUT" >&2
+  fail=1
+fi
+
+BP_MARKED_OUT="$(
+  cd "$BP_ROOT" && PUBLIC_VIEWER_OUT="$BP_EMPTY" "$BP_BUILD" 2>&1
+)" && BP_MARKED_EC=0 || BP_MARKED_EC=$?
+if [[ "$BP_MARKED_EC" -eq 0 ]] \
+  && [[ -f "$BP_EMPTY/Content-Security-Policy.txt" ]]; then
+  echo "PASS PUBLIC_VIEWER_OUT regenerates a previous marked bundle"
+else
+  echo "FAIL a dest with Content-Security-Policy.txt must be regenerable (ec=$BP_MARKED_EC)" >&2
+  echo "$BP_MARKED_OUT" >&2
+  fail=1
+fi
+
+BP_DEFAULT_OUT="$(cd "$BP_ROOT" && "$BP_BUILD" 2>&1)" && BP_DEFAULT_EC=0 || BP_DEFAULT_EC=$?
+if [[ "$BP_DEFAULT_EC" -eq 0 ]] \
+  && [[ -f "$BP_ROOT/viewer/public/Content-Security-Policy.txt" ]] \
+  && [[ -f "$BP_ROOT/viewer/public/config.js" ]]; then
+  echo "PASS default viewer/public build"
+else
+  echo "FAIL default viewer/public build must succeed (ec=$BP_DEFAULT_EC)" >&2
+  echo "$BP_DEFAULT_OUT" >&2
+  fail=1
+fi
+BP_DEFAULT2_OUT="$(cd "$BP_ROOT" && "$BP_BUILD" 2>&1)" && BP_DEFAULT2_EC=0 || BP_DEFAULT2_EC=$?
+if [[ "$BP_DEFAULT2_EC" -eq 0 ]] \
+  && [[ -f "$BP_ROOT/viewer/public/Content-Security-Policy.txt" ]]; then
+  echo "PASS default viewer/public regeneration"
+else
+  echo "FAIL default viewer/public regeneration must succeed (ec=$BP_DEFAULT2_EC)" >&2
+  echo "$BP_DEFAULT2_OUT" >&2
+  fail=1
+fi
+
+cleanup_bp_pub
+trap - EXIT
+unset BP_BUILD BP_ROOT BP_SCRIPTS_SENTINEL BP_SCRIPTS_HASH BP_SCRIPTS_OUT BP_SCRIPTS_EC \
+  BP_FONTS_SENTINEL BP_FONTS_HASH BP_FONTS_OUT BP_FONTS_EC BP_FIX BP_UNMARKED_OUT \
+  BP_UNMARKED_EC BP_EMPTY BP_EMPTY_OUT BP_EMPTY_EC BP_MARKED_OUT BP_MARKED_EC \
+  BP_DEFAULT_OUT BP_DEFAULT_EC BP_DEFAULT2_OUT BP_DEFAULT2_EC
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
