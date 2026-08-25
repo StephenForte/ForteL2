@@ -2110,6 +2110,53 @@ else
   fail=1
 fi
 
+# Challenger / proxy / safedb / 8b vars must appear in the tracked example so
+# an operator recreating .env.sepolia can stand up Phase 7. Appearance is
+# `KEY=` or `# KEY=` (empty or commented). Do not require DEMO_*/FUNDING_* —
+# that gap is a separate task, and two of those are secrets.
+_env_ex_keys=(
+  OP_NODE_SAFEDB_PATH
+  L1_BEACON_URL
+  CHALLENGER_TRACE_TYPE
+  CHALLENGER_PRESTATE
+  CHALLENGER_L1_RPC_URL
+  OP_CHALLENGER_MAX_CONCURRENCY
+  OP_CHALLENGER_HTTP_POLL_INTERVAL
+  OP_CHALLENGER_GAME_WINDOW
+  FAULT_GAME_ABSOLUTE_PRESTATE
+  L1_BATCH_PROXY_PORT
+  L1_BATCH_PROXY_CHUNK
+  L1_BATCH_PROXY_PACE_SEC
+)
+_env_ex_ok=1
+for _k in "${_env_ex_keys[@]}"; do
+  if ! grep -qE "^(# )?${_k}=" "$ENV_SEPOLIA_EXAMPLE"; then
+    echo "FAIL .env.sepolia.example missing ${_k}" >&2
+    _env_ex_ok=0
+  fi
+  _n="$(grep -cE "^${_k}=" "$ENV_SEPOLIA_EXAMPLE" || true)"
+  if [[ "${_n}" -gt 1 ]]; then
+    echo "FAIL .env.sepolia.example duplicate uncommented assignment of ${_k}" >&2
+    _env_ex_ok=0
+  fi
+done
+if ((_env_ex_ok)); then
+  echo "PASS .env.sepolia.example documents challenger/proxy/safedb/8b env vars"
+else
+  echo "FAIL .env.sepolia.example must document each challenger/proxy/safedb/8b var once (empty or commented)" >&2
+  fail=1
+fi
+unset _env_ex_keys _env_ex_ok _k _n
+
+# Tripwire: a PRIVATE_KEY= or TOKEN= line (commented or not) must not carry a
+# value. The live .env.sepolia is gitignored; pasting from it is a leak.
+if grep -nE '(PRIVATE_KEY|TOKEN)=.+' "$ENV_SEPOLIA_EXAMPLE"; then
+  echo "FAIL .env.sepolia.example must not contain a populated PRIVATE_KEY or TOKEN (placeholders only)" >&2
+  fail=1
+else
+  echo "PASS .env.sepolia.example PRIVATE_KEY/TOKEN values are empty"
+fi
+
 # F7-10: ADMIN_PRIVATE_KEY must derive ADMIN_ADDRESS before spend or wipe.
 # Generate the keypair at runtime — never a key literal in this file.
 _f710_fn="$(awk '/^require_admin_key_matches_address\(\)/,/^}/' "$DEPLOY_SEPOLIA")"
