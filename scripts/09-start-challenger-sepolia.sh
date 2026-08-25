@@ -137,16 +137,8 @@ require_eth_address "CHALLENGER_ADDRESS" "${CHALLENGER_ADDRESS:-}"
 # accepted). That bounded exposure is deliberately accepted to close a
 # silent-wrong-signer failure; the long-running daemon still gets the key via
 # OP_CHALLENGER_PRIVATE_KEY, never argv.
-derived="$(cast wallet address --private-key "$CHALLENGER_PRIVATE_KEY")"
-derived_lc="$(printf '%s' "$derived" | tr '[:upper:]' '[:lower:]')"
-configured_lc="$(printf '%s' "$CHALLENGER_ADDRESS" | tr '[:upper:]' '[:lower:]')"
-if [[ "$derived_lc" != "$configured_lc" ]]; then
-  echo "ERROR: CHALLENGER_PRIVATE_KEY does not match CHALLENGER_ADDRESS" >&2
-  echo "  derived:    $derived" >&2
-  echo "  configured: $CHALLENGER_ADDRESS" >&2
-  echo "  This script signs as the challenger role, never PROPOSER_PRIVATE_KEY." >&2
-  exit 1
-fi
+require_key_matches_address CHALLENGER_PRIVATE_KEY CHALLENGER_ADDRESS \
+  "This script signs as the challenger role, never PROPOSER_PRIVATE_KEY."
 
 TRACE_TYPE="${CHALLENGER_TRACE_TYPE:-}"
 if [[ -z "$TRACE_TYPE" ]]; then
