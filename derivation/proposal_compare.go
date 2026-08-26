@@ -211,7 +211,11 @@ func verifyAgainstProposals(ctx context.Context, opts VerifyOptions, sealer *Sea
 		ProposalSkipped:    &skipped,
 	}
 
-	if err := resolveFromL1BlockSeal(ctx, sealer, &opts); err != nil {
+	if opts.ResumeL1Bound {
+		if err := resolveResumeInboxScan(ctx, sealer, cfg, &opts); err != nil {
+			return report, err
+		}
+	} else if err := resolveFromL1BlockSeal(ctx, sealer, &opts); err != nil {
 		return report, err
 	}
 

@@ -5233,6 +5233,92 @@ else
   fail=1
 fi
 
+# US-P7-005 l1-scan-checkpoint: resumed self-anchor derives L1 scan start from
+# origin(M) − channel_timeout − margin (sealed head), not a stored high-water mark.
+# Genesis / legacy modes stay byte-identical.
+if grep -q 'flag.Bool("resume-l1-bound"' "$VERIFY_MAIN"; then
+  echo "PASS cmd/verify exposes -resume-l1-bound"
+else
+  echo "FAIL cmd/verify must add -resume-l1-bound for self-anchor resume scan bound" >&2
+  fail=1
+fi
+
+if grep -q 'FROM_L1="$(jq -r '"'"'.genesis.l1.number'"'"' "$ROLLUP")"' "$DERIV_CHECK" \
+  && grep -B2 'FROM_L1="$(jq -r '"'"'.genesis.l1.number'"'"' "$ROLLUP")"' "$DERIV_CHECK" \
+    | grep -q 'START_L2" -eq 1'; then
+  echo "PASS self-anchor genesis still sets FROM_L1 from rollup genesis.l1"
+else
+  echo "FAIL self-anchor start=1 must still scan from rollup genesis.l1" >&2
+  fail=1
+fi
+
+if awk '
+  /RESUME_L1_BOUND=1/ { sets++ }
+  /"\$SEAL_HEAD" -gt 0/ { resume = 1 }
+  resume && /-z "\$CHANNEL_TX"/ { ch_ok = 1 }
+  resume && ch_ok && /RESUME_L1_BOUND=1/ { resume_set = 1 }
+  resume && /^  else$/ { resume = 0 }
+  /VERIFY_ARGS\+=\(-resume-l1-bound\)/ { pass++ }
+  /"\$RESUME_L1_BOUND" -eq 1/ { gated++ }
+  END { exit (sets == 1 && resume_set && pass == 1 && gated == 1) ? 0 : 1 }
+' "$DERIV_CHECK"; then
+  echo "PASS -resume-l1-bound is gated on self-anchor resume (SEAL_HEAD>0) only"
+else
+  echo "FAIL -resume-l1-bound must be set only on self-anchor resume, never genesis/legacy" >&2
+  fail=1
+fi
+
+if awk '
+  /"\$USE_ANCHOR" -eq 1/ { ua = 1 }
+  ua && /resume-l1-bound/ { bad = 1 }
+  ua && /^fi$/ { ua = 0 }
+  /"\$MAKE_ANCHOR" -eq 1/ { ma = 1 }
+  ma && /resume-l1-bound/ { bad = 1 }
+  ma && /exit 0/ { ma = 0 }
+  END { exit bad ? 1 : 0 }
+' "$DERIV_CHECK"; then
+  echo "PASS legacy --make-anchor / --anchor-datadir paths omit -resume-l1-bound"
+else
+  echo "FAIL -resume-l1-bound must not leak into legacy --make-anchor / --anchor-datadir paths" >&2
+  fail=1
+fi
+
+# --self-anchor --channel-tx on a nonempty datadir must not pass -resume-l1-bound
+# (Codex P2: the previous same-line grep missed this combination).
+if awk '
+  /RESUME_L1_BOUND=1/ {
+    for (i = 1; i <= 12 && NR-i > 0; i++) {
+      if (prev[i] ~ /-z "\$CHANNEL_TX"/) { ok = 1; break }
+    }
+  }
+  { for (i = 12; i >= 2; i--) prev[i] = prev[i-1]; prev[1] = $0 }
+  END { exit ok ? 0 : 1 }
+' "$DERIV_CHECK"; then
+  echo "PASS RESUME_L1_BOUND=1 is gated on empty --channel-tx"
+else
+  echo "FAIL --self-anchor --channel-tx must not set -resume-l1-bound (legacy single-tx path)" >&2
+  fail=1
+fi
+
+if grep -q 'channel_timeout' "$SCRIPT_DIR/../derivation/rollup.go" \
+  && grep -q 'InboxScanStart' "$SCRIPT_DIR/../derivation/scan_bound.go" \
+  && grep -q 'ResumeScanMargin' "$SCRIPT_DIR/../derivation/scan_bound.go" \
+  && ! grep -n 'InboxScanStart' "$SCRIPT_DIR/../derivation/scan_bound.go" | grep -q '[[:space:]]300[[:space:]]'; then
+  echo "PASS resume scan bound reads channel_timeout from rollup config (not hard-coded 300)"
+else
+  echo "FAIL InboxScanStart must take channel_timeout from rollup.json; do not hard-code 300" >&2
+  fail=1
+fi
+
+if grep -q 'origin(M)' "$SCRIPT_DIR/../derivation/README.md" \
+  && grep -q 'channel_timeout' "$SCRIPT_DIR/../derivation/README.md" \
+  && grep -q -- '-resume-l1-bound' "$SCRIPT_DIR/../derivation/README.md"; then
+  echo "PASS derivation README runbook/CLI documents resume L1 delta-scan bound"
+else
+  echo "FAIL derivation README runbook/CLI must document origin(M) − channel_timeout resume scan" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
