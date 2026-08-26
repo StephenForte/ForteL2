@@ -3,11 +3,12 @@ package derivation
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -198,7 +199,11 @@ func jitterDuration(d time.Duration) time.Duration {
 		return 0
 	}
 	half := d / 2
-	return half + time.Duration(rand.Int64N(int64(half)+1))
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(half)+1))
+	if err != nil {
+		return half
+	}
+	return half + time.Duration(n.Int64())
 }
 
 func expBackoff(base, max time.Duration, attempt int) time.Duration {
