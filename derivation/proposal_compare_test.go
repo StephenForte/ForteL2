@@ -1,6 +1,7 @@
 package derivation
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -116,5 +117,46 @@ func TestUnknownCompareMode(t *testing.T) {
 func TestGameStatusName(t *testing.T) {
 	if GameStatusName(0) != "IN_PROGRESS" || GameStatusName(1) != "CHALLENGER_WINS" || GameStatusName(2) != "DEFENDER_WINS" {
 		t.Fatal("status labels")
+	}
+}
+
+func TestProposalReportJSONIncludesZeroGameType(t *testing.T) {
+	gt := uint32(0)
+	matched, skipped, mismatched := 0, 2, 0
+	report := &VerifyReport{
+		Compare:            CompareProposals,
+		RespectedGameType:  &gt,
+		ProposalMatched:    &matched,
+		ProposalSkipped:    &skipped,
+		ProposalMismatched: &mismatched,
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if string(m["respectedGameType"]) != "0" {
+		t.Fatalf("respectedGameType omitted or wrong: %s", raw)
+	}
+	if string(m["proposalMatched"]) != "0" {
+		t.Fatalf("proposalMatched omitted or wrong: %s", raw)
+	}
+	if string(m["proposalMismatched"]) != "0" {
+		t.Fatalf("proposalMismatched omitted or wrong: %s", raw)
+	}
+	if string(m["proposalSkipped"]) != "2" {
+		t.Fatalf("proposalSkipped=%s", m["proposalSkipped"])
+	}
+
+	legacy := &VerifyReport{WindowStart: 1, WindowEnd: 20, Matched: 20}
+	lraw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(lraw), "respectedGameType") || strings.Contains(string(lraw), "proposalMatched") {
+		t.Fatalf("legacy JSON must omit proposal fields: %s", lraw)
 	}
 }

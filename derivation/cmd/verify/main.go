@@ -109,7 +109,8 @@ func main() {
 	}
 	if *compare == derivation.CompareProposals {
 		fmt.Fprintf(human, "PASS: proposals MATCH=%d SKIPPED=%d MISMATCH=%d (respected type %d)\n",
-			report.ProposalMatched, report.ProposalSkipped, report.ProposalMismatched, report.RespectedGameType)
+			derivation.ProposalMatchedCount(report), derivation.ProposalSkippedCount(report),
+			derivation.ProposalMismatchedCount(report), derivation.ProposalRespectedType(report))
 		return
 	}
 	fmt.Fprintf(human, "PASS: blocks %d–%d all match reference EL\n", *start, *end)

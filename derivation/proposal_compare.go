@@ -99,6 +99,52 @@ func FormatProposalLine(r ProposalResult) string {
 	}
 }
 
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefUint32(p *uint32) uint32 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// ProposalMatchedCount is the MATCH count (0 if the field was not set).
+func ProposalMatchedCount(r *VerifyReport) int {
+	if r == nil {
+		return 0
+	}
+	return derefInt(r.ProposalMatched)
+}
+
+// ProposalSkippedCount is the SKIPPED count (0 if the field was not set).
+func ProposalSkippedCount(r *VerifyReport) int {
+	if r == nil {
+		return 0
+	}
+	return derefInt(r.ProposalSkipped)
+}
+
+// ProposalMismatchedCount is the MISMATCH count (0 if the field was not set).
+func ProposalMismatchedCount(r *VerifyReport) int {
+	if r == nil {
+		return 0
+	}
+	return derefInt(r.ProposalMismatched)
+}
+
+// ProposalRespectedType is the respected/override game type (0 if unset).
+func ProposalRespectedType(r *VerifyReport) uint32 {
+	if r == nil {
+		return 0
+	}
+	return derefUint32(r.RespectedGameType)
+}
+
 // WriteProposalReport prints the proposal-mode header and per-game lines.
 func WriteProposalReport(w io.Writer, report *VerifyReport) {
 	if report == nil {
@@ -108,11 +154,11 @@ func WriteProposalReport(w io.Writer, report *VerifyReport) {
 	if report.GameTypeOverridden {
 		src = "override"
 	}
-	fmt.Fprintf(w, "respected_game_type=%d (%s)\n", report.RespectedGameType, src)
+	fmt.Fprintf(w, "respected_game_type=%d (%s)\n", derefUint32(report.RespectedGameType), src)
 	fmt.Fprintf(w, "factory=%s asr=%s\n", report.Factory, report.ASR)
 	fmt.Fprintf(w, "window=%d–%d MATCH=%d SKIPPED=%d MISMATCH=%d enumerated=%d\n",
 		report.WindowStart, report.WindowEnd,
-		report.ProposalMatched, report.ProposalSkipped, report.ProposalMismatched,
+		derefInt(report.ProposalMatched), derefInt(report.ProposalSkipped), derefInt(report.ProposalMismatched),
 		len(report.Proposals))
 	for _, p := range report.Proposals {
 		fmt.Fprintln(w, FormatProposalLine(p))
@@ -142,14 +188,19 @@ func verifyAgainstProposals(ctx context.Context, opts VerifyOptions, sealer *Sea
 		}
 	}
 
+	matched, mismatched, skipped := 0, 0, 0
+	gt := gameType
 	report := &VerifyReport{
 		WindowStart:        opts.StartL2,
 		WindowEnd:          opts.EndL2,
 		Compare:            CompareProposals,
-		RespectedGameType:  gameType,
+		RespectedGameType:  &gt,
 		GameTypeOverridden: overridden,
 		Factory:            opts.Factory,
 		ASR:                opts.ASR,
+		ProposalMatched:    &matched,
+		ProposalMismatched: &mismatched,
+		ProposalSkipped:    &skipped,
 	}
 
 	if err := resolveFromL1BlockSeal(ctx, sealer, &opts); err != nil {
@@ -211,11 +262,11 @@ func verifyAgainstProposals(ctx context.Context, opts VerifyOptions, sealer *Sea
 		report.Proposals = append(report.Proposals, pr)
 		switch pr.Result {
 		case ProposalMatch:
-			report.ProposalMatched++
+			*report.ProposalMatched++
 		case ProposalSkipped:
-			report.ProposalSkipped++
+			*report.ProposalSkipped++
 		case ProposalMismatch:
-			report.ProposalMismatched++
+			*report.ProposalMismatched++
 			if mismatch == nil {
 				mismatch = fmt.Errorf("output-root mismatch at game %s index=%d l2=%d: derived %s claimed %s",
 					pr.Game, pr.Index, pr.L2Block, pr.DerivedRoot, pr.ClaimedRoot)
