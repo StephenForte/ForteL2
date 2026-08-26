@@ -34,8 +34,10 @@ Reference stack must be running (`./scripts/start-all.sh` or Sepolia equivalent)
 
 FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia  # needs prior: --sepolia --make-anchor (stack stopped)
 
-# Self-anchor (Path A): keep the derivation EL datadir; resume from last self-sealed block.
-# Mutually exclusive with --make-anchor / --anchor-datadir. Does not copy or stop the reference.
+# Operator path (Path A self-anchor): keep the derivation EL datadir; resume from last
+# self-sealed block. Mutually exclusive with --make-anchor / --anchor-datadir. Does not
+# copy or stop the reference. Live Sepolia stop/resume ≥1000 blocks is not yet proven
+# (cmd/verify empty L1 JSON after inbox scan; T2). No window 2; no seal-rate numbers.
 ./scripts/derivation-check.sh --self-anchor --start-l2 1 --end-l2 20
 ./scripts/derivation-check.sh --self-anchor --start-l2 21 --end-l2 40
 FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia --self-anchor --start-l2 1 --end-l2 20

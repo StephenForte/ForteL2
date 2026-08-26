@@ -5179,6 +5179,24 @@ else
   fail=1
 fi
 
+# Runbook must keep the Sepolia self-anchor invocation and not claim a live ≥1000-block
+# stop/resume (or seal-rate) that never succeeded. Limitations is T3; stop before it.
+_sa_readme="$SCRIPT_DIR/../derivation/README.md"
+if awk '
+  /^## Limitations/ { exit }
+  /FORTEL2_ENV=\.env\.sepolia \.\/scripts\/derivation-check\.sh --sepolia --self-anchor/ { saw = 1 }
+  /not yet proven/ { unproven = 1 }
+  /empty L1 JSON/ { emptyjson = 1 }
+  /T2/ { t2 = 1 }
+  END { exit (saw && unproven && emptyjson && t2) ? 0 : 1 }
+' "$_sa_readme"; then
+  echo "PASS derivation README runbook keeps Sepolia self-anchor and states live ≥1000-block stop/resume is unproven"
+else
+  echo "FAIL derivation README runbook must keep the Sepolia self-anchor operator path and state live ≥1000-block stop/resume is not yet proven (empty L1 JSON / T2)" >&2
+  fail=1
+fi
+unset _sa_readme
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
