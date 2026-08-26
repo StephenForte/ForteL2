@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // RPCClient is a minimal JSON-RPC 2.0 HTTP client.
@@ -74,7 +76,33 @@ func (e *rpcError) Error() string {
 	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
 }
 
+// errEmptyRPCResult is a valid JSON-RPC envelope with a missing or empty
+// result (hosted L1 endpoints sometimes return this after a long inbox scan).
+// Call retries a few times instead of json.Unmarshal("") → "unexpected end of JSON input".
+var errEmptyRPCResult = errors.New("empty result")
+
+func rpcResultEmpty(result json.RawMessage) bool {
+	return len(bytes.TrimSpace(result)) == 0
+}
+
 func (c *RPCClient) Call(ctx context.Context, method string, params []any, out any) error {
+	const attempts = 3
+	var err error
+	for i := 0; i < attempts; i++ {
+		err = c.callOnce(ctx, method, params, out)
+		if err == nil || !errors.Is(err, errEmptyRPCResult) || i == attempts-1 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return err
+}
+
+func (c *RPCClient) callOnce(ctx context.Context, method string, params []any, out any) error {
 	reqBody, err := json.Marshal(rpcRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -107,6 +135,9 @@ func (c *RPCClient) Call(ctx context.Context, method string, params []any, out a
 	}
 	if out == nil {
 		return nil
+	}
+	if rpcResultEmpty(rpcResp.Result) {
+		return fmt.Errorf("rpc %s: %w", method, errEmptyRPCResult)
 	}
 	return json.Unmarshal(rpcResp.Result, out)
 }
