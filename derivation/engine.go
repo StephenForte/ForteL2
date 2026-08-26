@@ -349,8 +349,8 @@ type VerifyReport struct {
 	Compare            string           `json:"compare,omitempty"`
 	RespectedGameType  *uint32          `json:"respectedGameType,omitempty"`
 	GameTypeOverridden bool             `json:"gameTypeOverridden,omitempty"`
-	Factory            common.Address   `json:"factory,omitempty"`
-	ASR                common.Address   `json:"asr,omitempty"`
+	Factory            *common.Address  `json:"factory,omitempty"`
+	ASR                *common.Address  `json:"asr,omitempty"`
 	Proposals          []ProposalResult `json:"proposals,omitempty"`
 	ProposalMatched    *int             `json:"proposalMatched,omitempty"`
 	ProposalMismatched *int             `json:"proposalMismatched,omitempty"`

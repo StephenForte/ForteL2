@@ -159,4 +159,7 @@ func TestProposalReportJSONIncludesZeroGameType(t *testing.T) {
 	if strings.Contains(string(lraw), "respectedGameType") || strings.Contains(string(lraw), "proposalMatched") {
 		t.Fatalf("legacy JSON must omit proposal fields: %s", lraw)
 	}
+	if strings.Contains(string(lraw), `"factory"`) || strings.Contains(string(lraw), `"asr"`) {
+		t.Fatalf("legacy JSON must omit zero factory/asr (common.Address is not omitempty-empty): %s", lraw)
+	}
 }

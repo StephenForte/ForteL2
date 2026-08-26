@@ -113,6 +113,13 @@ func derefUint32(p *uint32) uint32 {
 	return *p
 }
 
+func derefAddr(p *common.Address) common.Address {
+	if p == nil {
+		return common.Address{}
+	}
+	return *p
+}
+
 // ProposalMatchedCount is the MATCH count (0 if the field was not set).
 func ProposalMatchedCount(r *VerifyReport) int {
 	if r == nil {
@@ -155,7 +162,7 @@ func WriteProposalReport(w io.Writer, report *VerifyReport) {
 		src = "override"
 	}
 	fmt.Fprintf(w, "respected_game_type=%d (%s)\n", derefUint32(report.RespectedGameType), src)
-	fmt.Fprintf(w, "factory=%s asr=%s\n", report.Factory, report.ASR)
+	fmt.Fprintf(w, "factory=%s asr=%s\n", derefAddr(report.Factory), derefAddr(report.ASR))
 	fmt.Fprintf(w, "window=%d–%d MATCH=%d SKIPPED=%d MISMATCH=%d enumerated=%d\n",
 		report.WindowStart, report.WindowEnd,
 		derefInt(report.ProposalMatched), derefInt(report.ProposalSkipped), derefInt(report.ProposalMismatched),
@@ -190,14 +197,15 @@ func verifyAgainstProposals(ctx context.Context, opts VerifyOptions, sealer *Sea
 
 	matched, mismatched, skipped := 0, 0, 0
 	gt := gameType
+	fac, asr := opts.Factory, opts.ASR
 	report := &VerifyReport{
 		WindowStart:        opts.StartL2,
 		WindowEnd:          opts.EndL2,
 		Compare:            CompareProposals,
 		RespectedGameType:  &gt,
 		GameTypeOverridden: overridden,
-		Factory:            opts.Factory,
-		ASR:                opts.ASR,
+		Factory:            &fac,
+		ASR:                &asr,
 		ProposalMatched:    &matched,
 		ProposalMismatched: &mismatched,
 		ProposalSkipped:    &skipped,
