@@ -343,4 +343,14 @@ type VerifyReport struct {
 	ReferenceSafeL2   L2Ref         `json:"referenceSafeL2"`
 	ReferenceUnsafeL2 L2Ref         `json:"referenceUnsafeL2"`
 	Blocks            []BlockResult `json:"blocks"`
+	// Proposal-mode fields. omitempty keeps legacy JSON fixtures unchanged.
+	Compare            string           `json:"compare,omitempty"`
+	RespectedGameType  uint32           `json:"respectedGameType,omitempty"`
+	GameTypeOverridden bool             `json:"gameTypeOverridden,omitempty"`
+	Factory            common.Address   `json:"factory,omitempty"`
+	ASR                common.Address   `json:"asr,omitempty"`
+	Proposals          []ProposalResult `json:"proposals,omitempty"`
+	ProposalMatched    int              `json:"proposalMatched,omitempty"`
+	ProposalMismatched int              `json:"proposalMismatched,omitempty"`
+	ProposalSkipped    int              `json:"proposalSkipped,omitempty"`
 }

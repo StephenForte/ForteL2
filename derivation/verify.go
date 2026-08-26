@@ -26,10 +26,23 @@ type VerifyOptions struct {
 	ScanFromGenesis bool
 	AnchoredHead    bool // sealing EL was reset to StartL2-1 via debug_setHead
 	L1Lookback      uint64 // inbox scan lookback from anchor/safe L1 origin (default 300)
+	// Proposal mode (US-P7-005). Zero values keep legacy consistency mode unchanged.
+	Compare          string
+	Factory          common.Address
+	ASR              common.Address
+	GameTypeOverride *uint32 // nil = AnchorStateRegistry.respectedGameType(); never a silent default
 }
 
 // Verify runs the derivation pipeline and compares sealed hashes to reference EL.
 func Verify(ctx context.Context, opts VerifyOptions, sealer *SealingEL) (*VerifyReport, error) {
+	switch opts.Compare {
+	case "", CompareReference:
+		// legacy consistency path below
+	case CompareProposals:
+		return verifyAgainstProposals(ctx, opts, sealer)
+	default:
+		return nil, fmt.Errorf("unknown -compare %q (want %q or %q)", opts.Compare, CompareReference, CompareProposals)
+	}
 	cfg, err := LoadRollupConfig(opts.RollupPath)
 	if err != nil {
 		return nil, err

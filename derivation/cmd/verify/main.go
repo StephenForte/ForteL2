@@ -32,6 +32,11 @@ func main() {
 	anchoredHead := flag.Bool("anchored-head", false, "sealing EL was reset to start-l2-1 via debug_setHead")
 	l1Lookback := flag.Uint64("l1-lookback", 300, "L1 inbox scan lookback from anchor/safe origin when -from-l1 0")
 	jsonOut := flag.Bool("json", false, "emit JSON report")
+	compare := flag.String("compare", derivation.CompareReference, "comparison oracle: reference (legacy, uses -ref-l2) or proposals (factory root claims; -ref-l2 is not an authority)")
+	factory := flag.String("factory", "", "DisputeGameFactory address (overrides -deploy-state)")
+	asr := flag.String("asr", "", "AnchorStateRegistry address (overrides -deploy-state)")
+	deployState := flag.String("deploy-state", "", "op-deployer state.json or deployments.json with factory/ASR proxies")
+	gameType := flag.String("game-type", "", "override respected game type; empty resolves AnchorStateRegistry.respectedGameType() (no default)")
 	flag.Parse()
 
 	if *rollup == "" {
@@ -42,15 +47,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: -jwt required (separate sealing EL)")
 		os.Exit(2)
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	sealer, err := derivation.StartSealingEL(ctx, *sealAuth, *jwt, *sealHTTP)
-	if err != nil {
-		fatal(err)
-	}
-	defer sealer.Close()
 
 	opts := derivation.VerifyOptions{
 		RollupPath:      *rollup,
@@ -65,10 +61,36 @@ func main() {
 		ScanFromGenesis: *scanFromGenesis,
 		AnchoredHead:    *anchoredHead,
 		L1Lookback:      *l1Lookback,
+		Compare:         *compare,
 	}
 	if *channelTx != "" {
 		opts.ChannelTx = common.HexToHash(*channelTx)
 	}
+	if *compare == derivation.CompareProposals {
+		// Proposal mode must run without -ref-l2 as an authority (D-0097).
+		opts.RefL2RPC = ""
+		opts.RefNodeRPC = ""
+		fac, asrAddr, err := derivation.ResolveProposalContracts(*deployState, *factory, *asr)
+		if err != nil {
+			fatal(err)
+		}
+		opts.Factory = fac
+		opts.ASR = asrAddr
+		gt, err := derivation.ParseGameTypeFlag(*gameType)
+		if err != nil {
+			fatal(err)
+		}
+		opts.GameTypeOverride = gt
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	sealer, err := derivation.StartSealingEL(ctx, *sealAuth, *jwt, *sealHTTP)
+	if err != nil {
+		fatal(err)
+	}
+	defer sealer.Close()
 
 	report, err := derivation.Verify(ctx, opts, sealer)
 	// With -json, stdout carries ONLY the JSON report (fixture-capture safe);
@@ -85,11 +107,20 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FAIL: %v\n", err)
 		os.Exit(1)
 	}
+	if *compare == derivation.CompareProposals {
+		fmt.Fprintf(human, "PASS: proposals MATCH=%d SKIPPED=%d MISMATCH=%d (respected type %d)\n",
+			report.ProposalMatched, report.ProposalSkipped, report.ProposalMismatched, report.RespectedGameType)
+		return
+	}
 	fmt.Fprintf(human, "PASS: blocks %d–%d all match reference EL\n", *start, *end)
 }
 
 func printHeader(w io.Writer, r *derivation.VerifyReport) {
 	if r == nil {
+		return
+	}
+	if r.Compare == derivation.CompareProposals {
+		derivation.WriteProposalReport(w, r)
 		return
 	}
 	fmt.Fprintf(w, "reference safe_l2=%d hash=%s\n", r.ReferenceSafeL2.Number, r.ReferenceSafeL2.Hash)

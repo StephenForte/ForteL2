@@ -69,6 +69,28 @@ go run ./cmd/verify \
   -start-l2 1 -end-l2 20
 ```
 
+Proposal-compare flags (`-compare proposals` only; legacy `reference` mode is unchanged):
+
+| Flag | Default | Notes |
+|---|---|---|
+| `-compare` | `reference` | `proposals` diffs derived output roots against factory `rootClaim`s. `-ref-l2` is not an authority in this mode. |
+| `-deploy-state` | (none) | op-deployer `state.json` or `deployments.json` with factory/ASR proxies. Required unless both address flags are set. |
+| `-factory` / `-asr` | (none) | Override artifact addresses. Refuse to run with neither artifacts nor flags. |
+| `-game-type` | (none) | Override `AnchorStateRegistry.respectedGameType()`. **No numeric default** (D-0063 3c / D-0083). |
+
+```bash
+# Proposal audit: derived output root vs staked claim. No -ref-l2.
+go run ./cmd/verify \
+  -compare proposals \
+  -rollup "$DEPLOY_DIR/rollup.json" \
+  -l1 "$L1_RPC_URL" \
+  -seal-auth http://127.0.0.1:19651 \
+  -seal-http http://127.0.0.1:19645 \
+  -jwt "$DATA_DIR/jwt/derivation-jwt.txt" \
+  -deploy-state "$FORTEL2_ROOT/deployments/sepolia/deployments.json" \
+  -start-l2 1 -end-l2 20
+```
+
 ## Limitations — independent verification
 
 `cmd/verify` always needs `-ref-l2` and `-ref-node` — the operator's own L2 / op-node — as the comparison oracle. Mid-chain windows also need an **anchor datadir** copied from that same operator node while it is stopped (D-R2-2).
