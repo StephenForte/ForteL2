@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,17 +15,29 @@ import (
 	"time"
 )
 
+// rpcHTTPTimeout is the per-attempt deadline for a JSON-RPC HTTP call.
+// Heavy methods (chunked eth_feeHistory, eth_getBlockReceipts) can take
+// tens of seconds on a throttled hosted L1; a tight timeout turns a hang
+// into a spurious abort. Generous deadline + retry beats a tight deadline.
+const rpcHTTPTimeout = 90 * time.Second
+
 // RPCClient is a minimal JSON-RPC 2.0 HTTP client.
 type RPCClient struct {
-	url      string
-	redacted string
-	client   *http.Client
-	id       atomic.Uint64
+	url         string
+	redacted    string
+	client      *http.Client
+	httpTimeout time.Duration // per-attempt; tests shrink this
+	id          atomic.Uint64
 }
 
 func NewRPCClient(rawURL string) *RPCClient {
 	rawURL = strings.TrimSpace(rawURL)
-	return &RPCClient{url: rawURL, redacted: redactRPCURL(rawURL), client: http.DefaultClient}
+	return &RPCClient{
+		url:         rawURL,
+		redacted:    redactRPCURL(rawURL),
+		httpTimeout: rpcHTTPTimeout,
+		client:      &http.Client{Timeout: rpcHTTPTimeout},
+	}
 }
 
 // redactRPCURL strips path, query, and userinfo — hosted RPC URLs carry API
@@ -81,8 +94,27 @@ func (e *rpcError) Error() string {
 // Call retries a few times instead of json.Unmarshal("") → "unexpected end of JSON input".
 var errEmptyRPCResult = errors.New("empty result")
 
+// errHTTPTimeout is a per-attempt HTTP deadline miss. Call retries a few
+// times, then fails closed — never hang on a stalled hosted-L1 response.
+var errHTTPTimeout = errors.New("http timeout")
+
 func rpcResultEmpty(result json.RawMessage) bool {
 	return len(bytes.TrimSpace(result)) == 0
+}
+
+func retryableCallErr(err error) bool {
+	return errors.Is(err, errEmptyRPCResult) || errors.Is(err, errHTTPTimeout)
+}
+
+func isHTTPTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var nerr net.Error
+	return errors.As(err, &nerr) && nerr.Timeout()
 }
 
 func (c *RPCClient) Call(ctx context.Context, method string, params []any, out any) error {
@@ -90,7 +122,7 @@ func (c *RPCClient) Call(ctx context.Context, method string, params []any, out a
 	var err error
 	for i := 0; i < attempts; i++ {
 		err = c.callOnce(ctx, method, params, out)
-		if err == nil || !errors.Is(err, errEmptyRPCResult) || i == attempts-1 {
+		if err == nil || !retryableCallErr(err) || i == attempts-1 {
 			return err
 		}
 		select {
@@ -112,18 +144,37 @@ func (c *RPCClient) callOnce(ctx context.Context, method string, params []any, o
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(reqBody))
+	timeout := c.httpTimeout
+	if timeout <= 0 {
+		timeout = rpcHTTPTimeout
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.url, bytes.NewReader(reqBody))
 	if err != nil {
 		return c.redactErr(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return c.redactErr(err)
+		redacted := c.redactErr(err)
+		if ctx.Err() != nil {
+			return redacted
+		}
+		if isHTTPTimeout(err) {
+			return fmt.Errorf("rpc %s: %w (%v)", method, errHTTPTimeout, redacted)
+		}
+		return redacted
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if ctx.Err() != nil {
+			return c.redactErr(err)
+		}
+		if isHTTPTimeout(err) {
+			return fmt.Errorf("rpc %s: %w (%v)", method, errHTTPTimeout, err)
+		}
 		return err
 	}
 	var rpcResp rpcResponse
