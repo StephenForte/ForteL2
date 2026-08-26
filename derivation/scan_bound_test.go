@@ -216,6 +216,25 @@ func TestResolveResumeInboxScanNoOpWhenFlagOff(t *testing.T) {
 	}
 }
 
+func TestResolveResumeInboxScanSkipsChannelTx(t *testing.T) {
+	src := &fakeL1InfoSrc{raw: resumeTestDeposit(t, 99)}
+	cfg := testRollup901() // ChannelTimeout stays 0: must not fail-closed
+	opts := VerifyOptions{
+		ResumeL1Bound: true,
+		StartL2:       50,
+		ChannelTx:     common.HexToHash("0xabc"),
+	}
+	if err := resolveResumeInboxScan(context.Background(), src, cfg, &opts); err != nil {
+		t.Fatalf("explicit -channel-tx must skip the resume bound, got %v", err)
+	}
+	if opts.FromL1Block != 0 {
+		t.Fatalf("FromL1Block = %d, want 0", opts.FromL1Block)
+	}
+	if src.gotNum != 0 {
+		t.Fatal("must not read sealing EL when -channel-tx is set")
+	}
+}
+
 func TestRollupJSONChannelTimeoutRoundTrip(t *testing.T) {
 	// Guard: we read the field by name, never a hard-coded 300 in InboxScanStart.
 	var cfg RollupConfig

@@ -306,7 +306,11 @@ if [[ "$SELF_ANCHOR" -eq 1 ]]; then
     # − margin). Not a stored high-water mark — that would miss open-channel frames
     # and could survive a wiped datadir. cmd/verify reads origin(M) from the seal
     # EL's L1-info and channel_timeout from rollup.json.
-    RESUME_L1_BOUND=1
+    # --channel-tx is a single-tx decode (legacy); it must not grow an inbox-scan
+    # bound or fail closed on channel_timeout.
+    if [[ -z "$CHANNEL_TX" ]]; then
+      RESUME_L1_BOUND=1
+    fi
   else
     echo "self-anchor genesis: sealing EL at genesis; deriving ${START_L2}-${END_L2}"
   fi

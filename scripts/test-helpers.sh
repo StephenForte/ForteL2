@@ -5255,7 +5255,8 @@ fi
 if awk '
   /RESUME_L1_BOUND=1/ { sets++ }
   /"\$SEAL_HEAD" -gt 0/ { resume = 1 }
-  resume && /RESUME_L1_BOUND=1/ { resume_set = 1 }
+  resume && /-z "\$CHANNEL_TX"/ { ch_ok = 1 }
+  resume && ch_ok && /RESUME_L1_BOUND=1/ { resume_set = 1 }
   resume && /^  else$/ { resume = 0 }
   /VERIFY_ARGS\+=\(-resume-l1-bound\)/ { pass++ }
   /"\$RESUME_L1_BOUND" -eq 1/ { gated++ }
@@ -5274,12 +5275,28 @@ if awk '
   /"\$MAKE_ANCHOR" -eq 1/ { ma = 1 }
   ma && /resume-l1-bound/ { bad = 1 }
   ma && /exit 0/ { ma = 0 }
-  /CHANNEL_TX/ && /resume-l1-bound/ { bad = 1 }
   END { exit bad ? 1 : 0 }
 ' "$DERIV_CHECK"; then
-  echo "PASS legacy --make-anchor / --anchor-datadir / --channel-tx paths omit -resume-l1-bound"
+  echo "PASS legacy --make-anchor / --anchor-datadir paths omit -resume-l1-bound"
 else
-  echo "FAIL -resume-l1-bound must not leak into legacy derivation-check paths" >&2
+  echo "FAIL -resume-l1-bound must not leak into legacy --make-anchor / --anchor-datadir paths" >&2
+  fail=1
+fi
+
+# --self-anchor --channel-tx on a nonempty datadir must not pass -resume-l1-bound
+# (Codex P2: the previous same-line grep missed this combination).
+if awk '
+  /RESUME_L1_BOUND=1/ {
+    for (i = 1; i <= 12 && NR-i > 0; i++) {
+      if (prev[i] ~ /-z "\$CHANNEL_TX"/) { ok = 1; break }
+    }
+  }
+  { for (i = 12; i >= 2; i--) prev[i] = prev[i-1]; prev[1] = $0 }
+  END { exit ok ? 0 : 1 }
+' "$DERIV_CHECK"; then
+  echo "PASS RESUME_L1_BOUND=1 is gated on empty --channel-tx"
+else
+  echo "FAIL --self-anchor --channel-tx must not set -resume-l1-bound (legacy single-tx path)" >&2
   fail=1
 fi
 

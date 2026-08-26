@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // ResumeScanMargin is extra L1 blocks subtracted below origin(M) − channel_timeout.
@@ -42,6 +44,9 @@ type l1InfoTxSource interface {
 // (the sealed head cannot lie about what has been derived). No checkpoint file.
 func resolveResumeInboxScan(ctx context.Context, src l1InfoTxSource, cfg *RollupConfig, opts *VerifyOptions) error {
 	if !opts.ResumeL1Bound {
+		return nil
+	}
+	if opts.ChannelTx != (common.Hash{}) {
 		return nil
 	}
 	if opts.FromL1Block != 0 || opts.StartL2 <= 1 {
