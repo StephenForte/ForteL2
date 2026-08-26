@@ -71,7 +71,9 @@ usage: derivation-check.sh [options]
                             datadir. Mutually exclusive with --anchor-datadir and
                             --make-anchor. Combine with --sepolia and explicit
                             --start-l2/--end-l2 (the default --sepolia safe_l2
-                            window is not applied).
+                            window is not applied). A resumed window (head > 0)
+                            scans L1 from origin(M) − channel_timeout − margin
+                            (derived from the sealed head; not a checkpoint).
   --scan-from-genesis       allow L1 inbox scan from block 1 on large L1 chains
 
 Mid-chain windows (start-l2 > 1) require --anchor-datadir or --make-anchor,
@@ -268,6 +270,7 @@ fi
 echo "reference op-node is up"
 
 ANCHORED_HEAD=0
+RESUME_L1_BOUND=0
 if [[ "$SELF_ANCHOR" -eq 1 ]]; then
   SEAL_HEAD="$(cast block-number --rpc-url "$SEAL_HTTP")"
   SEAL_HEAD_HASH="$(cast block "$SEAL_HEAD" --field hash --rpc-url "$SEAL_HTTP")"
@@ -299,6 +302,11 @@ if [[ "$SELF_ANCHOR" -eq 1 ]]; then
     # Sync cmd/verify's in-memory forkchoice to the kept datadir tip. Do not
     # roll the sealing EL back — that belongs to the reference-copy path only.
     ANCHORED_HEAD=1
+    # Derive the L1 inbox start from the sealed head (origin(M) − channel_timeout
+    # − margin). Not a stored high-water mark — that would miss open-channel frames
+    # and could survive a wiped datadir. cmd/verify reads origin(M) from the seal
+    # EL's L1-info and channel_timeout from rollup.json.
+    RESUME_L1_BOUND=1
   else
     echo "self-anchor genesis: sealing EL at genesis; deriving ${START_L2}-${END_L2}"
   fi
@@ -344,6 +352,9 @@ if [[ -n "${FROM_L1:-}" ]]; then
 fi
 if [[ "$ANCHORED_HEAD" -eq 1 ]]; then
   VERIFY_ARGS+=(-anchored-head)
+fi
+if [[ "$RESUME_L1_BOUND" -eq 1 ]]; then
+  VERIFY_ARGS+=(-resume-l1-bound)
 fi
 if [[ "$SCAN_FROM_GENESIS" -eq 1 ]]; then
   VERIFY_ARGS+=(-scan-from-genesis)

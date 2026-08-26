@@ -25,8 +25,11 @@ type VerifyOptions struct {
 	ChannelTx       common.Hash
 	FromL1Block     uint64
 	ScanFromGenesis bool
-	AnchoredHead    bool // sealing EL was reset to StartL2-1 via debug_setHead
+	AnchoredHead    bool   // sealing EL was reset to StartL2-1 via debug_setHead
 	L1Lookback      uint64 // inbox scan lookback from anchor/safe L1 origin (default 300)
+	// ResumeL1Bound derives -from-l1 from the sealing EL head (self-anchor resume).
+	// Legacy lookback (L1Lookback / resolveFromL1Block) stays byte-identical when false.
+	ResumeL1Bound bool
 	// Proposal mode (US-P7-005). Zero values keep legacy consistency mode unchanged.
 	Compare          string
 	Factory          common.Address
@@ -58,7 +61,11 @@ func Verify(ctx context.Context, opts VerifyOptions, sealer *SealingEL) (*Verify
 		report.ReferenceUnsafeL2 = sync.UnsafeL2
 	}
 
-	if err := resolveFromL1Block(ctx, ref, &opts); err != nil {
+	if opts.ResumeL1Bound {
+		if err := resolveResumeInboxScan(ctx, sealer, cfg, &opts); err != nil {
+			return nil, err
+		}
+	} else if err := resolveFromL1Block(ctx, ref, &opts); err != nil {
 		return nil, err
 	}
 

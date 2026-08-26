@@ -30,6 +30,7 @@ func main() {
 	fromL1 := flag.Uint64("from-l1", 0, "first L1 block for inbox scan (0 = auto; on large chains use explicit bound or -scan-from-genesis)")
 	scanFromGenesis := flag.Bool("scan-from-genesis", false, "allow L1 inbox scan from block 1 when L1 tip exceeds 1M blocks")
 	anchoredHead := flag.Bool("anchored-head", false, "sealing EL was reset to start-l2-1 via debug_setHead")
+	resumeL1Bound := flag.Bool("resume-l1-bound", false, "derive L1 inbox scan start from the sealing EL head: origin(M) - channel_timeout - margin, clamped at genesis.l1")
 	l1Lookback := flag.Uint64("l1-lookback", 300, "L1 inbox scan lookback from anchor/safe origin when -from-l1 0")
 	jsonOut := flag.Bool("json", false, "emit JSON report")
 	compare := flag.String("compare", derivation.CompareReference, "comparison oracle: reference (legacy, uses -ref-l2) or proposals (factory root claims; -ref-l2 is not an authority)")
@@ -60,6 +61,7 @@ func main() {
 		FromL1Block:     *fromL1,
 		ScanFromGenesis: *scanFromGenesis,
 		AnchoredHead:    *anchoredHead,
+		ResumeL1Bound:   *resumeL1Bound,
 		L1Lookback:      *l1Lookback,
 		Compare:         *compare,
 	}

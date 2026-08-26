@@ -36,8 +36,11 @@ FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia  # needs prior:
 
 # Operator path (Path A self-anchor): keep the derivation EL datadir; resume from last
 # self-sealed block. Mutually exclusive with --make-anchor / --anchor-datadir. Does not
-# copy or stop the reference. Live Sepolia stop/resume ≥1000 blocks is not yet proven
-# (cmd/verify empty L1 JSON after inbox scan; T2). No window 2; no seal-rate numbers.
+# copy or stop the reference. A resumed window (seal EL head > 0) derives the L1 inbox
+# scan start from the sealed head's L1-info: origin(M) − channel_timeout − margin,
+# clamped at genesis.l1 — not a stored checkpoint. Live Sepolia stop/resume ≥1000
+# blocks is not yet proven (cmd/verify empty L1 JSON after inbox scan; T2). No window 2;
+# no seal-rate numbers.
 ./scripts/derivation-check.sh --self-anchor --start-l2 1 --end-l2 20
 ./scripts/derivation-check.sh --self-anchor --start-l2 21 --end-l2 40
 FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia --self-anchor --start-l2 1 --end-l2 20
@@ -72,6 +75,10 @@ go run ./cmd/verify \
   -jwt "$DATA_DIR/jwt/derivation-jwt.txt" \
   -start-l2 1 -end-l2 20
 ```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `-resume-l1-bound` | false | Self-anchor resume (`derivation-check.sh --self-anchor` when the seal EL head is > 0). Derives `-from-l1` from the sealing EL head as origin(M) − `channel_timeout` − 1, clamped at `genesis.l1`. Not a stored checkpoint. Genesis self-anchor still passes `-from-l1` from rollup `genesis.l1`. |
 
 Proposal-compare flags (`-compare proposals` only; legacy `reference` mode is unchanged):
 
