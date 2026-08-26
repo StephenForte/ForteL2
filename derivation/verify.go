@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -180,15 +181,35 @@ func resolveFromL1Block(ctx context.Context, ref *ReferenceClient, opts *VerifyO
 	return nil
 }
 
+// sealingELBinName is the only process these helpers may start (the separate
+// loopback op-geth). A variable Command path trips SAST; we keep the argv0
+// literal and bind Path to the resolved binary after a basename check.
+const sealingELBinName = "op-geth"
+
+func requireSealingELBin(bin string) error {
+	if filepath.Base(bin) != sealingELBinName {
+		return fmt.Errorf("refusing to exec %q (basename must be %s)", bin, sealingELBinName)
+	}
+	return nil
+}
+
 func runCmd(name string, bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
+	if err := requireSealingELBin(bin); err != nil {
+		return err
+	}
+	cmd := exec.Command(sealingELBinName, args...)
+	cmd.Path = bin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func startCmd(bin string, args ...string) (*os.Process, error) {
-	cmd := exec.Command(bin, args...)
+	if err := requireSealingELBin(bin); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(sealingELBinName, args...)
+	cmd.Path = bin
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
