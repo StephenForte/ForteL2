@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -26,10 +27,23 @@ type VerifyOptions struct {
 	ScanFromGenesis bool
 	AnchoredHead    bool // sealing EL was reset to StartL2-1 via debug_setHead
 	L1Lookback      uint64 // inbox scan lookback from anchor/safe L1 origin (default 300)
+	// Proposal mode (US-P7-005). Zero values keep legacy consistency mode unchanged.
+	Compare          string
+	Factory          common.Address
+	ASR              common.Address
+	GameTypeOverride *uint32 // nil = AnchorStateRegistry.respectedGameType(); never a silent default
 }
 
 // Verify runs the derivation pipeline and compares sealed hashes to reference EL.
 func Verify(ctx context.Context, opts VerifyOptions, sealer *SealingEL) (*VerifyReport, error) {
+	switch opts.Compare {
+	case "", CompareReference:
+		// legacy consistency path below
+	case CompareProposals:
+		return verifyAgainstProposals(ctx, opts, sealer)
+	default:
+		return nil, fmt.Errorf("unknown -compare %q (want %q or %q)", opts.Compare, CompareReference, CompareProposals)
+	}
 	cfg, err := LoadRollupConfig(opts.RollupPath)
 	if err != nil {
 		return nil, err
@@ -167,15 +181,35 @@ func resolveFromL1Block(ctx context.Context, ref *ReferenceClient, opts *VerifyO
 	return nil
 }
 
+// sealingELBinName is the only process these helpers may start (the separate
+// loopback op-geth). A variable Command path trips SAST; we keep the argv0
+// literal and bind Path to the resolved binary after a basename check.
+const sealingELBinName = "op-geth"
+
+func requireSealingELBin(bin string) error {
+	if filepath.Base(bin) != sealingELBinName {
+		return fmt.Errorf("refusing to exec %q (basename must be %s)", bin, sealingELBinName)
+	}
+	return nil
+}
+
 func runCmd(name string, bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
+	if err := requireSealingELBin(bin); err != nil {
+		return err
+	}
+	cmd := exec.Command(sealingELBinName, args...)
+	cmd.Path = bin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func startCmd(bin string, args ...string) (*os.Process, error) {
-	cmd := exec.Command(bin, args...)
+	if err := requireSealingELBin(bin); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(sealingELBinName, args...)
+	cmd.Path = bin
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

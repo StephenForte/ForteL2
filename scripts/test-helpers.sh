@@ -5197,6 +5197,42 @@ else
 fi
 unset _sa_readme
 
+# US-P7-005 T2: proposal-compare flags (cmd/verify). Append-only; derivation-check.sh is T1's.
+VERIFY_MAIN="$SCRIPT_DIR/../derivation/cmd/verify/main.go"
+if grep -q 'flag.String("compare"' "$VERIFY_MAIN" \
+  && grep -q 'flag.String("game-type", ""' "$VERIFY_MAIN" \
+  && grep -q 'flag.String("factory", ""' "$VERIFY_MAIN" \
+  && grep -q 'flag.String("asr", ""' "$VERIFY_MAIN" \
+  && grep -q 'flag.String("deploy-state", ""' "$VERIFY_MAIN"; then
+  echo "PASS cmd/verify exposes -compare/-factory/-asr/-deploy-state/-game-type with empty game-type default"
+else
+  echo "FAIL cmd/verify must add proposal-compare flags with empty -game-type default" >&2
+  fail=1
+fi
+if grep -qE 'flag\.(Uint|Int|Uint64)\("game-type"' "$VERIFY_MAIN" \
+  || grep -qE 'game-type", [0-9]' "$SCRIPT_DIR/../derivation/cmd/verify/main.go" \
+  || grep -qE 'DefaultGameType[[:space:]]*=' "$SCRIPT_DIR/../derivation"/*.go \
+  || grep -qE 'gameType[[:space:]]*=[[:space:]]*8[[:space:]]*$' "$SCRIPT_DIR/../derivation"/proposals.go; then
+  echo "FAIL proposal-compare must not hard-code a numeric game-type default" >&2
+  fail=1
+else
+  echo "PASS proposal-compare has no silent numeric game-type default"
+fi
+if grep -q 'ProposalSkipped' "$SCRIPT_DIR/../derivation/proposal_compare.go" \
+  && grep -q '"SKIPPED"' "$SCRIPT_DIR/../derivation/proposal_compare.go" \
+  && grep -q 'height outside window' "$SCRIPT_DIR/../derivation/proposal_compare.go"; then
+  echo "PASS proposal-compare names SKIPPED for out-of-window heights"
+else
+  echo "FAIL out-of-window proposals must be named SKIPPED (not dropped)" >&2
+  fail=1
+fi
+if grep -q '0x4200000000000000000000000000000000000016' "$SCRIPT_DIR/../derivation/outputroot.go"; then
+  echo "PASS output-root uses L2ToL1MessagePasser predeploy"
+else
+  echo "FAIL outputroot.go must use the L2ToL1MessagePasser predeploy" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
