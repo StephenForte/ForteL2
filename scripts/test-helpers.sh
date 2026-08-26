@@ -5071,6 +5071,132 @@ unset BP_BUILD BP_ROOT BP_SCRIPTS_SENTINEL BP_SCRIPTS_HASH BP_SCRIPTS_OUT BP_SCR
   BP_UNMARKED_EC BP_EMPTY BP_EMPTY_OUT BP_EMPTY_EC BP_MARKED_OUT BP_MARKED_EC \
   BP_DEFAULT_OUT BP_DEFAULT_EC BP_DEFAULT2_OUT BP_DEFAULT2_EC BP_PUB BP_CSP_CHECK
 
+# US-P7-005 --self-anchor (keep-and-reuse derivation EL; never a reference copy).
+DERIV_CHECK="${DERIV_CHECK:-$SCRIPT_DIR/derivation-check.sh}"
+_sa_help="$("$DERIV_CHECK" --help 2>&1)" || true
+if echo "$_sa_help" | grep -q -- '--self-anchor' \
+  && echo "$_sa_help" | grep -q 'Mutually exclusive with --anchor-datadir and' \
+  && echo "$_sa_help" | grep -q -- '--make-anchor'; then
+  echo "PASS derivation-check --help documents --self-anchor and mutual exclusion"
+else
+  echo "FAIL derivation-check --help must document --self-anchor as mutually exclusive with --anchor-datadir / --make-anchor" >&2
+  fail=1
+fi
+
+_sa_make_out="$("$DERIV_CHECK" --self-anchor --make-anchor 2>&1)" && _sa_make_ec=0 || _sa_make_ec=$?
+if [[ "$_sa_make_ec" -eq 2 ]] \
+  && echo "$_sa_make_out" | grep -q -- '--self-anchor cannot be combined with --make-anchor' \
+  && echo "$_sa_make_out" | grep -q 'mutually exclusive' \
+  && echo "$_sa_make_out" | grep -q 'copy of the reference datadir'; then
+  echo "PASS derivation-check --self-anchor --make-anchor refuses (exit 2, names both flags)"
+else
+  echo "FAIL derivation-check --self-anchor --make-anchor must refuse naming the conflict (ec=$_sa_make_ec)" >&2
+  echo "$_sa_make_out" >&2
+  fail=1
+fi
+
+_sa_ad_out="$("$DERIV_CHECK" --self-anchor --anchor-datadir /tmp/fortel2-not-a-copy 2>&1)" && _sa_ad_ec=0 || _sa_ad_ec=$?
+if [[ "$_sa_ad_ec" -eq 2 ]] \
+  && echo "$_sa_ad_out" | grep -q -- '--self-anchor cannot be combined with --anchor-datadir' \
+  && echo "$_sa_ad_out" | grep -q 'mutually exclusive' \
+  && echo "$_sa_ad_out" | grep -q 'copy of the reference datadir'; then
+  echo "PASS derivation-check --self-anchor --anchor-datadir refuses (exit 2, names both flags)"
+else
+  echo "FAIL derivation-check --self-anchor --anchor-datadir must refuse naming the conflict (ec=$_sa_ad_ec)" >&2
+  echo "$_sa_ad_out" >&2
+  fail=1
+fi
+
+# Resume math (no chain): head 0 → start 1; head N → start N+1.
+_sa_fn="$(awk '/^self_anchor_next_start\(\)/,/^}/ {print} /^self_anchor_start_ok\(\)/,/^}/ {print}' "$DERIV_CHECK")"
+if echo "$_sa_fn" | grep -q '^self_anchor_next_start()' \
+  && echo "$_sa_fn" | grep -q '^self_anchor_start_ok()'; then
+  _sa_eval=0
+  _sa_ns0="$(bash -c "$_sa_fn"$'\n'"self_anchor_next_start 0")" || _sa_eval=1
+  _sa_ns20="$(bash -c "$_sa_fn"$'\n'"self_anchor_next_start 20")" || _sa_eval=1
+  _sa_ok_g="$(bash -c "$_sa_fn"$'\n'"self_anchor_start_ok 0 1 && echo yes")" || _sa_ok_g=""
+  _sa_bad_g="$(bash -c "$_sa_fn"$'\n'"self_anchor_start_ok 0 2 && echo yes || echo no")" || true
+  _sa_ok_r="$(bash -c "$_sa_fn"$'\n'"self_anchor_start_ok 20 21 && echo yes")" || _sa_ok_r=""
+  _sa_bad_r="$(bash -c "$_sa_fn"$'\n'"self_anchor_start_ok 20 20 && echo yes || echo no")" || true
+  _sa_gap="$(bash -c "$_sa_fn"$'\n'"self_anchor_start_ok 20 22 && echo yes || echo no")" || true
+  if [[ "$_sa_eval" -eq 0 && "$_sa_ns0" == "1" && "$_sa_ns20" == "21" \
+    && "$_sa_ok_g" == "yes" && "$_sa_bad_g" == "no" \
+    && "$_sa_ok_r" == "yes" && "$_sa_bad_r" == "no" && "$_sa_gap" == "no" ]]; then
+    echo "PASS self-anchor resume start is contiguous (0→1, N→N+1; gaps refused)"
+  else
+    echo "FAIL self-anchor resume helpers must map head 0→1 and N→N+1 and refuse gaps (ns0=$_sa_ns0 ns20=$_sa_ns20)" >&2
+    fail=1
+  fi
+else
+  echo "FAIL derivation-check.sh must define self_anchor_next_start and self_anchor_start_ok" >&2
+  fail=1
+fi
+
+# Property: the reference-datadir copy exists only inside --make-anchor (the trap).
+if awk '
+  /"\$MAKE_ANCHOR" -eq 1/ { make = 1 }
+  make && /exit 0/ { make = 0 }
+  /cp -a "\$REF_DATADIR"/ {
+    copies++
+    if (!make) bad = 1
+  }
+  /refuse_live_anchor_copy$/ {
+    calls++
+    if (!make) bad = 1
+  }
+  END { exit (copies == 1 && calls == 1 && !bad) ? 0 : 1 }
+' "$DERIV_CHECK"; then
+  echo "PASS reference datadir copy is only inside --make-anchor (not --self-anchor)"
+else
+  echo "FAIL --self-anchor must keep-and-reuse the derivation EL datadir; never copy the reference" >&2
+  fail=1
+fi
+
+# debug_setHead stays on the reference-copy path only (USE_ANCHOR).
+if awk '
+  /^if \[\[ "\$SELF_ANCHOR" -eq 1 \]\]; then$/ { sa = 1 }
+  sa && /debug_setHead/ { bad = 1 }
+  sa && /^fi$/ { sa = 0 }
+  /"\$USE_ANCHOR" -eq 1/ { ua = 1 }
+  ua && /debug_setHead/ { ua_set = 1 }
+  END { exit (ua_set && !bad) ? 0 : 1 }
+' "$DERIV_CHECK"; then
+  echo "PASS debug_setHead is confined to the USE_ANCHOR copy path, not --self-anchor"
+else
+  echo "FAIL debug_setHead must not run on the --self-anchor keep-and-reuse datadir" >&2
+  fail=1
+fi
+
+unset _sa_help _sa_make_out _sa_make_ec _sa_ad_out _sa_ad_ec _sa_fn _sa_eval \
+  _sa_ns0 _sa_ns20 _sa_ok_g _sa_bad_g _sa_ok_r _sa_bad_r _sa_gap
+
+# Rate math must not run on legacy success paths (python3 missing → skip PASS).
+if ! grep -q 'python3' "$DERIV_CHECK" \
+  && grep -B20 'VERIFY_RATE=' "$DERIV_CHECK" | grep -q 'SELF_ANCHOR'; then
+  echo "PASS self-anchor rate math is awk-only and confined to --self-anchor"
+else
+  echo "FAIL seal-rate math must not run (or require python3) on legacy derivation-check paths" >&2
+  fail=1
+fi
+
+# Runbook must keep the Sepolia self-anchor invocation and not claim a live ≥1000-block
+# stop/resume (or seal-rate) that never succeeded. Limitations is T3; stop before it.
+_sa_readme="$SCRIPT_DIR/../derivation/README.md"
+if awk '
+  /^## Limitations/ { exit }
+  /FORTEL2_ENV=\.env\.sepolia \.\/scripts\/derivation-check\.sh --sepolia --self-anchor/ { saw = 1 }
+  /not yet proven/ { unproven = 1 }
+  /empty L1 JSON/ { emptyjson = 1 }
+  /T2/ { t2 = 1 }
+  END { exit (saw && unproven && emptyjson && t2) ? 0 : 1 }
+' "$_sa_readme"; then
+  echo "PASS derivation README runbook keeps Sepolia self-anchor and states live ≥1000-block stop/resume is unproven"
+else
+  echo "FAIL derivation README runbook must keep the Sepolia self-anchor operator path and state live ≥1000-block stop/resume is not yet proven (empty L1 JSON / T2)" >&2
+  fail=1
+fi
+unset _sa_readme
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
