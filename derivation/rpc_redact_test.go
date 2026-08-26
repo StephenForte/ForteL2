@@ -41,7 +41,7 @@ func TestCallEmptyResultIsRPCError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewRPCClient(srv.URL)
+	c := tightRPCClient(srv.URL)
 	var out map[string]any
 	err := c.Call(context.Background(), "eth_getBlockByNumber", []any{"0x1", false}, &out)
 	if err == nil {
@@ -61,7 +61,7 @@ func TestBlockHeaderEmptyResultIsRPCError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	l1 := NewL1Client(NewRPCClient(srv.URL))
+	l1 := NewL1Client(tightRPCClient(srv.URL))
 	_, err := l1.BlockHeader(context.Background(), 1)
 	if err == nil {
 		t.Fatal("expected error on empty result")
@@ -90,7 +90,7 @@ func TestCallEmptyResultRetriesThenSucceeds(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewRPCClient(srv.URL)
+	c := tightRPCClient(srv.URL)
 	var out map[string]any
 	if err := c.Call(context.Background(), "eth_getBlockByNumber", []any{"0x1", false}, &out); err != nil {
 		t.Fatalf("retry should succeed: %v", err)
