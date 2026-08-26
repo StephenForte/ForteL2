@@ -9,6 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+export DERIVATION_RPC_MAX_RPS="${DERIVATION_RPC_MAX_RPS:-}"
 
 # Next --start-l2 after a self-anchor run whose sealing EL latest is HEAD.
 # Head 0 (genesis only) → 1; otherwise last self-sealed + 1.

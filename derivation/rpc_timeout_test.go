@@ -34,7 +34,7 @@ func TestCallHTTPTimeoutNeverResponds(t *testing.T) {
 	})
 
 	tokenURL := srv.URL + "/deadbeefcafe1234"
-	c := NewRPCClient(tokenURL)
+	c := tightRPCClient(tokenURL)
 	c.httpTimeout = attempt
 
 	start := time.Now()
@@ -63,7 +63,7 @@ func TestCallHTTPTimeoutThenSucceeds(t *testing.T) {
 	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if n.Add(1) == 1 {
-			stallPastDeadline(3 * attempt).ServeHTTP(w, r)
+			stallPastDeadline(3*attempt).ServeHTTP(w, r)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -77,7 +77,7 @@ func TestCallHTTPTimeoutThenSucceeds(t *testing.T) {
 		srv.Close()
 	})
 
-	c := NewRPCClient(srv.URL)
+	c := tightRPCClient(srv.URL)
 	c.httpTimeout = attempt
 
 	var out map[string]any
@@ -96,7 +96,7 @@ func TestCallCancelDuringStallReturnsPromptly(t *testing.T) {
 		srv.Close()
 	})
 
-	c := NewRPCClient(srv.URL)
+	c := tightRPCClient(srv.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	time.AfterFunc(50*time.Millisecond, cancel)

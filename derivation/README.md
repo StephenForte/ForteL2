@@ -50,6 +50,10 @@ FORTEL2_ENV=.env.sepolia ./scripts/derivation-check.sh --sepolia --self-anchor -
 
 **Kill switch:** do not run `derivation-check.sh` — stock `op-node` derivation is unchanged.
 
+| Env | Default | Notes |
+|---|---|---|
+| `DERIVATION_RPC_MAX_RPS` | unset (unpaced) | Optional client-side JSON-RPC max requests/second on `NewRPCClient`. Empty = today's unpaced behavior. Alchemy free-tier: try `2`. HTTP 429/5xx and HTML bodies retry with exponential backoff+jitter; retries log to stderr (redacted). |
+
 ### Separate sealing EL (D-R1-1)
 
 The runbook starts its own `op-geth` under `$DATA_DIR/l2/derivation-op-geth` (genesis replay) or reuses `$DATA_DIR/l2/derivation-anchor-op-geth` (mid-chain copy) with dedicated ports (`DERIV_EL_HTTP_PORT=19645`, `DERIV_EL_AUTH_PORT=19651`, P2P `--port=30323`) and JWT (`$DATA_DIR/jwt/derivation-jwt.txt`). The reference `op-geth` / `op-node` are **read-only** oracles (`eth_getBlockByNumber`, `optimism_syncStatus`). `debug_setHead` is confined to the anchor copy only.
