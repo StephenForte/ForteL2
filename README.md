@@ -747,6 +747,7 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 | Proposer poll | `12s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
 | Proposer txmgr receipt / rebroadcast / resubmission | `36s` / `36s` / `72s` | `SEPOLIA_PROPOSER_TXMGR_*` / `SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT` |
 | Mac op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
+| Mac op-node L1 RPC kind | `quicknode` | `SEPOLIA_L1_RPC_KIND` (rollback: `standard`) |
 | **Render** op-node poll / rate limit | `24s` / `5` rps | `L1_HTTP_POLL_INTERVAL` / `L1_RPC_RATE_LIMIT` in fortel2-replica |
 | **Render** daytime/night schedule | `L1_RPC_SCHEDULE=business` → QuickNode **09:00–17:00** `America/Los_Angeles`, publicnode overnight (in-container router) | Override with `L1_RPC_FORCE=public\|metered` or `L1_USE_PUBLIC_RPC=1` |
 | **Render** pin public always | `L1_USE_PUBLIC_RPC=1` or `L1_RPC_FORCE=public` | Keep QuickNode in `L1_RPC_URL` for later |
