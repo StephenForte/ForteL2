@@ -606,7 +606,7 @@ _balance_unread() {
   local label="$1"
   local addr="$2"
   echo "ERROR: $label $addr: could not establish L1 balance at $(redact_rpc_url "${L1_RPC_URL:-}")" >&2
-  echo "Balance is unknown — refusing to start. This is not an underfunded wallet." >&2
+  echo "Balance is unknown — refusing to start. Underfunding has not been established." >&2
   exit 1
 }
 

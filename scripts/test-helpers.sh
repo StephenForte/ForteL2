@@ -5349,6 +5349,7 @@ if [[ "${1:-}" == "balance" ]]; then
   fi
   case "${CAST_BALANCE_STUB:-}" in
     missing) exit 1 ;;
+    junk) printf '%s\n' "null"; exit 0 ;;
     disagree)
       _n=0
       if [[ -f "${CAST_STUB_DIR}/balance-calls" ]]; then
@@ -5394,6 +5395,18 @@ EOF
   else
     echo "FAIL require_min_balance_eth missing pinned block must refuse without a figure (ec=$_BAL_MISS_EC)" >&2
     echo "$_BAL_MISS_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_JUNK_EC=0
+  _BAL_JUNK_OUT="$(_bal_run junk 2>&1)" && _BAL_JUNK_EC=0 || _BAL_JUNK_EC=$?
+  if [[ "$_BAL_JUNK_EC" -ne 0 ]] \
+    && echo "$_BAL_JUNK_OUT" | grep -q 'could not establish L1 balance' \
+    && ! echo "$_BAL_JUNK_OUT" | grep -q 'has .* ETH'; then
+    echo "PASS require_min_balance_eth non-integer balance is unread, not underfunded"
+  else
+    echo "FAIL require_min_balance_eth non-integer balance must refuse without a figure (ec=$_BAL_JUNK_EC)" >&2
+    echo "$_BAL_JUNK_OUT" >&2
     fail=1
   fi
 
