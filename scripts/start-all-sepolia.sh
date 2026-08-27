@@ -70,6 +70,28 @@ sepolia_start_cleanup() {
   echo "ERROR: Sepolia start failed after sequencer — stopping partial stack" >&2
   "$SCRIPT_DIR/stop-all-sepolia.sh" || true
 }
+
+# Optional fault-proof services. Call AFTER `trap - ERR`: a challenger (or
+# proxy) failure — including D-0103 "balance could not be established" — must
+# not fire sepolia_start_cleanup. Core stack stays up; we yell on stderr.
+# Test-only overrides (names never appear in env files, so they survive
+# lib.sh `set -a` sourcing): FORTEL2_START_L1_BATCH_PROXY_SH,
+# FORTEL2_START_CHALLENGER_SH.
+start_optional_sepolia_fault_proofs() {
+  local proxy_sh challenger_sh
+  proxy_sh="${FORTEL2_START_L1_BATCH_PROXY_SH:-$SCRIPT_DIR/start-l1-batch-proxy-sepolia.sh}"
+  challenger_sh="${FORTEL2_START_CHALLENGER_SH:-$SCRIPT_DIR/09-start-challenger-sepolia.sh}"
+  if [[ -n "${CHALLENGER_L1_RPC_URL:-}" ]]; then
+    echo "Starting l1-batch-proxy (CHALLENGER_L1_RPC_URL is set; D-0081)"
+    "$proxy_sh" || return $?
+  else
+    echo "Skipping l1-batch-proxy (CHALLENGER_L1_RPC_URL unset; challenger dials L1_RPC_URL)"
+  fi
+  echo "Starting op-challenger"
+  "$challenger_sh" || return $?
+  return 0
+}
+
 trap sepolia_start_cleanup ERR
 
 "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"
@@ -80,10 +102,23 @@ sleep 3
 "$SCRIPT_DIR/06-start-proposer-sepolia.sh"
 trap - ERR
 
+# Capture status — a plain assignment aborts under set -e (bash 3.2 / D-0103).
+optional_rc=0
+start_optional_sepolia_fault_proofs || optional_rc=$?
+if [[ "$optional_rc" -ne 0 ]]; then
+  echo "ERROR: optional fault-proof services failed (exit $optional_rc) — sequencer, batcher, and proposer left running" >&2
+  echo "ERROR: fault-proof defense is OFF until op-challenger is restored" >&2
+fi
+
 WRITE_PORT="${L2_WRITE_RPC_PORT:-9555}"
 echo
 echo "=== Sepolia L2 stack is up ==="
 echo "L2 RPC (full/operator):  $(redact_rpc_url "$L2_RPC_URL")  (chain $L2_CHAIN_ID)"
 echo "L2 write filter:         http://127.0.0.1:${WRITE_PORT}  (eth/net/web3 only; tunnel target)"
+if is_running op-challenger; then
+  echo "Challenger:              RUNNING"
+else
+  echo "Challenger:              not running (optional; core stack is up)"
+fi
 echo "Status:  FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/status.sh"
 echo "Stop:    FORTEL2_ENV=.env.sepolia $SCRIPT_DIR/stop-all-sepolia.sh"

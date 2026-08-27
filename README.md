@@ -650,7 +650,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 | Script | Role |
 |---|---|
-| `start-all-sepolia.sh` | Sequencer + **write RPC filter** + batcher + proposer (calldata DA, beacon ignored) |
+| `start-all-sepolia.sh` | Sequencer + **write RPC filter** + batcher + proposer (calldata DA, beacon ignored) + **op-challenger** (and **l1-batch-proxy** first when `CHALLENGER_L1_RPC_URL` is set). Challenger-class start failures degrade: core stays up, error on stderr. |
 | `stop-all-sepolia.sh` | Stops Sepolia PIDs only (incl. `l2-rpc-filter`) — no Anvil |
 | `07-start-rpc-filter-sepolia.sh` | Start the eth/net/web3 allowlist proxy alone (upstream must already be up) |
 | `deposit-eth-sepolia.sh` | L1→L2 via Sepolia `deployments.json` |
@@ -989,10 +989,13 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 
 ## Phase 7 challenger (US-073)
 
-Isolated, opt-in — **not** started by `start-all-sepolia.sh` or launchd. Operator-only, after the Phase 7 wipe. Watches the DisputeGameFactory as the **challenger** role (`CHALLENGER_PRIVATE_KEY` / `CHALLENGER_ADDRESS`), never the proposer. A valid game should not be attacked; a deliberately bad proposal is US-074.
+Started by `start-all-sepolia.sh` (and therefore by `dev-sleep.sh wake`) **after** the sequencer, write filter, batcher, and proposer are up. Not a launchd unit of its own — it rides the stack start. A challenger (or l1-batch-proxy) start failure is **degraded, not fail-closed**: the core stack stays up, the error is loud on stderr, and `alert-watch.sh` raises if the process is still missing. Sequencer/batcher/proposer start failures still tear down the partial stack. Watches the DisputeGameFactory as the **challenger** role (`CHALLENGER_PRIVATE_KEY` / `CHALLENGER_ADDRESS`), never the proposer. A valid game should not be attacked; a deliberately bad proposal is US-074.
 
 ```bash
-# After the wipe, with the Sepolia stack already up:
+# Cold start (proxy + challenger included; proxy only when CHALLENGER_L1_RPC_URL is set):
+FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
+
+# Standalone (stack already up):
 FORTEL2_ENV=.env.sepolia ./scripts/09-start-challenger-sepolia.sh
 
 # Stop (challenger is torn down before op-node / op-geth):
@@ -1007,7 +1010,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 **Keys:** this process signs with `CHALLENGER_PRIVATE_KEY`, which must derive to `CHALLENGER_ADDRESS`. That is the inverse of the US-074 bad-proposal tool, which must sign with `PROPOSER_PRIVATE_KEY` because only the factory proposer role may `create()` a game. Putting the proposer key in the challenger slot would have the honest-party process signing as the party it is supposed to be disputing. The daemon receives the key via environment (`OP_CHALLENGER_PRIVATE_KEY`), not `ps` argv. Keys live only in local `.env.sepolia` (gitignored); nothing in this script or the committed tree is a secret.
 
-**L1 batch proxy (QuickNode cap):** when the factory holds dozens of games, the pinned op-challenger enumerates them in JSON-RPC batches of 100 — each sub-call counts against QuickNode's per-second cap and the fetch fails before any window filtering. Start the loopback splitter first (`FORTEL2_ENV=.env.sepolia ./scripts/start-l1-batch-proxy-sepolia.sh`; listens on `127.0.0.1:9549` by default), then set `CHALLENGER_L1_RPC_URL=http://127.0.0.1:9549` in `.env.sepolia` so `09-start-challenger-sepolia.sh` dials the proxy for `--l1-eth-rpc`, preflight `cast` calls, and its L1 wait. Unset `CHALLENGER_L1_RPC_URL` keeps direct `L1_RPC_URL` (byte-identical to before). If op-challenger is already running, stop it before re-running the start script with a new `CHALLENGER_L1_RPC_URL` (`stop-all-sepolia.sh` stops challenger then proxy). Money-path services (batcher, proposer, recovery) stay on direct `L1_RPC_URL` — this proxy is challenger-only.
+**L1 batch proxy (QuickNode cap):** when the factory holds dozens of games, the pinned op-challenger enumerates them in JSON-RPC batches of 100 — each sub-call counts against QuickNode's per-second cap and the fetch fails before any window filtering. When `CHALLENGER_L1_RPC_URL` is set (typically `http://127.0.0.1:9549`), `start-all-sepolia.sh` starts the loopback splitter **before** the challenger (D-0081). Unset `CHALLENGER_L1_RPC_URL` keeps direct `L1_RPC_URL` (no proxy). Standalone: `FORTEL2_ENV=.env.sepolia ./scripts/start-l1-batch-proxy-sepolia.sh` then `09-start-challenger-sepolia.sh`. If op-challenger is already running, stop it before re-running the start script with a new `CHALLENGER_L1_RPC_URL` (`stop-all-sepolia.sh` stops challenger then proxy). Money-path services (batcher, proposer, recovery) stay on direct `L1_RPC_URL` — this proxy is challenger-only.
 
 **Trace type / prestate (no defaults):** set `CHALLENGER_TRACE_TYPE` to what the **post-wipe** factory actually registers (`alphabet`, `cannon`, `cannon-kona`, `permissioned`, `fast`, `super-cannon-kona`, `zk`). For Cannon-family types (`cannon`, `permissioned`, `cannon-kona`, `super-cannon-kona`) also set `CHALLENGER_PRESTATE` (local file) and/or `CHALLENGER_PRESTATES_URL` (base URL). A relative `CHALLENGER_PRESTATE` is resolved to an absolute path before the daemon starts (`start_bg` chdirs to `/`). The prestate is a **Kona** artifact built in CI and registered post-wipe at step 8b (D-0059 / D-0061); it is not the op-deployer default, which is a stale cannon32 hash (D-0056). `L1_BEACON_URL` is required for this binary's CheckRequired (`--l1-beacon`); it does not turn on blob DA — op-node still uses `--l1.beacon.ignore` (D-0037 / D-0053). For `cannon` / `permissioned` the script also passes `--cannon-rollup-config` and `--cannon-l2-genesis` from the Sepolia deploy tree (`$DEPLOY_DIR/rollup.json`, `$DEPLOY_DIR/genesis.json`); `cannon-kona` uses the matching `--cannon-kona-*` flags on the same files.
 
