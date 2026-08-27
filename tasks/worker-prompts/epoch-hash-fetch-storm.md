@@ -68,18 +68,14 @@ rather than assuming.
 - The D-0100 resume bound, #159 retry/pacing behavior, and legacy modes untouched.
 - D-0049: never read or print `.env.sepolia` values.
 
-## Live shakeout (required, and it doubles as the W1 the operator has been waiting for)
-From the merged branch state (after merging current main into it), with
-`DERIVATION_RPC_MAX_RPS=10` and `FORTEL2_ENV=.env.sepolia`:
-`./scripts/derivation-check.sh --sepolia --self-anchor --start-l2 1 --end-l2 2200`
-Expected with the fix: the inbox scan (~2¼ h at 10 RPS — unavoidable, unchanged) and then
-a post-scan phase of **minutes, not hours** (≈370 memoized header fetches), sealing, and
-`derivation-check: PASS` with the seal-rate line. Report scan wall-clock, post-scan
-wall-clock, and the seal rate — these are the D-0097 measurement numbers. If the run
-cannot finish before the 23:45 chain dev-sleep window, run it the next morning and say so
-rather than handing back an interrupted run.
+## Live shakeout (operator-owned; do not run)
+Do **not** run `./scripts/derivation-check.sh` or start a seal EL. Prove the fix with
+the call-budget test and `go test ./...` only. Hand back `STATUS complete-with-caveats`
+and `LIVE SHAKEOUT: not run (operator-run after merge)`. The operator owns the live W1
+(`--sepolia --self-anchor --start-l2 1 --end-l2 2200` at `DERIVATION_RPC_MAX_RPS=10`).
 
 ## Out of scope, with reasons
+- Live W1 (`derivation-check.sh` / seal EL) — operator-run after merge (amendment 2026-08-26).
 - W2 (resumed ≥1000-block window) and the factory audit — operator-run after merge.
 - Pacer burst-smoothing (post-backoff credit burst observed, minor) — noted for a future
   task, not this one.
@@ -98,8 +94,7 @@ STATUS:      complete | complete-with-caveats | blocked
 VERIFICATION: <each check named> — pass/fail, with counts
               (run against main merged in as of hand-back)
 CALL BUDGET: <fetches for the fixture window, asserted in test: n for K origins>
-LIVE SHAKEOUT: scan <t1>, post-scan <t2>, seal rate <r> blocks/s, window 1–2200 PASS/FAIL,
-               RPS cap used; or why it could not run
+LIVE SHAKEOUT: not run (operator-run after merge)
 MIGRATION:   none
 
 SHARED FILES TOUCHED: <path> — what changed, why it is additive   (or: none)
