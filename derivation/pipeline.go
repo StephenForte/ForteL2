@@ -50,20 +50,24 @@ func deriveBlockInputs(ctx context.Context, cfg *RollupConfig, l1 *L1Client, opt
 				return nil, err
 			}
 			for _, e := range elems {
-				if e.EpochHash == (common.Hash{}) {
-					hdr, err := l1.BlockHeader(ctx, e.EpochNumber)
-					if err != nil {
-						return nil, err
-					}
-					e.EpochHash = hdr.Hash
-				}
-
+				// L2 number is knowable from the timestamp alone. Classify the
+				// window before resolving EpochHash so a genesis-scale span
+				// decode does not fetch one L1 header per historical L2 block.
+				// Do not drop elements inside DecodeSpanBatch — only skip the
+				// unused hash fetch for out-of-window rows.
 				num, err := blockNumberFromTimestamp(cfg, e.Timestamp)
 				if err != nil {
 					return nil, fmt.Errorf("tx %s: %w", btx.Hash, err)
 				}
 				if num < opts.StartL2 || num > opts.EndL2 {
 					continue
+				}
+				if e.EpochHash == (common.Hash{}) {
+					hdr, err := l1.BlockHeader(ctx, e.EpochNumber)
+					if err != nil {
+						return nil, err
+					}
+					e.EpochHash = hdr.Hash
 				}
 				e.Number = num
 				e.L1SourceTx = btx.Hash

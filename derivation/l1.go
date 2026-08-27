@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/StephenForte/ForteL2/batcher"
 	"github.com/ethereum/go-ethereum/common"
@@ -21,7 +22,7 @@ type L1BlockHeader struct {
 	ParentHash       common.Hash
 	Time             uint64
 	BaseFee          *big.Int
-	BlobBaseFee      *big.Int    // Ecotone+ L1-info; from eth_feeHistory (D-R3-1)
+	BlobBaseFee      *big.Int // Ecotone+ L1-info; from eth_feeHistory (D-R3-1)
 	MixDigest        common.Hash
 	ParentBeaconRoot common.Hash // Ecotone+ payload attrs; zero on beacon-less L1s (Anvil)
 }
@@ -30,10 +31,56 @@ type L1BlockHeader struct {
 type L1Client struct {
 	rpc      *RPCClient
 	blobFees *blobFeeCache
+	headers  *headerCache
 }
 
 func NewL1Client(rpc *RPCClient) *L1Client {
-	return &L1Client{rpc: rpc, blobFees: newBlobFeeCache()}
+	return &L1Client{rpc: rpc, blobFees: newBlobFeeCache(), headers: newHeaderCache()}
+}
+
+// headerCache memoizes L1 headers by number and hash so repeated epoch
+// origins (≈6 L2 blocks per L1 origin) cost one eth_getBlockByNumber.
+type headerCache struct {
+	mu     sync.Mutex
+	byNum  map[uint64]*L1BlockHeader
+	byHash map[common.Hash]*L1BlockHeader
+}
+
+func newHeaderCache() *headerCache {
+	return &headerCache{
+		byNum:  make(map[uint64]*L1BlockHeader),
+		byHash: make(map[common.Hash]*L1BlockHeader),
+	}
+}
+
+func (c *L1Client) cachedHeaderByNum(num uint64) *L1BlockHeader {
+	if c.headers == nil {
+		return nil
+	}
+	c.headers.mu.Lock()
+	defer c.headers.mu.Unlock()
+	return c.headers.byNum[num]
+}
+
+func (c *L1Client) cachedHeaderByHash(hash common.Hash) *L1BlockHeader {
+	if c.headers == nil || hash == (common.Hash{}) {
+		return nil
+	}
+	c.headers.mu.Lock()
+	defer c.headers.mu.Unlock()
+	return c.headers.byHash[hash]
+}
+
+func (c *L1Client) storeHeader(h *L1BlockHeader) {
+	if c.headers == nil || h == nil {
+		return
+	}
+	c.headers.mu.Lock()
+	defer c.headers.mu.Unlock()
+	c.headers.byNum[h.Number] = h
+	if h.Hash != (common.Hash{}) {
+		c.headers.byHash[h.Hash] = h
+	}
 }
 
 type l1HeaderJSON struct {
@@ -57,28 +104,44 @@ type l1BlockJSON struct {
 }
 
 type txJSON struct {
-	Hash  common.Hash `json:"hash"`
-	From  common.Address `json:"from"`
-	To    *common.Address `json:"to"`
-	Input hexutil.Bytes `json:"input"`
-	BlockNumber string `json:"blockNumber"`
+	Hash        common.Hash     `json:"hash"`
+	From        common.Address  `json:"from"`
+	To          *common.Address `json:"to"`
+	Input       hexutil.Bytes   `json:"input"`
+	BlockNumber string          `json:"blockNumber"`
 }
 
 func (c *L1Client) BlockHeader(ctx context.Context, num uint64) (*L1BlockHeader, error) {
+	if h := c.cachedHeaderByNum(num); h != nil {
+		return h, nil
+	}
 	var blk l1HeaderJSON
 	tag := fmt.Sprintf("0x%x", num)
 	if err := c.rpc.Call(ctx, "eth_getBlockByNumber", []any{tag, false}, &blk); err != nil {
 		return nil, err
 	}
-	return headerFromJSON(blk)
+	h, err := headerFromJSON(blk)
+	if err != nil {
+		return nil, err
+	}
+	c.storeHeader(h)
+	return h, nil
 }
 
 func (c *L1Client) BlockHeaderByHash(ctx context.Context, hash common.Hash) (*L1BlockHeader, error) {
+	if h := c.cachedHeaderByHash(hash); h != nil {
+		return h, nil
+	}
 	var blk l1HeaderJSON
 	if err := c.rpc.Call(ctx, "eth_getBlockByHash", []any{hash, false}, &blk); err != nil {
 		return nil, err
 	}
-	return headerFromJSON(blk)
+	h, err := headerFromJSON(blk)
+	if err != nil {
+		return nil, err
+	}
+	c.storeHeader(h)
+	return h, nil
 }
 
 func headerFromJSON(blk l1HeaderJSON) (*L1BlockHeader, error) {
