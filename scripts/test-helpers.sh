@@ -519,6 +519,16 @@ else
   echo "FAIL Sepolia start scripts must keep credit-budget env defaults" >&2
   fail=1
 fi
+# Sepolia op-node L1 receipts-fetch kind (QuickNode; D-0105 Finding 3).
+if grep -q 'SEPOLIA_L1_RPC_KIND:-quicknode' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -q -- '--l1.rpckind="${L1_RPC_KIND}"' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -q 'kind=${L1_RPC_KIND}' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && ! grep -q -- '--l1.rpckind=standard' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
+  echo "PASS Sepolia op-node L1 rpckind defaults to quicknode from env"
+else
+  echo "FAIL Sepolia op-node must take --l1.rpckind from SEPOLIA_L1_RPC_KIND (default quicknode)" >&2
+  fail=1
+fi
 # Phase 4: custom batcher is opt-in; stock path remains default; Sepolia needs confirm gate.
 # Stop existing op-batcher pid before custom start; Sepolia passes L1 confirmations + receipt-timeout.
 if grep -q 'USE_CUSTOM_BATCHER' "$SCRIPT_DIR/05-start-batcher.sh" \
