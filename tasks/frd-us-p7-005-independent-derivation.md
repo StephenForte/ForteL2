@@ -1,5 +1,7 @@
 # FRD — US-P7-005: Independent derivation (Path A)
 
+> **PARKED 2026-08-27 (D-0102).** The T1→T3 sequence below is **stopped**, not active. T1/T2 merged (#157/#158) and are dormant; the live measurement and factory audit were never completed. Before any resumption, fix the eip1559Params/extraData defect (derivation never reads `chain_op_config`; every derived block on this chain mismatches) and wipe `$DATA_DIR/l2/derivation-op-geth`, which holds a block 1 with the wrong hash. Resume only for a pilot counterparty.
+
 **Status:** specified (D-0094) · **PRD:** `tasks/prd-mainnet-pilot.md` § US-P7-005 · **Gap:** `derivation/README.md` § Limitations
 
 ## 1. Problem

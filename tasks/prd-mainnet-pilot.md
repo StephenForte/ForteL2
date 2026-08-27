@@ -46,7 +46,7 @@ P7 block IDs are stable identifiers, not a phase number.
 | Deployment-permission policy | **Specified** — US-P7-002 |
 | Sequencer HA stance | **Specified** — US-P7-003 |
 | RaaS re-check | **Specified** — US-P7-004 |
-| Independent derivation gap | **Specified** — US-P7-005 |
+| Independent derivation gap | **PARKED 2026-08-27 (D-0102)** — spec exists (US-P7-005); work stopped, resume only for a pilot counterparty |
 
 ### P7-1 — L1 + chain infrastructure (later wave)
 
@@ -58,7 +58,7 @@ P7 block IDs are stable identifiers, not a phase number.
 ### P7-2 — Replicas + audit distribution (later wave)
 
 - [ ] Operator standby verifier (second provider/region; Render replica pattern)
-- [ ] Counterparty replica pack + Docker runbook + verifier handoff — blocked on US-P7-005
+- [ ] Counterparty replica pack + Docker runbook + verifier handoff — blocked on US-P7-005 (**parked**, D-0102)
 - [ ] Replica sync-check path that works for private deployments (extend D-0016 or publish a deliberate public read URL)
 
 ### P7-3 — Money-rail triggers fire (later; SOS-gated)
@@ -131,7 +131,9 @@ These close the skeleton’s “no acceptance criteria” gap for the four open 
 - [ ] One-page note comparing self-host vs at least two RaaS options on: key custody, DA policy (calldata permanence), cost, who can halt the sequencer
 - [ ] Decision recorded in `tasks/decisions.md` (keep or switch). Default remains self-host unless the note says otherwise
 
-### US-P7-005: Independent derivation (blocks promising the verifier to a pilot)
+### US-P7-005: Independent derivation (blocks promising the verifier to a pilot) — **PARKED 2026-08-27 (D-0102)**
+
+**Status: PARKED (D-0102).** Do not resume without an explicit operator decision. Two blockers must be cleared first: the **eip1559Params/extraData defect** (derivation ignores `chain_op_config`, so every derived block on the post-wipe chain mismatches) and the **poisoned derivation datadir** (holds a block 1 with the wrong hash - wipe before any run).
 
 **Description:** As the operator, I want the `derivation/` limitation closed so a counterparty is not “auditing” my node against itself.
 
