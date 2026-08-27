@@ -5817,6 +5817,49 @@ else
   echo "$STK_SLEEP_OUT" >&2
   fail=1
 fi
+
+# Production path: PID_DIR is a shell var (lib.sh after set +a), not exported.
+# alert-watch must pass ${ALERT_WATCH_PID_DIR:-$PID_DIR} on argv so Python sees it.
+if grep -q 'ALERT_WATCH_PID_DIR:-$PID_DIR' "$SCRIPT_DIR/alert-watch.sh"; then
+  echo "PASS alert-watch passes PID_DIR to python on argv (not via exported env)"
+else
+  echo "FAIL alert-watch must pass \${ALERT_WATCH_PID_DIR:-\$PID_DIR} on python argv" >&2
+  fail=1
+fi
+
+# Drive the launchd path: no ALERT_WATCH_PID_DIR; pids live under DATA_DIR/pids.
+stk_reset
+mkdir -p "$STK_FIX/data/pids"
+rm -f "$STK_FIX/data/pids"/*.pid "$STK_FIX/pids"/*.pid
+for n in $STK_CORE; do
+  printf '%s\n' "$$" > "$STK_FIX/data/pids/$n.pid"
+done
+STK_NATIVE_OUT="$(
+  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL -u ALERT_WATCH_PID_DIR \
+    PATH="$STK_FIX/shim:$PATH" \
+    FORTEL2_ENV="$STK_FIX/env" \
+    ALERT_WATCH_MOCK_DIR="$STK_FIX/mock" \
+    ALERT_WATCH_FUNDING_JSON="$STK_FIX/funding-health.json" \
+    ALERT_WATCH_STATE="$STK_FIX/state.json" \
+    ALERT_WATCH_RESOLVE_OUT="$STK_FIX/resolve.out.log" \
+    ALERT_WATCH_RESOLVE_ERR="$STK_FIX/resolve.err.log" \
+    ALERT_WATCH_EXPECT_STACK=1 \
+    ALERT_WATCH_CURL="$STK_FIX/shim/curl" \
+    ALERT_WATCH_OSASCRIPT="$STK_FIX/shim/osascript" \
+    ALERT_WATCH_LAUNCHCTL="$STK_FIX/shim/launchctl" \
+    ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
+    RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+    "$SCRIPT_DIR/alert-watch.sh" 2>&1
+)" && STK_NATIVE_EC=0 || STK_NATIVE_EC=$?
+if [[ "$STK_NATIVE_EC" -eq 0 ]] \
+   && [[ "$(cat "$STK_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -q 'op-challenger' "$STK_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch fires on a missing challenger using lib.sh PID_DIR (no ALERT_WATCH_PID_DIR)"
+else
+  echo "FAIL alert-watch must see PID_DIR from the shell when ALERT_WATCH_PID_DIR is unset (ec=$STK_NATIVE_EC)" >&2
+  echo "$STK_NATIVE_OUT" >&2
+  fail=1
+fi
 rm -rf "$STK_FIX"
 
 if (( fail )); then

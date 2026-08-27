@@ -200,9 +200,12 @@ fi
 # --- evaluate + cooldown (python) --------------------------------------------
 mkdir -p "$(dirname "$STATE_FILE")" "$WORKDIR"
 
+# PID_DIR is assigned in lib.sh after `set +a`, so it is a shell variable, not
+# an exported env var. Pass it on argv — Python never sees the shell binding.
 python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$HEALTH_STALE_SECS" "$RESOLVE_STALE_SECS" "$SLEEP_GRACE_SECS" \
-  "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" <<'PY'
+  "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
+  "${ALERT_WATCH_PID_DIR:-$PID_DIR}" <<'PY'
 import json, os, shutil, sys, time, subprocess
 
 funding_json, state_file, resolve_out, resolve_err = sys.argv[1:5]
@@ -213,6 +216,7 @@ realert_hours = float(sys.argv[8])
 label = sys.argv[9]
 workdir = sys.argv[10]
 launchctl_bin = sys.argv[11] if len(sys.argv) > 11 else ""
+pid_dir_arg = sys.argv[12] if len(sys.argv) > 12 else ""
 now = time.time()
 realert_secs = realert_hours * 3600.0
 
@@ -393,12 +397,21 @@ def in_dev_sleep_window(now_ts):
     return mins >= (23 * 60 + 45) or mins < (3 * 60)
 
 l2_chain = os.environ.get("L2_CHAIN_ID") or ""
-pid_dir = os.environ.get("ALERT_WATCH_PID_DIR") or os.environ.get("PID_DIR") or ""
+# Argv from bash (ALERT_WATCH_PID_DIR override, else the shell's PID_DIR).
+# Do not read PID_DIR from os.environ — lib.sh assigns it after set +a.
+pid_dir = pid_dir_arg or ""
 expect_override = os.environ.get("ALERT_WATCH_EXPECT_STACK") or ""
 # Presence only — never print CHALLENGER_L1_RPC_URL (D-0049).
 want_proxy = bool((os.environ.get("CHALLENGER_L1_RPC_URL") or "").strip())
+# Existing helper tests inherit L2_CHAIN_ID=852 from earlier cases while
+# pointing FORTEL2_ENV at a throwaway fixture. Production launchd sets
+# FORTEL2_ENV=.env.sepolia. Test fixtures opt in via ALERT_WATCH_PID_DIR
+# or ALERT_WATCH_EXPECT_STACK.
+fortel2_env = os.environ.get("FORTEL2_ENV") or ""
+sepolia_env = "sepolia" in fortel2_env.lower()
+test_hook = bool(os.environ.get("ALERT_WATCH_PID_DIR") or expect_override)
 
-if l2_chain == "852" and pid_dir:
+if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
     expected = [
         "op-geth", "op-node", "op-batcher", "op-proposer",
         "l2-rpc-filter", "op-challenger",
