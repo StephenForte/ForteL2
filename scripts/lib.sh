@@ -594,15 +594,47 @@ assert_l2_ports_free() {
 }
 
 # Require address balance >= min_ether (ether units as decimal string). Uses cast.
+# Three outcomes — a failed read must never be reported as underfunded:
+#   (a) verified wei integer >= floor → return
+#   (b) verified wei integer < floor  → exit 1, existing underfunded message
+#   (c) balance could not be determined → exit 1, distinct message, no figure
 require_min_balance_eth() {
   local addr="$1"
   local min_eth="$2"
   local label="${3:-account}"
   require_eth_address "$label" "$addr"
   require_bin cast
-  local bal_wei min_wei
-  bal_wei="$(cast balance "$addr" --rpc-url "$L1_RPC_URL")"
+  local bal_wei="" min_wei
+  local attempt=0
+  local max_attempts=3
+  local read_ok=0
+
+  # Status captured in `if` so a failed RPC cannot abort the caller under set -e.
+  # Regex unquoted: bash 3.2 treats a quoted =~ operand as a literal.
+  while [[ "$attempt" -lt "$max_attempts" ]]; do
+    attempt=$((attempt + 1))
+    bal_wei=""
+    if bal_wei="$(cast balance "$addr" --rpc-url "$L1_RPC_URL" 2>/dev/null)" \
+      && [[ -n "$bal_wei" && "$bal_wei" =~ ^[0-9]+$ ]]; then
+      read_ok=1
+      break
+    fi
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      sleep 1
+    fi
+  done
+
+  if [[ "$read_ok" -ne 1 ]]; then
+    echo "ERROR: $label $addr: could not read L1 balance at $(redact_rpc_url "${L1_RPC_URL:-}")" >&2
+    echo "Balance is unknown — refusing to start. This is not an underfunded wallet." >&2
+    exit 1
+  fi
+
   min_wei="$(cast to-wei "$min_eth" ether)"
+  if ! [[ -n "$min_wei" && "$min_wei" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: $label $addr: could not convert minimum ETH floor to wei" >&2
+    exit 1
+  fi
   if ! python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) >= int(sys.argv[2]) else 1)' "$bal_wei" "$min_wei"; then
     local bal_eth
     bal_eth="$(cast --to-unit "$bal_wei" ether)"

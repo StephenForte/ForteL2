@@ -5319,6 +5319,93 @@ else
   fail=1
 fi
 
+# require_min_balance_eth: three outcomes (failed read ≠ underfunded). Stub cast
+# on PATH; no live chain, no .env.sepolia, no network.
+_BAL_ADDR="0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
+_BAL_HARVEST="0x0000000000000000000000000000000000000001"
+_BAL_RPC="https://example.invalid/secret-token-do-not-leak"
+_BAL_REAL_CAST="$(command -v cast || true)"
+_BAL_STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-bal-stub.XXXXXX")"
+if [[ -z "$_BAL_REAL_CAST" ]]; then
+  echo "FAIL require_min_balance_eth tests need cast on PATH" >&2
+  fail=1
+else
+  cat > "$_BAL_STUB_DIR/cast" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "balance" ]]; then
+  case "${CAST_BALANCE_STUB:-}" in
+    fail) exit 1 ;;
+    empty) exit 0 ;;
+    low) printf '%s\n' "10000000000000000"; exit 0 ;;
+    high) printf '%s\n' "1000000000000000000"; exit 0 ;;
+    *) exit 1 ;;
+  esac
+fi
+exec "${CAST_REAL:?cast stub missing CAST_REAL}" "$@"
+EOF
+  chmod +x "$_BAL_STUB_DIR/cast"
+
+  _bal_run() {
+    export PATH="${_BAL_STUB_DIR}:$PATH"
+    export CAST_REAL="$_BAL_REAL_CAST"
+    export CAST_BALANCE_STUB="$1"
+    export L1_RPC_URL="$_BAL_RPC"
+    export HARVEST_ADDRESS="$_BAL_HARVEST"
+    require_min_balance_eth "$_BAL_ADDR" "0.15" "BATCHER"
+  }
+
+  _BAL_FAIL_EC=0
+  _BAL_FAIL_OUT="$(_bal_run fail 2>&1)" && _BAL_FAIL_EC=0 || _BAL_FAIL_EC=$?
+  if [[ "$_BAL_FAIL_EC" -ne 0 ]] \
+    && echo "$_BAL_FAIL_OUT" | grep -q 'could not read L1 balance' \
+    && echo "$_BAL_FAIL_OUT" | grep -q 'example.invalid' \
+    && ! echo "$_BAL_FAIL_OUT" | grep -q 'secret-token-do-not-leak' \
+    && ! echo "$_BAL_FAIL_OUT" | grep -q 'has .* ETH'; then
+    echo "PASS require_min_balance_eth failed read names the RPC failure, not a balance"
+  else
+    echo "FAIL require_min_balance_eth failed read must refuse without a balance figure (ec=$_BAL_FAIL_EC)" >&2
+    echo "$_BAL_FAIL_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_EMPTY_EC=0
+  _BAL_EMPTY_OUT="$(_bal_run empty 2>&1)" && _BAL_EMPTY_EC=0 || _BAL_EMPTY_EC=$?
+  if [[ "$_BAL_EMPTY_EC" -ne 0 ]] \
+    && echo "$_BAL_EMPTY_OUT" | grep -q 'could not read L1 balance' \
+    && ! echo "$_BAL_EMPTY_OUT" | grep -q 'has .* ETH'; then
+    echo "PASS require_min_balance_eth empty/non-integer read is not reported as underfunded"
+  else
+    echo "FAIL require_min_balance_eth empty balance must not claim a figure (ec=$_BAL_EMPTY_EC)" >&2
+    echo "$_BAL_EMPTY_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_LOW_EC=0
+  _BAL_LOW_OUT="$(_bal_run low 2>&1)" && _BAL_LOW_EC=0 || _BAL_LOW_EC=$?
+  if [[ "$_BAL_LOW_EC" -ne 0 ]] \
+    && echo "$_BAL_LOW_OUT" | grep -q 'has .* ETH; need >= 0.15 ETH on Sepolia' \
+    && echo "$_BAL_LOW_OUT" | grep -q 'Fund from harvest' \
+    && echo "$_BAL_LOW_OUT" | grep -q 'sepolia-fund-check.sh' \
+    && ! echo "$_BAL_LOW_OUT" | grep -q 'could not read L1 balance'; then
+    echo "PASS require_min_balance_eth low balance still uses the underfunded message"
+  else
+    echo "FAIL require_min_balance_eth low balance must keep today's underfunded text (ec=$_BAL_LOW_EC)" >&2
+    echo "$_BAL_LOW_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_HIGH_EC=0
+  _BAL_HIGH_OUT="$(_bal_run high 2>&1)" && _BAL_HIGH_EC=0 || _BAL_HIGH_EC=$?
+  if [[ "$_BAL_HIGH_EC" -eq 0 ]]; then
+    echo "PASS require_min_balance_eth healthy balance proceeds"
+  else
+    echo "FAIL require_min_balance_eth healthy balance must pass (ec=$_BAL_HIGH_EC)" >&2
+    echo "$_BAL_HIGH_OUT" >&2
+    fail=1
+  fi
+fi
+rm -rf "$_BAL_STUB_DIR"
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
