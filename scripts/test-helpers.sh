@@ -5449,6 +5449,376 @@ EOF
 fi
 rm -rf "$_BAL_STUB_DIR"
 
+# --- stack-start-stop-symmetry: derive lists from the scripts; degrade; alerts ---
+SYM_START_ALL="$SCRIPT_DIR/start-all-sepolia.sh"
+SYM_STOP_ALL="$SCRIPT_DIR/stop-all-sepolia.sh"
+
+SYM_DERIVE="$(python3 - "$SYM_START_ALL" "$SYM_STOP_ALL" "$SCRIPT_DIR" <<'PY'
+import os, re, sys
+start_all, stop_all, scripts_dir = sys.argv[1:4]
+
+def stop_names(path):
+    text = open(path).read()
+    m = re.search(r"for name in ([^;\n]+); do", text)
+    if not m:
+        raise SystemExit("stop-all-sepolia.sh: no 'for name in ...; do' list")
+    return m.group(1).split()
+
+def invoked_start_scripts(path):
+    text = open(path).read()
+    found = re.findall(r"\$SCRIPT_DIR/([A-Za-z0-9._-]+\.sh)", text)
+    out = []
+    for name in found:
+        if name.startswith("stop-"):
+            continue
+        if "start" in name:
+            out.append(name)
+    return sorted(set(out))
+
+def start_bg_names(script_path):
+    names = []
+    with open(script_path) as fh:
+        for line in fh:
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            m = re.match(r"start_bg\s+([A-Za-z0-9_-]+)", stripped)
+            if m:
+                names.append(m.group(1))
+    return names
+
+stopped = sorted(set(stop_names(stop_all)))
+started = []
+for rel in invoked_start_scripts(start_all):
+    started.extend(start_bg_names(os.path.join(scripts_dir, rel)))
+started = sorted(set(started))
+print("STOP=" + " ".join(stopped))
+print("START=" + " ".join(started))
+print("SCRIPTS=" + " ".join(invoked_start_scripts(start_all)))
+sys.exit(0 if started == stopped else 1)
+PY
+)" && SYM_DERIVE_EC=0 || SYM_DERIVE_EC=$?
+if [[ "$SYM_DERIVE_EC" -eq 0 ]] \
+   && echo "$SYM_DERIVE" | grep -q 'STOP=l1-batch-proxy l2-rpc-filter op-batcher op-challenger op-geth op-node op-proposer' \
+   && echo "$SYM_DERIVE" | grep -q 'START=l1-batch-proxy l2-rpc-filter op-batcher op-challenger op-geth op-node op-proposer' \
+   && echo "$SYM_DERIVE" | grep -q '09-start-challenger-sepolia.sh' \
+   && echo "$SYM_DERIVE" | grep -q 'start-l1-batch-proxy-sepolia.sh'; then
+  echo "PASS start-all-sepolia.sh starts every service stop-all-sepolia.sh stops"
+else
+  echo "FAIL start/stop Sepolia service lists must match (derived from the scripts)" >&2
+  echo "$SYM_DERIVE" >&2
+  fail=1
+fi
+
+# Wake inherits start-all (property 5) — cmd_wake must call start-all-sepolia.sh.
+if awk '
+     /cmd_wake/ { in_wake = 1 }
+     in_wake && /start-all-sepolia\.sh/ { found = 1 }
+     in_wake && /^}/ { exit found ? 0 : 1 }
+     END { exit found ? 0 : 1 }
+   ' "$SCRIPT_DIR/dev-sleep.sh"; then
+  echo "PASS dev-sleep.sh wake delegates to start-all-sepolia.sh"
+else
+  echo "FAIL dev-sleep.sh wake must call start-all-sepolia.sh" >&2
+  fail=1
+fi
+
+# Optional call is after trap - ERR; core starts are inside the armed trap.
+# Match command lines only — a comment containing `trap - ERR` sits above the
+# armed trap and would otherwise clear the flag too early.
+if awk '
+     /^trap sepolia_start_cleanup ERR$/ { armed = 1 }
+     armed && !cleared && /04-start-sequencer-sepolia/ { seq = 1 }
+     armed && !cleared && /07-start-rpc-filter-sepolia/ { filt = 1 }
+     armed && !cleared && /05-start-batcher-sepolia/ { bat = 1 }
+     armed && !cleared && /06-start-proposer-sepolia/ { prop = 1 }
+     armed && !cleared && /start_optional_sepolia_fault_proofs \|\|/ { early = 1 }
+     /^trap - ERR$/ { cleared = 1 }
+     cleared && /start_optional_sepolia_fault_proofs \|\|/ { opt = 1 }
+     END { exit (seq && filt && bat && prop && cleared && opt && !early) ? 0 : 1 }
+   ' "$SYM_START_ALL" \
+   && grep -q 'sepolia_start_cleanup' "$SYM_START_ALL"; then
+  echo "PASS optional fault-proof start is after trap - ERR; core stays fail-closed"
+else
+  echo "FAIL challenger/proxy start must run after trap - ERR; core starts must stay inside it" >&2
+  fail=1
+fi
+
+SYM_FN="$(python3 - "$SYM_START_ALL" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(
+    r"^start_optional_sepolia_fault_proofs\(\) \{.*?\n\}\n",
+    text,
+    re.M | re.S,
+)
+if not m:
+    sys.exit("missing start_optional_sepolia_fault_proofs")
+sys.stdout.write(m.group(0))
+PY
+)" && SYM_FN_EC=0 || SYM_FN_EC=$?
+SYM_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-stack-sym.XXXXXX")"
+cat > "$SYM_FIX/proxy.sh" <<'EOS'
+#!/usr/bin/env bash
+printf 'proxy\n' >> "${SYM_ORDER_LOG}"
+exit 0
+EOS
+cat > "$SYM_FIX/challenger.sh" <<'EOS'
+#!/usr/bin/env bash
+printf 'challenger\n' >> "${SYM_ORDER_LOG}"
+exit 0
+EOS
+cat > "$SYM_FIX/challenger-fail.sh" <<'EOS'
+#!/usr/bin/env bash
+printf 'challenger-fail\n' >> "${SYM_ORDER_LOG}"
+echo "ERROR: stub challenger refused (forced failure)" >&2
+exit 7
+EOS
+cat > "$SYM_FIX/stop-all-sepolia.sh" <<'EOS'
+#!/usr/bin/env bash
+printf 'stop-all\n' >> "${SYM_ORDER_LOG}"
+exit 0
+EOS
+chmod +x "$SYM_FIX/proxy.sh" "$SYM_FIX/challenger.sh" "$SYM_FIX/challenger-fail.sh" \
+  "$SYM_FIX/stop-all-sepolia.sh"
+printf '%s\n' "$SYM_FN" > "$SYM_FIX/fn.sh"
+
+# Proxy-on: CHALLENGER_L1_RPC_URL set → proxy then challenger.
+: > "$SYM_FIX/order-on"
+SYM_ON_OUT="$(
+  set -euo pipefail
+  SCRIPT_DIR="$SYM_FIX"
+  export SYM_ORDER_LOG="$SYM_FIX/order-on"
+  FORTEL2_START_L1_BATCH_PROXY_SH="$SYM_FIX/proxy.sh"
+  FORTEL2_START_CHALLENGER_SH="$SYM_FIX/challenger.sh"
+  CHALLENGER_L1_RPC_URL='http://127.0.0.1:1'
+  # shellcheck disable=SC1091
+  source "$SYM_FIX/fn.sh"
+  start_optional_sepolia_fault_proofs
+)" && SYM_ON_EC=0 || SYM_ON_EC=$?
+SYM_ON_ORDER="$(tr '\n' ' ' < "$SYM_FIX/order-on" | sed 's/[[:space:]]*$//')"
+if [[ "$SYM_FN_EC" -eq 0 && "$SYM_ON_EC" -eq 0 && "$SYM_ON_ORDER" == "proxy challenger" ]] \
+   && [[ "$SYM_ON_OUT" == *"CHALLENGER_L1_RPC_URL is set"* ]]; then
+  echo "PASS optional start runs l1-batch-proxy before challenger when CHALLENGER_L1_RPC_URL is set"
+else
+  echo "FAIL proxy must start before challenger when CHALLENGER_L1_RPC_URL is set (ec=$SYM_ON_EC order='$SYM_ON_ORDER')" >&2
+  echo "$SYM_ON_OUT" >&2
+  fail=1
+fi
+
+# Proxy-off: unset → challenger only.
+: > "$SYM_FIX/order-off"
+SYM_OFF_OUT="$(
+  set -euo pipefail
+  SCRIPT_DIR="$SYM_FIX"
+  export SYM_ORDER_LOG="$SYM_FIX/order-off"
+  FORTEL2_START_L1_BATCH_PROXY_SH="$SYM_FIX/proxy.sh"
+  FORTEL2_START_CHALLENGER_SH="$SYM_FIX/challenger.sh"
+  unset CHALLENGER_L1_RPC_URL || true
+  # shellcheck disable=SC1091
+  source "$SYM_FIX/fn.sh"
+  start_optional_sepolia_fault_proofs
+)" && SYM_OFF_EC=0 || SYM_OFF_EC=$?
+SYM_OFF_ORDER="$(tr '\n' ' ' < "$SYM_FIX/order-off" | sed 's/[[:space:]]*$//')"
+if [[ "$SYM_OFF_EC" -eq 0 && "$SYM_OFF_ORDER" == "challenger" ]] \
+   && [[ "$SYM_OFF_OUT" == *"CHALLENGER_L1_RPC_URL unset"* ]]; then
+  echo "PASS optional start skips l1-batch-proxy when CHALLENGER_L1_RPC_URL is unset"
+else
+  echo "FAIL unset CHALLENGER_L1_RPC_URL must skip the proxy (ec=$SYM_OFF_EC order='$SYM_OFF_ORDER')" >&2
+  echo "$SYM_OFF_OUT" >&2
+  fail=1
+fi
+
+# Degrade: core markers survive a failing challenger; cleanup/stop-all must not run.
+# Reproduces start-all's trap - ERR then `|| optional_rc` wrapper with stub children.
+cat > "$SYM_FIX/degrade-driver.sh" <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="${SYM_FIX}"
+export SYM_ORDER_LOG="${SYM_FIX}/order-degrade"
+: > "$SYM_ORDER_LOG"
+printf 'core\n' >> "$SYM_FIX/core-started"
+sepolia_start_cleanup() {
+  printf 'cleanup\n' >> "$SYM_ORDER_LOG"
+  "$SCRIPT_DIR/stop-all-sepolia.sh" || true
+}
+# shellcheck disable=SC1091
+source "$SYM_FIX/fn.sh"
+trap sepolia_start_cleanup ERR
+# Core path (armed): a failure here would cleanup. We succeed, then disarm.
+true
+trap - ERR
+optional_rc=0
+FORTEL2_START_L1_BATCH_PROXY_SH="$SYM_FIX/proxy.sh"
+FORTEL2_START_CHALLENGER_SH="$SYM_FIX/challenger-fail.sh"
+unset CHALLENGER_L1_RPC_URL || true
+start_optional_sepolia_fault_proofs || optional_rc=$?
+if [[ "$optional_rc" -ne 0 ]]; then
+  echo "ERROR: optional fault-proof services failed (exit $optional_rc) — sequencer, batcher, and proposer left running" >&2
+  echo "ERROR: fault-proof defense is OFF until op-challenger is restored" >&2
+fi
+if [[ ! -f "$SYM_FIX/core-started" ]]; then
+  echo "core marker missing" >&2
+  exit 20
+fi
+if grep -q cleanup "$SYM_ORDER_LOG" || grep -q stop-all "$SYM_ORDER_LOG"; then
+  echo "cleanup ran" >&2
+  exit 21
+fi
+if [[ "$optional_rc" -eq 0 ]]; then
+  echo "optional unexpectedly succeeded" >&2
+  exit 22
+fi
+echo "degrade-ok optional_rc=$optional_rc"
+exit 0
+EOS
+chmod +x "$SYM_FIX/degrade-driver.sh"
+SYM_DEG_OUT="$(SYM_FIX="$SYM_FIX" "$SYM_FIX/degrade-driver.sh" 2>&1)" && SYM_DEG_EC=0 || SYM_DEG_EC=$?
+if [[ "$SYM_DEG_EC" -eq 0 ]] \
+   && [[ "$SYM_DEG_OUT" == *"degrade-ok"* ]] \
+   && [[ "$SYM_DEG_OUT" == *"optional fault-proof services failed"* ]] \
+   && [[ "$SYM_DEG_OUT" == *"sequencer, batcher, and proposer left running"* ]] \
+   && [[ -f "$SYM_FIX/core-started" ]]; then
+  echo "PASS challenger-start failure leaves the core stack up (no stop-all)"
+else
+  echo "FAIL challenger-start failure must not tear down the core stack (ec=$SYM_DEG_EC)" >&2
+  echo "$SYM_DEG_OUT" >&2
+  fail=1
+fi
+rm -rf "$SYM_FIX"
+
+# Alert: missing expected service fires; present stays silent. Isolated fixture
+# (existing alert-watch cases stay above; L2_CHAIN_ID=852 is the Sepolia gate).
+STK_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-stack-alert.XXXXXX")"
+mkdir -p "$STK_FIX/shim" "$STK_FIX/mock" "$STK_FIX/data" "$STK_FIX/bin" "$STK_FIX/deploy" "$STK_FIX/pids"
+cat > "$STK_FIX/env" <<EOF
+FORTEL2_ROOT=$STK_FIX
+DATA_DIR=$STK_FIX/data
+BIN_DIR=$STK_FIX/bin
+DEPLOY_DIR=$STK_FIX/deploy
+L2_CHAIN_ID=852
+EOF
+cat > "$STK_FIX/shim/curl" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+n=0
+[ -f "$dir/curl.calls" ] && n=$(cat "$dir/curl.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/curl.calls"
+printf 'ARG:%s\n' "$@" >> "$dir/curl.argv"
+cat > "$dir/curl.stdin"
+out=""
+writeout=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then out="$a"; fi
+  if [ "$prev" = "-w" ] || [ "$prev" = "--write-out" ]; then writeout="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] && printf '%s\n' '{"id":"mock-resend"}' > "$out"
+[ -n "$writeout" ] && printf '%s' "${ALERT_WATCH_CURL_HTTP:-200}"
+exit 0
+EOS
+cat > "$STK_FIX/shim/osascript" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+n=0
+[ -f "$dir/osascript.calls" ] && n=$(cat "$dir/osascript.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/osascript.calls"
+printf 'ARG:%s\n' "$@" >> "$dir/osascript.argv"
+exit 0
+EOS
+cat > "$STK_FIX/shim/launchctl" <<'EOS'
+#!/bin/sh
+printf 'gui/501/com.steve.fortel2-resolve-games = {\n\tstate = not running\n\tlast exit code = 0\n}\n'
+exit 0
+EOS
+chmod +x "$STK_FIX/shim/curl" "$STK_FIX/shim/osascript" "$STK_FIX/shim/launchctl"
+stk_reset() {
+  rm -f "$STK_FIX/mock"/curl.argv "$STK_FIX/mock"/curl.calls \
+    "$STK_FIX/mock"/osascript.argv "$STK_FIX/mock"/osascript.calls \
+    "$STK_FIX/state.json"
+  : > "$STK_FIX/resolve.out.log"
+  : > "$STK_FIX/resolve.err.log"
+  printf '%s\n' '{"verdict":"OK","reason":"balance at or above the funding policy minimum"}' \
+    > "$STK_FIX/funding-health.json"
+}
+stk_mark() {
+  local n
+  rm -f "$STK_FIX/pids"/*.pid
+  for n in "$@"; do
+    printf '%s\n' "$$" > "$STK_FIX/pids/$n.pid"
+  done
+}
+stk_run() {
+  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL \
+    PATH="$STK_FIX/shim:$PATH" \
+    FORTEL2_ENV="$STK_FIX/env" \
+    L2_CHAIN_ID=852 \
+    ALERT_WATCH_MOCK_DIR="$STK_FIX/mock" \
+    ALERT_WATCH_FUNDING_JSON="$STK_FIX/funding-health.json" \
+    ALERT_WATCH_STATE="$STK_FIX/state.json" \
+    ALERT_WATCH_RESOLVE_OUT="$STK_FIX/resolve.out.log" \
+    ALERT_WATCH_RESOLVE_ERR="$STK_FIX/resolve.err.log" \
+    ALERT_WATCH_PID_DIR="$STK_FIX/pids" \
+    ALERT_WATCH_CURL="$STK_FIX/shim/curl" \
+    ALERT_WATCH_OSASCRIPT="$STK_FIX/shim/osascript" \
+    ALERT_WATCH_LAUNCHCTL="$STK_FIX/shim/launchctl" \
+    ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
+    "$@"
+}
+STK_CORE="op-geth op-node op-batcher op-proposer l2-rpc-filter"
+STK_ALL="$STK_CORE op-challenger"
+
+stk_reset
+stk_mark $STK_CORE
+STK_MISS_OUT="$(stk_run ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && STK_MISS_EC=0 || STK_MISS_EC=$?
+if [[ "$STK_MISS_EC" -eq 0 ]] \
+   && [[ "$(cat "$STK_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+   && grep -q 'op-challenger' "$STK_FIX/mock/osascript.argv" \
+   && grep -qi 'missing\|not running' "$STK_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch fires when op-challenger is missing from a running stack"
+else
+  echo "FAIL alert-watch must alert on a missing op-challenger (ec=$STK_MISS_EC)" >&2
+  echo "$STK_MISS_OUT" >&2
+  fail=1
+fi
+
+stk_reset
+stk_mark $STK_ALL
+STK_OK_OUT="$(stk_run ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && STK_OK_EC=0 || STK_OK_EC=$?
+if [[ "$STK_OK_EC" -eq 0 ]] \
+   && [[ ! -f "$STK_FIX/mock/osascript.calls" ]] \
+   && [[ ! -f "$STK_FIX/mock/curl.calls" ]] \
+   && [[ "$STK_OK_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch is silent when expected Sepolia services are present"
+else
+  echo "FAIL alert-watch must stay quiet when the stack pids are present (ec=$STK_OK_EC)" >&2
+  echo "$STK_OK_OUT" >&2
+  fail=1
+fi
+
+# Scheduled sleep: everything down + EXPECT_STACK=0 must not storm.
+stk_reset
+rm -f "$STK_FIX/pids"/*.pid
+STK_SLEEP_OUT="$(stk_run ALERT_WATCH_EXPECT_STACK=0 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && STK_SLEEP_EC=0 || STK_SLEEP_EC=$?
+if [[ "$STK_SLEEP_EC" -eq 0 ]] \
+   && [[ ! -f "$STK_FIX/mock/osascript.calls" ]] \
+   && [[ "$STK_SLEEP_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch stays quiet when the stack is down inside the sleep window"
+else
+  echo "FAIL alert-watch must not alert on a scheduled-down stack (ec=$STK_SLEEP_EC)" >&2
+  echo "$STK_SLEEP_OUT" >&2
+  fail=1
+fi
+rm -rf "$STK_FIX"
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

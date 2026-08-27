@@ -14,6 +14,10 @@
 #   resolve-games-stale   recovery-agent logs older than 2 h (≤ 2 hourly cycles)
 #   resolve-games-unloaded  launchctl print cannot find the job (read-only)
 #   resolve-games-nonzero   last exit code nonzero on 2 consecutive watcher runs
+#   stack-missing         Sepolia (L2_CHAIN_ID=852): some expected pids are up,
+#                         at least one (incl. op-challenger) is not
+#   stack-down            Sepolia: nothing is up outside the 23:45–03:00 PT
+#                         sleep window (a failed 03:00 wake)
 #
 # Verdicts OK / WARN / INSUFFICIENT never alert (WARN is inside funding-watch's
 # documented tolerance; alerting on it is the cry-wolf class #146 removed).
@@ -50,6 +54,7 @@
 #   ALERT_WATCH_RESOLVE_OUT    ALERT_WATCH_RESOLVE_ERR
 #   ALERT_WATCH_HEALTH_STALE_SECS   ALERT_WATCH_RESOLVE_STALE_SECS
 #   ALERT_WATCH_SLEEP_GRACE_SECS
+#   ALERT_WATCH_PID_DIR        ALERT_WATCH_EXPECT_STACK (1=up, 0=sleep window)
 #   ALERT_WATCH_CURL  ALERT_WATCH_OSASCRIPT  ALERT_WATCH_LAUNCHCTL
 #     (absolute shim paths — lib.sh prepends homebrew onto PATH)
 set -euo pipefail
@@ -358,6 +363,66 @@ else:
     elif launchctl is not None and launchctl.get("found"):
         streak = 0
     state["resolve_nonzero_streak"] = streak
+
+# --- Sepolia stack presence (L2_CHAIN_ID=852 only; pidfiles, no env values) ---
+def pid_running(pid_dir, name):
+    path = os.path.join(pid_dir, name + ".pid")
+    try:
+        with open(path) as fh:
+            raw = fh.read().strip()
+        pid = int(raw)
+    except (OSError, ValueError, TypeError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+def in_dev_sleep_window(now_ts):
+    # Nightly 23:45–03:00 America/Los_Angeles (D-0026 / launchd sleep+wake).
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        local = datetime.fromtimestamp(now_ts, ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        return False
+    mins = local.hour * 60 + local.minute
+    return mins >= (23 * 60 + 45) or mins < (3 * 60)
+
+l2_chain = os.environ.get("L2_CHAIN_ID") or ""
+pid_dir = os.environ.get("ALERT_WATCH_PID_DIR") or os.environ.get("PID_DIR") or ""
+expect_override = os.environ.get("ALERT_WATCH_EXPECT_STACK") or ""
+# Presence only — never print CHALLENGER_L1_RPC_URL (D-0049).
+want_proxy = bool((os.environ.get("CHALLENGER_L1_RPC_URL") or "").strip())
+
+if l2_chain == "852" and pid_dir:
+    expected = [
+        "op-geth", "op-node", "op-batcher", "op-proposer",
+        "l2-rpc-filter", "op-challenger",
+    ]
+    if want_proxy:
+        expected.append("l1-batch-proxy")
+    present = [n for n in expected if pid_running(pid_dir, n)]
+    missing = [n for n in expected if n not in present]
+    if expect_override == "1":
+        want_up = True
+    elif expect_override == "0":
+        want_up = False
+    else:
+        want_up = not in_dev_sleep_window(now)
+    if present and missing:
+        add("stack-missing",
+            "ForteL2 stack service missing",
+            "Sepolia stack is partially up; not running: %s."
+            % ", ".join(missing))
+    elif missing and want_up:
+        add("stack-down",
+            "ForteL2 stack is down",
+            "Sepolia stack is not running outside the 23:45-03:00 PT sleep "
+            "window: %s." % ", ".join(missing))
 
 # --- cooldown filter (per condition × channel) ---
 cd = state.get("cooldown")
