@@ -593,23 +593,131 @@ assert_l2_ports_free() {
   done
 }
 
+# Pin this many L1 blocks behind the observed head. Too recent (head itself)
+# fails honest nodes that are 1–2 slots behind a load-balanced tip; too old
+# reports a historical balance. Three Sepolia slots ≈ 36s: recent enough that
+# funding is current, settled enough that an honest node a block or two behind
+# still has the header. A lagging backend that cannot serve that height must
+# error rather than answer eth_getBalance(..., "latest") from an older view.
+_BALANCE_PIN_LAG=3
+
+# Outcome (c): balance could not be established. Quotes no figure.
+_balance_unread() {
+  local label="$1"
+  local addr="$2"
+  echo "ERROR: $label $addr: could not establish L1 balance at $(redact_rpc_url "${L1_RPC_URL:-}")" >&2
+  echo "Balance is unknown — refusing to start. Underfunding has not been established." >&2
+  exit 1
+}
+
+# Two head samples, take the max so a mixed load balancer prefers a current
+# backend. Each sample retries on failure. Prints the pin block; return 1 if
+# no verified head. Status captured in `if` — a failed cast must not abort
+# the caller under set -e (plain assignment would). Regex unquoted: bash 3.2
+# treats a quoted =~ operand as a literal.
+_l1_balance_pin_block() {
+  local attempt=0
+  local max_attempts=3
+  local raw="" head="" sample=""
+  while [[ "$attempt" -lt "$max_attempts" ]]; do
+    attempt=$((attempt + 1))
+    raw=""
+    if raw="$(cast block-number --rpc-url "$L1_RPC_URL" 2>/dev/null)" \
+      && [[ -n "$raw" && "$raw" =~ ^[0-9]+$ ]]; then
+      head="$raw"
+      break
+    fi
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      sleep 1
+    fi
+  done
+  if [[ -z "$head" ]]; then
+    return 1
+  fi
+  if sample="$(cast block-number --rpc-url "$L1_RPC_URL" 2>/dev/null)" \
+    && [[ -n "$sample" && "$sample" =~ ^[0-9]+$ ]] \
+    && [[ "$sample" -gt "$head" ]]; then
+    head="$sample"
+  fi
+  if [[ "$head" -gt "$_BALANCE_PIN_LAG" ]]; then
+    printf '%s\n' "$((head - _BALANCE_PIN_LAG))"
+  else
+    printf '%s\n' "0"
+  fi
+  return 0
+}
+
+# Balance in wei at an explicit block. Retries; prints a decimal integer or
+# returns 1. Never uses the implicit "latest" tag.
+_l1_balance_wei_at() {
+  local addr="$1"
+  local block="$2"
+  local attempt=0
+  local max_attempts=3
+  local raw=""
+  while [[ "$attempt" -lt "$max_attempts" ]]; do
+    attempt=$((attempt + 1))
+    raw=""
+    if raw="$(cast balance "$addr" --rpc-url "$L1_RPC_URL" --block "$block" 2>/dev/null)" \
+      && [[ -n "$raw" && "$raw" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$raw"
+      return 0
+    fi
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      sleep 1
+    fi
+  done
+  return 1
+}
+
 # Require address balance >= min_ether (ether units as decimal string). Uses cast.
+# Three outcomes — an unpinned or unconfirmed read must never tear the stack down:
+#   (a) verified wei integer >= floor → return
+#   (b) two agreeing reads < floor    → exit 1, existing underfunded message
+#   (c) balance could not be established → exit 1, distinct message, no figure
 require_min_balance_eth() {
   local addr="$1"
   local min_eth="$2"
   local label="${3:-account}"
   require_eth_address "$label" "$addr"
   require_bin cast
-  local bal_wei min_wei
-  bal_wei="$(cast balance "$addr" --rpc-url "$L1_RPC_URL")"
+  local min_wei pin_block bal_wei bal_wei2
+
   min_wei="$(cast to-wei "$min_eth" ether)"
-  if ! python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) >= int(sys.argv[2]) else 1)' "$bal_wei" "$min_wei"; then
-    local bal_eth
-    bal_eth="$(cast --to-unit "$bal_wei" ether)"
-    echo "ERROR: $label $addr has ${bal_eth} ETH; need >= ${min_eth} ETH on Sepolia" >&2
-    echo "Fund from harvest ($HARVEST_ADDRESS) then re-run. See scripts/sepolia-fund-check.sh" >&2
+  if ! [[ -n "$min_wei" && "$min_wei" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: $label $addr: could not convert minimum ETH floor to wei" >&2
     exit 1
   fi
+
+  if ! pin_block="$(_l1_balance_pin_block)"; then
+    _balance_unread "$label" "$addr"
+  fi
+  if ! [[ -n "$pin_block" && "$pin_block" =~ ^[0-9]+$ ]]; then
+    _balance_unread "$label" "$addr"
+  fi
+
+  if ! bal_wei="$(_l1_balance_wei_at "$addr" "$pin_block")"; then
+    _balance_unread "$label" "$addr"
+  fi
+
+  if python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) >= int(sys.argv[2]) else 1)' "$bal_wei" "$min_wei"; then
+    return 0
+  fi
+
+  # Below floor: corroborate at the same pin after a short delay.
+  sleep 1
+  if ! bal_wei2="$(_l1_balance_wei_at "$addr" "$pin_block")"; then
+    _balance_unread "$label" "$addr"
+  fi
+  if [[ "$bal_wei" != "$bal_wei2" ]]; then
+    _balance_unread "$label" "$addr"
+  fi
+
+  local bal_eth
+  bal_eth="$(cast --to-unit "$bal_wei" ether)"
+  echo "ERROR: $label $addr has ${bal_eth} ETH; need >= ${min_eth} ETH on Sepolia" >&2
+  echo "Fund from harvest ($HARVEST_ADDRESS) then re-run. See scripts/sepolia-fund-check.sh" >&2
+  exit 1
 }
 
 # Validate a TCP port number (1–65535).
