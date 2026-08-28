@@ -1994,6 +1994,7 @@ else
   mkdir -p "$_C429_FIX/pids" "$_C429_FIX/logs"
   # Stub start_bg: launch a short-lived process whose cmdline contains op-challenger,
   # write its pid, return 0 — mimics D-0054 (start_bg succeeds, child dies soon).
+  # Redirect stdio away from the caller's capture pipe (Codex P2 on #168).
   cat > "$_C429_FIX/stub_lib.sh" <<'EOS'
 start_bg() {
   local name="$1"; shift
@@ -2001,7 +2002,7 @@ start_bg() {
   local logfile="$LOG_DIR/$name.log"
   : >>"$logfile"
   # argv[0] shape that ps -o args= will show as containing op-challenger
-  bash -c 'exec -a op-challenger-stub sleep 0.2' &
+  bash -c 'exec -a op-challenger-stub sleep 0.2' </dev/null >>"$logfile" 2>&1 &
   local pid=$!
   echo "$pid" >"$pidfile"
   echo "stub start_bg $name pid $pid" >>"$logfile"
@@ -2042,13 +2043,15 @@ EOS
   fi
 
   # Success path: stub that stays alive past grace.
+  # Detach stdio from the $(...) capture pipe so we do not wait for sleep 30
+  # (Codex P2 on #168 — real start_bg dup2s to the logfile).
   cat > "$_C429_FIX/stub_lib_ok.sh" <<'EOS'
 start_bg() {
   local name="$1"; shift
   local pidfile="$PID_DIR/$name.pid"
   local logfile="$LOG_DIR/$name.log"
   : >>"$logfile"
-  bash -c 'exec -a op-challenger-ok sleep 30' &
+  bash -c 'exec -a op-challenger-ok sleep 30' </dev/null >>"$logfile" 2>&1 &
   local pid=$!
   echo "$pid" >"$pidfile"
   echo "$pid" >"$PID_DIR/ok.pid"
