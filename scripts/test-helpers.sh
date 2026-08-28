@@ -513,7 +513,10 @@ if grep -q 'SEPOLIA_BATCHER_POLL_INTERVAL:-12s' "$SCRIPT_DIR/05-start-batcher-se
   && grep -q 'SEPOLIA_PROPOSER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_PROPOSER_TXMGR_REBROADCAST_INTERVAL:-36s' "$SCRIPT_DIR/06-start-proposer-sepolia.sh" \
   && grep -q 'SEPOLIA_L1_HTTP_POLL_INTERVAL:-12s' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
-  && grep -q 'SEPOLIA_L1_RPC_RATE_LIMIT:-20' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
+  && grep -q 'SEPOLIA_L1_RPC_RATE_LIMIT:-20' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -q 'SEPOLIA_CHALLENGER_HTTP_POLL_INTERVAL:-${OP_CHALLENGER_HTTP_POLL_INTERVAL:-300s}' "$SCRIPT_DIR/09-start-challenger-sepolia.sh" \
+  && grep -q 'SEPOLIA_CHALLENGER_MIN_UPDATE_INTERVAL:-${OP_CHALLENGER_MIN_UPDATE_INTERVAL:-300s}' "$SCRIPT_DIR/09-start-challenger-sepolia.sh" \
+  && grep -q 'SEPOLIA_CHALLENGER_MAX_CONCURRENCY:-${OP_CHALLENGER_MAX_CONCURRENCY:-1}' "$SCRIPT_DIR/09-start-challenger-sepolia.sh"; then
   echo "PASS Sepolia start scripts use credit-budget poll/channel defaults"
 else
   echo "FAIL Sepolia start scripts must keep credit-budget env defaults" >&2
@@ -1938,6 +1941,163 @@ else
   rm -rf "$_f711_tmp"
 fi
 
+# --- challenger-429-resilience (D-0107): scan-cost knobs + init grace retry ---
+# (a) Wired flags reach challenger_args with credit-budget defaults; README table
+#     documents the same numbers. (b) Functional: a process that dies inside the
+#     grace window is retried; exhausting attempts exits nonzero. Removing the
+#     retry loop must turn (b) red.
+if grep -q -- '--http-poll-interval="$HTTP_POLL"' "$CHALLENGER_START" \
+  && grep -q -- '--min-update-interval="$MIN_UPDATE"' "$CHALLENGER_START" \
+  && grep -q -- '--max-concurrency="$MAX_CONCURRENCY"' "$CHALLENGER_START" \
+  && grep -q 'challenger_args+=(--game-window="$GAME_WINDOW")' "$CHALLENGER_START" \
+  && grep -q 'http-poll=${HTTP_POLL} min-update=${MIN_UPDATE} max-concurrency=${MAX_CONCURRENCY}' "$CHALLENGER_START" \
+  && grep -q 'SEPOLIA_CHALLENGER_HTTP_POLL_INTERVAL:-${OP_CHALLENGER_HTTP_POLL_INTERVAL:-300s}' "$CHALLENGER_START" \
+  && grep -q 'SEPOLIA_CHALLENGER_MIN_UPDATE_INTERVAL:-${OP_CHALLENGER_MIN_UPDATE_INTERVAL:-300s}' "$CHALLENGER_START" \
+  && grep -q 'SEPOLIA_CHALLENGER_MAX_CONCURRENCY:-${OP_CHALLENGER_MAX_CONCURRENCY:-1}' "$CHALLENGER_START" \
+  && grep -q 'CHALLENGER_START_GRACE_SEC:-15' "$CHALLENGER_START" \
+  && grep -q 'CHALLENGER_START_ATTEMPTS:-3' "$CHALLENGER_START" \
+  && grep -q 'start_challenger_with_retry' "$CHALLENGER_START" \
+  && awk '
+       /CHALLENGER_CANNON_SERVER|CHALLENGER_KONA_SERVER|super-cannon-kona is not supported/ { gate = NR }
+       /^start_challenger_with_retry\(\)/ { fn = NR }
+       END { exit !(gate && fn && gate < fn) }
+     ' "$CHALLENGER_START" \
+  && grep -q 'SEPOLIA_CHALLENGER_HTTP_POLL_INTERVAL' "$SCRIPT_DIR/../README.md" \
+  && grep -q '`300s` / `300s`' "$SCRIPT_DIR/../README.md" \
+  && grep -q 'SEPOLIA_CHALLENGER_MAX_CONCURRENCY' "$SCRIPT_DIR/../README.md" \
+  && grep -qE '^# SEPOLIA_CHALLENGER_HTTP_POLL_INTERVAL=300s$' "$CHALLENGER_ENV" \
+  && grep -qE '^# SEPOLIA_CHALLENGER_MIN_UPDATE_INTERVAL=300s$' "$CHALLENGER_ENV" \
+  && grep -qE '^# SEPOLIA_CHALLENGER_MAX_CONCURRENCY=1$' "$CHALLENGER_ENV" \
+  && grep -qE '^# OP_CHALLENGER_HTTP_POLL_INTERVAL=$' "$CHALLENGER_ENV"; then
+  echo "PASS challenger scan-cost knobs wired (args + echo + README + .env.sepolia.example)"
+else
+  echo "FAIL 09-start-challenger must wire poll/update/concurrency into challenger_args with 300s/1 defaults, echo them, and document in README/.env.sepolia.example" >&2
+  fail=1
+fi
+
+# Functional retry: extract helpers, stub start_bg so the "daemon" dies inside grace.
+_C429_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-challenger-429.XXXXXX")"
+_C429_FN="${_C429_FIX}/fn.sh"
+# Extract the three helpers (alive / clear / retry) plus their call site is not needed.
+awk '
+  /^challenger_process_alive\(\)/ { keep=1 }
+  /^challenger_clear_dead_pidfile\(\)/ { keep=1 }
+  /^start_challenger_with_retry\(\)/ { keep=1 }
+  keep { print }
+  keep && /^}/ { keep=0; print "" }
+' "$CHALLENGER_START" > "$_C429_FN"
+if ! grep -q '^start_challenger_with_retry()' "$_C429_FN" \
+  || ! grep -q '^challenger_process_alive()' "$_C429_FN"; then
+  echo "FAIL could not extract challenger retry helpers from 09-start-challenger-sepolia.sh" >&2
+  fail=1
+else
+  mkdir -p "$_C429_FIX/pids" "$_C429_FIX/logs"
+  # Stub start_bg: launch a short-lived process whose cmdline contains op-challenger,
+  # write its pid, return 0 — mimics D-0054 (start_bg succeeds, child dies soon).
+  # Redirect stdio away from the caller's capture pipe (Codex P2 on #168).
+  cat > "$_C429_FIX/stub_lib.sh" <<'EOS'
+start_bg() {
+  local name="$1"; shift
+  local pidfile="$PID_DIR/$name.pid"
+  local logfile="$LOG_DIR/$name.log"
+  : >>"$logfile"
+  # argv[0] shape that ps -o args= will show as containing op-challenger
+  bash -c 'exec -a op-challenger-stub sleep 0.2' </dev/null >>"$logfile" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$pidfile"
+  echo "stub start_bg $name pid $pid" >>"$logfile"
+  START_BG_CALLS=$(( ${START_BG_CALLS:-0} + 1 ))
+  export START_BG_CALLS
+  echo "$START_BG_CALLS" >"$PID_DIR/start_bg.calls"
+  return 0
+}
+EOS
+  _C429_RC=0
+  _C429_OUT="$(
+    set +e
+    (
+      set -euo pipefail
+      PID_DIR="$_C429_FIX/pids"
+      LOG_DIR="$_C429_FIX/logs"
+      CHALLENGER_START_GRACE_SEC=1
+      CHALLENGER_START_ATTEMPTS=3
+      challenger_args=(--datadir=/tmp)
+      START_BG_CALLS=0
+      # shellcheck disable=SC1090
+      source "$_C429_FIX/stub_lib.sh"
+      # shellcheck disable=SC1090
+      source "$_C429_FN"
+      start_challenger_with_retry
+    ) 2>&1
+  )" || _C429_RC=$?
+  _C429_CALLS="$(cat "$_C429_FIX/pids/start_bg.calls" 2>/dev/null || echo 0)"
+  if [[ "$_C429_RC" -ne 0 ]] \
+    && [[ "$_C429_CALLS" -eq 3 ]] \
+    && printf '%s' "$_C429_OUT" | grep -q 'failed to stay up after 3 attempts' \
+    && printf '%s' "$_C429_OUT" | grep -q 'died within 1s grace'; then
+    echo "PASS challenger init retry exhausts after grace deaths (nonzero + 3 start_bg calls)"
+  else
+    echo "FAIL challenger start_challenger_with_retry must retry on grace death and exit nonzero after attempts (rc=$_C429_RC calls=$_C429_CALLS)" >&2
+    echo "$_C429_OUT" >&2
+    fail=1
+  fi
+
+  # Success path: stub that stays alive past grace.
+  # Detach stdio from the $(...) capture pipe so we do not wait for sleep 30
+  # (Codex P2 on #168 — real start_bg dup2s to the logfile).
+  cat > "$_C429_FIX/stub_lib_ok.sh" <<'EOS'
+start_bg() {
+  local name="$1"; shift
+  local pidfile="$PID_DIR/$name.pid"
+  local logfile="$LOG_DIR/$name.log"
+  : >>"$logfile"
+  bash -c 'exec -a op-challenger-ok sleep 30' </dev/null >>"$logfile" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$pidfile"
+  echo "$pid" >"$PID_DIR/ok.pid"
+  START_BG_CALLS=$(( ${START_BG_CALLS:-0} + 1 ))
+  echo "$START_BG_CALLS" >"$PID_DIR/start_bg.calls"
+  return 0
+}
+EOS
+  rm -f "$_C429_FIX/pids"/* "$_C429_FIX/logs"/*
+  mkdir -p "$_C429_FIX/pids" "$_C429_FIX/logs"
+  _C429_OK_RC=0
+  _C429_OK_OUT="$(
+    set +e
+    (
+      set -euo pipefail
+      PID_DIR="$_C429_FIX/pids"
+      LOG_DIR="$_C429_FIX/logs"
+      CHALLENGER_START_GRACE_SEC=1
+      CHALLENGER_START_ATTEMPTS=3
+      challenger_args=(--datadir=/tmp)
+      # shellcheck disable=SC1090
+      source "$_C429_FIX/stub_lib_ok.sh"
+      # shellcheck disable=SC1090
+      source "$_C429_FN"
+      start_challenger_with_retry
+    ) 2>&1
+  )" || _C429_OK_RC=$?
+  _C429_OK_PID="$(cat "$_C429_FIX/pids/ok.pid" 2>/dev/null || true)"
+  if [[ -n "$_C429_OK_PID" ]]; then
+    kill "$_C429_OK_PID" 2>/dev/null || true
+    wait "$_C429_OK_PID" 2>/dev/null || true
+  fi
+  _C429_OK_CALLS="$(cat "$_C429_FIX/pids/start_bg.calls" 2>/dev/null || echo 0)"
+  if [[ "$_C429_OK_RC" -eq 0 ]] \
+    && [[ "$_C429_OK_CALLS" -eq 1 ]] \
+    && printf '%s' "$_C429_OK_OUT" | grep -q 'survived 1s post-start grace'; then
+    echo "PASS challenger init retry accepts a process that survives grace (single start_bg)"
+  else
+    echo "FAIL challenger start_challenger_with_retry must succeed once the process survives grace (rc=$_C429_OK_RC calls=$_C429_OK_CALLS)" >&2
+    echo "$_C429_OK_OUT" >&2
+    fail=1
+  fi
+fi
+rm -rf "$_C429_FIX"
+unset _C429_FIX _C429_FN _C429_RC _C429_OUT _C429_CALLS _C429_OK_RC _C429_OK_OUT _C429_OK_PID _C429_OK_CALLS
+
 # F7-6 / D-0061: type-8 additional dispute game is a second apply, never the wipe.
 # Assert properties of generated intent and of the prestate gate, not error phrasing.
 DEPLOY_SEPOLIA="$SCRIPT_DIR/02-deploy-contracts-sepolia.sh"
@@ -2174,6 +2334,11 @@ _env_ex_keys=(
   OP_CHALLENGER_MAX_CONCURRENCY
   OP_CHALLENGER_HTTP_POLL_INTERVAL
   OP_CHALLENGER_GAME_WINDOW
+  OP_CHALLENGER_MIN_UPDATE_INTERVAL
+  SEPOLIA_CHALLENGER_HTTP_POLL_INTERVAL
+  SEPOLIA_CHALLENGER_MIN_UPDATE_INTERVAL
+  SEPOLIA_CHALLENGER_MAX_CONCURRENCY
+  SEPOLIA_CHALLENGER_GAME_WINDOW
   FAULT_GAME_ABSOLUTE_PRESTATE
   L1_BATCH_PROXY_PORT
   L1_BATCH_PROXY_CHUNK
