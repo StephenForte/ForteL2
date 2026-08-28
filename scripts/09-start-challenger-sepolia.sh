@@ -216,6 +216,36 @@ if ! [[ "$NUM_CONFS" =~ ^[0-9]+$ ]]; then
 fi
 LOG_LEVEL="${CHALLENGER_LOG_LEVEL:-info}"
 
+# Scan-cost knobs (binary help: --http-poll-interval default 12s, --min-update-interval
+# default 0s, --max-concurrency default NumCPU, --game-window default 672h).
+# SEPOLIA_* preferred; OP_CHALLENGER_* accepted as binary-native fallbacks.
+# Steady-state poll/update defaults to 300s — material vs binary 12s/0s. Safe vs this
+# chain's dispute clocks (FAULT_GAME_MAX_CLOCK_DURATION=7200 / extension=600; D-0082
+# observed full 7200s clocks). --game-window is bond-claim scope: leave at binary
+# default unless the operator sets it (shrinking can miss DelayedWETH claims).
+HTTP_POLL="${SEPOLIA_CHALLENGER_HTTP_POLL_INTERVAL:-${OP_CHALLENGER_HTTP_POLL_INTERVAL:-300s}}"
+MIN_UPDATE="${SEPOLIA_CHALLENGER_MIN_UPDATE_INTERVAL:-${OP_CHALLENGER_MIN_UPDATE_INTERVAL:-300s}}"
+MAX_CONCURRENCY="${SEPOLIA_CHALLENGER_MAX_CONCURRENCY:-${OP_CHALLENGER_MAX_CONCURRENCY:-1}}"
+GAME_WINDOW="${SEPOLIA_CHALLENGER_GAME_WINDOW:-${OP_CHALLENGER_GAME_WINDOW:-}}"
+if ! [[ "$MAX_CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: SEPOLIA_CHALLENGER_MAX_CONCURRENCY must be a positive integer (got $MAX_CONCURRENCY)" >&2
+  exit 1
+fi
+# Init-path 429s kill the process (D-0107); runtime retries. start_bg's 0.3s check
+# is too short for CheckRequired / game-type registration RPC. Grace must cover
+# that fatal init window; 15s is long enough for the observed 1s death and short
+# enough that 3 attempts + backoff stay under ~1 min of wake time.
+CHALLENGER_START_GRACE_SEC="${CHALLENGER_START_GRACE_SEC:-15}"
+CHALLENGER_START_ATTEMPTS="${CHALLENGER_START_ATTEMPTS:-3}"
+if ! [[ "$CHALLENGER_START_GRACE_SEC" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: CHALLENGER_START_GRACE_SEC must be a positive integer (got $CHALLENGER_START_GRACE_SEC)" >&2
+  exit 1
+fi
+if ! [[ "$CHALLENGER_START_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: CHALLENGER_START_ATTEMPTS must be a positive integer (got $CHALLENGER_START_ATTEMPTS)" >&2
+  exit 1
+fi
+
 # Always required by this binary's CheckRequired (requiredFlags includes l1-beacon).
 # Passing --l1-beacon is NOT a DA change: op-node still uses --l1.beacon.ignore (D-0037 / D-0053).
 if [[ -z "${L1_BEACON_URL:-}" ]]; then
@@ -436,7 +466,13 @@ challenger_args=(
   --l1-rpc-kind="$L1_RPC_KIND"
   --num-confirmations="$NUM_CONFS"
   --log.level="$LOG_LEVEL"
+  --http-poll-interval="$HTTP_POLL"
+  --min-update-interval="$MIN_UPDATE"
+  --max-concurrency="$MAX_CONCURRENCY"
 )
+if [[ -n "$GAME_WINDOW" ]]; then
+  challenger_args+=(--game-window="$GAME_WINDOW")
+fi
 
 if needs_cannon_bin "$TRACE_TYPE"; then
   challenger_args+=(--cannon-bin="$CANNON_BIN")
@@ -480,9 +516,89 @@ fi
 # --l1-beacon satisfies CheckRequired; it does not enable blob DA (D-0037 / D-0053).
 # Chain 852 is not in the superchain registry — never pass --network.
 
+# True liveness after start_bg (D-0054 / D-0107): pidfile + kill -0 is not
+# enough — a recycled PID can look alive. Require the live process cmdline to
+# still name op-challenger.
+challenger_process_alive() {
+  local pidfile="$PID_DIR/op-challenger.pid"
+  local pid cmd
+  [[ -f "$pidfile" ]] || return 1
+  pid="$(tr -d '[:space:]' < "$pidfile")"
+  [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  [[ "$cmd" == *op-challenger* ]]
+}
+
+# Clear a dead/stale pidfile so start_bg will relaunch (it no-ops when kill -0
+# succeeds on the pidfile contents).
+challenger_clear_dead_pidfile() {
+  local pidfile="$PID_DIR/op-challenger.pid"
+  local pid
+  [[ -f "$pidfile" ]] || return 0
+  pid="$(tr -d '[:space:]' < "$pidfile")"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && challenger_process_alive; then
+    return 0
+  fi
+  rm -f "$pidfile"
+}
+
+# Bounded post-start_bg retry for transient init RPC failures (429). Pre-start
+# config gates above are outside this loop on purpose — permanent refusals must
+# not be retried. Binary has no init-level retry flag (txmgr.retry-interval is
+# for tx resubmit only); script-level grace + restart is the lever.
+start_challenger_with_retry() {
+  local attempt=1
+  local max_attempts="$CHALLENGER_START_ATTEMPTS"
+  local grace="$CHALLENGER_START_GRACE_SEC"
+  local backoff=5
+  local start_rc
+
+  while (( attempt <= max_attempts )); do
+    challenger_clear_dead_pidfile
+    if challenger_process_alive; then
+      echo "op-challenger already running (pid $(tr -d '[:space:]' < "$PID_DIR/op-challenger.pid"))"
+      return 0
+    fi
+    echo "op-challenger start attempt ${attempt}/${max_attempts} (grace ${grace}s)"
+    start_rc=0
+    start_bg op-challenger op-challenger "${challenger_args[@]}" || start_rc=$?
+    if (( start_rc != 0 )); then
+      echo "WARN: start_bg op-challenger failed immediately (attempt ${attempt}/${max_attempts}, rc=${start_rc})" >&2
+    else
+      # Wait the full grace even if start_bg's 0.3s check passed — init RPC
+      # (game-type registration) is the failure class D-0107 measured at ~1s.
+      sleep "$grace"
+      if challenger_process_alive; then
+        echo "op-challenger survived ${grace}s post-start grace"
+        return 0
+      fi
+      echo "WARN: op-challenger died within ${grace}s grace (attempt ${attempt}/${max_attempts})" >&2
+      challenger_clear_dead_pidfile
+    fi
+    if (( attempt >= max_attempts )); then
+      break
+    fi
+    echo "Retrying op-challenger in ${backoff}s…" >&2
+    sleep "$backoff"
+    backoff=$((backoff * 2))
+    attempt=$((attempt + 1))
+  done
+
+  echo "ERROR: op-challenger failed to stay up after ${max_attempts} attempts" >&2
+  echo "--- tail of ${LOG_DIR}/op-challenger.log ---" >&2
+  if [[ -f "$LOG_DIR/op-challenger.log" ]]; then
+    tail -n 50 "$LOG_DIR/op-challenger.log" >&2 || true
+  else
+    echo "(no log file at $LOG_DIR/op-challenger.log)" >&2
+  fi
+  return 1
+}
+
 echo "Sepolia challenger starting against DisputeGameFactory=$GAME_FACTORY game-types=$TRACE_TYPE"
 echo "  L1=$(redact_rpc_url "$CHALLENGER_L1_RPC_URL")  beacon=$(redact_rpc_url "$L1_BEACON_URL")  op-node=$(redact_rpc_url "$L2_NODE_RPC_URL")  L2=$(redact_rpc_url "$L2_RPC_URL")"
 echo "  challenger=$CHALLENGER_ADDRESS  datadir=$CHALLENGER_DATADIR  l1-rpc-kind=$L1_RPC_KIND"
+echo "  http-poll=${HTTP_POLL} min-update=${MIN_UPDATE} max-concurrency=${MAX_CONCURRENCY} game-window=${GAME_WINDOW:-binary-default-672h}"
 if [[ -n "$CANNON_ROLLUP" ]]; then
   echo "  rollup=$CANNON_ROLLUP  genesis=$CANNON_GENESIS"
 fi
@@ -496,7 +612,7 @@ if [[ -n "$PRESTATES_URL" ]]; then
   echo "  prestates-url=$(redact_rpc_url "$PRESTATES_URL")"
 fi
 
-start_bg op-challenger op-challenger "${challenger_args[@]}"
+start_challenger_with_retry
 
 echo "Sepolia challenger started (pid file $PID_DIR/op-challenger.pid). Signs as CHALLENGER, never PROPOSER."
 echo "Known-good: 'starting monitoring' in $LOG_DIR/op-challenger.log — it should not attack a valid game"
