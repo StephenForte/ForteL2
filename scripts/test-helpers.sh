@@ -5499,6 +5499,7 @@ fi
 _BAL_ADDR="0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
 _BAL_HARVEST="0x0000000000000000000000000000000000000001"
 _BAL_RPC="https://example.invalid/secret-token-do-not-leak"
+_BAL_CORR="https://corroboration.example.invalid/second"
 _BAL_REAL_CAST="$(command -v cast || true)"
 _BAL_STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-bal-stub.XXXXXX")"
 if [[ -z "$_BAL_REAL_CAST" ]]; then
@@ -5513,14 +5514,31 @@ if [[ "${1:-}" == "block-number" ]]; then
 fi
 if [[ "${1:-}" == "balance" ]]; then
   has_block=0
+  _rpc=""
+  _prev=""
   for _a in "$@"; do
     if [[ "$_a" == "--block" || "$_a" == "-B" ]]; then
       has_block=1
-      break
     fi
+    if [[ "$_prev" == "--rpc-url" ]]; then
+      _rpc="$_a"
+    fi
+    _prev="$_a"
   done
   if [[ "$has_block" -ne 1 ]]; then
     exit 1
+  fi
+  if [[ -n "${CAST_STUB_DIR:-}" ]]; then
+    printf '%s\n' "$_rpc" >> "${CAST_STUB_DIR}/balance-rpc-urls"
+  fi
+  if [[ -n "$_rpc" && "$_rpc" != "${L1_RPC_URL:-}" && -n "${CAST_BALANCE_SECONDARY:-}" ]]; then
+    case "${CAST_BALANCE_SECONDARY}" in
+      missing) exit 1 ;;
+      junk) printf '%s\n' "null"; exit 0 ;;
+      high) printf '%s\n' "1000000000000000000"; exit 0 ;;
+      low) printf '%s\n' "10000000000000000"; exit 0 ;;
+      *) exit 1 ;;
+    esac
   fi
   case "${CAST_BALANCE_STUB:-}" in
     missing) exit 1 ;;
@@ -5549,14 +5567,25 @@ EOF
   chmod +x "$_BAL_STUB_DIR/cast"
 
   _bal_run() {
-    rm -f "${_BAL_STUB_DIR}/balance-calls"
+    rm -f "${_BAL_STUB_DIR}/balance-calls" "${_BAL_STUB_DIR}/balance-rpc-urls"
     export PATH="${_BAL_STUB_DIR}:$PATH"
     export CAST_REAL="$_BAL_REAL_CAST"
     export CAST_STUB_DIR="$_BAL_STUB_DIR"
     export CAST_BALANCE_STUB="$1"
+    export CAST_BALANCE_SECONDARY="${3:-}"
     export L1_RPC_URL="$_BAL_RPC"
+    export SEPOLIA_L1_CORROBORATION_RPC_URL="${2:-$_BAL_CORR}"
     export HARVEST_ADDRESS="$_BAL_HARVEST"
     require_min_balance_eth "$_BAL_ADDR" "0.15" "BATCHER"
+  }
+
+  _bal_secondary_call_count() {
+    local url="${1:-$_BAL_CORR}"
+    if [[ ! -f "${_BAL_STUB_DIR}/balance-rpc-urls" ]]; then
+      printf '0'
+      return 0
+    fi
+    grep -cF "$url" "${_BAL_STUB_DIR}/balance-rpc-urls" 2>/dev/null || true
   }
 
   _BAL_MISS_EC=0
@@ -5619,6 +5648,63 @@ EOF
   else
     echo "FAIL require_min_balance_eth healthy balance must pass (ec=$_BAL_HIGH_EC)" >&2
     echo "$_BAL_HIGH_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_HIGH_SEC="$(_bal_secondary_call_count)"
+  if [[ "$_BAL_HIGH_EC" -eq 0 && "$_BAL_HIGH_SEC" -eq 0 ]]; then
+    echo "PASS require_min_balance_eth healthy balance makes no secondary RPC call"
+  else
+    echo "FAIL require_min_balance_eth healthy path must not call the corroboration URL (secondary_calls=$_BAL_HIGH_SEC ec=$_BAL_HIGH_EC)" >&2
+    echo "$_BAL_HIGH_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_SPLIT_EC=0
+  _BAL_SPLIT_OUT="$(_bal_run low "$_BAL_CORR" high 2>&1)" && _BAL_SPLIT_EC=0 || _BAL_SPLIT_EC=$?
+  if [[ "$_BAL_SPLIT_EC" -eq 0 ]] \
+    && echo "$_BAL_SPLIT_OUT" | grep -q 'WARN' \
+    && echo "$_BAL_SPLIT_OUT" | grep -q 'D-0106' \
+    && echo "$_BAL_SPLIT_OUT" | grep -q 'example.invalid' \
+    && echo "$_BAL_SPLIT_OUT" | grep -q 'corroboration.example.invalid' \
+    && echo "$_BAL_SPLIT_OUT" | grep -q 'pinned block' \
+    && echo "$_BAL_SPLIT_OUT" | grep -q 'primary' \
+    && echo "$_BAL_SPLIT_OUT" | grep -q 'secondary' \
+    && ! echo "$_BAL_SPLIT_OUT" | grep -q 'secret-token-do-not-leak' \
+    && ! echo "$_BAL_SPLIT_OUT" | grep -q 'need >= 0.15 ETH'; then
+    echo "PASS require_min_balance_eth primary-low secondary-high proceeds with provider-disagreement WARN"
+  else
+    echo "FAIL require_min_balance_eth provider disagreement must WARN and proceed (ec=$_BAL_SPLIT_EC)" >&2
+    echo "$_BAL_SPLIT_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_SEC_MISS_EC=0
+  _BAL_SEC_MISS_OUT="$(_bal_run low "$_BAL_CORR" missing 2>&1)" && _BAL_SEC_MISS_EC=0 || _BAL_SEC_MISS_EC=$?
+  if [[ "$_BAL_SEC_MISS_EC" -ne 0 ]] \
+    && echo "$_BAL_SEC_MISS_OUT" | grep -q 'second-opinion L1 balance unavailable' \
+    && echo "$_BAL_SEC_MISS_OUT" | grep -q 'Cannot corroborate' \
+    && echo "$_BAL_SEC_MISS_OUT" | grep -q 'corroboration.example.invalid' \
+    && ! echo "$_BAL_SEC_MISS_OUT" | grep -q 'has .* ETH; need >= 0.15 ETH' \
+    && ! echo "$_BAL_SEC_MISS_OUT" | grep -q 'could not establish L1 balance'; then
+    echo "PASS require_min_balance_eth secondary unreachable is cannot-corroborate, not underfunded"
+  else
+    echo "FAIL require_min_balance_eth unreachable second opinion must refuse without the underfunded message (ec=$_BAL_SEC_MISS_EC)" >&2
+    echo "$_BAL_SEC_MISS_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_SAME_EC=0
+  _BAL_SAME_OUT="$(_bal_run low "$_BAL_RPC" 2>&1)" && _BAL_SAME_EC=0 || _BAL_SAME_EC=$?
+  if [[ "$_BAL_SAME_EC" -ne 0 ]] \
+    && echo "$_BAL_SAME_OUT" | grep -q 'SEPOLIA_L1_CORROBORATION_RPC_URL equals L1_RPC_URL' \
+    && echo "$_BAL_SAME_OUT" | grep -q 'Cannot corroborate' \
+    && echo "$_BAL_SAME_OUT" | grep -q 'D-0106' \
+    && ! echo "$_BAL_SAME_OUT" | grep -q 'secret-token-do-not-leak'; then
+    echo "PASS require_min_balance_eth corroboration URL equal to primary is refused"
+  else
+    echo "FAIL require_min_balance_eth same-host second opinion must be refused loudly (ec=$_BAL_SAME_EC)" >&2
+    echo "$_BAL_SAME_OUT" >&2
     fail=1
   fi
 fi
