@@ -6368,6 +6368,106 @@ else
   fail=1
 fi
 
+# Task 1 — EL pin assertion (stubs only; CI has no Mini arm64 binaries).
+PIN_CHECK="$SCRIPT_DIR/check-el-pins.sh"
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch scripts/check-el-pins.sh >/dev/null 2>&1 \
+  && [[ -x "$PIN_CHECK" ]]; then
+  echo "PASS scripts/check-el-pins.sh is tracked and executable"
+else
+  echo "FAIL scripts/check-el-pins.sh must be tracked and executable" >&2
+  fail=1
+fi
+# Trap: tag op-reth/v2.3.3 is not the --version string. Matcher must use
+# reported 2.3.0-dev + full commit, not a bare 2.3 or the tag 2.3.3.
+if grep -q "PIN_RETH_VERSION='2.3.0-dev'" "$PIN_CHECK" \
+  && grep -q "PIN_RETH_COMMIT='9384bc53d8c0c77e59cac83fdaaf3b372c6d2216'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_NODE_VERSION='v1.19.2'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_NODE_COMMIT='da197e45'" "$PIN_CHECK"; then
+  echo "PASS check-el-pins.sh pins reported Reth 2.3.0-dev + commit 9384bc53 and op-node v1.19.2 da197e45"
+else
+  echo "FAIL check-el-pins.sh must pin 2.3.0-dev / 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216 / v1.19.2 / da197e45" >&2
+  fail=1
+fi
+PIN_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-el-pins.XXXXXX")"
+cat > "$PIN_FIX/op-node" <<'EOS'
+#!/bin/sh
+echo "op-node version v1.19.2-da197e45-1782514747"
+EOS
+cat > "$PIN_FIX/op-reth" <<'EOS'
+#!/bin/sh
+echo "Reth Version: 2.3.0-dev"
+echo "Commit SHA: 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216"
+EOS
+cat > "$PIN_FIX/op-reth-wrong" <<'EOS'
+#!/bin/sh
+echo "Reth Version: 2.4.0"
+echo "Commit SHA: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+EOS
+# Would pass a naive "2.3" grep; must fail the exact 2.3.0-dev + commit check.
+cat > "$PIN_FIX/op-reth-prefix" <<'EOS'
+#!/bin/sh
+echo "Reth Version: 2.3.1-dev"
+echo "Commit SHA: 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216"
+EOS
+cat > "$PIN_FIX/op-geth" <<'EOS'
+#!/bin/sh
+echo "op-geth version 1.101702.2-stable-e8800cff"
+EOS
+chmod +x "$PIN_FIX/op-node" "$PIN_FIX/op-reth" "$PIN_FIX/op-reth-wrong" \
+  "$PIN_FIX/op-reth-prefix" "$PIN_FIX/op-geth"
+PIN_OK_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_OK_EC=0 || PIN_OK_EC=$?
+if [[ "$PIN_OK_EC" -eq 0 ]] && echo "$PIN_OK_OUT" | grep -q 'ok op-node'; then
+  echo "PASS check-el-pins.sh accepts matching stub versions"
+else
+  echo "FAIL check-el-pins.sh must exit 0 on matching stubs (ec=$PIN_OK_EC)" >&2
+  echo "$PIN_OK_OUT" >&2
+  fail=1
+fi
+PIN_BAD_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" OP_RETH_BIN="$PIN_FIX/op-reth-wrong" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_BAD_EC=0 || PIN_BAD_EC=$?
+if [[ "$PIN_BAD_EC" -ne 0 ]] \
+  && echo "$PIN_BAD_OUT" | grep -q 'expected:' \
+  && echo "$PIN_BAD_OUT" | grep -q 'got:' \
+  && echo "$PIN_BAD_OUT" | grep -q '2.3.0-dev' \
+  && echo "$PIN_BAD_OUT" | grep -q '2.4.0'; then
+  echo "PASS check-el-pins.sh goes red on a wrong op-reth pin (expected vs got)"
+else
+  echo "FAIL check-el-pins.sh must exit nonzero and name expected vs got on a wrong pin (ec=$PIN_BAD_EC)" >&2
+  echo "$PIN_BAD_OUT" >&2
+  fail=1
+fi
+PIN_PFX_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" OP_RETH_BIN="$PIN_FIX/op-reth-prefix" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_PFX_EC=0 || PIN_PFX_EC=$?
+if [[ "$PIN_PFX_EC" -ne 0 ]] && echo "$PIN_PFX_OUT" | grep -q '2.3.1-dev'; then
+  echo "PASS check-el-pins.sh refuses a 2.3.x prefix match (not a bare 2.3 grep)"
+else
+  echo "FAIL check-el-pins.sh must not accept 2.3.1-dev as the 2.3.0-dev pin (ec=$PIN_PFX_EC)" >&2
+  echo "$PIN_PFX_OUT" >&2
+  fail=1
+fi
+PIN_GETH_OUT="$(
+  FORTEL2_EL=reth OP_NODE_BIN="$PIN_FIX/op-node" OP_RETH_BIN="$PIN_FIX/op-geth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_GETH_EC=0 || PIN_GETH_EC=$?
+if [[ "$PIN_GETH_EC" -ne 0 ]] \
+  && echo "$PIN_GETH_OUT" | grep -qi 'op-geth' \
+  && echo "$PIN_GETH_OUT" | grep -q 'expected:' \
+  && echo "$PIN_GETH_OUT" | grep -q 'got:'; then
+  echo "PASS check-el-pins.sh refuses op-geth when FORTEL2_EL=reth"
+else
+  echo "FAIL FORTEL2_EL=reth must refuse an op-geth binary (ec=$PIN_GETH_EC)" >&2
+  echo "$PIN_GETH_OUT" >&2
+  fail=1
+fi
+rm -rf "$PIN_FIX"
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
