@@ -101,20 +101,18 @@ Want a last line `spike-op-reth: PASS`. Failures are real — read `$DATA_DIR/lo
 
 ### 4. Write down the result
 
-Edit `tasks/spike-op-reth.md` Results + flag table (Mini column). Paste `op-reth --version`, the two hashes, PASS/FAIL. That is what the migration PRD cites.
-
-Optional flags: `--genesis PATH`, `--no-wipe`. Sidecar ports: HTTP **19845**, auth **19851**, op-node **19847**.
+Filled below from the Mini retry. Optional flags: `--genesis PATH`, `--no-wipe`. Sidecar ports: HTTP **19845**, auth **19851**, op-node **19847**.
 
 ## Checks (must be able to go red)
 
 | Check | Cloud Linux | Mini darwin/arm64 |
 |---|---|---|
-| `op-reth --version` is v2.3.3+ (native path, not Docker) | | 2.3.0-dev (9384bc5) Mach-O arm64 (upstream reth pin in op-reth/v2.3.3) |
+| `op-reth --version` is v2.3.3+ (native path, not Docker) | not a Mini substitute | `Reth Version: 2.3.0-dev` SHA `9384bc53` (upstream reth pin in `op-reth/v2.3.3`); Mach-O arm64 |
 | Genesis block 0 hash matches replica | | PASS `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` |
-| `op-node --l2.enginekind=reth` attaches | | PASS — FCU genesis + reset at L1 `0xaf5518e2…:11545587` |
-| Block N hash matches replica | | FAIL first run — head stayed 0 (L1 receipts, not EL) |
-| Sequencer-tip door (optional; may be down 23:45–03:00 PT) | | not reached |
-| RPC probe: `eth` / `net` / `web3`; `debug` / `txpool` / `eth_getProof` / `debug_setHead` recorded | | not reached |
+| `op-node --l2.enginekind=reth` attaches | | PASS — `--l2.enginekind=reth` + `--l1.rpckind=quicknode` |
+| Block N hash matches replica | | PASS block 5 `0xd9fd2a33ebadd2a734924d8f76bac945709ba4a1df352a7d4fd50383dee209e9` (first run FAIL was L1 receipts) |
+| Sequencer-tip door (optional; may be down 23:45–03:00 PT) | | PASS — same hash at block 5 |
+| RPC probe: `eth` / `net` / `web3`; `debug` / `txpool` / `eth_getProof` / `debug_setHead` recorded | | see flag table |
 | Live `op-geth` datadir and ports 9545/9546/9547/9551 untouched | | PASS (sidecar :19845/:19846/:19851/:19847/:30329) |
 
 Replica oracle: `https://fortel2-replica-rpc.onrender.com` (read only).
@@ -123,30 +121,37 @@ Replica oracle: `https://fortel2-replica-rpc.onrender.com` (read only).
 
 | Need (today on op-geth) | op-reth flag that worked | Notes |
 |---|---|---|
-| HTTP loopback + JWT auth | | |
-| `eth,net,web3` | | |
-| `debug` | | |
-| `txpool` | | |
-| archive / `eth_getProof` | | |
-| genesis init | | |
-| `debug_setHead` (probe) | | |
+| HTTP loopback + JWT auth | `--http.addr=127.0.0.1 --http.port=19845 --authrpc.addr=127.0.0.1 --authrpc.port=19851 --authrpc.jwtsecret` | WS `:19846`; P2P `--port=30329 --disable-discovery` |
+| `eth,net,web3` | `--http.api=eth,net,web3,debug,txpool` | `net_version` PASS; `web3_clientVersion` PASS |
+| `debug` | same `--http.api` | PASS (`debug_getRawHeader` or `debug_traceBlockByNumber` answered) |
+| `txpool` | same `--http.api` | `txpool_status` PASS |
+| archive / `eth_getProof` | default archive prune (no extra flag) | `cast proof` PASS |
+| genesis init | `op-reth init --datadir --chain` then `op-reth node --chain` | Local `$DEPLOY_DIR/genesis.json` was chain 901 — fetched replica genesis |
+| `debug_setHead` (probe) | **answered** | UNEXPECTED. Do **not** use on a keeper datadir. Derivation mid-chain needs another path |
 
 ## Results
 
+**Mini retry (2026-08-29, after L1 receipt-kind fix) — PASS `--blocks 5` on darwin/arm64.**
+
+- `--preflight` PASS: `l2=852`, `l1.rpckind=quicknode`, no PublicNode WARN. Caller `L1_RPC_URL` kept (QuickNode; script printed a redacted `quiknode.pro` host). Do not paste that URL.
+- `op-reth --version`: `Reth Version: 2.3.0-dev` commit `9384bc53d8c0c77e59cac83fdaaf3b372c6d2216` (upstream reth pin inside `op-reth/v2.3.3`).
+- Ignored `$DEPLOY_DIR/genesis.json` (chainId 901). Fetched 852 genesis from fortel2-replica.
+- Genesis replica = sidecar = `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d`.
+- Block 5 replica = sidecar = `0xd9fd2a33ebadd2a734924d8f76bac945709ba4a1df352a7d4fd50383dee209e9`. Sequencer-tip door matched the same hash.
+- RPC: `net_version`, `web3_clientVersion`, debug (some method), `txpool_status`, `eth_getProof` PASS. `debug_setHead` **answered** — do not use on a keeper datadir.
+- Sidecar only (`:19845/:19851/:19847`). Live `op-geth` untouched. EXIT trap stopped the sidecar.
+- `zsh: command not found: #` was the paste of a comment line. Harmless.
+
 **Mini first run (2026-08-28 19:19–19:26 PT) — FAIL `--blocks 5`. Not an op-reth failure.**
 
-- Build: `~/src/fortel2/optimism-op-reth` @ `op-reth/v2.3.3`; binary `Reth 2.3.0-dev (9384bc5)`; Mach-O arm64; `--preflight` PASS.
-- Genesis hash matched replica. op-reth Engine API accepted FCU to genesis. `latest_block` stayed **0**.
-- op-node reset Holocene at L1 origin `0xaf5518e27683473d8bcc776fadc48c2af9ef1d9881ed0f62c5e3a9ffd25c0800:11545587` (correct), then looped:
+- Same binary. Genesis matched. Head stayed **0**.
+- op-node reset Holocene at L1 origin `0xaf5518e27683473d8bcc776fadc48c2af9ef1d9881ed0f62c5e3a9ffd25c0800:11545587` (correct), then looped `got 0 receipts but expected 105`.
+- L1 was PublicNode + hardcoded `--l1.rpckind=standard`. Live sequencer uses QuickNode + `quicknode`. Fixed in this follow-up (`SPIKE_L1_RPC_KIND` / `SEPOLIA_L1_RPC_KIND`, default `quicknode`; PublicNode refused on `--blocks`; caller `L1_RPC_URL` snapshotted across `.env` load).
 
-  `failed to fetch receipts of L1 block … got 0 receipts but expected 105` (then 104, 137, …).
-
-- L1 was PublicNode (`https://ethereum-sepolia-rpc.publicnode.com`) with the script hardcoded `--l1.rpckind=standard`. Live Sepolia sequencer uses QuickNode + `--l1.rpckind=quicknode` (`04-start-sequencer-sepolia.sh`). PublicNode serves headers, not receipts.
-- EL `Beacon client online, but no consensus updates` is a consequence: CL never sent payloads. SIGTERM at 02:26:06 UTC stopped the sidecar only.
-- Script fix (this note’s follow-up): default `l1.rpckind` to `quicknode`; refuse PublicNode on `--blocks`; warn on `--preflight`. Retry is required before any migration PRD.
-
-A Cloud PASS is not a Mini PASS. Do not fill the flag table from this receipts FAIL.
+A Cloud PASS is not a Mini PASS. This Mini PASS is.
 
 ## Go / no-go for the migration PRD
 
-_Pending a Mini `--blocks 5` PASS with QuickNode L1._ First-run FAIL is L1 receipts, not a reason to abandon op-reth.
+**GO to write the migration PRD**, citing this Mini `--blocks 5` PASS (hashes and flag table above).
+
+Still **NO-GO** for: sequencer cutover, replacing `04-start-sequencer*.sh`, friend-replica image swap, `karst_time`, Phase 7 wipe, or sync-to-tip. P:0 proved genesis + first 5 L2 blocks hash-match on a sidecar. That is not a cutover. `debug_setHead` answering is a derivation risk — the PRD must not treat it as a keeper rewind tool.
