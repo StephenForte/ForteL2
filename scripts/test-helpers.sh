@@ -6225,10 +6225,15 @@ if [[ -n "$SPIKE_B5" ]] \
   && grep -q 'debug_setHead' "$PRD_RETH" \
   && grep -q 'karst_time' "$PRD_RETH" \
   && grep -q 'FORCE_SEPOLIA_REDEPLOY' "$PRD_RETH" \
-  && grep -q 'Do not execute this task unless explicitly asked' "$PRD_RETH"; then
+  && grep -q 'Do not execute this task unless explicitly asked' "$PRD_RETH" \
+  && grep -q 'admin_stopSequencer' "$PRD_RETH" \
+  && grep -q 'verifier-only' "$PRD_RETH" \
+  && grep -q 'com.steve.fortel2-wake' "$PRD_RETH" \
+  && grep -q 'alert-watch.sh' "$PRD_RETH" \
+  && grep -q 'D-0105 Finding 3' "$PRD_RETH"; then
   echo "PASS op-reth migration PRD cites spike hashes, receipts, debug_setHead, no-wipe, Task 5 hold"
 else
-  echo "FAIL prd-op-reth-migration.md must cite spike hash, PublicNode/quicknode, debug_setHead, karst_time, FORCE_SEPOLIA_REDEPLOY, and Task 5 hold" >&2
+  echo "FAIL prd-op-reth-migration.md must cite spike hash, PublicNode/quicknode, debug_setHead, karst_time, FORCE_SEPOLIA_REDEPLOY, Task 5 hold, admin_stopSequencer, verifier-only rollback, launchd wake, alert-watch, D-0105 Finding 3" >&2
   fail=1
 fi
 if grep -q 'tasks/prd-op-reth-migration.md' "$FORTEL2_ROOT/tasks/prd-l2-learning-chain.md" \

@@ -192,11 +192,13 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 - Datadir `$DATA_DIR/l2/op-reth` (production) vs `$DATA_DIR/l2/spike-op-reth` (throwaway). Guard: refuse `$DATA_DIR/l2/op-geth`.
 - Flags that worked: `--http.addr=127.0.0.1`, `--authrpc.jwtsecret`, `--http.api=eth,net,web3,debug,txpool`, `--chain` + `op-reth init --chain`.
-- op-node: `--l2.enginekind=reth`, `--l1.rpckind=quicknode`, `--l1.trustrpc=true`, `--l1.beacon.ignore=true` (same class as live Sepolia).
+- op-node: `--l2.enginekind=reth`, `--l1.rpckind` from `SEPOLIA_L1_RPC_KIND` / `SPIKE_L1_RPC_KIND` (default `quicknode` when L1 is QuickNode), `--l1.trustrpc=true`, `--l1.beacon.ignore=true` (same class as live Sepolia).
 - Snapshot caller `L1_RPC_URL` before `source lib.sh`.
 - Storage: default archive prune gave `eth_getProof` on the sidecar (not a Task 4 proof).
 
-**Scope:** Init/start/stop/status/reset helpers, env examples, process/log/datadir names, helper tests. Prefer extending `scripts/lib.sh` helpers. **`start_bg` / `stop_bg` edits need human review.**
+**Scope:** Init/start/stop/status/reset helpers, env examples, process/log/datadir **and pid** names, helper tests. Prefer extending `scripts/lib.sh` helpers. **`start_bg` / `stop_bg` edits need human review.**
+
+**Phase 7 lesson:** after the wipe, launchd **sleep/wake** failed because start/stop/status still assumed the old process set and port occupancy. An EL rename that updates `04-start-sequencer-sepolia.sh` but not `stop-all-sepolia.sh`, `status.sh`, `alert-watch.sh`, `demo-checklist.sh`, and `dev-sleep.sh` will fail the same way. Decide the pid name in this task (`op-reth` vs a neutral `l2-el`) and treat §10 stray-surface list as the closed update set.
 
 **Instructions:**
 
@@ -229,7 +231,7 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 1. `op-reth` + `op-node` verifier-only; committed 852 genesis + `deployments/sepolia/rollup.json`.
 2. Separate datadir, ports, JWT, names, logs. Reserved sequencer ports (`9545 9546 9547 9551`) stay untouched.
-3. Derive from Sepolia. L1 = QuickNode (or equivalent receipts RPC) + `l1.rpckind=quicknode`. Refuse PublicNode.
+3. Derive from Sepolia. Default L1 is the live QuickNode URL with `--l1.rpckind=quicknode` (`SEPOLIA_L1_RPC_KIND`). Refuse PublicNode (receipts return 0). If a different receipts-capable provider is used, set `SEPOLIA_L1_RPC_KIND` / `SPIKE_L1_RPC_KIND` to **that** provider (`alchemy`, `infura`, `standard`, …). Do not force `quicknode` on a non-QuickNode URL — a mismatched kind breaks derivation (D-0105 Finding 3).
 4. Wait until the verifier’s safe head matches live safe (or a documented lag bound).
 5. Compare ≥20 sampled safe blocks (recent + older checkpoints): number, hash, parent hash, state root, receipts root, tx count.
 6. Compare contract storage, balances, receipts, deposits, withdrawal-related state.
@@ -282,15 +284,16 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 **Instructions:**
 
 1. Announce a maintenance window. No genesis-wipe notice (chain config unchanged). This is **not** a Phase 7 reset announcement.
-2. Disable authenticated external write before stopping the sequencer.
-3. Stop intake; wait until latest sequenced block is safe/L1-derived; batcher has published remaining channels; `unsafe == safe` at the cutover height.
-4. Record cutover number/hash, safe/finalized, output root, versions, batcher/proposer L1 tx state.
-5. Stop in documented order. Preserve the complete op-geth datadir and logs.
-6. Candidate op-reth already at the recorded safe point (from Task 3/4).
-7. Start op-reth (`sequencer_faultproof`), then op-node sequencer + `--l2.enginekind=reth`.
-8. Start write filter, batcher, proposer, challenger in existing order.
-9. Re-enable writes only after production, batches, proposals, and challenger health.
-10. Immediate rollback if it cannot produce, changes the expected state root, breaks batch/propose, or cannot support fault-proof checks.
+2. Disable the authenticated external write path (Access / write filter). That does **not** stop block production.
+3. Pause sequencing through op-node admin (`admin_stopSequencer` on loopback `--rpc.enable-admin`). The live start path is `--sequencer.enabled=true --sequencer.stopped=false` (`scripts/04-start-sequencer-sepolia.sh`). Until admin-stopped, op-node keeps producing empty unsafe blocks every `L2_BLOCK_TIME` (2s), so the batcher can never make `safe` catch `unsafe`.
+4. Wait until the latest sequenced block is safe/L1-derived. Force or wait for the batcher to publish remaining channels. Verify `unsafe == safe` at the intended cutover height **after** sequencing is paused.
+5. Record cutover number/hash, safe/finalized, output root, versions, batcher/proposer L1 tx state.
+6. Stop in documented order. Preserve the complete op-geth datadir and logs.
+7. Candidate op-reth already at the recorded safe point (from Task 3/4).
+8. Start op-reth (`sequencer_faultproof`), then op-node sequencer + `--l2.enginekind=reth`.
+9. Start write filter, batcher, proposer, challenger in the existing dependency order.
+10. Re-enable writes only after block production, batch submission, proposals, and challenger health.
+11. Immediate rollback (§9) if it cannot produce, changes the expected state root, breaks batch/propose, or cannot support fault-proof checks.
 
 **Out of scope:** Deleting op-geth; changing L1 contracts or public URLs; `karst_time`.
 
@@ -304,9 +307,9 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 **Objective:** Stability through restarts, nightly sleep/wake, L1 derivation, and one proposer/challenger lifecycle.
 
-**Instructions:** ≥72 hours, ≥2 scheduled sleep/wake cycles; track production, lag, batches, games, challenger, memory, disk, L1 usage; one controlled restart; keep geth binary/selector/datadir; dated promote / extend / rollback decision.
+**Instructions:** ≥72 hours, ≥2 **launchd** sleep/wake cycles (`com.steve.fortel2-sleep` / `com.steve.fortel2-wake` via `run_dev_{sleep,wake}.sh` → `dev-sleep.sh`). After Phase 7 the jobs failed because start/stop still assumed the pre-wipe process set — treat a missed 03:00 wake or a `status.sh` / `alert-watch.sh` “op-geth stopped” false-negative as a Task 6 fail, not a footnote. Also: health snapshot (`com.steve.fortel2-health`), alerts (`com.steve.fortel2-alerts`), resolve-games (`com.steve.fortel2-resolve-games`), one controlled `stop-all-sepolia` / `start-all-sepolia` restart, keep geth binary/selector/datadir, dated promote / extend / rollback decision.
 
-**Success:** No unexplained divergence or missed wake; resources fit the Mac; wakes recover; dated decision before Task 7.
+**Success:** No unexplained divergence or missed wake; `alert-watch` expected-stack names match the running EL pid; resources fit the Mac; dated decision before Task 7.
 
 **Dependencies:** Task 5.
 
@@ -340,7 +343,7 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 **Objective:** op-reth is the only supported EL in actively maintained code.
 
-**Instructions:** End the window only after Mac + Render observation and at least one friend clean sync; remove geth startup options; keep dated records; archive or separately-approved delete of geth datadirs; CI/search guard against new `op-geth` pins or `enginekind=geth`.
+**Instructions:** End the window only after Mac + Render observation and at least one friend clean sync; walk the §10 stray-surface list and remove geth startup options from every **active** path; keep dated records; archive or separately-approved delete of geth datadirs; CI/search guard against new `op-geth` pins or `enginekind=geth` on the live selector. Learning oracles (`derivation-check.sh`, `sequencer-stub-demo.sh`) need an explicit keep-on-geth exception or a follow-up task — do not leave them as silent live-path leftovers.
 
 **Dependencies:** Tasks 5–8 and expiry of the declared window.
 
@@ -357,9 +360,20 @@ Rollback the Mac sequencer to preserved op-geth if any of these occur in Task 5 
 - Authenticated writes accepted but txs disappear across restart/cutover.
 - Memory, disk, or restart exceeds the declared envelope.
 
-Procedure: stop writes, stop op-reth, restart preserved op-geth at last safe point, verify hash continuity, re-enable writes. Do not delete or mutate the op-reth datadir during rollback.
+Procedure (do **not** run stock `04-start-sequencer-sepolia.sh` as the first rollback step — it sets `--sequencer.enabled=true --sequencer.stopped=false`):
+
+1. Stop authenticated writes.
+2. Stop the op-reth pair. Leave the op-reth datadir untouched for diagnosis.
+3. Start the preserved op-geth + op-node in **verifier-only** mode (`--sequencer.enabled=false`, or start then `admin_stopSequencer`). The preserved geth database ends at the **original cutover height**. If Task 6 already published op-reth blocks to L1, enabling sequencing immediately builds an alternate unsafe branch instead of deriving those blocks.
+4. Wait until the rollback pair’s **safe** number and hash match the current canonical safe head (L1-derived, including post-cutover op-reth blocks that were batched).
+5. Only then enable sequencing (`admin_startSequencer`).
+6. Verify hash continuity, then re-enable writes.
+
+Do not delete or mutate either datadir during rollback.
 
 ## 10. Final QA checklist
+
+This section is the **closed list** for “did we forget a file.” The Phase 7 failure class was launchd sleep/wake still assuming the old process set. An EL swap that updates only `04-start-sequencer-sepolia.sh` will fail the same way. Search active files for `op-geth`, `enginekind=geth`, and the pid name `op-geth` before calling Task 5 or Task 9 done.
 
 ### Chain continuity
 
@@ -368,6 +382,8 @@ Procedure: stop writes, stop op-reth, restart preserved op-geth at last safe poi
 - [ ] Sampled safe/finalized hashes and state roots match across candidate verifier, sequencer, Render replica, and friend node.
 - [ ] First post-cutover block extends the recorded parent.
 - [ ] No unsafe/unbatched tx discarded at cutover.
+- [ ] Cutover used `admin_stopSequencer` before `unsafe == safe`.
+- [ ] If rollback ran after op-reth blocks were on L1: geth came up **verifier-only**, caught canonical safe, then `admin_startSequencer`.
 
 ### Core services
 
@@ -380,12 +396,13 @@ Procedure: stop writes, stop op-reth, restart preserved op-geth at last safe poi
 
 ### End-to-end
 
-- [ ] Ordinary L2 transfer.
-- [ ] L1→L2 deposit.
+- [ ] Ordinary L2 transfer (`scripts/smoke-transfer.sh`).
+- [ ] L1→L2 deposit (`deposit-eth-sepolia.sh`).
 - [ ] L2→L1 initiate/prove/finalize.
 - [ ] Authenticated SettlementOS submit + receipt poll.
-- [ ] Pipeline viewer and block viewer correct.
+- [ ] Pipeline viewer (`serve-viewer.sh`) and block viewer (`blocks/`) correct.
 - [ ] Public read gateways still reject writes.
+- [ ] Guestbook dApp still reads via loopback `JsonRpcProvider`.
 
 ### Security
 
@@ -393,14 +410,67 @@ Procedure: stop writes, stop op-reth, restart preserved op-geth at last safe poi
 - [ ] EL and op-node admin RPC loopback/private.
 - [ ] Friend nodes receive no operator key.
 - [ ] New Render and friend services use independent JWTs (and preferably independent L1 credentials).
+- [ ] Write filter still proxies loopback EL (`rpc-method-filter.py` → `:9545`); cloudflared still dials `:9555`, never the raw EL.
 
-### Operations
+### Operations — launchd / sleep / wake (P7 miss)
 
-- [ ] Mac: controlled restart + two sleep/wake cycles.
-- [ ] Render: restart on the new disk.
+These jobs do not name `op-geth` in the plists; they call scripts that do. A pid-name change that misses one of them is a silent overnight fail.
+
+- [ ] `FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep` stops the new EL (and the rest of the Sepolia set).
+- [ ] `dev-sleep.sh wake` starts it again (funds preflight + orphan cleanup still work).
+- [ ] `launchd/com.steve.fortel2-sleep.plist` → `run_dev_sleep.sh` still matches repo (`check-launchd.sh`).
+- [ ] `launchd/com.steve.fortel2-wake.plist` → `run_dev_wake.sh` — **two scheduled 03:00 wakes** after Task 5.
+- [ ] `launchd/com.steve.fortel2-health.plist` → `refresh_health.sh` writes `data/pipeline-health.json`.
+- [ ] `launchd/com.steve.fortel2-alerts.plist` → `alert-watch.sh` expected-stack list includes the **new** EL pid (today: `op-geth`). A leftover `op-geth` expect after a rename is a false `stack-missing`.
+- [ ] `launchd/com.steve.fortel2-resolve-games.plist` still recovers bonds through the sleep window.
+- [ ] `scripts/check-launchd.sh` is green after the pid/script change.
+- [ ] No leftover crontab double-start (`launchd/README.md`).
+
+### Stray surfaces — Mac start/stop/status (must match pid + enginekind)
+
+- [ ] `scripts/03-init-l2.sh` — 852 genesis only; op-reth init path; refuse 901 / `$DATA_DIR/l2/op-geth` when selector is reth.
+- [ ] `scripts/04-start-sequencer.sh` (local 901) — selector, datadir, `--l2.enginekind`.
+- [ ] `scripts/04-start-sequencer-sepolia.sh` — `require_bin`, `$DATA_DIR/l2/op-reth`, `--l2.enginekind=reth`, `--l1.rpckind` from `SEPOLIA_L1_RPC_KIND` (not hardcoded).
+- [ ] `scripts/start-all.sh` / `start-all-sepolia.sh` — still start EL + node + filter + batcher + proposer (+ optional challenger/proxy).
+- [ ] `scripts/stop-all.sh` / `stop-all-sepolia.sh` — `stop_bg` name matches `start_bg` name.
+- [ ] `scripts/status.sh` — `procs=(…)` includes the new EL.
+- [ ] `scripts/reset.sh` / `reset-sepolia.sh` — wipe the **reth** datadir when that is the live EL; never wipe the preserved geth rollback dir by default.
+- [ ] `scripts/07-start-rpc-filter-sepolia.sh` — `wait_for_rpc` label/upstream still the live EL HTTP port.
+- [ ] Log path: `data/logs/op-reth.log` (or documented alias). README “known-good log lines” updated.
+
+### Stray surfaces — monitors, checklists, helpers
+
+- [ ] `scripts/alert-watch.sh` expected list (`op-geth` today).
+- [ ] `scripts/demo-checklist.sh` process arrays (local + Sepolia).
+- [ ] `scripts/demo-live.sh` talk-track / health if it names the EL.
+- [ ] `scripts/test-helpers.sh` — `STK_CORE`, start/stop symbol lists, any `STOP=… op-geth` greps. Dual-client tests until Task 9, then geth-only live path must go red.
+- [ ] `.env.example` pin comment (`op-geth v1.101702.2`).
+- [ ] `AGENTS.md` / `README.md` process tables, architecture diagram (`Geth["op-geth :9545"]`), sequencer-restart paragraph.
+- [ ] `.cursor/rules/fortel2.mdc` if it still says the live EL is only op-geth after Task 9.
+
+### Stray surfaces — keep-on-geth unless a follow-up says otherwise
+
+Learning oracles. Do not silently break them at Task 5, and do not treat them as the live sequencer.
+
+- [ ] `scripts/derivation-check.sh` + `$DATA_DIR/l2/derivation-op-geth` / `derivation-anchor-op-geth`.
+- [ ] `scripts/sequencer-stub-demo.sh` + `$DATA_DIR/l2/sequencer-stub-op-geth`.
+- [ ] Document the exception in the Task 9 closeout, or file a follow-up to retarget them.
+
+### Stray surfaces — replica / friends / rail (Task 7–8)
+
+- [ ] `replica/FRIENDS.md` still says op-geth until Task 8; then points at `fortel2-node`.
+- [ ] `scripts/pack-replica-artifacts.sh` — artifacts unchanged (no new genesis).
+- [ ] `fortel2-replica` image pin / Dockerfile (sibling repo; Task 7).
+- [ ] `deployments/rail-interface.json` notes that mention op-geth bind (URLs stay; wording).
+- [ ] `config/cloudflared-write.yml.example` still forbids pointing at raw EL admin ports.
+
+### Operations (other)
+
+- [ ] Mac: controlled `stop-all-sepolia` / `start-all-sepolia` restart on the new datadir.
+- [ ] Render: restart on the **new** disk (Task 7).
 - [ ] Resource use within declared limits.
-- [ ] Rollback rehearsed or mechanically validated before removing geth support.
-- [ ] Docs/status/logs say op-reth.
+- [ ] Rollback rehearsed or mechanically validated (verifier-first) before removing geth support.
+- [ ] `./scripts/status.sh` and logs say the live EL name.
 
 ### Repository boundaries
 
@@ -427,6 +497,7 @@ Answer during Task 1 or 2 unless noted.
 
 - **Done:** Mini P:0 sidecar (native arm64 op-reth, isolated ports, QuickNode L1, first-N hash-match). Recorded in `tasks/spike-op-reth.md`.
 - **Not done:** Sync-to-tip, 20-sample safe-head parity, challenger/SafeDB/withdrawal on op-reth, sequencer cutover, Render image, friend repo.
+- Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The live start path still has no `admin_stopSequencer` helper — Task 5 must add or document the RPC call.
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
 
