@@ -113,8 +113,9 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | yq | 4.53.3 | Homebrew |
 | jq | 1.8.2 | Homebrew |
 | Foundry (`forge`/`cast`/`anvil`) | 1.7.1 | `foundryup` |
-| optimism monorepo | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` |
+| optimism monorepo | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` (shallow live sequencer tree — **never** `git checkout` this clone for op-reth work) |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
+| op-reth | tag `op-reth/v2.3.3` → reports `Reth Version: 2.3.0-dev` commit `9384bc53d8c0c77e59cac83fdaaf3b372c6d2216` | **Second clone** `~/src/fortel2/optimism-op-reth` (source of truth for the op-reth binary). Assert with `./scripts/check-el-pins.sh`. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
 | Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
 | kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
@@ -183,7 +184,8 @@ python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pi
 ```bash
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
-./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config
+./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
+./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.2 (da197e45) + op-reth reported 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
 node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers
 (cd scripts/bridge && npm ci && node --test lib.test.js)  # withdrawal bridge helpers
 ```
@@ -227,14 +229,28 @@ ln -sfn ~/src/fortel2/optimism/op-node/bin/op-node ~/src/fortel2/bin/op-node
 ln -sfn ~/src/fortel2/optimism/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
 ln -sfn ~/src/fortel2/optimism/op-proposer/bin/op-proposer ~/src/fortel2/bin/op-proposer
 ln -sfn ~/src/fortel2/op-geth/build/bin/geth ~/src/fortel2/bin/op-geth
-# Rust — needed only for kona-host below. Nothing Rust-related ships with the
-# other tooling, so a cold-start Mac must install it here (D-0062).
+# Rust — kona-host (below) and the op-reth second clone. Nothing Rust-related
+# ships with the other tooling, so a cold-start Mac must install it here (D-0062).
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
 source "$HOME/.cargo/env"   # or open a new shell
 # kona-host — pre-image server for CHALLENGER_TRACE_TYPE=cannon-kona (D-0060/D-0062).
 # rustup honours rust/rust-toolchain.toml (1.94), so no toolchain flag is needed.
 (cd ~/src/fortel2/optimism/rust && cargo build --release -p kona-host)
 ln -sfn ~/src/fortel2/optimism/rust/target/release/kona-host ~/src/fortel2/bin/kona-host
+
+# op-reth — second optimism clone at the Task 1 pin. Do NOT `git checkout` the
+# shallow live tree (~/src/fortel2/optimism, branch op-node/v1.19.2); that clone
+# is what the running sequencer is built from.
+git clone --depth 1 --branch op-reth/v2.3.3 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth
+cd ~/src/fortel2/optimism-op-reth
+git submodule update --init --recursive
+just update-superchain-registry-submodule || true
+cd rust && cargo build --release --bin op-reth
+# Binary lands at rust/target/release/op-reth (or ../target/release/op-reth).
+ln -sfn ~/src/fortel2/optimism-op-reth/rust/target/release/op-reth ~/src/fortel2/bin/op-reth
+# Mini .env BIN_DIR is this repo's ./bin. From the ForteL2 repo root:
+#   ln -sfn ~/src/fortel2/optimism-op-reth/rust/target/release/op-reth ./bin/op-reth
+#   ./scripts/check-el-pins.sh
 ```
 
 ## Endpoints
@@ -839,6 +855,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 | Docker / compose / Blueprint | [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only — not in this monorepo |
 | Pack genesis/rollup (operator bridge) | `scripts/pack-replica-artifacts.sh` → `replica/config/` (gitignored staging) |
 | Sync check | `scripts/replica-sync-check.sh` (needs reachable replica RPC) or Shell hash compare |
+| Replica image pin | op-reth migration **Task 7** will pin the fortel2-replica image by **immutable digest**. No image swap in this task; sibling repo untouched. |
 
 This repo keeps only the **pack + sync-check bridge**. Runtime Docker lives in fortel2-replica — see `replica/README.md`.
 
