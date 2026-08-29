@@ -6388,6 +6388,12 @@ else
   echo "FAIL check-el-pins.sh must pin 2.3.0-dev / 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216 / v1.19.2 / da197e45" >&2
   fail=1
 fi
+if grep -q 'file -L' "$PIN_CHECK"; then
+  echo "PASS check-el-pins.sh follows symlinks with file -L for Mach-O arm64"
+else
+  echo "FAIL check-el-pins.sh must use file -L so BIN_DIR symlinks are architecture-checked" >&2
+  fail=1
+fi
 PIN_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-el-pins.XXXXXX")"
 cat > "$PIN_FIX/op-node" <<'EOS'
 #!/bin/sh

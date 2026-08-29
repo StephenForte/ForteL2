@@ -70,7 +70,9 @@ assert_macho_arm64_if_macho() {
   local label="$1" path="$2"
   command -v file >/dev/null 2>&1 || return 0
   local ft
-  ft="$(file "$path" 2>/dev/null || true)"
+  # -L: follow BIN_DIR symlinks. GNU file otherwise reports the link and
+  # skips the Mach-O arm64 check (macOS file follows by default).
+  ft="$(file -L "$path" 2>/dev/null || true)"
   if echo "$ft" | grep -q 'Mach-O'; then
     if ! echo "$ft" | grep -q 'arm64'; then
       fail_mismatch "$label architecture" "Mach-O arm64" "$(oneline "$ft")"
