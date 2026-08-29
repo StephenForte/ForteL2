@@ -6216,8 +6216,10 @@ else
   echo "FAIL tasks/prd-op-reth-migration.md must be tracked (git ls-files)" >&2
   fail=1
 fi
-if grep -q 'tasks/spike-op-reth.md' "$PRD_RETH" \
-  && grep -q '0xd9fd2a33ebadd2a734924d8f76bac945709ba4a1df352a7d4fd50383dee209e9' "$PRD_RETH" \
+SPIKE_B5="$(grep -oE '0xd9fd2a33[0-9a-f]{56}' "$SPIKE_NOTE" | head -1)"
+if [[ -n "$SPIKE_B5" ]] \
+  && grep -q 'tasks/spike-op-reth.md' "$PRD_RETH" \
+  && grep -q "$SPIKE_B5" "$PRD_RETH" \
   && grep -qi 'PublicNode' "$PRD_RETH" \
   && grep -q 'quicknode' "$PRD_RETH" \
   && grep -q 'debug_setHead' "$PRD_RETH" \
