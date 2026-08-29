@@ -6037,6 +6037,137 @@ else
 fi
 rm -rf "$STK_FIX"
 
+# P:0 op-reth spike — tracked files + refusals (no chain, no op-reth required).
+SPIKE_RETH="$SCRIPT_DIR/spike-op-reth.sh"
+SPIKE_NOTE="$FORTEL2_ROOT/tasks/spike-op-reth.md"
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch scripts/spike-op-reth.sh tasks/spike-op-reth.md >/dev/null 2>&1; then
+  echo "PASS spike-op-reth.sh and tasks/spike-op-reth.md are tracked"
+else
+  echo "FAIL spike-op-reth.sh / tasks/spike-op-reth.md must be tracked (git ls-files)" >&2
+  fail=1
+fi
+if [[ -x "$SPIKE_RETH" ]] && [[ -f "$SPIKE_NOTE" ]]; then
+  echo "PASS spike-op-reth.sh is executable"
+else
+  echo "FAIL spike-op-reth.sh must be executable and the spike note must exist" >&2
+  fail=1
+fi
+SPIKE_HELP="$("$SPIKE_RETH" --help 2>&1)" || true
+if echo "$SPIKE_HELP" | grep -q 'chain 901' \
+  && echo "$SPIKE_HELP" | grep -q 'op-geth datadir' \
+  && echo "$SPIKE_HELP" | grep -q ':9545' \
+  && echo "$SPIKE_HELP" | grep -q 'start_bg' \
+  && echo "$SPIKE_HELP" | grep -q '19845' \
+  && echo "$SPIKE_HELP" | grep -q '19851' \
+  && echo "$SPIKE_HELP" | grep -q '19847' \
+  && echo "$SPIKE_HELP" | grep -q 'deployments/sepolia/rollup.json'; then
+  echo "PASS spike-op-reth --help names refusals and default ports"
+else
+  echo "FAIL spike-op-reth --help must name 901 / live datadir / :9545 / start_bg / 19845/19851/19847 / sepolia rollup" >&2
+  echo "$SPIKE_HELP" >&2
+  fail=1
+fi
+if grep -E '^[[:space:]]*(start_bg|stop_bg)[[:space:]]' "$SPIKE_RETH"; then
+  echo "FAIL spike-op-reth.sh must not call start_bg / stop_bg" >&2
+  fail=1
+else
+  echo "PASS spike-op-reth.sh does not call start_bg / stop_bg"
+fi
+if grep -q 'deployments/sepolia/rollup.json' "$SPIKE_RETH" \
+  && grep -q 'SPIKE_EL_HTTP_PORT:-19845' "$SPIKE_RETH" \
+  && grep -q 'SPIKE_EL_AUTH_PORT:-19851' "$SPIKE_RETH" \
+  && grep -q 'SPIKE_NODE_RPC_PORT:-19847' "$SPIKE_RETH"; then
+  echo "PASS spike-op-reth defaults to 852 rollup and ports 19845/19851/19847"
+else
+  echo "FAIL spike-op-reth must default to deployments/sepolia/rollup.json and 19845/19851/19847" >&2
+  fail=1
+fi
+SPIKE_901="$(mktemp)"
+printf '%s\n' '{"l2_chain_id":901}' > "$SPIKE_901"
+SPIKE_901_OUT="$("$SPIKE_RETH" --preflight --rollup "$SPIKE_901" 2>&1)" && SPIKE_901_EC=0 || SPIKE_901_EC=$?
+rm -f "$SPIKE_901"
+if [[ "$SPIKE_901_EC" -eq 2 ]] && echo "$SPIKE_901_OUT" | grep -q '901'; then
+  echo "PASS spike-op-reth --preflight refuses chain 901"
+else
+  echo "FAIL spike-op-reth must refuse a 901 rollup (ec=$SPIKE_901_EC)" >&2
+  echo "$SPIKE_901_OUT" >&2
+  fail=1
+fi
+SPIKE_PF_OUT="$(SPIKE_EL_HTTP_PORT=9545 "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_PF_EC=0 || SPIKE_PF_EC=$?
+if [[ "$SPIKE_PF_EC" -eq 2 ]] && echo "$SPIKE_PF_OUT" | grep -q '9545'; then
+  echo "PASS spike-op-reth --preflight refuses :9545"
+else
+  echo "FAIL spike-op-reth must refuse SPIKE_EL_HTTP_PORT=9545 (ec=$SPIKE_PF_EC)" >&2
+  echo "$SPIKE_PF_OUT" >&2
+  fail=1
+fi
+SPIKE_DD_OUT="$(SPIKE_DATADIR="$DATA_DIR/l2/op-geth" "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_DD_EC=0 || SPIKE_DD_EC=$?
+if [[ "$SPIKE_DD_EC" -eq 2 ]] && echo "$SPIKE_DD_OUT" | grep -qi 'op-geth datadir'; then
+  echo "PASS spike-op-reth --preflight refuses live op-geth datadir"
+else
+  echo "FAIL spike-op-reth must refuse \$DATA_DIR/l2/op-geth (ec=$SPIKE_DD_EC)" >&2
+  echo "$SPIKE_DD_OUT" >&2
+  fail=1
+fi
+SPIKE_OK_OUT="$("$SPIKE_RETH" --preflight 2>&1)" && SPIKE_OK_EC=0 || SPIKE_OK_EC=$?
+if [[ "$SPIKE_OK_EC" -eq 0 ]] && echo "$SPIKE_OK_OUT" | grep -q 'preflight ok'; then
+  echo "PASS spike-op-reth --preflight accepts checked-in 852 rollup"
+else
+  echo "FAIL spike-op-reth --preflight should pass on deployments/sepolia/rollup.json (ec=$SPIKE_OK_EC)" >&2
+  echo "$SPIKE_OK_OUT" >&2
+  fail=1
+fi
+SPIKE_ENV_OUT="$(FORTEL2_ENV=.env.sepolia "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_ENV_EC=0 || SPIKE_ENV_EC=$?
+if [[ "$SPIKE_ENV_EC" -eq 2 ]] && echo "$SPIKE_ENV_OUT" | grep -qi 'role keys\|FORTEL2_ENV'; then
+  echo "PASS spike-op-reth refuses FORTEL2_ENV=.env.sepolia"
+else
+  echo "FAIL spike-op-reth must refuse FORTEL2_ENV=.env.sepolia (ec=$SPIKE_ENV_EC)" >&2
+  echo "$SPIKE_ENV_OUT" >&2
+  fail=1
+fi
+SPIKE_HOME_OUT="$(SPIKE_DATADIR="$HOME" "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_HOME_EC=0 || SPIKE_HOME_EC=$?
+if [[ "$SPIKE_HOME_EC" -eq 2 ]] && echo "$SPIKE_HOME_OUT" | grep -q 'SPIKE_DATADIR must be'; then
+  echo "PASS spike-op-reth --preflight refuses SPIKE_DATADIR=\$HOME"
+else
+  echo "FAIL spike-op-reth must refuse SPIKE_DATADIR=\$HOME (ec=$SPIKE_HOME_EC)" >&2
+  echo "$SPIKE_HOME_OUT" >&2
+  fail=1
+fi
+SPIKE_L2ROOT_OUT="$(SPIKE_DATADIR="$DATA_DIR/l2" "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_L2ROOT_EC=0 || SPIKE_L2ROOT_EC=$?
+if [[ "$SPIKE_L2ROOT_EC" -eq 2 ]] && echo "$SPIKE_L2ROOT_OUT" | grep -q 'SPIKE_DATADIR must be'; then
+  echo "PASS spike-op-reth --preflight refuses SPIKE_DATADIR=\$DATA_DIR/l2"
+else
+  echo "FAIL spike-op-reth must refuse wiping \$DATA_DIR/l2 (ec=$SPIKE_L2ROOT_EC)" >&2
+  echo "$SPIKE_L2ROOT_OUT" >&2
+  fail=1
+fi
+SPIKE_P2P_OUT="$(SPIKE_EL_P2P_PORT=9545 "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_P2P_EC=0 || SPIKE_P2P_EC=$?
+if [[ "$SPIKE_P2P_EC" -eq 2 ]] && echo "$SPIKE_P2P_OUT" | grep -q '9545'; then
+  echo "PASS spike-op-reth --preflight refuses SPIKE_EL_P2P_PORT=9545"
+else
+  echo "FAIL spike-op-reth must refuse P2P port 9545 (ec=$SPIKE_P2P_EC)" >&2
+  echo "$SPIKE_P2P_OUT" >&2
+  fail=1
+fi
+SPIKE_GFILE="$(mktemp)"
+printf '%s\n' '{"config":{"chainId":852}}' > "$SPIKE_GFILE"
+SPIKE_GERR="$(mktemp)"
+SPIKE_GOUT="$("$SPIKE_RETH" --print-genesis --genesis "$SPIKE_GFILE" 2>"$SPIKE_GERR")" && SPIKE_GEC=0 || SPIKE_GEC=$?
+if [[ "$SPIKE_GEC" -eq 0 && "$SPIKE_GOUT" == "$SPIKE_GFILE" ]]; then
+  echo "PASS spike-op-reth --print-genesis stdout is only the path"
+else
+  echo "FAIL --print-genesis stdout must be exactly --genesis path (ec=$SPIKE_GEC out=$(printf '%q' "$SPIKE_GOUT"))" >&2
+  cat "$SPIKE_GERR" >&2
+  fail=1
+fi
+rm -f "$SPIKE_GFILE" "$SPIKE_GERR"
+if awk '/^resolve_genesis\(\)/,/^}/' "$SPIKE_RETH" | grep -E '^[[:space:]]*echo ' | grep -v '>&2' >/dev/null; then
+  echo "FAIL resolve_genesis informational echo must go to stderr (stdout is the path)" >&2
+  fail=1
+else
+  echo "PASS resolve_genesis echo lines are stderr"
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
