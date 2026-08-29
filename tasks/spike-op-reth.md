@@ -77,7 +77,7 @@ cd /Users/steveforte/ForteL2
 
 Want: `preflight ok`, `l2=852`, and `l1.rpckind=quicknode`. If it errors about `.env.sepolia`, you exported the wrong env — `unset FORTEL2_ENV` and retry. PublicNode is a **WARN** on `--preflight` and a **refuse** on `--blocks`.
 
-`--blocks` needs the same receipts-capable L1 the live sequencer uses. Export **only** the URL — do not print it, and do **not** `export FORTEL2_ENV=.env.sepolia`:
+`--blocks` needs the same receipts-capable L1 the live sequencer uses. Export **only** the URL **before** invoking the script — the script snapshots `L1_RPC_URL` so Phase 1 `.env` (Anvil loopback) cannot clobber it into PublicNode. Do not print the URL, and do **not** `export FORTEL2_ENV=.env.sepolia`:
 
 ```bash
 unset FORTEL2_ENV

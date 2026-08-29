@@ -76,8 +76,16 @@ if ! [[ "$BLOCKS" =~ ^[0-9]+$ ]] || [[ "$BLOCKS" -lt 1 ]]; then
   exit 2
 fi
 
+# lib.sh sources .env (Anvil L1 on Mini). Keep a caller-supplied L1 so
+# `export L1_RPC_URL=…` is not clobbered into the PublicNode fallback.
+_SPIKE_L1_FROM_CALLER="${L1_RPC_URL:-}"
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+
+if [[ -n "${_SPIKE_L1_FROM_CALLER}" ]]; then
+  L1_RPC_URL="$_SPIKE_L1_FROM_CALLER"
+fi
 
 RESERVED_PORTS="9545 9546 9547 9551"
 SPIKE_EL_HTTP_PORT="${SPIKE_EL_HTTP_PORT:-19845}"

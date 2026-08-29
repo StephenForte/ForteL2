@@ -6195,6 +6195,17 @@ else
   echo "$SPIKE_PN_BL" >&2
   fail=1
 fi
+# Caller L1_RPC_URL must survive lib.sh sourcing .env (Anvil loopback).
+SPIKE_KEEP_OUT="$(L1_RPC_URL=https://example.invalid/sepolia "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_KEEP_EC=0 || SPIKE_KEEP_EC=$?
+if [[ "$SPIKE_KEEP_EC" -eq 0 ]] && echo "$SPIKE_KEEP_OUT" | grep -q 'preflight ok' \
+  && ! echo "$SPIKE_KEEP_OUT" | grep -qi 'PublicNode' \
+  && ! echo "$SPIKE_KEEP_OUT" | grep -q 'Using public Sepolia'; then
+  echo "PASS spike-op-reth --preflight keeps caller L1_RPC_URL over .env"
+else
+  echo "FAIL spike-op-reth must not clobber caller L1_RPC_URL with .env Anvil (ec=$SPIKE_KEEP_EC)" >&2
+  echo "$SPIKE_KEEP_OUT" >&2
+  fail=1
+fi
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2
