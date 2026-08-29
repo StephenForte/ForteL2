@@ -5697,7 +5697,7 @@ EOF
   _BAL_SAME_EC=0
   _BAL_SAME_OUT="$(_bal_run low "$_BAL_RPC" 2>&1)" && _BAL_SAME_EC=0 || _BAL_SAME_EC=$?
   if [[ "$_BAL_SAME_EC" -ne 0 ]] \
-    && echo "$_BAL_SAME_OUT" | grep -q 'SEPOLIA_L1_CORROBORATION_RPC_URL equals L1_RPC_URL' \
+    && echo "$_BAL_SAME_OUT" | grep -q 'SEPOLIA_L1_CORROBORATION_RPC_URL shares origin with L1_RPC_URL' \
     && echo "$_BAL_SAME_OUT" | grep -q 'Cannot corroborate' \
     && echo "$_BAL_SAME_OUT" | grep -q 'D-0106' \
     && ! echo "$_BAL_SAME_OUT" | grep -q 'secret-token-do-not-leak'; then
@@ -5705,6 +5705,20 @@ EOF
   else
     echo "FAIL require_min_balance_eth same-host second opinion must be refused loudly (ec=$_BAL_SAME_EC)" >&2
     echo "$_BAL_SAME_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_SAMEHOST_EC=0
+  _BAL_SAMEHOST_OUT="$(_bal_run low "https://example.invalid/other-token" 2>&1)" && _BAL_SAMEHOST_EC=0 || _BAL_SAMEHOST_EC=$?
+  if [[ "$_BAL_SAMEHOST_EC" -ne 0 ]] \
+    && echo "$_BAL_SAMEHOST_OUT" | grep -q 'SEPOLIA_L1_CORROBORATION_RPC_URL shares origin with L1_RPC_URL' \
+    && echo "$_BAL_SAMEHOST_OUT" | grep -q 'Cannot corroborate' \
+    && ! echo "$_BAL_SAMEHOST_OUT" | grep -q 'secret-token-do-not-leak' \
+    && ! echo "$_BAL_SAMEHOST_OUT" | grep -q 'need >= 0.15 ETH'; then
+    echo "PASS require_min_balance_eth same-origin corroboration URL with a different path is refused"
+  else
+    echo "FAIL require_min_balance_eth same-origin different-path must be refused (ec=$_BAL_SAMEHOST_EC)" >&2
+    echo "$_BAL_SAMEHOST_OUT" >&2
     fail=1
   fi
 fi

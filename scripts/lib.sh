@@ -704,6 +704,7 @@ require_min_balance_eth() {
   require_eth_address "$label" "$addr"
   require_bin cast
   local min_wei pin_block bal_wei bal_wei2 corr_url corr_wei corr_eth bal_eth
+  local primary_origin corr_origin
 
   min_wei="$(cast to-wei "$min_eth" ether)"
   if ! [[ -n "$min_wei" && "$min_wei" =~ ^[0-9]+$ ]]; then
@@ -739,8 +740,18 @@ require_min_balance_eth() {
   # at the same pin (D-0106): same-provider corroboration cannot detect
   # provider-level staleness. One-shot read only — not serving L1.
   corr_url="${SEPOLIA_L1_CORROBORATION_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
-  if [[ "$corr_url" == "${L1_RPC_URL:-}" ]]; then
-    echo "ERROR: $label $addr: SEPOLIA_L1_CORROBORATION_RPC_URL equals L1_RPC_URL ($(redact_rpc_url "${L1_RPC_URL:-}")) — a same-provider second opinion cannot detect provider staleness (D-0106)" >&2
+  # Compare origins, not raw strings: a token in the path, a query, or a
+  # trailing slash must not count as an independent provider (D-0106).
+  if ! primary_origin="$(rpc_origin "${L1_RPC_URL:-}" 2>/dev/null)"; then
+    echo "ERROR: $label $addr: cannot parse L1_RPC_URL origin for second-opinion comparison" >&2
+    echo "Cannot corroborate — refusing to start. Underfunding has not been established (D-0106)." >&2
+    exit 1
+  fi
+  if ! corr_origin="$(rpc_origin "$corr_url" 2>/dev/null)"; then
+    _balance_second_opinion_unread "$label" "$addr" "$corr_url" "$pin_block"
+  fi
+  if [[ "$corr_origin" == "$primary_origin" ]]; then
+    echo "ERROR: $label $addr: SEPOLIA_L1_CORROBORATION_RPC_URL shares origin with L1_RPC_URL ($(redact_rpc_url "${L1_RPC_URL:-}")) — a same-provider second opinion cannot detect provider staleness (D-0106)" >&2
     echo "Cannot corroborate — refusing to start. Underfunding has not been established." >&2
     exit 1
   fi
