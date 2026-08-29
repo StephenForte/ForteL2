@@ -5573,8 +5573,12 @@ EOF
     export CAST_STUB_DIR="$_BAL_STUB_DIR"
     export CAST_BALANCE_STUB="$1"
     export CAST_BALANCE_SECONDARY="${3:-}"
-    export L1_RPC_URL="$_BAL_RPC"
-    export SEPOLIA_L1_CORROBORATION_RPC_URL="${2:-$_BAL_CORR}"
+    export L1_RPC_URL="${4:-$_BAL_RPC}"
+    if [[ "${2:-}" == "__unset__" ]]; then
+      unset SEPOLIA_L1_CORROBORATION_RPC_URL
+    else
+      export SEPOLIA_L1_CORROBORATION_RPC_URL="${2:-$_BAL_CORR}"
+    fi
     export HARVEST_ADDRESS="$_BAL_HARVEST"
     require_min_balance_eth "$_BAL_ADDR" "0.15" "BATCHER"
   }
@@ -5719,6 +5723,24 @@ EOF
   else
     echo "FAIL require_min_balance_eth same-origin different-path must be refused (ec=$_BAL_SAMEHOST_EC)" >&2
     echo "$_BAL_SAMEHOST_OUT" >&2
+    fail=1
+  fi
+
+  _BAL_PN="https://ethereum-sepolia-rpc.publicnode.com"
+  _BAL_PN_FALLBACK="https://rpc.sepolia.org"
+  _BAL_PN_EC=0
+  _BAL_PN_OUT="$(_bal_run low __unset__ low "$_BAL_PN" 2>&1)" && _BAL_PN_EC=0 || _BAL_PN_EC=$?
+  _BAL_PN_FALLBACK_N="$(_bal_secondary_call_count "$_BAL_PN_FALLBACK")"
+  if [[ "$_BAL_PN_EC" -ne 0 ]] \
+    && echo "$_BAL_PN_OUT" | grep -q 'has .* ETH; need >= 0.15 ETH on Sepolia' \
+    && echo "$_BAL_PN_OUT" | grep -q 'rpc.sepolia.org' \
+    && echo "$_BAL_PN_OUT" | grep -q 'default corroboration URL shares origin' \
+    && [[ "$_BAL_PN_FALLBACK_N" -ge 1 ]] \
+    && ! echo "$_BAL_PN_OUT" | grep -q 'Cannot corroborate'; then
+    echo "PASS require_min_balance_eth unset corr with PublicNode L1 falls back and still reports underfunded"
+  else
+    echo "FAIL require_min_balance_eth PublicNode L1 + unset corr must fall back, not fail-close as cannot-corroborate (ec=$_BAL_PN_EC fallback_calls=$_BAL_PN_FALLBACK_N)" >&2
+    echo "$_BAL_PN_OUT" >&2
     fail=1
   fi
 fi
