@@ -958,6 +958,14 @@
 - **Decision:** Queue re-ranked on credit evidence: **(1) challenger 429-resilience + scan tuning** (the money and the defense gap — brief dispatched separately), **(2) funding-gate cross-provider corroboration** (D-0106), **(3) resolve-games type filter** (D-0105 Finding 4), **(4) check-launchd coverage for the cloudflared daemon**. `SEPOLIA_L1_RPC_KIND=quicknode` stays as merged.
 - **Consequence:** D-0108 is reserved for the challenger-task verdict. Next free decision id is **D-0109**.
 
+### D-0108 — **#168 live verdict: clean unattended wake, retry armed but not needed, challenger L1 traffic down ~96%; operator env overrides predate the runbook and include a shrunken game-window**
+- **Context:** First unattended 23:45 → 03:00 cycle with #168 merged (2026-08-28 → 29). Verdict recorded per the reservation in D-0107.
+- **Finding 1 — the wake passed end-to-end with no intervention.** All six services up; `op-challenger start attempt 1/3 (grace 15s)` → `survived 15s post-start grace` (03:00:24). The retry machinery ran and was not needed beyond attempt 1 — consistent with the gentler scan profile reducing the very burst that used to kill init. Wake err log untouched; no alert.
+- **Finding 2 — challenger L1 traffic fell ~96%.** l1-batch-proxy (challenger-only, D-0081): **48 batched POSTs/min before #168 → 2/min after** (120 s count, 2026-08-29 ~09:20). Challenger 429 errors: 29 so far today vs 12–21/hour before. Provider-side credit delta pending a dashboard login (both Chrome sessions expired); to be appended here when read, as with D-0107's amendment.
+- **Finding 3 — the effective knobs are not the merged defaults.** The wake log reports `http-poll=30s min-update=300s max-concurrency=2 game-window=12h`: `.env.sepolia` (mtime 2026-08-27 06:21, predating #168 and its runbook) contains `OP_CHALLENGER_MAX_CONCURRENCY=2`, `OP_CHALLENGER_HTTP_POLL_INTERVAL=30s`, `OP_CHALLENGER_GAME_WINDOW=12h` — binary-native env vars the challenger honoured directly even before #168. Two consequences: the measured reduction was achieved mostly by `min-update 0s→300s` (the one knob not overridden), and **`game-window=12h` contradicts the #168 runbook** ("do not shrink; bond-claim buffer", binary default 672h). Risk today is low (all sampled games have `credit(proposer)=0`, D-0105), but the override should be removed or consciously re-affirmed.
+- **Decision:** Operator to settle the env overrides: recommended is deleting the three `OP_CHALLENGER_*` lines from `.env.sepolia` so the script defaults (300s/300s/1, window at binary 672h) govern — one source of truth, runbook-consistent. Queue unchanged otherwise: funding-gate cross-provider corroboration next, then resolve-games, then check-launchd/cloudflared coverage.
+- **Consequence:** Next free decision id is **D-0109**.
+
 ---
 
 ## Escalations
