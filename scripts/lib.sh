@@ -601,12 +601,33 @@ assert_l2_ports_free() {
 # error rather than answer eth_getBalance(..., "latest") from an older view.
 _BALANCE_PIN_LAG=3
 
+# One-shot second-opinion L1 (D-0106). Not serving traffic. Default is the
+# endpoint that served the historical pin; if that origin is also L1_RPC_URL
+# (the committed example uses PublicNode as L1), fall back rather than
+# fail-closing — an unset default colliding with serving L1 is not an
+# operator misconfig. An *explicit* same-origin URL is still refused.
+_SEPOLIA_L1_CORROBORATION_RPC_DEFAULT="https://ethereum-sepolia-rpc.publicnode.com"
+_SEPOLIA_L1_CORROBORATION_RPC_FALLBACK="https://rpc.sepolia.org"
+
 # Outcome (c): balance could not be established. Quotes no figure.
 _balance_unread() {
   local label="$1"
   local addr="$2"
   echo "ERROR: $label $addr: could not establish L1 balance at $(redact_rpc_url "${L1_RPC_URL:-}")" >&2
   echo "Balance is unknown — refusing to start. Underfunding has not been established." >&2
+  exit 1
+}
+
+# Below-floor primary, but the independent second opinion could not be read.
+# Distinct from underfunded (quotes no confirmed figure) and from (c) (names
+# the corroboration URL). Fail-closed: we cannot establish funds.
+_balance_second_opinion_unread() {
+  local label="$1"
+  local addr="$2"
+  local corr_url="$3"
+  local pin_block="$4"
+  echo "ERROR: $label $addr: second-opinion L1 balance unavailable at $(redact_rpc_url "$corr_url") (pinned block ${pin_block})" >&2
+  echo "Cannot corroborate a below-floor primary read — refusing to start. Underfunding has not been established (D-0106)." >&2
   exit 1
 }
 
@@ -647,18 +668,20 @@ _l1_balance_pin_block() {
   return 0
 }
 
-# Balance in wei at an explicit block. Retries; prints a decimal integer or
-# returns 1. Never uses the implicit "latest" tag.
+# Balance in wei at an explicit block on rpc_url (defaults to $L1_RPC_URL).
+# Retries; prints a decimal integer or returns 1. Never uses the implicit
+# "latest" tag. Third arg is the independent corroboration URL (D-0106).
 _l1_balance_wei_at() {
   local addr="$1"
   local block="$2"
+  local rpc_url="${3:-${L1_RPC_URL:-}}"
   local attempt=0
   local max_attempts=3
   local raw=""
   while [[ "$attempt" -lt "$max_attempts" ]]; do
     attempt=$((attempt + 1))
     raw=""
-    if raw="$(cast balance "$addr" --rpc-url "$L1_RPC_URL" --block "$block" 2>/dev/null)" \
+    if raw="$(cast balance "$addr" --rpc-url "$rpc_url" --block "$block" 2>/dev/null)" \
       && [[ -n "$raw" && "$raw" =~ ^[0-9]+$ ]]; then
       printf '%s\n' "$raw"
       return 0
@@ -671,17 +694,25 @@ _l1_balance_wei_at() {
 }
 
 # Require address balance >= min_ether (ether units as decimal string). Uses cast.
-# Three outcomes — an unpinned or unconfirmed read must never tear the stack down:
-#   (a) verified wei integer >= floor → return
-#   (b) two agreeing reads < floor    → exit 1, existing underfunded message
-#   (c) balance could not be established → exit 1, distinct message, no figure
+# Outcomes — an unpinned or unconfirmed read must never tear the stack down:
+#   (a) verified wei integer >= floor → return (no secondary call)
+#   (b) two agreeing same-provider reads < floor, then a second provider at
+#       the same pin:
+#         secondary >= floor → WARN (D-0106), proceed
+#         secondary < floor  → exit 1, existing underfunded message + both readings
+#         secondary unread   → exit 1, distinct cannot-corroborate message
+#   (c) primary balance could not be established → exit 1, no figure
+# Status captured in `if` — a failed cast must not abort the caller under
+# set -e (plain assignment would). Regex unquoted: bash 3.2 treats a quoted
+# =~ operand as a literal.
 require_min_balance_eth() {
   local addr="$1"
   local min_eth="$2"
   local label="${3:-account}"
   require_eth_address "$label" "$addr"
   require_bin cast
-  local min_wei pin_block bal_wei bal_wei2
+  local min_wei pin_block bal_wei bal_wei2 corr_url corr_wei corr_eth bal_eth
+  local primary_origin corr_origin corr_explicit=0
 
   min_wei="$(cast to-wei "$min_eth" ether)"
   if ! [[ -n "$min_wei" && "$min_wei" =~ ^[0-9]+$ ]]; then
@@ -704,7 +735,7 @@ require_min_balance_eth() {
     return 0
   fi
 
-  # Below floor: corroborate at the same pin after a short delay.
+  # Below floor: corroborate at the same pin after a short delay (same provider).
   sleep 1
   if ! bal_wei2="$(_l1_balance_wei_at "$addr" "$pin_block")"; then
     _balance_unread "$label" "$addr"
@@ -713,9 +744,61 @@ require_min_balance_eth() {
     _balance_unread "$label" "$addr"
   fi
 
-  local bal_eth
+  # Same-provider reads agree below floor. Ask a second independent provider
+  # at the same pin (D-0106): same-provider corroboration cannot detect
+  # provider-level staleness. One-shot read only — not serving L1.
+  if [[ -n "${SEPOLIA_L1_CORROBORATION_RPC_URL:-}" ]]; then
+    corr_explicit=1
+    corr_url="$SEPOLIA_L1_CORROBORATION_RPC_URL"
+  else
+    corr_url="$_SEPOLIA_L1_CORROBORATION_RPC_DEFAULT"
+  fi
+  # Compare origins, not raw strings: a token in the path, a query, or a
+  # trailing slash must not count as an independent provider (D-0106).
+  if ! primary_origin="$(rpc_origin "${L1_RPC_URL:-}" 2>/dev/null)"; then
+    echo "ERROR: $label $addr: cannot parse L1_RPC_URL origin for second-opinion comparison" >&2
+    echo "Cannot corroborate — refusing to start. Underfunding has not been established (D-0106)." >&2
+    exit 1
+  fi
+  if ! corr_origin="$(rpc_origin "$corr_url" 2>/dev/null)"; then
+    _balance_second_opinion_unread "$label" "$addr" "$corr_url" "$pin_block"
+  fi
+  if [[ "$corr_origin" == "$primary_origin" ]]; then
+    if [[ "$corr_explicit" -eq 1 ]]; then
+      echo "ERROR: $label $addr: SEPOLIA_L1_CORROBORATION_RPC_URL shares origin with L1_RPC_URL ($(redact_rpc_url "${L1_RPC_URL:-}")) — a same-provider second opinion cannot detect provider staleness (D-0106)" >&2
+      echo "Cannot corroborate — refusing to start. Underfunding has not been established." >&2
+      exit 1
+    fi
+    # Unset default collided with serving L1 (example PublicNode). Fall back.
+    corr_url="$_SEPOLIA_L1_CORROBORATION_RPC_FALLBACK"
+    if ! corr_origin="$(rpc_origin "$corr_url" 2>/dev/null)"; then
+      _balance_second_opinion_unread "$label" "$addr" "$corr_url" "$pin_block"
+    fi
+    if [[ "$corr_origin" == "$primary_origin" ]]; then
+      echo "ERROR: $label $addr: SEPOLIA_L1_CORROBORATION_RPC_URL shares origin with L1_RPC_URL ($(redact_rpc_url "${L1_RPC_URL:-}")) — a same-provider second opinion cannot detect provider staleness (D-0106)" >&2
+      echo "Cannot corroborate — refusing to start. Underfunding has not been established." >&2
+      exit 1
+    fi
+    echo "WARN: default corroboration URL shares origin with L1_RPC_URL; using $(redact_rpc_url "$corr_url") for the second opinion (D-0106)" >&2
+  fi
+
+  if ! corr_wei="$(_l1_balance_wei_at "$addr" "$pin_block" "$corr_url")"; then
+    _balance_second_opinion_unread "$label" "$addr" "$corr_url" "$pin_block"
+  fi
+
   bal_eth="$(cast --to-unit "$bal_wei" ether)"
+  corr_eth="$(cast --to-unit "$corr_wei" ether)"
+
+  if python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) >= int(sys.argv[2]) else 1)' "$corr_wei" "$min_wei"; then
+    echo "WARN: $label $addr: L1 providers disagree at pinned block ${pin_block} (D-0106)" >&2
+    echo "  primary $(redact_rpc_url "${L1_RPC_URL:-}"): ${bal_eth} ETH" >&2
+    echo "  secondary $(redact_rpc_url "$corr_url"): ${corr_eth} ETH" >&2
+    echo "  Proceeding with start — provider disagreement; a false abort takes the stack down overnight." >&2
+    return 0
+  fi
+
   echo "ERROR: $label $addr has ${bal_eth} ETH; need >= ${min_eth} ETH on Sepolia" >&2
+  echo "  primary $(redact_rpc_url "${L1_RPC_URL:-}"): ${bal_eth} ETH; secondary $(redact_rpc_url "$corr_url"): ${corr_eth} ETH (pinned block ${pin_block})" >&2
   echo "Fund from harvest ($HARVEST_ADDRESS) then re-run. See scripts/sepolia-fund-check.sh" >&2
   exit 1
 }

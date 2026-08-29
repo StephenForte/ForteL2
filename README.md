@@ -749,6 +749,7 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 | Proposer txmgr receipt / rebroadcast / resubmission | `36s` / `36s` / `72s` | `SEPOLIA_PROPOSER_TXMGR_*` / `SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT` |
 | Mac op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
 | Mac op-node L1 RPC kind | `quicknode` | `SEPOLIA_L1_RPC_KIND` (rollback: `standard`) |
+| Funding-gate second-opinion L1 | PublicNode (one-shot at the pinned block; **not** serving traffic — D-0106) | `SEPOLIA_L1_CORROBORATION_RPC_URL` (explicit same-origin as `L1_RPC_URL` is refused; unset default is `https://ethereum-sepolia-rpc.publicnode.com`, falling back to `https://rpc.sepolia.org` when that origin is also L1) |
 | Challenger HTTP poll / min update | `300s` / `300s` | `SEPOLIA_CHALLENGER_HTTP_POLL_INTERVAL` / `SEPOLIA_CHALLENGER_MIN_UPDATE_INTERVAL` (binary defaults `12s` / `0s`; safe vs `FAULT_GAME_MAX_CLOCK_DURATION=7200`) |
 | Challenger max concurrency | `1` | `SEPOLIA_CHALLENGER_MAX_CONCURRENCY` (binary default = NumCPU) |
 | Challenger game window | binary `672h` (unset) | `SEPOLIA_CHALLENGER_GAME_WINDOW` — do not shrink; bond-claim buffer |
