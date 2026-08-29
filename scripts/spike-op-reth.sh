@@ -28,9 +28,11 @@ Refuses:
   - start_bg / stop_bg (this script never calls them)
   - FORTEL2_ENV=.env.sepolia (do not load role keys)
   - Docker / OrbStack binary paths
+  - PublicNode L1 for --blocks (receipts return 0)
 
 Default sidecar ports: HTTP 19845, auth 19851, op-node 19847.
-L1: existing non-loopback L1_RPC_URL, or https://ethereum-sepolia-rpc.publicnode.com
+L1: export L1_RPC_URL only (QuickNode). Do not export FORTEL2_ENV.
+    --l1.rpckind defaults to quicknode (SPIKE_L1_RPC_KIND / SEPOLIA_L1_RPC_KIND).
 Oracle: https://fortel2-replica-rpc.onrender.com (eth_getBlockByNumber only)
 EOF
 }
@@ -74,8 +76,16 @@ if ! [[ "$BLOCKS" =~ ^[0-9]+$ ]] || [[ "$BLOCKS" -lt 1 ]]; then
   exit 2
 fi
 
+# lib.sh sources .env (Anvil L1 on Mini). Keep a caller-supplied L1 so
+# `export L1_RPC_URL=…` is not clobbered into the PublicNode fallback.
+_SPIKE_L1_FROM_CALLER="${L1_RPC_URL:-}"
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+
+if [[ -n "${_SPIKE_L1_FROM_CALLER}" ]]; then
+  L1_RPC_URL="$_SPIKE_L1_FROM_CALLER"
+fi
 
 RESERVED_PORTS="9545 9546 9547 9551"
 SPIKE_EL_HTTP_PORT="${SPIKE_EL_HTTP_PORT:-19845}"
@@ -180,9 +190,24 @@ case "${L1_RPC_URL:-}" in
 esac
 assert_remote_l1_rpc_url "$L1_RPC_URL" "L1_RPC_URL"
 
+# Live Sepolia sequencer uses quicknode (D-0102 / D-0105). PublicNode answers
+# eth_getBlockByNumber but returns 0 receipts — derivation cannot start.
+L1_RPC_KIND="${SPIKE_L1_RPC_KIND:-${SEPOLIA_L1_RPC_KIND:-quicknode}}"
+
+l1_is_publicnode() {
+  case "${1:-}" in
+    *publicnode.com*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 if [[ "$PREFLIGHT" -eq 1 ]]; then
   echo "preflight ok: rollup=$ROLLUP l2=852 sidecar=:$SPIKE_EL_HTTP_PORT/:$SPIKE_EL_AUTH_PORT/:$SPIKE_NODE_RPC_PORT"
   echo "datadir=$SPIKE_DATADIR (not $LIVE_GETH_DATADIR)"
+  echo "l1.rpckind=${L1_RPC_KIND} (SPIKE_L1_RPC_KIND / SEPOLIA_L1_RPC_KIND, default quicknode)"
+  if l1_is_publicnode "$L1_RPC_URL"; then
+    echo "WARN: L1 is PublicNode — --blocks will refuse (receipts return 0). Export L1_RPC_URL from .env.sepolia; do not export FORTEL2_ENV." >&2
+  fi
   exit 0
 fi
 
@@ -218,6 +243,14 @@ if [[ "$PRINT_GENESIS" -eq 1 ]]; then
   resolve_genesis
   printf '\n'
   exit 0
+fi
+
+if l1_is_publicnode "$L1_RPC_URL"; then
+  echo "ERROR: refusing PublicNode L1 — op-node receipt fetch returns 0 (got 0 receipts but expected N)" >&2
+  echo "Unset FORTEL2_ENV. Export only L1_RPC_URL from .env.sepolia (do not print or paste that URL):" >&2
+  echo "  export L1_RPC_URL=\"\$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)\"" >&2
+  echo "Default --l1.rpckind=quicknode (override SPIKE_L1_RPC_KIND)." >&2
+  exit 2
 fi
 
 require_bin op-reth
@@ -307,10 +340,10 @@ EL_PID=$!
 
 wait_for_rpc "$SPIKE_HTTP" "spike op-reth" 90
 
-echo "Starting verifier op-node --l2.enginekind=reth (rpc :$SPIKE_NODE_RPC_PORT)"
+echo "Starting verifier op-node --l2.enginekind=reth (rpc :$SPIKE_NODE_RPC_PORT) l1.rpckind=${L1_RPC_KIND}"
 op-node \
   --l1="$L1_RPC_URL" \
-  --l1.rpckind=standard \
+  --l1.rpckind="${L1_RPC_KIND}" \
   --l1.trustrpc=true \
   --l1.beacon.ignore=true \
   --l2="$SPIKE_AUTH" \

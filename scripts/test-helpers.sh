@@ -6060,10 +6060,11 @@ if echo "$SPIKE_HELP" | grep -q 'chain 901' \
   && echo "$SPIKE_HELP" | grep -q '19845' \
   && echo "$SPIKE_HELP" | grep -q '19851' \
   && echo "$SPIKE_HELP" | grep -q '19847' \
-  && echo "$SPIKE_HELP" | grep -q 'deployments/sepolia/rollup.json'; then
+  && echo "$SPIKE_HELP" | grep -q 'deployments/sepolia/rollup.json' \
+  && echo "$SPIKE_HELP" | grep -q 'PublicNode'; then
   echo "PASS spike-op-reth --help names refusals and default ports"
 else
-  echo "FAIL spike-op-reth --help must name 901 / live datadir / :9545 / start_bg / 19845/19851/19847 / sepolia rollup" >&2
+  echo "FAIL spike-op-reth --help must name 901 / live datadir / :9545 / start_bg / 19845/19851/19847 / sepolia rollup / PublicNode" >&2
   echo "$SPIKE_HELP" >&2
   fail=1
 fi
@@ -6166,6 +6167,44 @@ if awk '/^resolve_genesis\(\)/,/^}/' "$SPIKE_RETH" | grep -E '^[[:space:]]*echo 
   fail=1
 else
   echo "PASS resolve_genesis echo lines are stderr"
+fi
+# Mini 2026-08-29: PublicNode + --l1.rpckind=standard returned 0 receipts.
+if grep -q 'SEPOLIA_L1_RPC_KIND:-quicknode' "$SPIKE_RETH" \
+  && grep -q -- '--l1.rpckind="${L1_RPC_KIND}"' "$SPIKE_RETH" \
+  && ! grep -q -- '--l1.rpckind=standard' "$SPIKE_RETH"; then
+  echo "PASS spike-op-reth L1 rpckind defaults to quicknode from env"
+else
+  echo "FAIL spike-op-reth must take --l1.rpckind from SPIKE_L1_RPC_KIND / SEPOLIA_L1_RPC_KIND (default quicknode)" >&2
+  fail=1
+fi
+SPIKE_PN_PF="$(L1_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_PN_PF_EC=0 || SPIKE_PN_PF_EC=$?
+if [[ "$SPIKE_PN_PF_EC" -eq 0 ]] && echo "$SPIKE_PN_PF" | grep -q 'preflight ok' \
+  && echo "$SPIKE_PN_PF" | grep -qi 'PublicNode'; then
+  echo "PASS spike-op-reth --preflight warns on PublicNode L1"
+else
+  echo "FAIL spike-op-reth --preflight must pass and warn on PublicNode (ec=$SPIKE_PN_PF_EC)" >&2
+  echo "$SPIKE_PN_PF" >&2
+  fail=1
+fi
+SPIKE_PN_BL="$(L1_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com "$SPIKE_RETH" --blocks 5 2>&1)" && SPIKE_PN_BL_EC=0 || SPIKE_PN_BL_EC=$?
+if [[ "$SPIKE_PN_BL_EC" -eq 2 ]] && echo "$SPIKE_PN_BL" | grep -qi 'receipts' \
+  && ! echo "$SPIKE_PN_BL" | grep -q 'Starting op-reth'; then
+  echo "PASS spike-op-reth --blocks refuses PublicNode L1 before start"
+else
+  echo "FAIL spike-op-reth --blocks must refuse PublicNode before starting (ec=$SPIKE_PN_BL_EC)" >&2
+  echo "$SPIKE_PN_BL" >&2
+  fail=1
+fi
+# Caller L1_RPC_URL must survive lib.sh sourcing .env (Anvil loopback).
+SPIKE_KEEP_OUT="$(L1_RPC_URL=https://example.invalid/sepolia "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_KEEP_EC=0 || SPIKE_KEEP_EC=$?
+if [[ "$SPIKE_KEEP_EC" -eq 0 ]] && echo "$SPIKE_KEEP_OUT" | grep -q 'preflight ok' \
+  && ! echo "$SPIKE_KEEP_OUT" | grep -qi 'PublicNode' \
+  && ! echo "$SPIKE_KEEP_OUT" | grep -q 'Using public Sepolia'; then
+  echo "PASS spike-op-reth --preflight keeps caller L1_RPC_URL over .env"
+else
+  echo "FAIL spike-op-reth must not clobber caller L1_RPC_URL with .env Anvil (ec=$SPIKE_KEEP_EC)" >&2
+  echo "$SPIKE_KEEP_OUT" >&2
+  fail=1
 fi
 
 if (( fail )); then
