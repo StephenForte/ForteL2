@@ -9,7 +9,7 @@ FORTEL2_ROOT_HINT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-usage: spike-op-reth.sh [--blocks N] [--genesis PATH] [--rollup PATH] [--no-wipe] [--preflight]
+usage: spike-op-reth.sh [--blocks N] [--genesis PATH] [--rollup PATH] [--no-wipe] [--preflight] [--print-genesis]
 
 P:0 sidecar PoC — verifier-only op-reth on ForteL2 chain 852. Not a chat prompt.
 
@@ -18,11 +18,13 @@ P:0 sidecar PoC — verifier-only op-reth on ForteL2 chain 852. Not a chat promp
   --rollup PATH    must be chain 852 (default: deployments/sepolia/rollup.json)
   --no-wipe        reuse $DATA_DIR/l2/spike-op-reth
   --preflight      refusals only; does not require op-reth or start processes
+  --print-genesis  resolve genesis and print only the path on stdout (stderr for status)
 
 Refuses:
   - chain 901 / any rollup whose l2_chain_id is not 852
   - live op-geth datadir ($DATA_DIR/l2/op-geth)
-  - binding :9545 :9546 :9547 :9551 (sequencer ports)
+  - SPIKE_DATADIR other than $DATA_DIR/l2/spike-op-reth (wipe is constrained)
+  - binding :9545 :9546 :9547 :9551 (HTTP/WS/auth/node/P2P)
   - start_bg / stop_bg (this script never calls them)
   - FORTEL2_ENV=.env.sepolia (do not load role keys)
   - Docker / OrbStack binary paths
@@ -51,6 +53,7 @@ esac
 BLOCKS=5
 NO_WIPE=0
 PREFLIGHT=0
+PRINT_GENESIS=0
 GENESIS_ARG=""
 ROLLUP_ARG=""
 while [[ $# -gt 0 ]]; do
@@ -60,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --rollup) ROLLUP_ARG="$2"; shift 2 ;;
     --no-wipe) NO_WIPE=1; shift ;;
     --preflight) PREFLIGHT=1; shift ;;
+    --print-genesis) PRINT_GENESIS=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -99,20 +103,35 @@ refuse_reserved_port() {
   done
 }
 
-refuse_live_geth_datadir() {
-  local resolved live
-  resolved="$(cd "$(dirname "$SPIKE_DATADIR")" 2>/dev/null && pwd)/$(basename "$SPIKE_DATADIR")"
-  live="$(cd "$(dirname "$LIVE_GETH_DATADIR")" 2>/dev/null && pwd)/$(basename "$LIVE_GETH_DATADIR")"
-  if [[ "$resolved" == "$live" ]]; then
+# Absolute path even when the leaf does not exist yet.
+_canon_leaf() {
+  local p="$1" parent base
+  parent="$(dirname "$p")"
+  base="$(basename "$p")"
+  if [[ -d "$p" ]]; then
+    (cd "$p" && pwd)
+  elif [[ -d "$parent" ]]; then
+    printf '%s/%s\n' "$(cd "$parent" && pwd)" "$base"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
+# Wipe/run only $DATA_DIR/l2/spike-op-reth — never $HOME, $DATA_DIR/l2, or op-geth.
+require_spike_datadir() {
+  local allowed got
+  mkdir -p "$DATA_DIR/l2"
+  allowed="$(_canon_leaf "$DATA_DIR/l2/spike-op-reth")"
+  got="$(_canon_leaf "$SPIKE_DATADIR")"
+  SPIKE_DATADIR="$got"
+  if [[ "$got" == "$(_canon_leaf "$LIVE_GETH_DATADIR")" ]]; then
     echo "ERROR: refusing live op-geth datadir $LIVE_GETH_DATADIR" >&2
     exit 2
   fi
-  case "$SPIKE_DATADIR" in
-    */l2/op-geth|*/l2/op-geth/)
-      echo "ERROR: refusing live op-geth datadir $SPIKE_DATADIR" >&2
-      exit 2
-      ;;
-  esac
+  if [[ "$got" != "$allowed" ]]; then
+    echo "ERROR: SPIKE_DATADIR must be $allowed (got $got) — wipe is constrained to that child of \$DATA_DIR/l2" >&2
+    exit 2
+  fi
 }
 
 refuse_docker_bin() {
@@ -149,13 +168,14 @@ refuse_reserved_port SPIKE_EL_HTTP_PORT "$SPIKE_EL_HTTP_PORT"
 refuse_reserved_port SPIKE_EL_WS_PORT "$SPIKE_EL_WS_PORT"
 refuse_reserved_port SPIKE_EL_AUTH_PORT "$SPIKE_EL_AUTH_PORT"
 refuse_reserved_port SPIKE_NODE_RPC_PORT "$SPIKE_NODE_RPC_PORT"
-refuse_live_geth_datadir
+refuse_reserved_port SPIKE_EL_P2P_PORT "$SPIKE_EL_P2P_PORT"
+require_spike_datadir
 require_rollup_852
 
 case "${L1_RPC_URL:-}" in
   http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*|"")
     L1_RPC_URL="$DEFAULT_L1"
-    echo "Using public Sepolia L1 smoke URL (loopback/empty L1_RPC_URL is Anvil — not 852)"
+    echo "Using public Sepolia L1 smoke URL (loopback/empty L1_RPC_URL is Anvil — not 852)" >&2
     ;;
 esac
 assert_remote_l1_rpc_url "$L1_RPC_URL" "L1_RPC_URL"
@@ -163,6 +183,40 @@ assert_remote_l1_rpc_url "$L1_RPC_URL" "L1_RPC_URL"
 if [[ "$PREFLIGHT" -eq 1 ]]; then
   echo "preflight ok: rollup=$ROLLUP l2=852 sidecar=:$SPIKE_EL_HTTP_PORT/:$SPIKE_EL_AUTH_PORT/:$SPIKE_NODE_RPC_PORT"
   echo "datadir=$SPIKE_DATADIR (not $LIVE_GETH_DATADIR)"
+  exit 0
+fi
+
+resolve_genesis() {
+  if [[ -n "$GENESIS_ARG" ]]; then
+    [[ -f "$GENESIS_ARG" ]] || { echo "ERROR: --genesis not a file: $GENESIS_ARG" >&2; exit 1; }
+    printf '%s' "$GENESIS_ARG"
+    return
+  fi
+  if [[ -f "$DEPLOY_DIR/genesis.json" ]]; then
+    local gid
+    gid="$(jq -r '.config.chainId // empty' "$DEPLOY_DIR/genesis.json")"
+    if [[ "$gid" == "852" ]]; then
+      printf '%s' "$DEPLOY_DIR/genesis.json"
+      return
+    fi
+    echo "WARN: $DEPLOY_DIR/genesis.json chainId=$gid — ignoring (not 852)" >&2
+  fi
+  mkdir -p "$DATA_DIR/l2"
+  local dest="$DATA_DIR/l2/spike-op-reth-genesis.json"
+  echo "Fetching 852 genesis from fortel2-replica (not in git)" >&2
+  curl -fsSL "$REPLICA_GENESIS_URL" -o "$dest"
+  local gid
+  gid="$(jq -r '.config.chainId // empty' "$dest")"
+  if [[ "$gid" != "852" ]]; then
+    echo "ERROR: fetched genesis chainId=$gid (want 852)" >&2
+    exit 1
+  fi
+  printf '%s' "$dest"
+}
+
+if [[ "$PRINT_GENESIS" -eq 1 ]]; then
+  resolve_genesis
+  printf '\n'
   exit 0
 fi
 
@@ -180,34 +234,6 @@ echo "op-reth version: ${RETH_VER:-<unparsed>}"
 if ! printf '%s' "$RETH_VER" | grep -Eq '2\.(3|4|[5-9]|[1-9][0-9])'; then
   echo "WARN: expected op-reth v2.3.3+; record the actual string in tasks/spike-op-reth.md" >&2
 fi
-
-resolve_genesis() {
-  if [[ -n "$GENESIS_ARG" ]]; then
-    [[ -f "$GENESIS_ARG" ]] || { echo "ERROR: --genesis not a file: $GENESIS_ARG" >&2; exit 1; }
-    printf '%s' "$GENESIS_ARG"
-    return
-  fi
-  if [[ -f "$DEPLOY_DIR/genesis.json" ]]; then
-    local gid
-    gid="$(jq -r '.config.chainId // empty' "$DEPLOY_DIR/genesis.json")"
-    if [[ "$gid" == "852" ]]; then
-      printf '%s' "$DEPLOY_DIR/genesis.json"
-      return
-    fi
-    echo "WARN: $DEPLOY_DIR/genesis.json chainId=$gid — ignoring (not 852)"
-  fi
-  mkdir -p "$DATA_DIR/l2"
-  local dest="$DATA_DIR/l2/spike-op-reth-genesis.json"
-  echo "Fetching 852 genesis from fortel2-replica (not in git)"
-  curl -fsSL "$REPLICA_GENESIS_URL" -o "$dest"
-  local gid
-  gid="$(jq -r '.config.chainId // empty' "$dest")"
-  if [[ "$gid" != "852" ]]; then
-    echo "ERROR: fetched genesis chainId=$gid (want 852)" >&2
-    exit 1
-  fi
-  printf '%s' "$dest"
-}
 
 GENESIS="$(resolve_genesis)"
 echo "genesis=$GENESIS"

@@ -6125,6 +6125,48 @@ else
   echo "$SPIKE_ENV_OUT" >&2
   fail=1
 fi
+SPIKE_HOME_OUT="$(SPIKE_DATADIR="$HOME" "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_HOME_EC=0 || SPIKE_HOME_EC=$?
+if [[ "$SPIKE_HOME_EC" -eq 2 ]] && echo "$SPIKE_HOME_OUT" | grep -q 'SPIKE_DATADIR must be'; then
+  echo "PASS spike-op-reth --preflight refuses SPIKE_DATADIR=\$HOME"
+else
+  echo "FAIL spike-op-reth must refuse SPIKE_DATADIR=\$HOME (ec=$SPIKE_HOME_EC)" >&2
+  echo "$SPIKE_HOME_OUT" >&2
+  fail=1
+fi
+SPIKE_L2ROOT_OUT="$(SPIKE_DATADIR="$DATA_DIR/l2" "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_L2ROOT_EC=0 || SPIKE_L2ROOT_EC=$?
+if [[ "$SPIKE_L2ROOT_EC" -eq 2 ]] && echo "$SPIKE_L2ROOT_OUT" | grep -q 'SPIKE_DATADIR must be'; then
+  echo "PASS spike-op-reth --preflight refuses SPIKE_DATADIR=\$DATA_DIR/l2"
+else
+  echo "FAIL spike-op-reth must refuse wiping \$DATA_DIR/l2 (ec=$SPIKE_L2ROOT_EC)" >&2
+  echo "$SPIKE_L2ROOT_OUT" >&2
+  fail=1
+fi
+SPIKE_P2P_OUT="$(SPIKE_EL_P2P_PORT=9545 "$SPIKE_RETH" --preflight 2>&1)" && SPIKE_P2P_EC=0 || SPIKE_P2P_EC=$?
+if [[ "$SPIKE_P2P_EC" -eq 2 ]] && echo "$SPIKE_P2P_OUT" | grep -q '9545'; then
+  echo "PASS spike-op-reth --preflight refuses SPIKE_EL_P2P_PORT=9545"
+else
+  echo "FAIL spike-op-reth must refuse P2P port 9545 (ec=$SPIKE_P2P_EC)" >&2
+  echo "$SPIKE_P2P_OUT" >&2
+  fail=1
+fi
+SPIKE_GFILE="$(mktemp)"
+printf '%s\n' '{"config":{"chainId":852}}' > "$SPIKE_GFILE"
+SPIKE_GERR="$(mktemp)"
+SPIKE_GOUT="$("$SPIKE_RETH" --print-genesis --genesis "$SPIKE_GFILE" 2>"$SPIKE_GERR")" && SPIKE_GEC=0 || SPIKE_GEC=$?
+if [[ "$SPIKE_GEC" -eq 0 && "$SPIKE_GOUT" == "$SPIKE_GFILE" ]]; then
+  echo "PASS spike-op-reth --print-genesis stdout is only the path"
+else
+  echo "FAIL --print-genesis stdout must be exactly --genesis path (ec=$SPIKE_GEC out=$(printf '%q' "$SPIKE_GOUT"))" >&2
+  cat "$SPIKE_GERR" >&2
+  fail=1
+fi
+rm -f "$SPIKE_GFILE" "$SPIKE_GERR"
+if awk '/^resolve_genesis\(\)/,/^}/' "$SPIKE_RETH" | grep -E '^[[:space:]]*echo ' | grep -v '>&2' >/dev/null; then
+  echo "FAIL resolve_genesis informational echo must go to stderr (stdout is the path)" >&2
+  fail=1
+else
+  echo "PASS resolve_genesis echo lines are stderr"
+fi
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2
