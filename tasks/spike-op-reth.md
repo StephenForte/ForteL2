@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29  
 **Script:** `scripts/spike-op-reth.sh` (throwaway; do not replace `04-start-sequencer*.sh`)  
-**PRD (output, later):** migration PRD — this note is the evidence it must cite  
+**PRD:** `tasks/prd-op-reth-migration.md` — this note is the evidence it cites  
 **This is a shell script, not a chat prompt.** From the ForteL2 repo root: `./scripts/spike-op-reth.sh --blocks 5`
 
 ## Goal
@@ -152,6 +152,6 @@ A Cloud PASS is not a Mini PASS. This Mini PASS is.
 
 ## Go / no-go for the migration PRD
 
-**GO to write the migration PRD**, citing this Mini `--blocks 5` PASS (hashes and flag table above).
+**Written:** `tasks/prd-op-reth-migration.md` cites this Mini `--blocks 5` PASS.
 
-Still **NO-GO** for: sequencer cutover, replacing `04-start-sequencer*.sh`, friend-replica image swap, `karst_time`, Phase 7 wipe, or sync-to-tip. P:0 proved genesis + first 5 L2 blocks hash-match on a sidecar. That is not a cutover. `debug_setHead` answering is a derivation risk — the PRD must not treat it as a keeper rewind tool.
+Still **NO-GO** for: sequencer cutover (PRD Task 5, operator-owned), replacing `04-start-sequencer*.sh` as the default, friend-replica image swap, `karst_time`, Phase 7 wipe, or treating first-N as sync-to-tip. P:0 proved genesis + first 5 L2 blocks hash-match on a sidecar. That is not a cutover. `debug_setHead` answering is a derivation risk — the PRD must not treat it as a keeper rewind tool.

@@ -6207,6 +6207,45 @@ else
   fail=1
 fi
 
+# Migration PRD must stay tracked and cite spike evidence (can go red).
+PRD_RETH="$FORTEL2_ROOT/tasks/prd-op-reth-migration.md"
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch tasks/prd-op-reth-migration.md >/dev/null 2>&1 \
+  && [[ -f "$PRD_RETH" ]]; then
+  echo "PASS tasks/prd-op-reth-migration.md is tracked"
+else
+  echo "FAIL tasks/prd-op-reth-migration.md must be tracked (git ls-files)" >&2
+  fail=1
+fi
+SPIKE_B5="$(grep -oE '0xd9fd2a33[0-9a-f]{56}' "$SPIKE_NOTE" | head -1)"
+if [[ -n "$SPIKE_B5" ]] \
+  && grep -q 'tasks/spike-op-reth.md' "$PRD_RETH" \
+  && grep -q "$SPIKE_B5" "$PRD_RETH" \
+  && grep -qi 'PublicNode' "$PRD_RETH" \
+  && grep -q 'quicknode' "$PRD_RETH" \
+  && grep -q 'debug_setHead' "$PRD_RETH" \
+  && grep -q 'karst_time' "$PRD_RETH" \
+  && grep -q 'FORCE_SEPOLIA_REDEPLOY' "$PRD_RETH" \
+  && grep -q 'Do not execute this task unless explicitly asked' "$PRD_RETH" \
+  && grep -q 'admin_stopSequencer' "$PRD_RETH" \
+  && grep -q 'verifier-only' "$PRD_RETH" \
+  && grep -q 'com.steve.fortel2-wake' "$PRD_RETH" \
+  && grep -q 'alert-watch.sh' "$PRD_RETH" \
+  && grep -q 'D-0105 Finding 3' "$PRD_RETH"; then
+  echo "PASS op-reth migration PRD cites spike hashes, receipts, debug_setHead, no-wipe, Task 5 hold"
+else
+  echo "FAIL prd-op-reth-migration.md must cite spike hash, PublicNode/quicknode, debug_setHead, karst_time, FORCE_SEPOLIA_REDEPLOY, Task 5 hold, admin_stopSequencer, verifier-only rollback, launchd wake, alert-watch, D-0105 Finding 3" >&2
+  fail=1
+fi
+if grep -q 'tasks/prd-op-reth-migration.md' "$FORTEL2_ROOT/tasks/prd-l2-learning-chain.md" \
+  && grep -q 'tasks/prd-op-reth-migration.md' "$FORTEL2_ROOT/AGENTS.md" \
+  && grep -q 'tasks/prd-op-reth-migration.md' "$FORTEL2_ROOT/README.md" \
+  && grep -q 'prd-op-reth-migration.md' "$SPIKE_NOTE"; then
+  echo "PASS op-reth migration PRD is pointed from roadmap, AGENTS, README, and spike note"
+else
+  echo "FAIL roadmap / AGENTS / README / spike-op-reth.md must point at tasks/prd-op-reth-migration.md" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

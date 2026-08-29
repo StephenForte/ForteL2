@@ -14,3 +14,4 @@ alwaysApply: true
 - Prefer extending `scripts/lib.sh` helpers over duplicating start/stop/RPC logic.
 - Treat `start_bg` / `stop_bg` in `scripts/lib.sh` as privileged — flag for human review. (`serve_static_loopback` is not privileged process control.)
 - Do not widen scope into Sepolia/replicas unless the user asks (Phase 2+).
+- op-reth migration is `tasks/prd-op-reth-migration.md` (P:0 sidecar `--blocks 5` PASS). Do not cut over the sequencer, set `karst_time`, swap the Render replica image, or create `fortel2-node` unless asked.
