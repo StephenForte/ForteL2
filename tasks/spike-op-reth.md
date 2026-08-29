@@ -23,15 +23,17 @@ Your live optimism clone is a **shallow** `op-node/v1.19.2` tree. Do **not** `gi
 
 Paths below match `.env.example`. If your Mini `.env` differs, use those values for `ForteL2` and `BIN_DIR`.
 
-### 0. Get the script
+### 0. Get the receipt-kind fix
+
+The spike script is already on `main` (PR #170). Pull this follow-up before retrying `--blocks` — the first Mini run used PublicNode + `--l1.rpckind=standard` and could not fetch L1 receipts.
 
 ```bash
 cd /Users/steveforte/ForteL2
-git fetch origin cursor/spike-op-reth-p0-7710
-git checkout cursor/spike-op-reth-p0-7710
+git fetch origin cursor/spike-op-reth-l1-receipts-7710
+git checkout cursor/spike-op-reth-l1-receipts-7710
 ```
 
-Leave the sequencer running. This spike does not stop it.
+Leave the sequencer running. This spike does not stop it. Do **not** stay on `cursor/spike-op-reth-p0-7710`.
 
 ### 1. Build op-reth (once, 20–60 min)
 
@@ -73,18 +75,25 @@ cd /Users/steveforte/ForteL2
 ./scripts/spike-op-reth.sh --preflight
 ```
 
-Want: `preflight ok` and `l2=852`. If it errors about `.env.sepolia`, you exported the wrong env — `unset FORTEL2_ENV` and retry.
+Want: `preflight ok`, `l2=852`, and `l1.rpckind=quicknode`. If it errors about `.env.sepolia`, you exported the wrong env — `unset FORTEL2_ENV` and retry. PublicNode is a **WARN** on `--preflight` and a **refuse** on `--blocks`.
 
-Optional QuickNode (otherwise the script uses the public Sepolia URL):
+`--blocks` needs the same receipts-capable L1 the live sequencer uses. Export **only** the URL — do not print it, and do **not** `export FORTEL2_ENV=.env.sepolia`:
 
 ```bash
-export L1_RPC_URL='https://your-quicknode-sepolia-host'   # HTTPS only; do not paste keys into chat
+unset FORTEL2_ENV
+export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"
+# confirm without leaking the token:
+python3 -c "import os; u=os.environ.get('L1_RPC_URL',''); print('L1 set' if u.startswith('http') else 'L1 missing')"
 ```
+
+Override receipt kind only if needed: `export SPIKE_L1_RPC_KIND=quicknode` (this is already the default).
 
 ### 3. Run the spike
 
 ```bash
 cd /Users/steveforte/ForteL2
+unset FORTEL2_ENV
+# L1_RPC_URL must already be set from step 2
 ./scripts/spike-op-reth.sh --blocks 5
 ```
 
@@ -100,13 +109,13 @@ Optional flags: `--genesis PATH`, `--no-wipe`. Sidecar ports: HTTP **19845**, au
 
 | Check | Cloud Linux | Mini darwin/arm64 |
 |---|---|---|
-| `op-reth --version` is v2.3.3+ (native path, not Docker) | | |
-| Genesis block 0 hash matches replica | | |
-| `op-node --l2.enginekind=reth` attaches | | |
-| Block N hash matches replica | | |
-| Sequencer-tip door (optional; may be down 23:45–03:00 PT) | | |
-| RPC probe: `eth` / `net` / `web3`; `debug` / `txpool` / `eth_getProof` / `debug_setHead` recorded | | |
-| Live `op-geth` datadir and ports 9545/9546/9547/9551 untouched | | |
+| `op-reth --version` is v2.3.3+ (native path, not Docker) | | 2.3.0-dev (9384bc5) Mach-O arm64 (upstream reth pin in op-reth/v2.3.3) |
+| Genesis block 0 hash matches replica | | PASS `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` |
+| `op-node --l2.enginekind=reth` attaches | | PASS — FCU genesis + reset at L1 `0xaf5518e2…:11545587` |
+| Block N hash matches replica | | FAIL first run — head stayed 0 (L1 receipts, not EL) |
+| Sequencer-tip door (optional; may be down 23:45–03:00 PT) | | not reached |
+| RPC probe: `eth` / `net` / `web3`; `debug` / `txpool` / `eth_getProof` / `debug_setHead` recorded | | not reached |
+| Live `op-geth` datadir and ports 9545/9546/9547/9551 untouched | | PASS (sidecar :19845/:19846/:19851/:19847/:30329) |
 
 Replica oracle: `https://fortel2-replica-rpc.onrender.com` (read only).
 
@@ -124,8 +133,20 @@ Replica oracle: `https://fortel2-replica-rpc.onrender.com` (read only).
 
 ## Results
 
-_Unrun._ A Cloud PASS is not a Mini PASS.
+**Mini first run (2026-08-28 19:19–19:26 PT) — FAIL `--blocks 5`. Not an op-reth failure.**
+
+- Build: `~/src/fortel2/optimism-op-reth` @ `op-reth/v2.3.3`; binary `Reth 2.3.0-dev (9384bc5)`; Mach-O arm64; `--preflight` PASS.
+- Genesis hash matched replica. op-reth Engine API accepted FCU to genesis. `latest_block` stayed **0**.
+- op-node reset Holocene at L1 origin `0xaf5518e27683473d8bcc776fadc48c2af9ef1d9881ed0f62c5e3a9ffd25c0800:11545587` (correct), then looped:
+
+  `failed to fetch receipts of L1 block … got 0 receipts but expected 105` (then 104, 137, …).
+
+- L1 was PublicNode (`https://ethereum-sepolia-rpc.publicnode.com`) with the script hardcoded `--l1.rpckind=standard`. Live Sepolia sequencer uses QuickNode + `--l1.rpckind=quicknode` (`04-start-sequencer-sepolia.sh`). PublicNode serves headers, not receipts.
+- EL `Beacon client online, but no consensus updates` is a consequence: CL never sent payloads. SIGTERM at 02:26:06 UTC stopped the sidecar only.
+- Script fix (this note’s follow-up): default `l1.rpckind` to `quicknode`; refuse PublicNode on `--blocks`; warn on `--preflight`. Retry is required before any migration PRD.
+
+A Cloud PASS is not a Mini PASS. Do not fill the flag table from this receipts FAIL.
 
 ## Go / no-go for the migration PRD
 
-_Pending a Mini run._
+_Pending a Mini `--blocks 5` PASS with QuickNode L1._ First-run FAIL is L1 receipts, not a reason to abandon op-reth.
