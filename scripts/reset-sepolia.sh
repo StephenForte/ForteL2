@@ -9,6 +9,16 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_sepolia_env
 
+require_fortel2_el
+if [[ "$(fortel2_el)" == "reth" ]]; then
+  echo "FORTEL2_EL=reth — stopping sidecar and wiping reth datadir only (live op-geth untouched)"
+  stop_reth_sidecar
+  wipe_reth_datadir
+  echo "Reth datadir reset complete. Mid-chain rewind is this wipe + re-derive; never debug_setHead."
+  echo "op-geth at $DATA_DIR/l2/op-geth was not touched. Live JWT at $DATA_DIR/jwt untouched."
+  exit 0
+fi
+
 "$SCRIPT_DIR/stop-all-sepolia.sh" || true
 
 echo "Wiping Sepolia runtime under $DATA_DIR ..."

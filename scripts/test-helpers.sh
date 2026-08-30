@@ -6474,6 +6474,329 @@ else
 fi
 rm -rf "$PIN_FIX"
 
+# --- Task 2: op-reth selector / datadir / genesis / profile (must be able to go red) ---
+RETH_START="$SCRIPT_DIR/start-op-reth-verifier.sh"
+RETH_STOP="$SCRIPT_DIR/stop-op-reth-verifier.sh"
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch scripts/start-op-reth-verifier.sh >/dev/null 2>&1 \
+  && git -C "$FORTEL2_ROOT" ls-files --error-unmatch scripts/stop-op-reth-verifier.sh >/dev/null 2>&1 \
+  && [[ -x "$RETH_START" && -x "$RETH_STOP" ]]; then
+  echo "PASS start-op-reth-verifier.sh and stop-op-reth-verifier.sh are tracked and executable"
+else
+  echo "FAIL Task 2 sidecar scripts must be tracked and executable" >&2
+  fail=1
+fi
+
+# Live start paths refuse reth (enginekind=geth under FORTEL2_EL=reth must not run).
+RETH_LIVE_OUT="$(FORTEL2_EL=reth "$SCRIPT_DIR/04-start-sequencer.sh" 2>&1)" && RETH_LIVE_EC=0 || RETH_LIVE_EC=$?
+if [[ "$RETH_LIVE_EC" -ne 0 ]] \
+  && echo "$RETH_LIVE_OUT" | grep -q 'FORTEL2_EL=reth' \
+  && echo "$RETH_LIVE_OUT" | grep -q 'start-op-reth-verifier.sh'; then
+  echo "PASS 04-start-sequencer.sh refuses FORTEL2_EL=reth (no 901 reth path)"
+else
+  echo "FAIL 04-start-sequencer.sh must refuse FORTEL2_EL=reth (ec=$RETH_LIVE_EC)" >&2
+  echo "$RETH_LIVE_OUT" >&2
+  fail=1
+fi
+RETH_SEP_OUT="$(FORTEL2_EL=reth "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" 2>&1)" && RETH_SEP_EC=0 || RETH_SEP_EC=$?
+if [[ "$RETH_SEP_EC" -ne 0 ]] \
+  && echo "$RETH_SEP_OUT" | grep -q 'FORTEL2_EL=reth' \
+  && echo "$RETH_SEP_OUT" | grep -q 'start-op-reth-verifier.sh'; then
+  echo "PASS 04-start-sequencer-sepolia.sh refuses FORTEL2_EL=reth (live sequencer stays geth)"
+else
+  echo "FAIL 04-start-sequencer-sepolia.sh must refuse FORTEL2_EL=reth (ec=$RETH_SEP_EC)" >&2
+  echo "$RETH_SEP_OUT" >&2
+  fail=1
+fi
+
+# enginekind=geth under FORTEL2_EL=reth fails (helper — can go red).
+RETH_EK_OUT="$(
+  FORTEL2_EL=reth
+  require_reth_enginekind geth 2>&1
+)" && RETH_EK_EC=0 || RETH_EK_EC=$?
+if [[ "$RETH_EK_EC" -ne 0 ]] && echo "$RETH_EK_OUT" | grep -q 'enginekind=reth'; then
+  echo "PASS require_reth_enginekind fails on geth under FORTEL2_EL=reth"
+else
+  echo "FAIL enginekind=geth under FORTEL2_EL=reth must fail (ec=$RETH_EK_EC)" >&2
+  echo "$RETH_EK_OUT" >&2
+  fail=1
+fi
+if grep -q -- '--l2.enginekind=reth' "$RETH_START" \
+  && ! grep -q -- '--l2.enginekind=geth' "$RETH_START" \
+  && grep -q -- '--l2.enginekind=geth' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
+  echo "PASS sidecar starts enginekind=reth; live Sepolia start still enginekind=geth"
+else
+  echo "FAIL sidecar must use enginekind=reth and leave live start on geth" >&2
+  fail=1
+fi
+
+# Missing profile refuses (no silent default).
+RETH_PROF_OUT="$(
+  unset FORTEL2_RETH_PROFILE || true
+  require_reth_profile 2>&1
+)" && RETH_PROF_EC=0 || RETH_PROF_EC=$?
+if [[ "$RETH_PROF_EC" -ne 0 ]] && echo "$RETH_PROF_OUT" | grep -qi 'FORTEL2_RETH_PROFILE'; then
+  echo "PASS missing FORTEL2_RETH_PROFILE refuses"
+else
+  echo "FAIL missing profile must refuse (ec=$RETH_PROF_EC)" >&2
+  echo "$RETH_PROF_OUT" >&2
+  fail=1
+fi
+RETH_PF_SCRIPT_OUT="$(
+  env -u FORTEL2_RETH_PROFILE FORTEL2_EL=reth "$RETH_START" --preflight 2>&1
+)" && RETH_PF_SCRIPT_EC=0 || RETH_PF_SCRIPT_EC=$?
+if [[ "$RETH_PF_SCRIPT_EC" -ne 0 ]] && echo "$RETH_PF_SCRIPT_OUT" | grep -qi 'FORTEL2_RETH_PROFILE'; then
+  echo "PASS start-op-reth-verifier.sh --preflight refuses missing profile"
+else
+  echo "FAIL sidecar --preflight must refuse missing profile (ec=$RETH_PF_SCRIPT_EC)" >&2
+  echo "$RETH_PF_SCRIPT_OUT" >&2
+  fail=1
+fi
+
+# Both profiles start-able as flags (verifier includes gossip disable).
+RETH_VF_FLAGS="$(FORTEL2_RETH_PROFILE=verifier reth_profile_flags | tr '\n' ' ')"
+RETH_SF_FLAGS="$(FORTEL2_RETH_PROFILE=sequencer_faultproof reth_profile_flags | tr '\n' ' ')"
+if echo "$RETH_VF_FLAGS" | grep -q -- '--full' \
+  && echo "$RETH_VF_FLAGS" | grep -q -- '--rollup.disable-tx-pool-gossip' \
+  && echo "$RETH_SF_FLAGS" | grep -q -- '--proofs-history' \
+  && ! echo "$RETH_SF_FLAGS" | grep -q -- '--full'; then
+  echo "PASS reth profiles: verifier --full + disable-tx-pool-gossip; sequencer_faultproof archive + proofs-history"
+else
+  echo "FAIL storage profile flags (verifier='$RETH_VF_FLAGS' sequencer='$RETH_SF_FLAGS')" >&2
+  fail=1
+fi
+
+# reth pointed at the geth datadir refuses.
+RETH_DD_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-dd.XXXXXX")"
+mkdir -p "$RETH_DD_FIX/l2/op-geth" "$RETH_DD_FIX/l2/op-reth"
+echo marker > "$RETH_DD_FIX/l2/op-geth/KEEP"
+RETH_DD_OUT="$(
+  DATA_DIR="$RETH_DD_FIX"
+  require_reth_datadir "$RETH_DD_FIX/l2/op-geth" 2>&1
+)" && RETH_DD_EC=0 || RETH_DD_EC=$?
+if [[ "$RETH_DD_EC" -ne 0 ]] \
+  && echo "$RETH_DD_OUT" | grep -qi 'op-geth datadir' \
+  && [[ -f "$RETH_DD_FIX/l2/op-geth/KEEP" ]]; then
+  echo "PASS require_reth_datadir refuses op-geth path (marker intact)"
+else
+  echo "FAIL reth must refuse the geth datadir (ec=$RETH_DD_EC)" >&2
+  echo "$RETH_DD_OUT" >&2
+  fail=1
+fi
+RETH_DD_OK="$(
+  DATA_DIR="$RETH_DD_FIX"
+  require_reth_datadir "$RETH_DD_FIX/l2/op-reth" 2>/dev/null
+)" && RETH_DD_OK_EC=0 || RETH_DD_OK_EC=$?
+if [[ "$RETH_DD_OK_EC" -eq 0 ]]; then
+  echo "PASS require_reth_datadir allows \$DATA_DIR/l2/op-reth"
+else
+  echo "FAIL production op-reth datadir must be allowed (ec=$RETH_DD_OK_EC)" >&2
+  fail=1
+fi
+# Symlink op-reth → op-geth must not bypass the guard (physical path).
+# Place the symlink at the allowed name so a logical pwd would accept it.
+rm -rf "$RETH_DD_FIX/l2/op-reth"
+ln -sfn "$RETH_DD_FIX/l2/op-geth" "$RETH_DD_FIX/l2/op-reth"
+RETH_DD_LINK_OUT="$(
+  DATA_DIR="$RETH_DD_FIX"
+  require_reth_datadir "$RETH_DD_FIX/l2/op-reth" 2>&1
+)" && RETH_DD_LINK_EC=0 || RETH_DD_LINK_EC=$?
+if [[ "$RETH_DD_LINK_EC" -ne 0 ]] \
+  && echo "$RETH_DD_LINK_OUT" | grep -qi 'op-geth' \
+  && [[ -f "$RETH_DD_FIX/l2/op-geth/KEEP" ]]; then
+  echo "PASS require_reth_datadir refuses op-reth symlink to op-geth"
+else
+  echo "FAIL reth datadir must physically resolve and refuse a geth symlink (ec=$RETH_DD_LINK_EC)" >&2
+  echo "$RETH_DD_LINK_OUT" >&2
+  fail=1
+fi
+rm -f "$RETH_DD_FIX/l2/op-reth"
+mkdir -p "$RETH_DD_FIX/l2/op-reth"
+RETH_WIPE_OUT="$(
+  DATA_DIR="$RETH_DD_FIX"
+  wipe_reth_datadir "$RETH_DD_FIX/l2/op-geth" 2>&1
+)" && RETH_WIPE_EC=0 || RETH_WIPE_EC=$?
+if [[ "$RETH_WIPE_EC" -ne 0 ]] && [[ -f "$RETH_DD_FIX/l2/op-geth/KEEP" ]]; then
+  echo "PASS wipe_reth_datadir refuses op-geth (marker intact)"
+else
+  echo "FAIL wipe must not touch op-geth (ec=$RETH_WIPE_EC)" >&2
+  echo "$RETH_WIPE_OUT" >&2
+  fail=1
+fi
+RETH_DD_SCRIPT_OUT="$(
+  FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_RETH_DATADIR="$RETH_DD_FIX/l2/op-geth" \
+    "$RETH_START" --preflight 2>&1
+)" && RETH_DD_SCRIPT_EC=0 || RETH_DD_SCRIPT_EC=$?
+if [[ "$RETH_DD_SCRIPT_EC" -ne 0 ]] && echo "$RETH_DD_SCRIPT_OUT" | grep -qi 'op-geth'; then
+  echo "PASS start-op-reth-verifier.sh --preflight refuses a geth datadir"
+else
+  echo "FAIL sidecar --preflight must refuse geth datadir (ec=$RETH_DD_SCRIPT_EC)" >&2
+  echo "$RETH_DD_SCRIPT_OUT" >&2
+  fail=1
+fi
+rm -rf "$RETH_DD_FIX"
+
+# 901 genesis refuses.
+RETH_GEN_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-gen.XXXXXX")"
+printf '%s\n' '{"config":{"chainId":901}}' > "$RETH_GEN_FIX/genesis-901.json"
+printf '%s\n' '{"config":{"chainId":852}}' > "$RETH_GEN_FIX/genesis-852.json"
+RETH_901_OUT="$(
+  require_genesis_852 "$RETH_GEN_FIX/genesis-901.json" "$FORTEL2_ROOT/deployments/sepolia/rollup.json" 2>&1
+)" && RETH_901_EC=0 || RETH_901_EC=$?
+if [[ "$RETH_901_EC" -ne 0 ]] && echo "$RETH_901_OUT" | grep -q '901'; then
+  echo "PASS require_genesis_852 refuses 901 genesis"
+else
+  echo "FAIL 901 genesis must be refused (ec=$RETH_901_EC)" >&2
+  echo "$RETH_901_OUT" >&2
+  fail=1
+fi
+RETH_901_SCRIPT_OUT="$(
+  FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_RETH_GENESIS="$RETH_GEN_FIX/genesis-901.json" \
+    "$RETH_START" --preflight --genesis "$RETH_GEN_FIX/genesis-901.json" 2>&1
+)" && RETH_901_SCRIPT_EC=0 || RETH_901_SCRIPT_EC=$?
+if [[ "$RETH_901_SCRIPT_EC" -ne 0 ]] && echo "$RETH_901_SCRIPT_OUT" | grep -q '901'; then
+  echo "PASS start-op-reth-verifier.sh --preflight refuses 901 genesis"
+else
+  echo "FAIL sidecar --preflight must refuse 901 genesis (ec=$RETH_901_SCRIPT_EC)" >&2
+  echo "$RETH_901_SCRIPT_OUT" >&2
+  fail=1
+fi
+# Wrong rollup genesis hash (can go red).
+python3 - "$FORTEL2_ROOT/deployments/sepolia/rollup.json" "$RETH_GEN_FIX/rollup-bad.json" <<'PY'
+import json, sys
+src, dest = sys.argv[1], sys.argv[2]
+data = json.load(open(src))
+data["genesis"]["l2"]["hash"] = "0x" + "ab" * 32
+json.dump(data, open(dest, "w"))
+PY
+RETH_HASH_OUT="$(
+  require_genesis_852 "$RETH_GEN_FIX/genesis-852.json" "$RETH_GEN_FIX/rollup-bad.json" 2>&1
+)" && RETH_HASH_EC=0 || RETH_HASH_EC=$?
+if [[ "$RETH_HASH_EC" -ne 0 ]] && echo "$RETH_HASH_OUT" | grep -q 'e242b1a3'; then
+  echo "PASS require_genesis_852 refuses a rollup whose genesis hash is not 0xe242b1a3…"
+else
+  echo "FAIL genesis hash mismatch must refuse (ec=$RETH_HASH_EC)" >&2
+  echo "$RETH_HASH_OUT" >&2
+  fail=1
+fi
+rm -rf "$RETH_GEN_FIX"
+
+# Live ports never appear as reth defaults; 9545 refused.
+if grep -q "FORTEL2_RETH_HTTP_PORT:-19545" "$SCRIPT_DIR/lib.sh" \
+  && grep -q "FORTEL2_RETH_WS_PORT:-19546" "$SCRIPT_DIR/lib.sh" \
+  && grep -q "FORTEL2_RETH_AUTH_PORT:-19551" "$SCRIPT_DIR/lib.sh" \
+  && grep -q "FORTEL2_RETH_NODE_RPC_PORT:-19547" "$SCRIPT_DIR/lib.sh" \
+  && grep -q "FORTEL2_RETH_P2P_PORT:-30330" "$SCRIPT_DIR/lib.sh"; then
+  echo "PASS reth verifier default ports are 19545/19546/19551/19547/30330"
+else
+  echo "FAIL verifier default ports must be 19545/19546/19551/19547/30330" >&2
+  fail=1
+fi
+RETH_PORT_OUT="$(
+  FORTEL2_RETH_HTTP_PORT=9545
+  require_reth_verifier_ports 2>&1
+)" && RETH_PORT_EC=0 || RETH_PORT_EC=$?
+if [[ "$RETH_PORT_EC" -ne 0 ]] && echo "$RETH_PORT_OUT" | grep -q '9545'; then
+  echo "PASS require_reth_verifier_ports refuses live port 9545"
+else
+  echo "FAIL reth config must refuse live port 9545 (ec=$RETH_PORT_EC)" >&2
+  echo "$RETH_PORT_OUT" >&2
+  fail=1
+fi
+
+# Trap 1: default status procs= and overnight monitors must not gain op-reth.
+if grep -q 'procs=(op-geth op-node op-batcher op-proposer)' "$SCRIPT_DIR/status.sh" \
+  && ! grep -q 'procs=(.*op-reth' "$SCRIPT_DIR/status.sh"; then
+  echo "PASS status.sh default procs= does not include op-reth"
+else
+  echo "FAIL status.sh default procs= must stay geth-only until Task 5" >&2
+  fail=1
+fi
+if ! grep -q '"op-reth"' "$SCRIPT_DIR/alert-watch.sh" \
+  && ! grep -q 'op-reth' "$SCRIPT_DIR/dev-sleep.sh"; then
+  echo "PASS alert-watch.sh / dev-sleep.sh do not name op-reth (Task 5 flip)"
+else
+  echo "FAIL overnight monitors must not gain op-reth in Task 2" >&2
+  fail=1
+fi
+
+# start_bg / stop_bg bodies unchanged (CODEOWNERS). New helpers may call them.
+RETH_SBG="$(awk '/^start_bg\(\) \{/,/^}$/' "$SCRIPT_DIR/lib.sh")"
+RETH_XBG="$(awk '/^stop_bg\(\) \{/,/^}$/' "$SCRIPT_DIR/lib.sh")"
+if echo "$RETH_SBG" | grep -q 'python3 - "$pidfile"' \
+  && echo "$RETH_XBG" | grep -q 'kill "$pid"' \
+  && ! echo "$RETH_SBG" | grep -q 'op-reth' \
+  && ! echo "$RETH_XBG" | grep -q 'op-reth'; then
+  echo "PASS start_bg / stop_bg function bodies do not mention op-reth"
+else
+  echo "FAIL start_bg / stop_bg bodies must stay untouched" >&2
+  fail=1
+fi
+
+# Stop/status coverage: start-able names are stoppable by the same name.
+if grep -q 'start_bg op-reth ' "$RETH_START" \
+  && grep -q 'start_bg op-reth-node ' "$RETH_START" \
+  && grep -q 'stop_reth_sidecar' "$RETH_STOP" \
+  && grep -q 'stop_reth_sidecar' "$SCRIPT_DIR/stop-all.sh" \
+  && grep -q 'stop_reth_sidecar' "$SCRIPT_DIR/stop-all-sepolia.sh"; then
+  echo "PASS start_bg op-reth / op-reth-node are stopped via stop_reth_sidecar"
+else
+  echo "FAIL sidecar start names must have matching stop coverage" >&2
+  fail=1
+fi
+
+# JWT under verifier datadir, not live jwt.txt.
+if grep -q 'reth_jwt_path' "$RETH_START" \
+  && grep -q 'reth_jwt_path()' "$SCRIPT_DIR/lib.sh" \
+  && grep -q 'not the live sequencer JWT' "$SCRIPT_DIR/lib.sh"; then
+  echo "PASS verifier JWT is documented as datadir-local, not the live JWT"
+else
+  echo "FAIL verifier JWT must live under the reth datadir" >&2
+  fail=1
+fi
+
+# Happy-path preflight (profile set, no genesis — CI has no 852 artifacts).
+RETH_OK_OUT="$(
+  FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier "$RETH_START" --preflight 2>&1
+)" && RETH_OK_EC=0 || RETH_OK_EC=$?
+if [[ "$RETH_OK_EC" -eq 0 ]] && echo "$RETH_OK_OUT" | grep -q 'preflight ok'; then
+  echo "PASS start-op-reth-verifier.sh --preflight ok with verifier profile"
+else
+  echo "FAIL sidecar --preflight should pass with an explicit profile (ec=$RETH_OK_EC)" >&2
+  echo "$RETH_OK_OUT" >&2
+  fail=1
+fi
+
+# Caller DATA_DIR must survive Phase 1 .env load (Bugbot: env clobber).
+# Compare via pwd -P — matches fortel2_canon_path (macOS /var → /private/var).
+RETH_DD_KEEP="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-datadir-keep.XXXXXX")"
+RETH_DD_KEEP_CANON="$(cd "$RETH_DD_KEEP" && pwd -P)"
+RETH_DD_KEEP_OUT="$(
+  DATA_DIR="$RETH_DD_KEEP" FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
+    "$RETH_START" --preflight 2>&1
+)" && RETH_DD_KEEP_EC=0 || RETH_DD_KEEP_EC=$?
+if [[ "$RETH_DD_KEEP_EC" -eq 0 ]] \
+  && echo "$RETH_DD_KEEP_OUT" | grep -q "datadir=$RETH_DD_KEEP_CANON/l2/op-reth"; then
+  echo "PASS sidecar --preflight keeps caller DATA_DIR (not .env DATA_DIR)"
+else
+  echo "FAIL caller DATA_DIR must survive .env load (ec=$RETH_DD_KEEP_EC)" >&2
+  echo "$RETH_DD_KEEP_OUT" >&2
+  fail=1
+fi
+rm -rf "$RETH_DD_KEEP"
+
+# Child 03-init-l2.sh must not drop parent EL/genesis (Bugbot: env re-source).
+if grep -q '_CALLER_RETH_GENESIS' "$SCRIPT_DIR/03-init-l2.sh" \
+  && grep -q 'restore_caller_data_dir' "$SCRIPT_DIR/03-init-l2.sh" \
+  && grep -q 'export FORTEL2_RETH_GENESIS' "$RETH_START" \
+  && grep -q 'export FORTEL2_EL' "$RETH_START"; then
+  echo "PASS sidecar exports EL/genesis and 03-init-l2.sh restores caller env"
+else
+  echo "FAIL 03-init-l2.sh must restore caller FORTEL2_EL/GENESIS/DATA_DIR" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

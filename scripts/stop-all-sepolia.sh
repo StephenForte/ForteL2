@@ -14,5 +14,9 @@ require_sepolia_env
 for name in l2-rpc-filter op-challenger l1-batch-proxy op-proposer op-batcher op-node op-geth; do
   stop_bg "$name"
 done
+# Opt-in sidecar (Task 2). Keep this OUT of the `for name in` list — start/stop
+# symmetry tests derive that list against start-all-sepolia.sh (still geth).
+# stop_bg is a no-op without a pidfile; live geth is not this pair.
+stop_reth_sidecar
 echo "Sepolia L2 processes stopped (DATA_DIR=$DATA_DIR)."
 echo "Phase 1 datadir untouched. Restart: FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh"

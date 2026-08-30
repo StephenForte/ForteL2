@@ -24,6 +24,19 @@ for name in "${procs[@]}"; do
   fi
 done
 
+# Selector-gated / running-only: do NOT add op-reth to procs= above (Task 5).
+# An expected-but-absent op-reth would false-fire stack-service-missing overnight.
+if [[ "$(fortel2_el)" == "reth" ]] || is_running op-reth || is_running op-reth-node; then
+  echo "  --- op-reth sidecar (not the live EL; FORTEL2_EL=$(fortel2_el)) ---"
+  for name in op-reth op-reth-node; do
+    if is_running "$name"; then
+      echo "  $name: RUNNING pid=$(cat "$PID_DIR/$name.pid")"
+    else
+      echo "  $name: stopped"
+    fi
+  done
+fi
+
 if [[ "${L2_CHAIN_ID:-}" == "852" ]]; then
   echo "  (Sepolia mode — no Anvil; DATA_DIR=$DATA_DIR)"
 fi
