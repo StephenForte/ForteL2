@@ -9,4 +9,7 @@ source "$SCRIPT_DIR/lib.sh"
 for name in op-proposer op-batcher op-node op-geth anvil; do
   stop_bg "$name"
 done
+# Opt-in sidecar (Task 2). Not in the default list — alert-watch/status default
+# path must not expect op-reth until Task 5. stop_bg is a no-op without a pidfile.
+stop_reth_sidecar
 echo "All Phase 1 processes stopped."

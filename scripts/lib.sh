@@ -856,3 +856,270 @@ PY
   fi
   exec python3 -m http.server "${port}" --bind 127.0.0.1
 }
+
+# --- op-reth migration Task 2 (additive; start_bg/stop_bg bodies unchanged) ---
+# Selector: FORTEL2_EL=geth|reth, default geth until Task 5. Live sequencer
+# scripts refuse reth rather than hijacking :9545. Sidecar: start-op-reth-verifier.sh.
+# Mid-chain rewind without debug_setHead (PRD §11 Q6): wipe the reth datadir and
+# re-derive from 852 genesis. Never debug_setHead on a keeper (live or candidate).
+
+FORTEL2_L2_GENESIS_HASH_852='0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d'
+FORTEL2_LIVE_EL_PORTS='9545 9546 9547 9551'
+
+fortel2_el() {
+  printf '%s' "${FORTEL2_EL:-geth}"
+}
+
+require_fortel2_el() {
+  local el
+  el="$(fortel2_el)"
+  case "$el" in
+    geth|reth) ;;
+    *)
+      echo "ERROR: FORTEL2_EL must be geth or reth (got $el)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# Live sequencer start paths stay op-geth until Task 5. FORTEL2_EL=reth here
+# would otherwise start (or skip) geth with --l2.enginekind=geth — the silent
+# overnight class. Sidecar is scripts/start-op-reth-verifier.sh.
+refuse_reth_on_live_sequencer() {
+  local which="${1:-this live sequencer script}"
+  require_fortel2_el
+  if [[ "$(fortel2_el)" == "reth" ]]; then
+    echo "ERROR: FORTEL2_EL=reth — $which stays op-geth until Task 5" >&2
+    echo "Start the isolated 852 verifier: ./scripts/start-op-reth-verifier.sh" >&2
+    echo "Live ports :9545/:9546/:9547/:9551 stay on op-geth; this task never restarts the live stack." >&2
+    exit 1
+  fi
+}
+
+# Scripts that need a caller-exported L1_RPC_URL (QuickNode) snapshot it BEFORE
+# sourcing lib.sh — Phase 1 .env clobbers it to Anvil. Call this after source.
+restore_caller_l1_rpc_url() {
+  local saved="${1:-}"
+  if [[ -n "$saved" ]]; then
+    L1_RPC_URL="$saved"
+    export L1_RPC_URL
+  fi
+}
+
+require_reth_enginekind() {
+  local kind="${1:-}"
+  if [[ "$(fortel2_el)" != "reth" ]]; then
+    return 0
+  fi
+  if [[ "$kind" != "reth" ]]; then
+    echo "ERROR: FORTEL2_EL=reth requires --l2.enginekind=reth (got ${kind:-<empty>})" >&2
+    exit 1
+  fi
+}
+
+require_reth_profile() {
+  local profile="${1:-${FORTEL2_RETH_PROFILE:-}}"
+  case "$profile" in
+    sequencer_faultproof|verifier) ;;
+    "")
+      echo "ERROR: FORTEL2_RETH_PROFILE is required when starting op-reth (sequencer_faultproof | verifier); no silent default" >&2
+      exit 1
+      ;;
+    *)
+      echo "ERROR: FORTEL2_RETH_PROFILE must be sequencer_faultproof or verifier (got $profile)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# Prints one flag per line (bash 3.2 — no mapfile). Archive is op-reth default
+# (no --full). Task 4 proves historical-proof sufficiency; we enable the flag.
+reth_profile_flags() {
+  local profile="${1:-${FORTEL2_RETH_PROFILE:-}}"
+  require_reth_profile "$profile"
+  case "$profile" in
+    sequencer_faultproof)
+      printf '%s\n' --proofs-history
+      ;;
+    verifier)
+      printf '%s\n' --full --rollup.disable-tx-pool-gossip
+      ;;
+  esac
+}
+
+# Absolute path even when the leaf does not exist yet.
+fortel2_canon_path() {
+  local p="$1" parent base
+  parent="$(dirname "$p")"
+  base="$(basename "$p")"
+  if [[ -d "$p" ]]; then
+    (cd "$p" && pwd)
+  elif [[ -d "$parent" ]]; then
+    printf '%s/%s\n' "$(cd "$parent" && pwd)" "$base"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
+# Production candidate $DATA_DIR/l2/op-reth; throwaway $DATA_DIR/l2/spike-op-reth.
+# Refuse $DATA_DIR/l2/op-geth and any path whose leaf is op-geth.
+require_reth_datadir() {
+  local datadir="${1:-${FORTEL2_RETH_DATADIR:-$DATA_DIR/l2/op-reth}}"
+  local got leaf allowed_prod allowed_spike
+  mkdir -p "$DATA_DIR/l2"
+  got="$(fortel2_canon_path "$datadir")"
+  leaf="$(basename "$got")"
+  allowed_prod="$(fortel2_canon_path "$DATA_DIR/l2/op-reth")"
+  allowed_spike="$(fortel2_canon_path "$DATA_DIR/l2/spike-op-reth")"
+  if [[ "$leaf" == "op-geth" ]] || [[ "$got" == "$(fortel2_canon_path "$DATA_DIR/l2/op-geth")" ]]; then
+    echo "ERROR: refusing op-geth datadir $got — op-reth never opens \$DATA_DIR/l2/op-geth" >&2
+    exit 1
+  fi
+  if [[ "$got" != "$allowed_prod" && "$got" != "$allowed_spike" ]]; then
+    echo "ERROR: reth datadir must be $allowed_prod or $allowed_spike (got $got)" >&2
+    exit 1
+  fi
+  printf '%s\n' "$got"
+}
+
+# JWT lives under the verifier datadir — never $DATA_DIR/jwt/jwt.txt (live).
+reth_jwt_path() {
+  local datadir="${1:-}"
+  [[ -n "$datadir" ]] || { echo "ERROR: reth_jwt_path requires a datadir" >&2; exit 1; }
+  printf '%s/jwt.txt\n' "$datadir"
+}
+
+write_reth_jwt() {
+  local jwt="$1"
+  mkdir -p "$(dirname "$jwt")"
+  if [[ ! -f "$jwt" ]]; then
+    openssl rand -hex 32 > "$jwt"
+    chmod 600 "$jwt"
+    echo "Wrote verifier JWT $jwt (not the live sequencer JWT)"
+  fi
+}
+
+# Known ForteL2 852 genesis block hash from deployments/sepolia/rollup.json.
+require_sepolia_genesis_hash() {
+  local rollup="${1:-$FORTEL2_ROOT/deployments/sepolia/rollup.json}"
+  local got
+  if [[ ! -f "$rollup" ]]; then
+    echo "ERROR: missing rollup $rollup (need deployments/sepolia/rollup.json)" >&2
+    exit 1
+  fi
+  got="$(jq -r '.genesis.l2.hash // empty' "$rollup")"
+  if [[ "$got" != "$FORTEL2_L2_GENESIS_HASH_852" ]]; then
+    echo "ERROR: refusing genesis hash ${got:-<missing>} (want $FORTEL2_L2_GENESIS_HASH_852)" >&2
+    exit 1
+  fi
+  local id
+  id="$(jq -r '.l2_chain_id // empty' "$rollup")"
+  if [[ "$id" != "852" ]]; then
+    echo "ERROR: refusing rollup l2_chain_id ${id:-<missing>} — op-reth init is ForteL2 852 only (not 901)" >&2
+    exit 1
+  fi
+}
+
+require_genesis_852() {
+  local genesis="$1"
+  local rollup="${2:-$FORTEL2_ROOT/deployments/sepolia/rollup.json}"
+  local id
+  if [[ -z "$genesis" || ! -f "$genesis" ]]; then
+    echo "ERROR: missing 852 genesis.json: ${genesis:-<empty>}" >&2
+    exit 1
+  fi
+  id="$(jq -r '.config.chainId // empty' "$genesis")"
+  if [[ "$id" != "852" ]]; then
+    echo "ERROR: refusing chain ${id:-<missing>} genesis — op-reth init is ForteL2 852 only (not 901)" >&2
+    exit 1
+  fi
+  require_sepolia_genesis_hash "$rollup"
+}
+
+# Resolve 852 genesis. Never returns the Phase 1 901 $DEPLOY_DIR/genesis.json.
+resolve_reth_genesis() {
+  local explicit="${1:-${FORTEL2_RETH_GENESIS:-}}"
+  local sepolia="$FORTEL2_ROOT/deployments/sepolia/.deployer/genesis.json"
+  local packed="$FORTEL2_ROOT/replica/config/genesis.json"
+  local id
+  if [[ -n "$explicit" ]]; then
+    [[ -f "$explicit" ]] || { echo "ERROR: FORTEL2_RETH_GENESIS not a file: $explicit" >&2; exit 1; }
+    printf '%s\n' "$explicit"
+    return 0
+  fi
+  if [[ -f "$sepolia" ]]; then
+    id="$(jq -r '.config.chainId // empty' "$sepolia")"
+    if [[ "$id" == "852" ]]; then
+      printf '%s\n' "$sepolia"
+      return 0
+    fi
+    echo "WARN: $sepolia chainId=$id — ignoring (not 852)" >&2
+  fi
+  if [[ -f "$packed" ]]; then
+    id="$(jq -r '.config.chainId // empty' "$packed")"
+    if [[ "$id" == "852" ]]; then
+      printf '%s\n' "$packed"
+      return 0
+    fi
+  fi
+  if [[ -f "$DEPLOY_DIR/genesis.json" ]]; then
+    id="$(jq -r '.config.chainId // empty' "$DEPLOY_DIR/genesis.json")"
+    if [[ "$id" == "852" ]]; then
+      printf '%s\n' "$DEPLOY_DIR/genesis.json"
+      return 0
+    fi
+    echo "ERROR: $DEPLOY_DIR/genesis.json chainId=$id — refusing 901 (pass FORTEL2_RETH_GENESIS or use deployments/sepolia/.deployer/genesis.json)" >&2
+    exit 1
+  fi
+  echo "ERROR: no 852 genesis.json found (set FORTEL2_RETH_GENESIS or run with Sepolia deploy artifacts)" >&2
+  exit 1
+}
+
+reth_http_port() { printf '%s' "${FORTEL2_RETH_HTTP_PORT:-19545}"; }
+reth_ws_port() { printf '%s' "${FORTEL2_RETH_WS_PORT:-19546}"; }
+reth_auth_port() { printf '%s' "${FORTEL2_RETH_AUTH_PORT:-19551}"; }
+reth_node_rpc_port() { printf '%s' "${FORTEL2_RETH_NODE_RPC_PORT:-19547}"; }
+reth_p2p_port() { printf '%s' "${FORTEL2_RETH_P2P_PORT:-30330}"; }
+
+refuse_live_port_for_reth() {
+  local name="$1" port="$2" p
+  for p in $FORTEL2_LIVE_EL_PORTS; do
+    if [[ "$port" == "$p" ]]; then
+      echo "ERROR: refusing $name=$port — live sequencer ports :9545/:9546/:9547/:9551 stay on op-geth" >&2
+      exit 1
+    fi
+  done
+}
+
+require_reth_verifier_ports() {
+  local http ws auth node p2p
+  http="$(reth_http_port)"
+  ws="$(reth_ws_port)"
+  auth="$(reth_auth_port)"
+  node="$(reth_node_rpc_port)"
+  p2p="$(reth_p2p_port)"
+  require_http_port "$http" "FORTEL2_RETH_HTTP_PORT"
+  require_http_port "$ws" "FORTEL2_RETH_WS_PORT"
+  require_http_port "$auth" "FORTEL2_RETH_AUTH_PORT"
+  require_http_port "$node" "FORTEL2_RETH_NODE_RPC_PORT"
+  require_http_port "$p2p" "FORTEL2_RETH_P2P_PORT"
+  refuse_live_port_for_reth FORTEL2_RETH_HTTP_PORT "$http"
+  refuse_live_port_for_reth FORTEL2_RETH_WS_PORT "$ws"
+  refuse_live_port_for_reth FORTEL2_RETH_AUTH_PORT "$auth"
+  refuse_live_port_for_reth FORTEL2_RETH_NODE_RPC_PORT "$node"
+  refuse_live_port_for_reth FORTEL2_RETH_P2P_PORT "$p2p"
+}
+
+# Wipe only an allowed reth datadir. Never $DATA_DIR/l2/op-geth.
+wipe_reth_datadir() {
+  local datadir
+  datadir="$(require_reth_datadir "${1:-}")"
+  echo "Wiping reth datadir $datadir (op-geth untouched)"
+  rm -rf "$datadir"
+  mkdir -p "$datadir"
+}
+
+stop_reth_sidecar() {
+  stop_bg op-reth-node
+  stop_bg op-reth
+}

@@ -186,6 +186,12 @@ export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
 ./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.2 (da197e45) + op-reth reported 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
+# Opt-in 852 op-reth sidecar (Task 2; live sequencer stays op-geth until Task 5):
+#   unset FORTEL2_ENV
+#   export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"   # do not print
+#   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
+#   ./scripts/stop-op-reth-verifier.sh
+#   ./scripts/status.sh   # default procs= still geth; sidecar listed only if running / FORTEL2_EL=reth
 node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers
 (cd scripts/bridge && npm ci && node --test lib.test.js)  # withdrawal bridge helpers
 ```
@@ -960,7 +966,11 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 |---|---|---|
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
 | op-geth | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
+| op-reth (opt-in sidecar) | `data/logs/op-reth.log` | JSON-RPC / `Starting` — not the live EL until Task 5 |
+| op-reth-node (sidecar) | `data/logs/op-reth-node.log` | `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
+
+Mid-chain rewind on op-reth (PRD §11 Q6, interim): wipe the reth datadir (`FORTEL2_EL=reth ./scripts/reset.sh` or `stop-op-reth-verifier.sh` then `--wipe`) and re-derive from 852 genesis. **Never** `debug_setHead` on a keeper datadir (live op-geth or a candidate you intend to keep).
 | op-batcher | `data/logs/op-batcher.log` | `publishing` / `Submit` / `Sent transaction` |
 | op-proposer | `data/logs/op-proposer.log` | `dispute game` / `Proposing` |
 
