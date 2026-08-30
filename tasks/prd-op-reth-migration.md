@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — P:0 done; Task 1 done (#176, D-0109); Tasks 2–9 unstarted  
+**Status:** In execution — P:0 done; Task 1 (#176, D-0109) and Task 2 (#178, D-0110) done; Tasks 3–9 unstarted  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
@@ -490,7 +490,7 @@ Answer during Task 1 or 2 unless noted.
 | 3 | Which historical-proof flags/retention does `cannon-kona` + shortened withdrawal window need? | **Open.** Task 4. |
 | 4 | Does Render public RPC need archive, or is `--full` enough? | **Open.** Task 7. |
 | 5 | Disk/RAM of a clean 852 op-reth sync on Render under current RPC load? | **Open.** Task 7. |
-| 6 | Mid-chain rewind without `debug_setHead` on a keeper? | **Open.** Spike: method answered; forbidden on keeper. Task 2/3 must pick a path. |
+| 6 | Mid-chain rewind without `debug_setHead` on a keeper? | **Settled (Task 2, D-0110):** wipe the reth datadir + re-derive from 852 genesis; `debug_setHead` never. Task 3 may revisit only with evidence. |
 | 7 | Beacon requirement for friends if `--l1.beacon.ignore=true` stays operator-only? | **Open.** Live Sepolia and the spike ignore beacon (calldata DA). Task 8 must not require a beacon unless a later pin does. |
 
 ## 12. Inspection limits
