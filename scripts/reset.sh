@@ -5,6 +5,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
+require_fortel2_el
+if [[ "$(fortel2_el)" == "reth" ]]; then
+  echo "FORTEL2_EL=reth — stopping sidecar and wiping reth datadir only (op-geth / Anvil untouched)"
+  stop_reth_sidecar
+  wipe_reth_datadir
+  echo "Reth datadir reset complete. Mid-chain rewind is this wipe + re-derive; never debug_setHead."
+  echo "op-geth at $DATA_DIR/l2/op-geth was not touched."
+  exit 0
+fi
+
 "$SCRIPT_DIR/stop-all.sh"
 
 echo "Wiping data + deployment artifacts (including Anvil L1 state) ..."

@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
+refuse_reth_on_live_sequencer "04-start-sequencer-sepolia.sh (live Sepolia sequencer)"
+
 require_bin op-geth
 require_bin op-node
 require_bin cast
