@@ -6592,6 +6592,25 @@ else
   echo "FAIL production op-reth datadir must be allowed (ec=$RETH_DD_OK_EC)" >&2
   fail=1
 fi
+# Symlink op-reth → op-geth must not bypass the guard (physical path).
+# Place the symlink at the allowed name so a logical pwd would accept it.
+rm -rf "$RETH_DD_FIX/l2/op-reth"
+ln -sfn "$RETH_DD_FIX/l2/op-geth" "$RETH_DD_FIX/l2/op-reth"
+RETH_DD_LINK_OUT="$(
+  DATA_DIR="$RETH_DD_FIX"
+  require_reth_datadir "$RETH_DD_FIX/l2/op-reth" 2>&1
+)" && RETH_DD_LINK_EC=0 || RETH_DD_LINK_EC=$?
+if [[ "$RETH_DD_LINK_EC" -ne 0 ]] \
+  && echo "$RETH_DD_LINK_OUT" | grep -qi 'op-geth' \
+  && [[ -f "$RETH_DD_FIX/l2/op-geth/KEEP" ]]; then
+  echo "PASS require_reth_datadir refuses op-reth symlink to op-geth"
+else
+  echo "FAIL reth datadir must physically resolve and refuse a geth symlink (ec=$RETH_DD_LINK_EC)" >&2
+  echo "$RETH_DD_LINK_OUT" >&2
+  fail=1
+fi
+rm -f "$RETH_DD_FIX/l2/op-reth"
+mkdir -p "$RETH_DD_FIX/l2/op-reth"
 RETH_WIPE_OUT="$(
   DATA_DIR="$RETH_DD_FIX"
   wipe_reth_datadir "$RETH_DD_FIX/l2/op-geth" 2>&1
@@ -6750,9 +6769,9 @@ else
 fi
 
 # Caller DATA_DIR must survive Phase 1 .env load (Bugbot: env clobber).
-# Compare via pwd — macOS /var is a symlink to /private/var.
+# Compare via pwd -P — matches fortel2_canon_path (macOS /var → /private/var).
 RETH_DD_KEEP="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-datadir-keep.XXXXXX")"
-RETH_DD_KEEP_CANON="$(cd "$RETH_DD_KEEP" && pwd)"
+RETH_DD_KEEP_CANON="$(cd "$RETH_DD_KEEP" && pwd -P)"
 RETH_DD_KEEP_OUT="$(
   DATA_DIR="$RETH_DD_KEEP" FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
     "$RETH_START" --preflight 2>&1

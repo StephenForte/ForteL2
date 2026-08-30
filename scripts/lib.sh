@@ -961,15 +961,16 @@ reth_profile_flags() {
   esac
 }
 
-# Absolute path even when the leaf does not exist yet.
+# Absolute path even when the leaf does not exist yet. Physical (`pwd -P`) so a
+# symlink $DATA_DIR/l2/op-reth → op-geth cannot bypass the geth-datadir guard.
 fortel2_canon_path() {
   local p="$1" parent base
   parent="$(dirname "$p")"
   base="$(basename "$p")"
   if [[ -d "$p" ]]; then
-    (cd "$p" && pwd)
+    (cd "$p" && pwd -P)
   elif [[ -d "$parent" ]]; then
-    printf '%s/%s\n' "$(cd "$parent" && pwd)" "$base"
+    printf '%s/%s\n' "$(cd "$parent" && pwd -P)" "$base"
   else
     printf '%s\n' "$p"
   fi
