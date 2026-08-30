@@ -4,8 +4,19 @@
 # FORTEL2_EL=reth: op-reth from 852 genesis only — refuse 901 and $DATA_DIR/l2/op-geth.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Snapshot before lib.sh sources .env (Phase 1 DATA_DIR / FORTEL2_EL clobber).
+_CALLER_DATA_DIR="${DATA_DIR:-}"
+_CALLER_EL="${FORTEL2_EL:-}"
+_CALLER_RETH_GENESIS="${FORTEL2_RETH_GENESIS:-}"
+_CALLER_RETH_DATADIR="${FORTEL2_RETH_DATADIR:-}"
+_CALLER_RETH_PROFILE="${FORTEL2_RETH_PROFILE:-}"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+restore_caller_data_dir "$_CALLER_DATA_DIR"
+[[ -n "$_CALLER_EL" ]] && { FORTEL2_EL="$_CALLER_EL"; export FORTEL2_EL; }
+[[ -n "$_CALLER_RETH_GENESIS" ]] && { FORTEL2_RETH_GENESIS="$_CALLER_RETH_GENESIS"; export FORTEL2_RETH_GENESIS; }
+[[ -n "$_CALLER_RETH_DATADIR" ]] && { FORTEL2_RETH_DATADIR="$_CALLER_RETH_DATADIR"; export FORTEL2_RETH_DATADIR; }
+[[ -n "$_CALLER_RETH_PROFILE" ]] && { FORTEL2_RETH_PROFILE="$_CALLER_RETH_PROFILE"; export FORTEL2_RETH_PROFILE; }
 
 require_fortel2_el
 

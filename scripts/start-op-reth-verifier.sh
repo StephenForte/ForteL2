@@ -25,8 +25,8 @@ Datadir: $DATA_DIR/l2/op-reth (or FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-ret
 Ports default 19545/19546/19551/19547/30330 (env-overridable; live 954x refused).
 JWT: fresh file under the verifier datadir — never the live JWT.
 
-Do not export FORTEL2_ENV=.env.sepolia (role keys). Snapshot L1_RPC_URL before
-this script sources .env (Phase 1 Anvil would clobber a caller QuickNode URL):
+Do not export FORTEL2_ENV=.env.sepolia (role keys). Snapshot L1_RPC_URL and
+optional DATA_DIR before this script sources .env (Phase 1 would clobber them):
   unset FORTEL2_ENV
   export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"
   export FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier
@@ -70,11 +70,13 @@ if ! [[ "$WAIT_BLOCKS" =~ ^[0-9]+$ ]]; then
 fi
 
 _CALLER_L1_RPC_URL="${L1_RPC_URL:-}"
+_CALLER_DATA_DIR="${DATA_DIR:-}"
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
 restore_caller_l1_rpc_url "$_CALLER_L1_RPC_URL"
+restore_caller_data_dir "$_CALLER_DATA_DIR"
 
 FORTEL2_EL=reth
 export FORTEL2_EL
@@ -83,12 +85,16 @@ require_reth_enginekind reth
 require_reth_profile
 require_reth_verifier_ports
 DATADIR="$(require_reth_datadir)"
+export FORTEL2_RETH_DATADIR="$DATADIR"
 ROLLUP="${ROLLUP_ARG:-${FORTEL2_RETH_ROLLUP:-$FORTEL2_ROOT/deployments/sepolia/rollup.json}}"
+export FORTEL2_RETH_ROLLUP="$ROLLUP"
 require_sepolia_genesis_hash "$ROLLUP"
 
 if [[ -n "$GENESIS_ARG" ]]; then
   FORTEL2_RETH_GENESIS="$GENESIS_ARG"
 fi
+export FORTEL2_RETH_GENESIS
+export FORTEL2_RETH_PROFILE
 
 if [[ "$PREFLIGHT" -eq 1 ]]; then
   # Only resolve genesis when the caller supplied one — otherwise Phase 1

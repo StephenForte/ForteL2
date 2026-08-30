@@ -6749,6 +6749,35 @@ else
   fail=1
 fi
 
+# Caller DATA_DIR must survive Phase 1 .env load (Bugbot: env clobber).
+# Compare via pwd — macOS /var is a symlink to /private/var.
+RETH_DD_KEEP="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-datadir-keep.XXXXXX")"
+RETH_DD_KEEP_CANON="$(cd "$RETH_DD_KEEP" && pwd)"
+RETH_DD_KEEP_OUT="$(
+  DATA_DIR="$RETH_DD_KEEP" FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
+    "$RETH_START" --preflight 2>&1
+)" && RETH_DD_KEEP_EC=0 || RETH_DD_KEEP_EC=$?
+if [[ "$RETH_DD_KEEP_EC" -eq 0 ]] \
+  && echo "$RETH_DD_KEEP_OUT" | grep -q "datadir=$RETH_DD_KEEP_CANON/l2/op-reth"; then
+  echo "PASS sidecar --preflight keeps caller DATA_DIR (not .env DATA_DIR)"
+else
+  echo "FAIL caller DATA_DIR must survive .env load (ec=$RETH_DD_KEEP_EC)" >&2
+  echo "$RETH_DD_KEEP_OUT" >&2
+  fail=1
+fi
+rm -rf "$RETH_DD_KEEP"
+
+# Child 03-init-l2.sh must not drop parent EL/genesis (Bugbot: env re-source).
+if grep -q '_CALLER_RETH_GENESIS' "$SCRIPT_DIR/03-init-l2.sh" \
+  && grep -q 'restore_caller_data_dir' "$SCRIPT_DIR/03-init-l2.sh" \
+  && grep -q 'export FORTEL2_RETH_GENESIS' "$RETH_START" \
+  && grep -q 'export FORTEL2_EL' "$RETH_START"; then
+  echo "PASS sidecar exports EL/genesis and 03-init-l2.sh restores caller env"
+else
+  echo "FAIL 03-init-l2.sh must restore caller FORTEL2_EL/GENESIS/DATA_DIR" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

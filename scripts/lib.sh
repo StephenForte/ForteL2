@@ -906,6 +906,20 @@ restore_caller_l1_rpc_url() {
   fi
 }
 
+# Caller DATA_DIR (e.g. Sepolia runtime without loading .env.sepolia). Phase 1
+# .env always assigns DATA_DIR; restore then re-bind LOG_DIR/PID_DIR so pids
+# and logs land in the caller's tree, not the env-file tree.
+restore_caller_data_dir() {
+  local saved="${1:-}"
+  if [[ -n "$saved" ]]; then
+    DATA_DIR="$saved"
+    export DATA_DIR
+    LOG_DIR="$DATA_DIR/logs"
+    PID_DIR="$DATA_DIR/pids"
+    mkdir -p "$DATA_DIR" "$LOG_DIR" "$PID_DIR"
+  fi
+}
+
 require_reth_enginekind() {
   local kind="${1:-}"
   if [[ "$(fortel2_el)" != "reth" ]]; then
