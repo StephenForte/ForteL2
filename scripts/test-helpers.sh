@@ -7688,6 +7688,236 @@ unset -f cleanup_rg_zb rg_zb_write_game rg_zb_mock 2>/dev/null || true
 # end resolve-games-zero-bond-legs block
 # =============================================================================
 
+# =============================================================================
+# verify-reth-parity (op-reth Task 3)
+# Offline fixtures only; no live RPC, no L1 URL, no JWT.
+# Negative --alter-field must be able to go red.
+# =============================================================================
+
+VRP="$SCRIPT_DIR/verify-reth-parity.sh"
+VRP_NOTE="$FORTEL2_ROOT/tasks/task3-op-reth-safe-head-parity.md"
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch scripts/verify-reth-parity.sh >/dev/null 2>&1 \
+  && [[ -x "$VRP" ]]; then
+  echo "PASS verify-reth-parity.sh is tracked and executable"
+else
+  echo "FAIL scripts/verify-reth-parity.sh must be tracked and executable" >&2
+  fail=1
+fi
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch tasks/task3-op-reth-safe-head-parity.md >/dev/null 2>&1 \
+  && [[ -f "$VRP_NOTE" ]]; then
+  echo "PASS tasks/task3-op-reth-safe-head-parity.md is tracked"
+else
+  echo "FAIL Task 3 evidence file must be tracked" >&2
+  fail=1
+fi
+
+VRP_HELP="$("$VRP" --help 2>&1)" && VRP_HELP_EC=0 || VRP_HELP_EC=$?
+if [[ "$VRP_HELP_EC" -eq 0 ]] \
+  && echo "$VRP_HELP" | grep -q '19545' \
+  && echo "$VRP_HELP" | grep -q '9545' \
+  && echo "$VRP_HELP" | grep -q 'fixture' \
+  && echo "$VRP_HELP" | grep -q 'alter-field' \
+  && echo "$VRP_HELP" | grep -q 'eth_\*' \
+  && echo "$VRP_HELP" | grep -qi 'replica'; then
+  echo "PASS verify-reth-parity --help names ports, fixture, alter-field, eth_*, replica"
+else
+  echo "FAIL verify-reth-parity --help must name 19545/9545/fixture/alter-field/eth_*/replica (ec=$VRP_HELP_EC)" >&2
+  echo "$VRP_HELP" >&2
+  fail=1
+fi
+
+if grep -E "['\"]debug_setHead|['\"]admin_" "$VRP"; then
+  echo "FAIL verify-reth-parity.sh must not invoke debug_setHead or admin_ methods" >&2
+  fail=1
+else
+  echo "PASS verify-reth-parity.sh does not invoke debug_setHead or admin_ methods"
+fi
+if grep -q 'proofs init' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && grep -q 'skip-backfill' "$SCRIPT_DIR/start-op-reth-verifier.sh"; then
+  echo "PASS start-op-reth-verifier.sh runs proofs init --skip-backfill for sequencer_faultproof"
+else
+  echo "FAIL sidecar start must initialize proofs-history before --proofs-history" >&2
+  fail=1
+fi
+if grep -q 'L1_RPC_URL' "$VRP"; then
+  echo "FAIL verify-reth-parity.sh must not mention L1_RPC_URL (no provider URL in parity)" >&2
+  fail=1
+else
+  echo "PASS verify-reth-parity.sh does not mention L1_RPC_URL"
+fi
+if grep -q 'sleep-ms' "$VRP" \
+  && grep -q 'assert_loopback_url' "$VRP" \
+  && grep -q 'replica.readRpcUrl' "$VRP"; then
+  echo "PASS verify-reth-parity defaults replica from rail-interface, sleeps, loopback-guards live"
+else
+  echo "FAIL parity script must default replica URL, sleep between RPCs, and loopback-guard live EL" >&2
+  fail=1
+fi
+
+# Live non-loopback must refuse (fixture-less path).
+VRP_NL_OUT="$(
+  "$VRP" --live http://example.invalid:8545 --candidate http://127.0.0.1:19545 2>&1
+)" && VRP_NL_EC=0 || VRP_NL_EC=$?
+if [[ "$VRP_NL_EC" -ne 0 ]] && echo "$VRP_NL_OUT" | grep -qi 'loopback'; then
+  echo "PASS verify-reth-parity refuses a non-loopback live URL"
+else
+  echo "FAIL live sequencer URL must stay loopback (ec=$VRP_NL_EC)" >&2
+  echo "$VRP_NL_OUT" >&2
+  fail=1
+fi
+
+VRP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-parity.XXXXXX")"
+cleanup_vrp() { rm -rf "$VRP_FIX"; }
+trap cleanup_vrp EXIT
+python3 - "$VRP_FIX/match.json" <<'PY'
+import json, sys
+
+out = sys.argv[1]
+blocks = []
+for n in range(20):
+    num = n  # 0..19 includes 0 and 5
+    blocks.append({
+        "number": hex(num),
+        "hash": "0x" + ("%02x" % (num + 1)) * 32,
+        "parentHash": "0x" + ("%02x" % num) * 32,
+        "stateRoot": "0x" + ("%02x" % (num + 2)) * 32,
+        "receiptsRoot": "0x" + ("%02x" % (num + 3)) * 32,
+        "transactions": (
+            [{"hash": "0x" + "7e" * 32, "type": "0x7e"},
+             {"hash": "0x" + "11" * 32, "type": "0x2"}]
+            if num == 5 else []
+        ),
+    })
+doc = {
+    "chainId": "852",
+    "blocks": blocks,
+    "state": [
+        {
+            "kind": "codehash",
+            "address": "0x0116686e2291dbd5e317f47fadbfb43b599786ef",
+            "label": "Guestbook",
+            "value": "0x" + "aa" * 32,
+        },
+        {
+            "kind": "balance",
+            "address": "0x4200000000000000000000000000000000000010",
+            "label": "L2StandardBridge",
+            "value": "0x1234",
+        },
+        {
+            "kind": "storage",
+            "address": "0x4200000000000000000000000000000000000016",
+            "slot": "0x1",
+            "label": "L2ToL1MessagePasser.messageNonce",
+            "value": "0x" + "00" * 31 + "02",
+        },
+    ],
+    "receipts": [
+        {
+            "transactionHash": "0x" + "7e" * 32,
+            "status": "0x1",
+            "logsBloom": "0x" + "00" * 256,
+            "cumulativeGasUsed": "0x5208",
+            "blockNumber": "0x5",
+        },
+        {
+            "transactionHash": "0x" + "11" * 32,
+            "status": "0x1",
+            "logsBloom": "0x" + "00" * 256,
+            "cumulativeGasUsed": "0xa410",
+            "blockNumber": "0x5",
+        },
+    ],
+    "deposits": [
+        {"txHash": "0x" + "7e" * 32, "type": "0x7e", "blockNumber": 5},
+    ],
+}
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(doc, f)
+    f.write("\n")
+PY
+
+VRP_OK="$("$VRP" --fixture "$VRP_FIX/match.json" 2>&1)" && VRP_OK_EC=0 || VRP_OK_EC=$?
+if [[ "$VRP_OK_EC" -eq 0 ]] \
+  && echo "$VRP_OK" | grep -q 'full-match' \
+  && echo "$VRP_OK" | grep -q 'verify-reth-parity: PASS' \
+  && echo "$VRP_OK" | grep -q 'block 0' \
+  && echo "$VRP_OK" | grep -q 'block 5' \
+  && echo "$VRP_OK" | grep -q 'Guestbook' \
+  && echo "$VRP_OK" | grep -q 'L2StandardBridge' \
+  && echo "$VRP_OK" | grep -q 'deposit'; then
+  echo "PASS verify-reth-parity fixture full-match exits 0"
+else
+  echo "FAIL fixture match should exit 0 with full-match (ec=$VRP_OK_EC)" >&2
+  echo "$VRP_OK" >&2
+  fail=1
+fi
+
+# Negative: altered hash must name block + field and exit nonzero.
+VRP_BAD="$("$VRP" --fixture "$VRP_FIX/match.json" --alter-field hash 2>&1)" && VRP_BAD_EC=0 || VRP_BAD_EC=$?
+if [[ "$VRP_BAD_EC" -ne 0 ]] \
+  && echo "$VRP_BAD" | grep -q 'MISMATCH block=0 field=hash' \
+  && ! echo "$VRP_BAD" | grep -q 'verify-reth-parity: PASS'; then
+  echo "PASS verify-reth-parity --alter-field hash exits nonzero and names block+field"
+else
+  echo "FAIL altered hash must exit nonzero naming block=0 field=hash (ec=$VRP_BAD_EC)" >&2
+  echo "$VRP_BAD" >&2
+  fail=1
+fi
+
+VRP_SR="$("$VRP" --fixture "$VRP_FIX/match.json" --alter-field stateRoot 2>&1)" && VRP_SR_EC=0 || VRP_SR_EC=$?
+if [[ "$VRP_SR_EC" -ne 0 ]] && echo "$VRP_SR" | grep -q 'field=stateRoot'; then
+  echo "PASS verify-reth-parity --alter-field stateRoot exits nonzero"
+else
+  echo "FAIL altered stateRoot must go red (ec=$VRP_SR_EC)" >&2
+  echo "$VRP_SR" >&2
+  fail=1
+fi
+
+VRP_BAL="$("$VRP" --fixture "$VRP_FIX/match.json" --alter-field balance 2>&1)" && VRP_BAL_EC=0 || VRP_BAL_EC=$?
+if [[ "$VRP_BAL_EC" -ne 0 ]] && echo "$VRP_BAL" | grep -q 'field=balance'; then
+  echo "PASS verify-reth-parity --alter-field balance exits nonzero"
+else
+  echo "FAIL altered balance must go red (ec=$VRP_BAL_EC)" >&2
+  echo "$VRP_BAL" >&2
+  fail=1
+fi
+
+# Short fixture (5 blocks) must fail the ≥20 floor.
+python3 - "$VRP_FIX/short.json" <<'PY'
+import json, sys
+blocks = []
+for n in range(5):
+    blocks.append({
+        "number": hex(n),
+        "hash": "0x" + "aa" * 32,
+        "parentHash": "0x" + "00" * 32,
+        "stateRoot": "0x" + "bb" * 32,
+        "receiptsRoot": "0x" + "cc" * 32,
+        "transactions": [],
+    })
+json.dump({"blocks": blocks, "state": [], "receipts": [], "deposits": []}, open(sys.argv[1], "w"))
+PY
+VRP_SHORT="$("$VRP" --fixture "$VRP_FIX/short.json" 2>&1)" && VRP_SHORT_EC=0 || VRP_SHORT_EC=$?
+if [[ "$VRP_SHORT_EC" -ne 0 ]] && echo "$VRP_SHORT" | grep -q 'need >= 20'; then
+  echo "PASS verify-reth-parity short fixture fails the 20-block floor"
+else
+  echo "FAIL a 5-block fixture must not PASS (ec=$VRP_SHORT_EC)" >&2
+  echo "$VRP_SHORT" >&2
+  fail=1
+fi
+
+cleanup_vrp
+trap - EXIT
+unset VRP VRP_NOTE VRP_HELP VRP_HELP_EC VRP_NL_OUT VRP_NL_EC
+unset VRP_FIX VRP_OK VRP_OK_EC VRP_BAD VRP_BAD_EC VRP_SR VRP_SR_EC
+unset VRP_BAL VRP_BAL_EC VRP_SHORT VRP_SHORT_EC
+unset -f cleanup_vrp 2>/dev/null || true
+
+# =============================================================================
+# end verify-reth-parity block
+# =============================================================================
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

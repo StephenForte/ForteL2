@@ -31,6 +31,16 @@ optional DATA_DIR before this script sources .env (Phase 1 would clobber them):
   export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"
   export FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier
   ./scripts/start-op-reth-verifier.sh --wait-blocks 5
+
+Task 3 candidate (sequencer_faultproof from first start of $DATA_DIR/l2/op-reth;
+half-rate L1 reads on a months-deep historical derive — do not print L1_RPC_URL):
+  unset FORTEL2_ENV
+  export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"
+  export DATA_DIR="$(grep '^DATA_DIR=' .env.sepolia | cut -d= -f2-)"
+  export FORTEL2_EL=reth FORTEL2_RETH_PROFILE=sequencer_faultproof
+  export SEPOLIA_L1_RPC_RATE_LIMIT=10
+  ./scripts/start-op-reth-verifier.sh
+  ./scripts/verify-reth-parity.sh
 EOF
 }
 
@@ -176,6 +186,16 @@ while IFS= read -r f; do
   [[ -n "$f" ]] && PROFILE_FLAGS+=("$f")
 done < <(reth_profile_flags)
 
+# --proofs-history ExEx refuses to start unless the store is initialized.
+# Panic text names `initialize-op-proofs`; the pinned binary's command is
+# `op-reth proofs init`. skip-backfill: V1 has no backfill, and this datadir
+# starts at genesis so history is filled forward during Task 3 derive.
+if [[ "$FORTEL2_RETH_PROFILE" == "sequencer_faultproof" ]]; then
+  echo "Initializing proofs-history store at $DATADIR/historical-proofs (skip-backfill; idempotent)"
+  op-reth proofs init --datadir="$DATADIR" --chain="$GENESIS" \
+    --proofs-history.skip-backfill
+fi
+
 L1_RPC_KIND="${SEPOLIA_L1_RPC_KIND:-quicknode}"
 L1_CONFS="${SEPOLIA_VERIFIER_L1_CONFS:-1}"
 L1_HTTP_POLL="${SEPOLIA_L1_HTTP_POLL_INTERVAL:-12s}"
@@ -209,7 +229,7 @@ start_bg op-reth op-reth node \
 sleep 2
 wait_for_rpc "$EL_HTTP" "op-reth sidecar" 90
 
-echo "Starting op-reth-node --l2.enginekind=reth (rpc :$NODE_PORT) l1.rpckind=${L1_RPC_KIND}"
+echo "Starting op-reth-node --l2.enginekind=reth (rpc :$NODE_PORT) l1.rpckind=${L1_RPC_KIND} l1.rpc-rate-limit=${L1_RPC_RATE_LIMIT}"
 start_bg op-reth-node op-node \
   --l1="$L1_RPC_URL" \
   --l1.rpckind="${L1_RPC_KIND}" \
