@@ -21,7 +21,7 @@
 #     (absolute shim path — lib.sh prepends homebrew onto PATH)
 #   CHECK_LAUNCHD_AGENTS_DIR         fake ~/Library/LaunchAgents for fixtures
 #   CHECK_LAUNCHD_PINNED_TREE        fake /Users/steveforte/fortel2-agents
-#   CHECK_LAUNCHD_DEV_DIR            fake ~/ForteL2 (env-symlink target)
+#   CHECK_LAUNCHD_DEV_DIR            fake ~/ForteL2 (env-symlink and data/ targets)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -249,31 +249,38 @@ check_pinned_tree() {
     return
   fi
 
-  if [[ -n "$(git -C "$PINNED_TREE" status --porcelain)" ]]; then
+  local leftover
+  leftover="$(git -C "$PINNED_TREE" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data)$' || true)"
+  if [[ -n "$leftover" ]]; then
     echo "FAIL  pinned tree is dirty"
     FAILS=$((FAILS + 1))
     return
   fi
 
-  local sepolia_link="$PINNED_TREE/.env.sepolia"
-  local want="$DEV_DIR/.env.sepolia"
-  if [[ ! -L "$sepolia_link" ]]; then
-    echo "FAIL  pinned tree .env.sepolia is missing or not a symlink (jobs load FORTEL2_ENV=.env.sepolia)"
-    FAILS=$((FAILS + 1))
-    return
-  fi
-  local target
-  target="$(readlink "$sepolia_link")"
-  if [[ "$target" != "$want" ]]; then
-    echo "FAIL  pinned tree .env.sepolia does not point at the dev checkout (have=${target} want=${want})"
-    FAILS=$((FAILS + 1))
-    return
-  fi
-  if [[ ! -e "$sepolia_link" ]]; then
-    echo "FAIL  pinned tree .env.sepolia is dangling"
-    FAILS=$((FAILS + 1))
-    return
-  fi
+  # .env.sepolia is gitignored — porcelain cannot see a missing/dangling link.
+  # Health writes repo-relative data/; alerts read $FORTEL2_ROOT/data after the
+  # env overwrites FORTEL2_ROOT to the dev checkout. data/ must be a symlink.
+  local name expected link target
+  for name in .env.sepolia data; do
+    expected="$DEV_DIR/$name"
+    link="$PINNED_TREE/$name"
+    if [[ ! -L "$link" ]]; then
+      echo "FAIL  pinned tree $name is missing or not a symlink"
+      FAILS=$((FAILS + 1))
+      return
+    fi
+    target="$(readlink "$link")"
+    if [[ "$target" != "$expected" ]]; then
+      echo "FAIL  pinned tree $name symlink points at ${target} (expected ${expected})"
+      FAILS=$((FAILS + 1))
+      return
+    fi
+    if [[ ! -e "$link" ]]; then
+      echo "FAIL  pinned tree $name symlink is dangling"
+      FAILS=$((FAILS + 1))
+      return
+    fi
+  done
 
   echo "PASS  pinned tree  branch=main  clean  $(git -C "$PINNED_TREE" log -1 --format='%h %s')"
 }

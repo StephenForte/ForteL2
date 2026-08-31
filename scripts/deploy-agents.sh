@@ -62,7 +62,12 @@ branch_of() {
 }
 
 is_dirty() {
-  [[ -n "$(git -C "$1" status --porcelain)" ]]
+  # .env / .env.sepolia / data are gitignored as files-or-dirs in the real repo
+  # for `data/` (trailing slash = directory only). A symlink named data is not
+  # a directory, so it would otherwise show as untracked and block every update.
+  local leftover
+  leftover="$(git -C "$1" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data)$' || true)"
+  [[ -n "$leftover" ]]
 }
 
 resolve_remote() {
@@ -76,14 +81,20 @@ resolve_remote() {
   printf '%s' "https://github.com/StephenForte/ForteL2.git"
 }
 
-# $1 = name (.env.sepolia / .env). Missing source: required for .env.sepolia,
-# optional for .env. Existing regular file in the pinned tree → refuse (never
-# silently replace a real file with a symlink). Existing correct symlink → ok.
+# $1 = name (.env.sepolia / .env / data). Missing source: required when $2=1,
+# optional otherwise. Existing regular file/dir in the pinned tree → refuse
+# (never silently replace a real path with a symlink). Existing correct
+# symlink → ok. $3=1 → mkdir -p the source first (data/).
 ensure_env_symlink() {
   local name="$1"
   local required="${2:-0}"
+  local mkdir_src="${3:-0}"
   local src="$DEV/$name"
   local dst="$PINNED/$name"
+
+  if [[ "$mkdir_src" -eq 1 ]]; then
+    mkdir -p "$src"
+  fi
 
   if [[ ! -e "$src" && ! -L "$src" ]]; then
     if [[ "$required" -eq 1 ]]; then
@@ -172,6 +183,14 @@ if [[ -d "$PINNED" ]]; then
   fi
   if is_dirty "$PINNED"; then
     die_dirty
+  fi
+
+  pinned_origin="$(git -C "$PINNED" remote get-url origin 2>/dev/null || true)"
+  if [[ -z "$pinned_origin" ]]; then
+    die "pinned tree has no origin remote"
+  fi
+  if [[ "$(normalize_git_url "$pinned_origin")" != "$(normalize_git_url "$REMOTE")" ]]; then
+    die_wrong_origin "$pinned_origin" "$REMOTE"
   fi
 
   git -C "$PINNED" fetch origin

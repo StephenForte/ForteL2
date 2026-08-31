@@ -87,4 +87,4 @@ If you previously used `crontab` for `dev-sleep`, remove those lines (`crontab -
 ls -la data/pipeline-health.json
 ```
 
-That `data/` is `$DATA_DIR` from the symlinked `.env.sepolia` (the Sepolia datadir, not a second copy under the pinned tree).
+That `data/` is the **dev checkout's** `data/` (symlinked from the pinned tree). `refresh_health.sh` writes repo-relative `data/pipeline-health.json`; `alert-watch.sh` reads `$FORTEL2_ROOT/data` after the env file sets `FORTEL2_ROOT` to the mutable checkout. The symlink is what keeps those two paths the same file.

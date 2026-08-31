@@ -7713,7 +7713,7 @@ pa_init_origin() {
   local seed="$PA_FIX/seed"
   git init -q -b main "$seed"
   printf 'seed\n' > "$seed/README"
-  printf '.env\n.env.sepolia\n' > "$seed/.gitignore"
+  printf '.env\n.env.sepolia\ndata/\n' > "$seed/.gitignore"
   pa_git -C "$seed" add README .gitignore
   pa_git -C "$seed" commit -q -m seed
   git clone -q --bare "$seed" "$origin"
@@ -7731,6 +7731,15 @@ pa_deploy() {
   env FORTEL2_AGENTS_DIR="$1" FORTEL2_DEV_DIR="$PA_FIX/dev" \
     FORTEL2_AGENTS_REMOTE="$PA_FIX/origin.git" \
     "$PA_DEPLOY" 2>&1
+}
+
+pa_cl() {
+  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
+    CHECK_LAUNCHD_AGENTS_DIR="${1:-$PA_HOST}" \
+    CHECK_LAUNCHD_PINNED_TREE="${2:-$PA_AUDIT}" \
+    CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
+    CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
+    "$PA_CL" 2>&1 || true
 }
 
 # --- (c) every plist ProgramArguments references only the pinned tree ---
@@ -7931,18 +7940,23 @@ PA_AUDIT="$PA_FIX/audit-tree"
 git init -q -b main "$PA_AUDIT"
 git -C "$PA_AUDIT" remote add origin "$(git -C "$PA_ROOT" remote get-url origin)"
 pa_git -C "$PA_AUDIT" commit -q --allow-empty -m audit
-mkdir -p "$PA_AUDIT/.git/info"
+mkdir -p "$PA_AUDIT/.git/info" "$PA_FIX/dev/data"
 printf '.env.sepolia\n.env\ndata\n' >> "$PA_AUDIT/.git/info/exclude"
-ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
 
-PA_CL_OLD="$(
-  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
-  CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
-  CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
-  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
-  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
-  "$PA_CL" 2>&1 || true
-)"
+# Missing .env.sepolia symlink is FAIL even though gitignore hides it.
+PA_CL_NOSYM="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
+if echo "$PA_CL_NOSYM" | grep -q 'FAIL  pinned tree .env.sepolia is missing or not a symlink'; then
+  echo "PASS pin-agents check-launchd FAILs a pinned tree without .env.sepolia symlink"
+else
+  echo "FAIL check-launchd must FAIL when .env.sepolia is not a symlink" >&2
+  echo "$PA_CL_NOSYM" >&2
+  fail=1
+fi
+
+ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
+ln -s "$PA_FIX/dev/data" "$PA_AUDIT/data"
+
+PA_CL_OLD="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
 if echo "$PA_CL_OLD" | grep -q 'FAIL  com.steve.fortel2-sleep' \
   && echo "$PA_CL_OLD" | grep -q '/Users/steveforte/ForteL2' \
   && echo "$PA_CL_OLD" | grep -q 'PASS  pinned tree'; then
@@ -7955,14 +7969,7 @@ fi
 
 # Pinned-tree audit: dirty / not-main / missing are FAIL (read-only).
 printf 'dirt\n' > "$PA_AUDIT/dirt.txt"
-PA_CL_DIRTY="$(
-  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
-  CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
-  CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
-  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
-  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
-  "$PA_CL" 2>&1 || true
-)"
+PA_CL_DIRTY="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
 rm -f "$PA_AUDIT/dirt.txt"
 if echo "$PA_CL_DIRTY" | grep -q 'FAIL  pinned tree is dirty'; then
   echo "PASS pin-agents check-launchd FAILs a dirty pinned tree"
@@ -7973,14 +7980,7 @@ else
 fi
 
 git -C "$PA_AUDIT" checkout -q -b not-main
-PA_CL_NM="$(
-  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
-  CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
-  CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
-  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
-  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
-  "$PA_CL" 2>&1 || true
-)"
+PA_CL_NM="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
 git -C "$PA_AUDIT" checkout -q main
 if echo "$PA_CL_NM" | grep -q 'FAIL  pinned tree is not on branch main'; then
   echo "PASS pin-agents check-launchd FAILs a non-main pinned tree"
@@ -7990,14 +7990,7 @@ else
   fail=1
 fi
 
-PA_CL_MISS="$(
-  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
-  CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
-  CHECK_LAUNCHD_PINNED_TREE="$PA_FIX/no-such-tree" \
-  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
-  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
-  "$PA_CL" 2>&1 || true
-)"
+PA_CL_MISS="$(pa_cl "$PA_HOST" "$PA_FIX/no-such-tree")"
 if echo "$PA_CL_MISS" | grep -q 'FAIL  pinned tree missing'; then
   echo "PASS pin-agents check-launchd FAILs a missing pinned tree"
 else
@@ -8007,14 +8000,7 @@ else
 fi
 
 # Repo template audit (python3, no plutil) PASSes current plists.
-PA_CL_REPO="$(
-  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
-  CHECK_LAUNCHD_AGENTS_DIR="$PA_FIX/empty-agents" \
-  CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
-  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
-  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
-  "$PA_CL" 2>&1 || true
-)"
+PA_CL_REPO="$(pa_cl "$PA_FIX/empty-agents" "$PA_AUDIT")"
 if echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-sleep  repo script=/Users/steveforte/fortel2-agents/run_dev_sleep.sh' \
   && echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-wake  repo script=/Users/steveforte/fortel2-agents/run_dev_wake.sh' \
   && echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-health  repo script=/Users/steveforte/fortel2-agents/refresh_health.sh' \
@@ -8060,8 +8046,8 @@ unset PA_DEPLOY PA_CL PA_LAUNCHD PA_ROOT PA_FIX PA_PIN PA_OUT PA_EC PA_OUT2 PA_E
 unset PA_OLD_HEAD PA_FF PA_FF_EC PA_NEW_HEAD PA_DIRTY PA_DIRTY_EC
 unset PA_BRANCH PA_BRANCH_EC PA_DIV PA_DIV_EC PA_CLEAN PA_CLEAN_EC PA_REG PA_REG_EC
 unset PA_HOST PA_AUDIT PA_CL_OLD PA_CL_DIRTY PA_CL_NM PA_CL_MISS PA_CL_REPO PA_CL_ENV
-unset PA_PLIST_OLD PA_PLIST_PINNED PA_WRONG PA_WO PA_WO_EC
-unset -f cleanup_pa pa_git pa_init_origin pa_dev_secrets pa_deploy 2>/dev/null || true
+unset PA_CL_NOSYM PA_PLIST_OLD PA_PLIST_PINNED PA_WRONG PA_WO PA_WO_EC
+unset -f cleanup_pa pa_git pa_init_origin pa_dev_secrets pa_deploy pa_cl 2>/dev/null || true
 
 # =============================================================================
 # end pin-agents-worktree block
