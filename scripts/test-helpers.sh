@@ -7118,6 +7118,29 @@ else
   fail=1
 fi
 
+# Codex P2: zero-padded cap is canonical base-10 (08 → 8), not octal.
+RG_RT_OCT="$(rg_rt_analyze "$RG_RT_FIX/cap.json" 08)" && RG_RT_OCT_EC=0 || RG_RT_OCT_EC=$?
+if [[ "$RG_RT_OCT_EC" -eq 0 ]] \
+  && echo "$RG_RT_OCT" | grep -q '^max_txs=8$' \
+  && grep -q '10#\$MAX_TXS_PER_RUN' "$RG_RT" \
+  && grep -q '10#\$max_txs' "$RG_RT"; then
+  echo "PASS resolve-games zero-padded max_txs is canonical base-10"
+else
+  echo "FAIL RESOLVE_GAMES_MAX_TXS_PER_RUN=08 should plan max_txs=8 (ec=$RG_RT_OCT_EC)" >&2
+  echo "$RG_RT_OCT" >&2
+  fail=1
+fi
+
+# Codex P2: live fetch uses initBonds(respected), not a hardcoded 1.
+RG_RT_FETCH="$(awk '/^def fetch_snapshot\(/,/^def fetch_one_game\(/' "$RG_RT")"
+if echo "$RG_RT_FETCH" | grep -q 'initBonds(uint32)(uint256)", respected' \
+  && ! echo "$RG_RT_FETCH" | grep -q 'initBonds(uint32)(uint256)", 1)'; then
+  echo "PASS resolve-games fetch initBonds uses the snapshot respected type"
+else
+  echo "FAIL fetch_snapshot must call initBonds(respected), not initBonds(1)" >&2
+  fail=1
+fi
+
 cleanup_rg_rt
 trap - EXIT
 unset RG_RT RG_RT_PY_DIR RG_RT_PATH RG_RT_FIX RG_RT_AB RG_RT_AB_EC

@@ -131,6 +131,9 @@ case "$MAX_TXS_PER_RUN" in
     exit 1
     ;;
 esac
+# Canonical base-10: a value like 08 is digit-valid but bash [[ -ge ]]
+# treats it as octal and can skip the cap (Codex P2 on #182).
+MAX_TXS_PER_RUN=$((10#$MAX_TXS_PER_RUN))
 export RESOLVE_GAMES_MAX_TXS_PER_RUN="$MAX_TXS_PER_RUN"
 
 if [[ "$ANALYZE_ONLY" -eq 1 && "$EXECUTE" -eq 1 ]]; then
@@ -817,7 +820,8 @@ def fetch_snapshot(out_path, extra):
     now = l1_timestamp(rpc)
     finality = parse_uint(cast_call(rpc, asr, "disputeGameFinalityDelaySeconds()(uint256)")[0])
     weth_delay = parse_uint(cast_call(rpc, weth, "delay()(uint256)")[0])
-    init_bond = parse_uint(cast_call(rpc, factory, "initBonds(uint32)(uint256)", 1)[0])
+    respected = parse_uint(cast_call(rpc, asr, "respectedGameType()(uint32)")[0])
+    init_bond = parse_uint(cast_call(rpc, factory, "initBonds(uint32)(uint256)", respected)[0])
     impl8 = parse_addr(cast_call(rpc, factory, "gameImpls(uint32)(address)", 8)[0])
     impl1 = parse_addr(cast_call(rpc, factory, "gameImpls(uint32)(address)", 1)[0])
     try:
@@ -832,7 +836,6 @@ def fetch_snapshot(out_path, extra):
     anchor = cast_call(rpc, asr, "anchors(uint32)(bytes32,uint256)", 1)
     anchor_root = parse_addr(anchor[0])
     anchor_block = parse_uint(anchor[1]) if len(anchor) > 1 else 0
-    respected = parse_uint(cast_call(rpc, asr, "respectedGameType()(uint32)")[0])
     weth_bal = parse_uint(subprocess.check_output(
         ["cast", "balance", weth, "--rpc-url", rpc],
         stderr=subprocess.STDOUT, text=True,
@@ -1140,6 +1143,7 @@ v=s.get("respected_game_type", "")
 print("" if v is None else v)
 ' "$snapshot_file")"
   max_txs="${RESOLVE_GAMES_MAX_TXS_PER_RUN:-5}"
+  max_txs=$((10#$max_txs))
 
   if [[ -z "$selected_csv" ]]; then
     echo "EXECUTE: no games selected; sending nothing"
