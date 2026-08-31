@@ -20,11 +20,13 @@
 #                         sleep window (a failed 03:00 wake)
 #   cloudflared-failing   system LaunchDaemon com.cloudflare.cloudflared is
 #                         installed (plist exists) and unhealthy: launchctl print
-#                         missing/unparseable, or nonzero last exit while not
-#                         running. No overnight-sleep grace — KeepAlive 24/7.
-#                         Plist absent is a deliberate no-tunnel host, never an
-#                         alert. Err-log "Failed to read token file" may enrich
-#                         the body; daemon state is the trigger (D-0107 F5).
+#                         missing/unparseable, or state is not running (any last
+#                         exit code — KeepAlive SuccessfulExit=false, so a clean
+#                         exit is a permanent silent outage). No overnight-sleep
+#                         grace — KeepAlive 24/7. Plist absent is a deliberate
+#                         no-tunnel host, never an alert. Err-log "Failed to
+#                         read token file" may enrich the body; daemon state is
+#                         the trigger (D-0107 F5).
 #
 # Verdicts OK / WARN / INSUFFICIENT never alert (WARN is inside funding-watch's
 # documented tolerance; alerting on it is the cry-wolf class #146 removed).
@@ -66,6 +68,8 @@
 #   ALERT_WATCH_CURL  ALERT_WATCH_OSASCRIPT  ALERT_WATCH_LAUNCHCTL
 #     (absolute shim paths — lib.sh prepends homebrew onto PATH)
 #   ALERT_WATCH_CLOUDFLARED_PLIST  ALERT_WATCH_CLOUDFLARED_ERR
+#     A launchctl shim without CLOUDFLARED_PLIST does not observe the host's
+#     real tunnel plist (existing shims print resolve-games not-running/0).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,7 +103,13 @@ EMAIL_FROM="${ALERT_EMAIL_FROM:-onboarding@resend.dev}"
 EMAIL_TO="${ALERT_EMAIL_TO:-}"
 LABEL="com.steve.fortel2-resolve-games"
 # System-domain tunnel (D-0034 / D-0035). Override paths are test-only.
-CF_PLIST="${ALERT_WATCH_CLOUDFLARED_PLIST:-/Library/LaunchDaemons/com.cloudflare.cloudflared.plist}"
+# A launchctl shim plus no plist override must not see the host's real
+# tunnel — older shims always print not-running/0 for every print target.
+if [ -n "${ALERT_WATCH_LAUNCHCTL:-}" ] && [ -z "${ALERT_WATCH_CLOUDFLARED_PLIST:-}" ]; then
+  CF_PLIST=""
+else
+  CF_PLIST="${ALERT_WATCH_CLOUDFLARED_PLIST:-/Library/LaunchDaemons/com.cloudflare.cloudflared.plist}"
+fi
 CF_ERR="${ALERT_WATCH_CLOUDFLARED_ERR:-/Library/Logs/com.cloudflare.cloudflared.err.log}"
 CF_LABEL="com.cloudflare.cloudflared"
 
@@ -525,7 +535,9 @@ if cf_plist and os.path.exists(cf_plist):
             cf_print_ok = True
             cf_stdout = cf_proc.stdout or ""
     cf_state, cf_exit = parse_cf_print(cf_stdout)
-    # Unhealthy: print missing/unparseable, or nonzero last exit while not running.
+    # Unhealthy: print missing/unparseable, or any not-running state.
+    # KeepAlive SuccessfulExit=false: a clean exit is never restarted.
+    # Last exit code is body detail, not a gate.
     cf_unhealthy = False
     if not cf_print_ok:
         cf_unhealthy = True
@@ -539,17 +551,15 @@ if cf_plist and os.path.exists(cf_plist):
             "launchctl print system/%s output unparseable — cannot determine "
             "daemon state (fail toward alerting)." % cf_label
         )
-    elif cf_state == "not running" and cf_exit not in (None, 0):
+    elif cf_state == "not running":
         cf_unhealthy = True
+        if cf_exit is None:
+            cf_exit_disp = "unparseable"
+        else:
+            cf_exit_disp = str(cf_exit)
         cf_why = (
-            "system/%s is not running with last exit code %s."
-            % (cf_label, cf_exit)
-        )
-    elif cf_state == "not running" and cf_exit is None:
-        cf_unhealthy = True
-        cf_why = (
-            "system/%s is not running and last exit code is unparseable."
-            % cf_label
+            "system/%s is not running (last exit code %s)."
+            % (cf_label, cf_exit_disp)
         )
     elif cf_state not in ("running", "not running"):
         cf_unhealthy = True

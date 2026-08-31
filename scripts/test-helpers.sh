@@ -6979,6 +6979,25 @@ else
   fail=1
 fi
 
+# Review #181: not running + last exit 0 is still a permanent outage
+# (KeepAlive SuccessfulExit=false). Exit code is body detail, not a gate.
+CFW_PLIST="$CFW_FIX/cf.plist"
+: > "$CFW_PLIST"
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='not running' ALERT_WATCH_CF_EXIT=0 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-failing"* ]] \
+  && grep -qi 'not running' "$CFW_FIX/mock/osascript.argv" \
+  && grep -E -q 'last exit code 0' "$CFW_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch cloudflared-failing fires on not running even when last exit is 0"
+else
+  echo "FAIL not-running + last exit 0 must alert (KeepAlive will not restart a clean exit) (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
 # (c) plist absent → no condition, even if the shim would report unhealthy.
 CFW_PLIST="$CFW_FIX/no-such-cloudflared.plist"
 rm -f "$CFW_PLIST"

@@ -313,20 +313,15 @@ check_cloudflared_daemon() {
   fi
 
   if [[ -n "$exit_raw" ]]; then
-    exit_disp="$(printf '%s\n' "$exit_raw" | awk '{print $1}')"
+    exit_disp="$exit_raw"
   fi
 
   if [[ "$state_disp" == "unparseable" ]]; then
     unhealthy=1
     detail="launchctl print unparseable"
   elif [[ "$state_disp" == "not running" ]]; then
-    if [[ "$exit_disp" =~ ^[0-9]+$ && "$exit_disp" != "0" ]]; then
-      unhealthy=1
-      detail="nonzero last exit while not running"
-    elif [[ ! "$exit_disp" =~ ^[0-9]+$ ]]; then
-      unhealthy=1
-      detail="not running; last exit code unparseable"
-    fi
+    unhealthy=1
+    detail="not running (KeepAlive does not restart a clean exit)"
   elif [[ "$state_disp" != "running" ]]; then
     unhealthy=1
     detail="unknown state"
