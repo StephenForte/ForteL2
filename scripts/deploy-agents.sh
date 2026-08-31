@@ -38,6 +38,20 @@ die_not_main() {
 die_regular_env() {
   die "refusing to overwrite existing file with a symlink ($1) — operator must move it aside"
 }
+die_wrong_origin() {
+  die "pinned tree origin is not this repo (pinned=${1:-unknown} expected=${2:-unknown}) — refuse to update (operator decision)"
+}
+
+normalize_git_url() {
+  local u="$1"
+  u="${u%.git}"
+  u="${u%/}"
+  u="${u#git@}"
+  u="${u#https://}"
+  u="${u#http://}"
+  u="${u/://}"
+  printf '%s' "$u"
+}
 
 in_git() {
   git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1
@@ -96,6 +110,45 @@ ensure_env_symlink() {
   echo "symlink $name → $src (created)"
 }
 
+# gitignore "data/" matches directories only — a symlink named data is untracked
+# and would make every later deploy refuse dirty. Local exclude, not a
+# .gitignore edit (the pinned tree is a clone; this file is not committed).
+ensure_git_exclude() {
+  local line="$1"
+  local exclude="$PINNED/.git/info/exclude"
+  mkdir -p "$PINNED/.git/info"
+  touch "$exclude"
+  if grep -Fqx "$line" "$exclude"; then
+    return 0
+  fi
+  printf '%s\n' "$line" >> "$exclude"
+}
+
+# refresh_health.sh writes repo-relative data/; alert-watch.sh reads
+# $FORTEL2_ROOT/data after sourcing .env.sepolia (FORTEL2_ROOT still names
+# the checkout). One symlink keeps those files in the same place.
+ensure_data_symlink() {
+  local src="$DEV/data"
+  local dst="$PINNED/data"
+  mkdir -p "$src"
+  if [[ -L "$dst" ]]; then
+    local target
+    target="$(readlink "$dst")"
+    if [[ "$target" == "$src" ]]; then
+      echo "symlink data → $src (already)"
+      ensure_git_exclude "data"
+      return 0
+    fi
+    die "symlink $dst points at $target, expected $src — refuse to retarget (operator decision)"
+  fi
+  if [[ -e "$dst" ]]; then
+    die_regular_env "$dst"
+  fi
+  ln -s "$src" "$dst"
+  ensure_git_exclude "data"
+  echo "symlink data → $src (created)"
+}
+
 REMOTE="$(resolve_remote)"
 
 if [[ -e "$PINNED" && ! -d "$PINNED" ]]; then
@@ -104,6 +157,14 @@ fi
 
 if [[ -d "$PINNED" ]]; then
   in_git "$PINNED" || die "path exists but is not a git checkout: $PINNED"
+
+  pinned_origin="$(git -C "$PINNED" remote get-url origin 2>/dev/null || true)"
+  if [[ -z "$pinned_origin" ]]; then
+    die_wrong_origin "(none)" "$REMOTE"
+  fi
+  if [[ "$(normalize_git_url "$pinned_origin")" != "$(normalize_git_url "$REMOTE")" ]]; then
+    die_wrong_origin "$pinned_origin" "$REMOTE"
+  fi
 
   local_branch="$(branch_of "$PINNED")"
   if [[ "$local_branch" != "main" ]]; then
@@ -136,6 +197,7 @@ fi
 
 ensure_env_symlink ".env.sepolia" 1
 ensure_env_symlink ".env" 0
+ensure_data_symlink
 
 echo
 echo "agents now run:"

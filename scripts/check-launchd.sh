@@ -21,6 +21,7 @@
 #     (absolute shim path — lib.sh prepends homebrew onto PATH)
 #   CHECK_LAUNCHD_AGENTS_DIR         fake ~/Library/LaunchAgents for fixtures
 #   CHECK_LAUNCHD_PINNED_TREE        fake /Users/steveforte/fortel2-agents
+#   CHECK_LAUNCHD_DEV_DIR            fake ~/ForteL2 (env-symlink target)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -38,6 +39,7 @@ AGENTS_DIR="${CHECK_LAUNCHD_AGENTS_DIR:-${HOME}/Library/LaunchAgents}"
 PINNED_TREE="${CHECK_LAUNCHD_PINNED_TREE:-/Users/steveforte/fortel2-agents}"
 PINNED_PREFIX="/Users/steveforte/fortel2-agents"
 OLD_DEV_PREFIX="/Users/steveforte/ForteL2"
+DEV_DIR="${CHECK_LAUNCHD_DEV_DIR:-/Users/steveforte/ForteL2}"
 # Verbs for operator-facing hints only (kept out of source as adjacent tokens — see checks).
 _LC_VERB_OUT=bootout
 _LC_VERB_STRAP=bootstrap
@@ -249,6 +251,26 @@ check_pinned_tree() {
 
   if [[ -n "$(git -C "$PINNED_TREE" status --porcelain)" ]]; then
     echo "FAIL  pinned tree is dirty"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  local sepolia_link="$PINNED_TREE/.env.sepolia"
+  local want="$DEV_DIR/.env.sepolia"
+  if [[ ! -L "$sepolia_link" ]]; then
+    echo "FAIL  pinned tree .env.sepolia is missing or not a symlink (jobs load FORTEL2_ENV=.env.sepolia)"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+  local target
+  target="$(readlink "$sepolia_link")"
+  if [[ "$target" != "$want" ]]; then
+    echo "FAIL  pinned tree .env.sepolia does not point at the dev checkout (have=${target} want=${want})"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+  if [[ ! -e "$sepolia_link" ]]; then
+    echo "FAIL  pinned tree .env.sepolia is dangling"
     FAILS=$((FAILS + 1))
     return
   fi

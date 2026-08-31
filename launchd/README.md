@@ -2,7 +2,7 @@
 
 Checked-in LaunchAgents for the operator Mac mini. They execute a **pinned clone** of `main` at `/Users/steveforte/fortel2-agents`, not the mutable `~/ForteL2` checkout (D-0113 Finding 2). Parallel workers check branches out of `~/ForteL2` at will; a stale or broken branch there would silently change overnight sleep/wake.
 
-Deploy / update that clone with `./scripts/deploy-agents.sh` (fast-forward-only; refuses dirty / diverged / not-main). `.env.sepolia` in the pinned tree is a symlink back to the dev checkout — one source of secrets. The pinned tree does **not** self-update; agents never refuse-if-not-main (a fail-closed guard at 03:00 is worse than the hazard).
+Deploy / update that clone with `./scripts/deploy-agents.sh` (fast-forward-only; refuses dirty / diverged / not-main / wrong origin). `.env.sepolia` in the pinned tree is a symlink back to the dev checkout — one source of secrets. `data/` is also a symlink so `refresh_health.sh` (writes repo-relative `data/`) and `alert-watch.sh` (reads `$FORTEL2_ROOT/data` after the env file sets `FORTEL2_ROOT` to the checkout) share the same files. The pinned tree does **not** self-update; agents never refuse-if-not-main (a fail-closed guard at 03:00 is worse than the hazard).
 
 User agents only run while that user session is logged in (auto-login on the mini is fine).
 

@@ -7798,6 +7798,8 @@ if [[ "$PA_EC" -eq 0 ]] \
   && [[ -L "$PA_PIN/.env.sepolia" ]] \
   && [[ "$(readlink "$PA_PIN/.env.sepolia")" == "$PA_FIX/dev/.env.sepolia" ]] \
   && [[ -L "$PA_PIN/.env" ]] \
+  && [[ -L "$PA_PIN/data" ]] \
+  && [[ "$(readlink "$PA_PIN/data")" == "$PA_FIX/dev/data" ]] \
   && echo "$PA_OUT" | grep -q 'agents now run'; then
   echo "PASS pin-agents deploy creates pinned clone on main with env symlinks"
 else
@@ -7898,6 +7900,21 @@ else
   fail=1
 fi
 
+# Existing clone whose origin is not this repo → refuse before fetch/symlink.
+PA_WRONG="$PA_FIX/wrong-origin"
+git init -q -b main "$PA_WRONG"
+git -C "$PA_WRONG" remote add origin "https://github.com/example/not-fortel2.git"
+pa_git -C "$PA_WRONG" commit -q --allow-empty -m not-us
+PA_WO="$(pa_deploy "$PA_WRONG")" && PA_WO_EC=0 || PA_WO_EC=$?
+if [[ "$PA_WO_EC" -ne 0 ]] \
+  && echo "$PA_WO" | grep -q 'pinned tree origin is not this repo'; then
+  echo "PASS pin-agents deploy refuses a clone whose origin is not this repo"
+else
+  echo "FAIL existing clone with a foreign origin must refuse (ec=$PA_WO_EC)" >&2
+  echo "$PA_WO" >&2
+  fail=1
+fi
+
 # --- (d) check-launchd FAILs a host plist pointing at ~/ForteL2 ---
 PA_HOST="$PA_FIX/host-agents"
 mkdir -p "$PA_HOST"
@@ -7914,11 +7931,15 @@ PA_AUDIT="$PA_FIX/audit-tree"
 git init -q -b main "$PA_AUDIT"
 git -C "$PA_AUDIT" remote add origin "$(git -C "$PA_ROOT" remote get-url origin)"
 pa_git -C "$PA_AUDIT" commit -q --allow-empty -m audit
+mkdir -p "$PA_AUDIT/.git/info"
+printf '.env.sepolia\n.env\ndata\n' >> "$PA_AUDIT/.git/info/exclude"
+ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
 
 PA_CL_OLD="$(
   env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
   CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
   CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
+  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
   CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
   "$PA_CL" 2>&1 || true
 )"
@@ -7938,6 +7959,7 @@ PA_CL_DIRTY="$(
   env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
   CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
   CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
+  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
   CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
   "$PA_CL" 2>&1 || true
 )"
@@ -7955,6 +7977,7 @@ PA_CL_NM="$(
   env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
   CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
   CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
+  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
   CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
   "$PA_CL" 2>&1 || true
 )"
@@ -7971,6 +7994,7 @@ PA_CL_MISS="$(
   env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
   CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
   CHECK_LAUNCHD_PINNED_TREE="$PA_FIX/no-such-tree" \
+  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
   CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
   "$PA_CL" 2>&1 || true
 )"
@@ -7987,6 +8011,7 @@ PA_CL_REPO="$(
   env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
   CHECK_LAUNCHD_AGENTS_DIR="$PA_FIX/empty-agents" \
   CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
+  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
   CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
   "$PA_CL" 2>&1 || true
 )"
@@ -7999,6 +8024,25 @@ if echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-sleep  repo script=/Use
 else
   echo "FAIL check-launchd must PASS repo templates pointing at fortel2-agents" >&2
   echo "$PA_CL_REPO" >&2
+  fail=1
+fi
+
+# .env.sepolia is gitignored — porcelain cannot see it; audit the symlink.
+rm -f "$PA_AUDIT/.env.sepolia"
+PA_CL_ENV="$(
+  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
+  CHECK_LAUNCHD_AGENTS_DIR="$PA_FIX/empty-agents" \
+  CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
+  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
+  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
+  "$PA_CL" 2>&1 || true
+)"
+ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
+if echo "$PA_CL_ENV" | grep -q 'FAIL  pinned tree .env.sepolia is missing or not a symlink'; then
+  echo "PASS pin-agents check-launchd FAILs a pinned tree missing the .env.sepolia symlink"
+else
+  echo "FAIL check-launchd must FAIL when .env.sepolia is not a symlink to the checkout" >&2
+  echo "$PA_CL_ENV" >&2
   fail=1
 fi
 
@@ -8015,8 +8059,8 @@ trap - EXIT
 unset PA_DEPLOY PA_CL PA_LAUNCHD PA_ROOT PA_FIX PA_PIN PA_OUT PA_EC PA_OUT2 PA_EC2
 unset PA_OLD_HEAD PA_FF PA_FF_EC PA_NEW_HEAD PA_DIRTY PA_DIRTY_EC
 unset PA_BRANCH PA_BRANCH_EC PA_DIV PA_DIV_EC PA_CLEAN PA_CLEAN_EC PA_REG PA_REG_EC
-unset PA_HOST PA_AUDIT PA_CL_OLD PA_CL_DIRTY PA_CL_NM PA_CL_MISS PA_CL_REPO
-unset PA_PLIST_OLD PA_PLIST_PINNED
+unset PA_HOST PA_AUDIT PA_CL_OLD PA_CL_DIRTY PA_CL_NM PA_CL_MISS PA_CL_REPO PA_CL_ENV
+unset PA_PLIST_OLD PA_PLIST_PINNED PA_WRONG PA_WO PA_WO_EC
 unset -f cleanup_pa pa_git pa_init_origin pa_dev_secrets pa_deploy 2>/dev/null || true
 
 # =============================================================================
