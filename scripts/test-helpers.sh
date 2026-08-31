@@ -3259,9 +3259,11 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
   "finality_delay": 1800,
   "weth_delay": 3600,
   "init_bond_wei": "80000000000000000",
+  "respected_game_type": 1,
   "games": [
     {
       "index": 0,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000001",
       "created_at": 980000,
       "max_clock_duration": 7200,
@@ -3274,6 +3276,7 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
     },
     {
       "index": 1,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000002",
       "created_at": 990000,
       "max_clock_duration": 7200,
@@ -3286,6 +3289,7 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
     },
     {
       "index": 2,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000003",
       "created_at": 980000,
       "max_clock_duration": 7200,
@@ -3298,6 +3302,7 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
     },
     {
       "index": 3,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000004",
       "created_at": 980000,
       "max_clock_duration": 7200,
@@ -3310,6 +3315,7 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
     },
     {
       "index": 4,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000005",
       "created_at": 999000,
       "max_clock_duration": 7200,
@@ -3322,6 +3328,7 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
     },
     {
       "index": 5,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000006",
       "created_at": 990000,
       "max_clock_duration": 7200,
@@ -3334,6 +3341,7 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
     },
     {
       "index": 6,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000007",
       "created_at": 990000,
       "max_clock_duration": 7200,
@@ -3346,6 +3354,7 @@ cat >"$RG_FIXTURE_DIR/games.json" <<'EOF'
     },
     {
       "index": 7,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000008",
       "created_at": 990000,
       "max_clock_duration": 7200,
@@ -3363,7 +3372,7 @@ EOF
 # Restricted PATH: python3 must work, cast must not. Proves analyze-only is offline.
 RG_PY_DIR="$(dirname "$(command -v python3)")"
 RG_PATH="$RG_PY_DIR:/usr/bin:/bin"
-RG_ENV=(env -u FORTEL2_ENV PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/games.json")
+RG_ENV=(env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/games.json")
 
 RG_ALL_OUT="$("${RG_ENV[@]}" "$RESOLVE_GAMES" --analyze-only 2>&1)" && RG_ALL_EC=0 || RG_ALL_EC=$?
 if [[ "$RG_ALL_EC" -eq 0 ]] \
@@ -3465,6 +3474,7 @@ cat >"$RG_FIXTURE_DIR/type8.json" <<'EOF'
   "finality_delay": 1800,
   "weth_delay": 3600,
   "init_bond_wei": "80000000000000000",
+  "respected_game_type": 8,
   "games": [
     {
       "index": 1,
@@ -3496,16 +3506,18 @@ cat >"$RG_FIXTURE_DIR/type8.json" <<'EOF'
 }
 EOF
 RG_T8_OUT="$(
-  env -u FORTEL2_ENV PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/type8.json" \
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/type8.json" \
     "$RESOLVE_GAMES" --analyze-only 2>&1
 )" && RG_T8_EC=0 || RG_T8_EC=$?
 if [[ "$RG_T8_EC" -eq 0 ]] \
-  && echo "$RG_T8_OUT" | grep -q 'game 1 SKIP not_type_1' \
-  && echo "$RG_T8_OUT" | grep -q 'game 2 ACTION resolveClaim,resolve' \
-  && echo "$RG_T8_OUT" | grep -q 'selected_indexes=2'; then
-  echo "PASS resolve-games non-type-1 game is not selected"
+  && echo "$RG_T8_OUT" | grep -q 'respected_game_type=8' \
+  && echo "$RG_T8_OUT" | grep -q 'game 1 ACTION resolveClaim,resolve' \
+  && echo "$RG_T8_OUT" | grep -q 'game 2 SKIP not_respected_type' \
+  && echo "$RG_T8_OUT" | grep -q 'selected_indexes=1' \
+  && ! echo "$RG_T8_OUT" | grep -q 'not_type_1'; then
+  echo "PASS resolve-games selects the snapshot respected type (not hardcoded 1)"
 else
-  echo "FAIL resolve-games type-8 game should be skipped (ec=$RG_T8_EC)" >&2
+  echo "FAIL resolve-games type-8 respected should select type 8, skip type 1 (ec=$RG_T8_EC)" >&2
   echo "$RG_T8_OUT" >&2
   fail=1
 fi
@@ -3519,9 +3531,11 @@ cat >"$RG_FIXTURE_DIR/already-claim.json" <<'EOF'
   "finality_delay": 1800,
   "weth_delay": 3600,
   "init_bond_wei": "80000000000000000",
+  "respected_game_type": 1,
   "games": [
     {
       "index": 1,
+      "game_type": 1,
       "address": "0x0000000000000000000000000000000000000002",
       "created_at": 990000,
       "max_clock_duration": 7200,
@@ -3537,7 +3551,7 @@ cat >"$RG_FIXTURE_DIR/already-claim.json" <<'EOF'
 }
 EOF
 RG_ALREADY_OUT="$(
-  env -u FORTEL2_ENV PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/already-claim.json" \
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/already-claim.json" \
     "$RESOLVE_GAMES" --analyze-only 2>&1
 )" && RG_ALREADY_EC=0 || RG_ALREADY_EC=$?
 if [[ "$RG_ALREADY_EC" -eq 0 ]] \
@@ -3559,45 +3573,46 @@ cat >"$RG_FIXTURE_DIR/wm.json" <<'EOF'
   "finality_delay": 1800,
   "weth_delay": 3600,
   "init_bond_wei": "80000000000000000",
+  "respected_game_type": 1,
   "game_count": 8,
   "games": [
     {
-      "index": 0, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 0, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 992000
     },
     {
-      "index": 1, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 1, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 2, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 2, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 3, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 3, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 4, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 4, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 999900, "credit_wei": "80000000000000000",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 5, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 5, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 6, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 6, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "80000000000000000",
       "claim_data_len": 1, "weth_amount_wei": "80000000000000000", "weth_unlock_ts": 999000
     },
     {
-      "index": 7, "created_at": 999000, "max_clock_duration": 7200,
+      "index": 7, "game_type": 1, "created_at": 999000, "max_clock_duration": 7200,
       "status": 0, "resolved_at": 0, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     }
@@ -3608,7 +3623,7 @@ EOF
 rg_wm_analyze() {
   local mark="$1"
   shift
-  env -u FORTEL2_ENV PATH="$RG_PATH" \
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" \
     RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
     RESOLVE_GAMES_WATERMARK="$mark" \
     "$RESOLVE_GAMES" --analyze-only "$@"
@@ -3689,25 +3704,26 @@ cat >"$RG_FIXTURE_DIR/wm-delay.json" <<'EOF'
   "finality_delay": 1800,
   "weth_delay": 3600,
   "init_bond_wei": "80000000000000000",
+  "respected_game_type": 1,
   "game_count": 4,
   "games": [
     {
-      "index": 0, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 0, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 1, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 1, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 2, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 2, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "0",
       "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
     },
     {
-      "index": 3, "created_at": 980000, "max_clock_duration": 7200,
+      "index": 3, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
       "status": 2, "resolved_at": 990000, "credit_wei": "80000000000000000",
       "claim_data_len": 1, "weth_amount_wei": "80000000000000000", "weth_unlock_ts": 999000
     }
@@ -3716,7 +3732,7 @@ cat >"$RG_FIXTURE_DIR/wm-delay.json" <<'EOF'
 EOF
 WM_DELAY="$RG_FIXTURE_DIR/wm-delay-mark.json"
 RG_WM_DELAY_OUT="$(
-  env -u FORTEL2_ENV PATH="$RG_PATH" \
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" \
     RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm-delay.json" \
     RESOLVE_GAMES_WATERMARK="$WM_DELAY" \
     "$RESOLVE_GAMES" --analyze-only 2>&1
@@ -3775,7 +3791,7 @@ fi
 
 printf '%s\n' '{"low_water":4,"factory":"0x0000000000000000000000000000000000000001"}' >"$RG_FIXTURE_DIR/wm-factory.json"
 RG_WM_FAC_OUT="$(
-  env -u FORTEL2_ENV PATH="$RG_PATH" \
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" \
     RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
     RESOLVE_GAMES_WATERMARK="$RG_FIXTURE_DIR/wm-factory.json" \
     RESOLVE_GAMES_FACTORY="0x0000000000000000000000000000000000000002" \
@@ -3795,7 +3811,7 @@ fi
 
 printf 'x\n' >"$RG_FIXTURE_DIR/wm-notdir"
 RG_WM_IO_OUT="$(
-  env -u FORTEL2_ENV PATH="$RG_PATH" \
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" \
     RESOLVE_GAMES_SNAPSHOT="$RG_FIXTURE_DIR/wm.json" \
     RESOLVE_GAMES_WATERMARK="$RG_FIXTURE_DIR/wm-notdir/mark.json" \
     "$RESOLVE_GAMES" --analyze-only 2>&1
@@ -6796,6 +6812,346 @@ else
   echo "FAIL 03-init-l2.sh must restore caller FORTEL2_EL/GENESIS/DATA_DIR" >&2
   fail=1
 fi
+
+# =============================================================================
+# resolve-games-respected-type (D-0105 Finding 4)
+# Filter by snapshot respected_game_type + first-run tx cap.
+# Parallel with check-launchd-cloudflared — this block stays at EOF.
+# Offline fixtures only; no live RPC.
+# =============================================================================
+
+RG_RT="$SCRIPT_DIR/resolve-games-sepolia.sh"
+RG_RT_PY_DIR="$(dirname "$(command -v python3)")"
+RG_RT_PATH="$RG_RT_PY_DIR:/usr/bin:/bin"
+RG_RT_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-rg-respected.XXXXXX")"
+cleanup_rg_rt() { rm -rf "$RG_RT_FIX"; }
+trap cleanup_rg_rt EXIT
+
+rg_rt_analyze() {
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_RT_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$1" \
+    ${2:+RESOLVE_GAMES_MAX_TXS_PER_RUN="$2"} \
+    "$RG_RT" --analyze-only 2>&1
+}
+
+# (a)+(b) respected type from the snapshot: type 8 selected, type 1 skipped.
+# Fails if decide_game is re-hardcoded to type 1.
+cat >"$RG_RT_FIX/match.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "init_bond_wei": "80000000000000000",
+  "respected_game_type": 8,
+  "games": [
+    {
+      "index": 1,
+      "game_type": 8,
+      "address": "0x0000000000000000000000000000000000000008",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    },
+    {
+      "index": 2,
+      "game_type": 1,
+      "address": "0x0000000000000000000000000000000000000001",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_RT_AB="$(rg_rt_analyze "$RG_RT_FIX/match.json")" && RG_RT_AB_EC=0 || RG_RT_AB_EC=$?
+if [[ "$RG_RT_AB_EC" -eq 0 ]] \
+  && echo "$RG_RT_AB" | grep -q '^respected_game_type=8$' \
+  && echo "$RG_RT_AB" | grep -q 'game 1 ACTION resolveClaim,resolve' \
+  && echo "$RG_RT_AB" | grep -q 'game 2 SKIP not_respected_type' \
+  && echo "$RG_RT_AB" | grep -q '^selected_indexes=1$' \
+  && ! echo "$RG_RT_AB" | grep -q 'not_type_1'; then
+  echo "PASS resolve-games selects snapshot respected type, skips a mismatch"
+else
+  echo "FAIL respected-type wiring should select 8 and skip 1 (ec=$RG_RT_AB_EC)" >&2
+  echo "$RG_RT_AB" >&2
+  fail=1
+fi
+
+# (c) missing type information → skip missing_type, never selected.
+cat >"$RG_RT_FIX/missing-game-type.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "respected_game_type": 8,
+  "games": [
+    {
+      "index": 1,
+      "address": "0x0000000000000000000000000000000000000008",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_RT_C1="$(rg_rt_analyze "$RG_RT_FIX/missing-game-type.json")" && RG_RT_C1_EC=0 || RG_RT_C1_EC=$?
+if [[ "$RG_RT_C1_EC" -eq 0 ]] \
+  && echo "$RG_RT_C1" | grep -q 'game 1 SKIP missing_type' \
+  && ! echo "$RG_RT_C1" | grep -qE 'selected_indexes=.*(^|,)1(,|$)' \
+  && ! echo "$RG_RT_C1" | grep -q 'game 1 ACTION'; then
+  echo "PASS resolve-games skips a game missing game_type"
+else
+  echo "FAIL missing game_type must skip, never select (ec=$RG_RT_C1_EC)" >&2
+  echo "$RG_RT_C1" >&2
+  fail=1
+fi
+
+cat >"$RG_RT_FIX/missing-respected.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "games": [
+    {
+      "index": 1,
+      "game_type": 8,
+      "address": "0x0000000000000000000000000000000000000008",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_RT_C2="$(rg_rt_analyze "$RG_RT_FIX/missing-respected.json")" && RG_RT_C2_EC=0 || RG_RT_C2_EC=$?
+if [[ "$RG_RT_C2_EC" -eq 0 ]] \
+  && echo "$RG_RT_C2" | grep -q '^respected_game_type=missing$' \
+  && echo "$RG_RT_C2" | grep -q 'game 1 SKIP missing_type' \
+  && ! echo "$RG_RT_C2" | grep -q 'game 1 ACTION'; then
+  echo "PASS resolve-games skips when snapshot respected_game_type is missing"
+else
+  echo "FAIL missing snapshot type must skip, never select (ec=$RG_RT_C2_EC)" >&2
+  echo "$RG_RT_C2" >&2
+  fail=1
+fi
+
+cat >"$RG_RT_FIX/bad-type.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "respected_game_type": 8,
+  "games": [
+    {
+      "index": 1,
+      "game_type": "nope",
+      "address": "0x0000000000000000000000000000000000000008",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_RT_C3="$(rg_rt_analyze "$RG_RT_FIX/bad-type.json")" && RG_RT_C3_EC=0 || RG_RT_C3_EC=$?
+if [[ "$RG_RT_C3_EC" -eq 0 ]] \
+  && echo "$RG_RT_C3" | grep -q 'game 1 SKIP missing_type' \
+  && ! echo "$RG_RT_C3" | grep -q 'game 1 ACTION'; then
+  echo "PASS resolve-games skips an unparseable game_type"
+else
+  echo "FAIL unparseable game_type must skip, never select (ec=$RG_RT_C3_EC)" >&2
+  echo "$RG_RT_C3" >&2
+  fail=1
+fi
+
+# (d) more ready games than the cap → exactly cap-many action legs, truncation logged.
+cat >"$RG_RT_FIX/cap.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "respected_game_type": 8,
+  "games": [
+    {
+      "index": 1, "game_type": 8, "created_at": 990000, "max_clock_duration": 7200,
+      "status": 0, "resolved_at": 0, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 2, "game_type": 8, "created_at": 990000, "max_clock_duration": 7200,
+      "status": 0, "resolved_at": 0, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 3, "game_type": 8, "created_at": 990000, "max_clock_duration": 7200,
+      "status": 0, "resolved_at": 0, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 4, "game_type": 8, "created_at": 990000, "max_clock_duration": 7200,
+      "status": 0, "resolved_at": 0, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_RT_D="$(rg_rt_analyze "$RG_RT_FIX/cap.json" 5)" && RG_RT_D_EC=0 || RG_RT_D_EC=$?
+RG_RT_D_PLAN="$(printf '%s\n' "$RG_RT_D" | awk -F= '/^PLAN_JSON=/{print substr($0,11)}')"
+RG_RT_D_N="$(printf '%s' "$RG_RT_D_PLAN" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["actions"]))')"
+if [[ "$RG_RT_D_EC" -eq 0 ]] \
+  && echo "$RG_RT_D" | grep -q '^max_txs=5$' \
+  && echo "$RG_RT_D" | grep -q '^actions_ready=5$' \
+  && echo "$RG_RT_D" | grep -q '^txs_cap_truncated=1 remaining_ready=3 (remainder next hour)$' \
+  && [[ "$RG_RT_D_N" == "5" ]]; then
+  echo "PASS resolve-games tx cap plans exactly 5 actions and logs truncation"
+else
+  echo "FAIL tx cap should plan 5 actions and truncate (ec=$RG_RT_D_EC n=$RG_RT_D_N)" >&2
+  echo "$RG_RT_D" >&2
+  fail=1
+fi
+
+# Default cap is 5 when the env is unset (the hourly-agent money guard).
+RG_RT_DEF="$(
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_RT_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_RT_FIX/cap.json" \
+    "$RG_RT" --analyze-only 2>&1
+)" && RG_RT_DEF_EC=0 || RG_RT_DEF_EC=$?
+if [[ "$RG_RT_DEF_EC" -eq 0 ]] \
+  && echo "$RG_RT_DEF" | grep -q '^max_txs=5$' \
+  && echo "$RG_RT_DEF" | grep -q '^txs_cap_truncated=1'; then
+  echo "PASS resolve-games default max_txs is 5"
+else
+  echo "FAIL default RESOLVE_GAMES_MAX_TXS_PER_RUN should be 5 (ec=$RG_RT_DEF_EC)" >&2
+  echo "$RG_RT_DEF" >&2
+  fail=1
+fi
+
+# (e) respected type is taken from the snapshot, not re-fetched per game.
+RG_RT_DECIDE="$(awk '/^def decide_game\(/,/^WATERMARK_TERMINAL_REASONS/' "$RG_RT")"
+RG_RT_FETCH_ONE="$(awk '/^def fetch_one_game\(/,/^def main\(/' "$RG_RT")"
+RG_RT_ABI_N="$(grep -c 'respectedGameType()(uint32)' "$RG_RT" || true)"
+if echo "$RG_RT_DECIDE" | grep -q 'respected_game_type' \
+  && echo "$RG_RT_DECIDE" | grep -q 'not_respected_type' \
+  && echo "$RG_RT_DECIDE" | grep -q 'missing_type' \
+  && ! echo "$RG_RT_DECIDE" | grep -qE 'cast_call|subprocess|respectedGameType' \
+  && ! echo "$RG_RT_DECIDE" | grep -q 'not_type_1' \
+  && ! echo "$RG_RT_FETCH_ONE" | grep -q 'respectedGameType' \
+  && [[ "$RG_RT_ABI_N" -eq 1 ]]; then
+  echo "PASS resolve-games reads respectedGameType once at fetch, not per game"
+else
+  echo "FAIL respected type must be snapshot-only (decide/fetch-one must not call it; abi count=$RG_RT_ABI_N)" >&2
+  fail=1
+fi
+
+# Bugbot #182: not_respected_type must be watermark-terminal so a type-1
+# prefix cannot pin low_water after the respected type flips to 8.
+cat >"$RG_RT_FIX/wm-type.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "respected_game_type": 8,
+  "game_count": 2,
+  "games": [
+    {
+      "index": 0, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 1, "game_type": 8, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 999900, "credit_wei": "80000000000000000",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_RT_WM="$RG_RT_FIX/wm-type-mark.json"
+RG_RT_WM_OUT="$(
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_RT_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_RT_FIX/wm-type.json" \
+    RESOLVE_GAMES_WATERMARK="$RG_RT_WM" \
+    "$RG_RT" --analyze-only 2>&1
+)" && RG_RT_WM_EC=0 || RG_RT_WM_EC=$?
+RG_RT_WM_MARK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["low_water"])' "$RG_RT_WM" 2>/dev/null || echo missing)"
+if [[ "$RG_RT_WM_EC" -eq 0 ]] \
+  && echo "$RG_RT_WM_OUT" | grep -q 'game 0 SKIP not_respected_type' \
+  && echo "$RG_RT_WM_OUT" | grep -q 'game 1 WAIT finality' \
+  && echo "$RG_RT_WM_OUT" | grep -q '^watermark_next=1$' \
+  && [[ "$RG_RT_WM_MARK" == "1" ]]; then
+  echo "PASS resolve-games not_respected_type does not pin the watermark"
+else
+  echo "FAIL type-1 prefix must be watermark-terminal (ec=$RG_RT_WM_EC mark=$RG_RT_WM_MARK)" >&2
+  echo "$RG_RT_WM_OUT" >&2
+  fail=1
+fi
+
+# Codex P2: zero-padded cap is canonical base-10 (08 → 8), not octal.
+RG_RT_OCT="$(rg_rt_analyze "$RG_RT_FIX/cap.json" 08)" && RG_RT_OCT_EC=0 || RG_RT_OCT_EC=$?
+if [[ "$RG_RT_OCT_EC" -eq 0 ]] \
+  && echo "$RG_RT_OCT" | grep -q '^max_txs=8$' \
+  && grep -q '10#\$MAX_TXS_PER_RUN' "$RG_RT" \
+  && grep -q '10#\$max_txs' "$RG_RT"; then
+  echo "PASS resolve-games zero-padded max_txs is canonical base-10"
+else
+  echo "FAIL RESOLVE_GAMES_MAX_TXS_PER_RUN=08 should plan max_txs=8 (ec=$RG_RT_OCT_EC)" >&2
+  echo "$RG_RT_OCT" >&2
+  fail=1
+fi
+
+# Codex P2: live fetch uses initBonds(respected), not a hardcoded 1.
+RG_RT_FETCH="$(awk '/^def fetch_snapshot\(/,/^def fetch_one_game\(/' "$RG_RT")"
+if echo "$RG_RT_FETCH" | grep -q 'initBonds(uint32)(uint256)", respected' \
+  && ! echo "$RG_RT_FETCH" | grep -q 'initBonds(uint32)(uint256)", 1)'; then
+  echo "PASS resolve-games fetch initBonds uses the snapshot respected type"
+else
+  echo "FAIL fetch_snapshot must call initBonds(respected), not initBonds(1)" >&2
+  fail=1
+fi
+
+cleanup_rg_rt
+trap - EXIT
+unset RG_RT RG_RT_PY_DIR RG_RT_PATH RG_RT_FIX RG_RT_AB RG_RT_AB_EC
+unset RG_RT_C1 RG_RT_C1_EC RG_RT_C2 RG_RT_C2_EC RG_RT_C3 RG_RT_C3_EC
+unset RG_RT_D RG_RT_D_EC RG_RT_D_PLAN RG_RT_D_N RG_RT_DEF RG_RT_DEF_EC
+unset RG_RT_DECIDE RG_RT_FETCH_ONE RG_RT_ABI_N
+unset -f cleanup_rg_rt rg_rt_analyze 2>/dev/null || true
+
+# =============================================================================
+# end resolve-games-respected-type block
+# =============================================================================
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2
