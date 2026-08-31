@@ -271,8 +271,14 @@ def parse_max_txs():
     return n
 
 
-def decide_game(game, now, finality_delay, weth_delay, respected_game_type):
-    """Return disposition for one game. Never infers a claimCredit leg by call count."""
+def decide_game(game, now, finality_delay, weth_delay, respected_game_type, init_bond=0):
+    """Return disposition for one game. Never infers a claimCredit leg by call count.
+
+    init_bond is the snapshot's initBonds(respected) value. Action returns
+    include expected_credit_wei = remaining_wei(game, init_bond) so
+    confirm_leg_advanced can distinguish a zero-bond resolveClaim (credit
+    stays 0, success) from a bonded recovery that produced no credit.
+    """
     idx = int(game["index"])
     # Type filter uses the snapshot's respected_game_type (one on-chain read
     # at fetch time). decide_game never calls the chain and never hardcodes
@@ -422,6 +428,7 @@ def decide_game(game, now, finality_delay, weth_delay, respected_game_type):
         "reason": reason,
         "actions": actions,
         "ready_at": None,
+        "expected_credit_wei": str(remaining_wei(game, init_bond)),
     }
 
 
@@ -601,7 +608,7 @@ def analyze(snapshot, max_games):
     decisions = []
     for game in examined:
         decisions.append(
-            (game, decide_game(game, now, finality_delay, weth_delay, respected))
+            (game, decide_game(game, now, finality_delay, weth_delay, respected, init_bond))
         )
 
     candidates = [(g, d) for (g, d) in decisions if d["selected"]]
@@ -760,6 +767,7 @@ def analyze(snapshot, max_games):
                 "reason": d["reason"],
                 "actions": d["actions"],
                 "ready_at": d["ready_at"],
+                "expected_credit_wei": d.get("expected_credit_wei", "0"),
             }
             for (_, d) in report
         ],
@@ -962,7 +970,8 @@ def main(argv):
         weth_delay = parse_uint(os.environ["RESOLVE_GAMES_WETH_DELAY"])
         # Snapshot type, not a per-game RPC. Empty/missing → skip missing_type.
         respected = parse_optional_type(os.environ.get("RESOLVE_GAMES_RESPECTED_TYPE"))
-        dec = decide_game(game, now, finality, weth_delay, respected)
+        init_bond = parse_uint(os.environ.get("RESOLVE_GAMES_INIT_BOND", 0))
+        dec = decide_game(game, now, finality, weth_delay, respected, init_bond)
         json.dump(dec, sys.stdout)
         sys.stdout.write("\n")
         raise SystemExit(0)
@@ -1037,6 +1046,11 @@ send_leg() {
   local leg="$2"
   local recipient="$3"
   local tx_json tx_hash receipt status gas_used gas_price cost
+  # Offline fixture path (test-helpers). Never used by the hourly agent.
+  if [[ -n "${RESOLVE_GAMES_MOCK_DIR:-}" ]]; then
+    echo "SENT leg=$leg tx=0xmock gasUsed=1 effectiveGasPrice=1 cost_wei=1"
+    return 0
+  fi
   local send_rc=0
 
   case "$leg" in
@@ -1111,15 +1125,26 @@ print("%s %d %d %d" % (status, used, price, used * price))
 confirm_leg_advanced() {
   local game_file="$1"
   local leg="$2"
-  python3 - "$game_file" "$leg" <<'PY'
+  # Plan-time remaining_wei for this game (decide_game.expected_credit_wei).
+  # Empty/unparseable → fail closed: same fatal as a bonded recovery with
+  # credit still 0. Only expected == 0 makes credit == 0 a success.
+  local expected="${3:-}"
+  python3 - "$game_file" "$leg" "$expected" <<'PY'
 import json, sys
 g = json.load(open(sys.argv[1], encoding="utf-8"))
 leg = sys.argv[2]
+expected_raw = sys.argv[3] if len(sys.argv) > 3 else ""
 status = int(g.get("status", 0))
 credit = int(g.get("credit_wei", 0))
 weth_amount = int(g.get("weth_amount_wei", 0))
 if leg == "resolveClaim" and credit == 0:
-    raise SystemExit("ERROR: resolveClaim confirmed but credit is still 0")
+    try:
+        expected = int(str(expected_raw).strip()) if str(expected_raw).strip() != "" else None
+    except (TypeError, ValueError):
+        expected = None
+    if expected != 0:
+        raise SystemExit("ERROR: resolveClaim confirmed but credit is still 0")
+    print("OK resolveClaim confirmed with credit 0 (expected 0; zero-bond)")
 if leg == "resolve" and status == 0:
     raise SystemExit("ERROR: resolve confirmed but status is still 0")
 if leg == "claimCredit_unlock" and weth_amount == 0:
@@ -1152,12 +1177,14 @@ print("" if v is None else v)
   fi
 
   local idx game_json dec_json disposition actions_csv leg sent_n cost_sum game_file
-  local claim_already
+  local claim_already init_bond expected_credit
   sent_n=0
   cost_sum=0
+  init_bond="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("init_bond_wei",0))' "$snapshot_file")"
   export RESOLVE_GAMES_FINALITY="$finality"
   export RESOLVE_GAMES_WETH_DELAY="$weth_delay"
   export RESOLVE_GAMES_RESPECTED_TYPE="$respected_type"
+  export RESOLVE_GAMES_INIT_BOND="$init_bond"
   game_file="$(mktemp "${TMPDIR:-/tmp}/fortel2-resolve-one.XXXXXX")"
 
   # Split selected_indexes without assigning IFS (Semgrep bash.lang.security.ifs-tampering).
@@ -1167,13 +1194,13 @@ print("" if v is None else v)
     echo "--- game $idx ---"
     claim_already=0
     while true; do
-      RESOLVE_GAMES_NOW="$(cast block latest --field timestamp --rpc-url "$L1_RPC_URL" | awk '{print $1}')"
+      RESOLVE_GAMES_NOW="$(resolve_games_now)"
       if [[ -z "$RESOLVE_GAMES_NOW" || "$RESOLVE_GAMES_NOW" == "0" ]]; then
         echo "ERROR: L1 latest block timestamp was empty" >&2
         exit 1
       fi
       export RESOLVE_GAMES_NOW
-      game_json="$(resolve_games_py fetch-one "$idx")"
+      game_json="$(resolve_games_fetch_one "$idx")"
       if [[ "$claim_already" -eq 1 ]]; then
         # Stale RPC can still report resolved_subgame=false after the revert.
         game_json="$(printf '%s' "$game_json" | python3 -c 'import json,sys; g=json.load(sys.stdin); g["resolved_subgame"]=True; json.dump(g,sys.stdout)')"
@@ -1200,8 +1227,9 @@ print("" if v is None else v)
         leg="${actions_csv%%,*}"
       fi
       local game_addr send_out tx_hash cost_wei
+      expected_credit="$(printf '%s' "$dec_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("expected_credit_wei",""))')"
       game_addr="$(printf '%s' "$game_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("address",""))')"
-      echo "sending game=$idx leg=$leg to=$game_addr"
+      echo "sending game=$idx leg=$leg to=$game_addr expected_credit_wei=${expected_credit:-<missing>}"
       send_out="$(send_leg "$game_addr" "$leg" "$recipient")"
       echo "$send_out"
       if [[ "$send_out" == "ALREADY leg=resolveClaim" ]]; then
@@ -1212,9 +1240,9 @@ print("" if v is None else v)
       cost_wei="$(printf '%s' "$send_out" | awk '{for(i=1;i<=NF;i++) if($i ~ /^cost_wei=/){sub(/^cost_wei=/,"",$i); print $i}}')"
       sent_n=$((sent_n + 1))
       cost_sum="$(python3 -c 'import sys; print(int(sys.argv[1])+int(sys.argv[2]))' "$cost_sum" "${cost_wei:-0}")"
-      game_json="$(resolve_games_py fetch-one "$idx")"
+      game_json="$(resolve_games_fetch_one "$idx")"
       printf '%s\n' "$game_json" > "$game_file"
-      confirm_leg_advanced "$game_file" "$leg"
+      confirm_leg_advanced "$game_file" "$leg" "$expected_credit"
     done
   done <<EOF
 $(printf '%s' "$selected_csv" | awk -F, '{for (i = 1; i <= NF; i++) print $i}')
@@ -1225,6 +1253,42 @@ EOF
   echo "txs_sent=$sent_n"
   echo "gas_spent_wei=$cost_sum"
   echo "gas_spent_eth=$(python3 -c 'import sys; w=int(sys.argv[1]); print("%d.%018d" % (w//10**18, w%10**18))' "$cost_sum")"
+}
+
+# Offline fixture fetch/clock for test-helpers. Live path never sets MOCK_DIR.
+resolve_games_now() {
+  if [[ -n "${RESOLVE_GAMES_MOCK_DIR:-}" ]]; then
+    local ts
+    ts="$(cat "${RESOLVE_GAMES_MOCK_DIR}/now" 2>/dev/null || true)"
+    if [[ -z "$ts" ]]; then
+      ts=1000000
+    fi
+    printf '%s\n' "$ts"
+    return 0
+  fi
+  cast block latest --field timestamp --rpc-url "$L1_RPC_URL" | awk '{print $1}'
+}
+
+resolve_games_fetch_one() {
+  local idx="$1"
+  if [[ -n "${RESOLVE_GAMES_MOCK_DIR:-}" ]]; then
+    local nfile n src
+    nfile="${RESOLVE_GAMES_MOCK_DIR}/count.${idx}"
+    n=0
+    if [[ -f "$nfile" ]]; then
+      n="$(cat "$nfile")"
+    fi
+    n=$((n + 1))
+    printf '%s\n' "$n" > "$nfile"
+    src="${RESOLVE_GAMES_MOCK_DIR}/fetch/${idx}.${n}.json"
+    if [[ ! -f "$src" ]]; then
+      echo "ERROR: mock fetch missing $src" >&2
+      exit 1
+    fi
+    cat "$src"
+    return 0
+  fi
+  resolve_games_py fetch-one "$idx"
 }
 
 # --- analyze-only (offline) ------------------------------------------------
@@ -1238,6 +1302,37 @@ if [[ "$ANALYZE_ONLY" -eq 1 ]]; then
   echo "snapshot: $SNAP"
   export RESOLVE_GAMES_FULL_SCAN="$FULL_SCAN"
   resolve_games_py analyze "$SNAP" "$MAX_GAMES"
+  exit 0
+fi
+
+# --- mock-execute (offline fixtures; test-helpers only) -------------------
+# The hourly launchd job never sets RESOLVE_GAMES_MOCK_DIR. This path
+# skips Sepolia env, keys, and cast so confirmation can be exercised
+# against sequential fetch fixtures.
+if [[ -n "${RESOLVE_GAMES_MOCK_DIR:-}" ]]; then
+  if [[ ! -d "$RESOLVE_GAMES_MOCK_DIR" ]]; then
+    echo "ERROR: RESOLVE_GAMES_MOCK_DIR is not a directory" >&2
+    exit 1
+  fi
+  SNAP="${RESOLVE_GAMES_SNAPSHOT:-}"
+  if [[ -z "$SNAP" || ! -f "$SNAP" ]]; then
+    echo "ERROR: mock execute requires RESOLVE_GAMES_SNAPSHOT" >&2
+    exit 1
+  fi
+  echo "=== ForteL2 resolve-games (mock-execute) ==="
+  echo "snapshot: $SNAP"
+  echo "mock_dir: $RESOLVE_GAMES_MOCK_DIR"
+  export RESOLVE_GAMES_FULL_SCAN="$FULL_SCAN"
+  ANALYZE_EC=0
+  ANALYZE_OUT="$(resolve_games_py analyze "$SNAP" "$MAX_GAMES")" || ANALYZE_EC=$?
+  printf '%s\n' "$ANALYZE_OUT"
+  if [[ "$ANALYZE_EC" -ne 0 ]]; then
+    echo "ERROR: analyze/watermark persist failed (ec=$ANALYZE_EC)" >&2
+    exit "$ANALYZE_EC"
+  fi
+  SELECTED="$(printf '%s\n' "$ANALYZE_OUT" | awk -F= '/^selected_indexes=/{print $2}')"
+  echo "EXECUTE: processing selected_indexes=${SELECTED:-<none>}"
+  execute_selected "$SNAP" "$SELECTED" "${RESOLVE_GAMES_RECIPIENT:-0x0000000000000000000000000000000000000001}"
   exit 0
 fi
 
