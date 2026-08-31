@@ -989,6 +989,21 @@
 - **Decision:** #175 verdict: **holds in production; no follow-up required.** The 2026-08-26/27 incident arc (D-0102–D-0109) is closed. Queue: resolve-games type filter (D-0105 Finding 4) next, then check-launchd coverage for the cloudflared daemon (D-0107).
 - **Consequence:** Next free decision id is **D-0112**.
 
+### D-0112 — **resolve-games live verdict: the respected-type filter uncovered 113 pending legs, the cap held, one inherited assertion caused a night of false alerts, and the fixed agent now drains the backlog cleanly**
+- **Context:** Live verdicts for #182 (respected-type filter + tx cap) and #183 (zero-bond credit confirmation), per the D-0112 reservation.
+- **Finding 1 — the filter and cap worked exactly as reviewed.** First live run (2026-08-30 21:01): `respected_game_type=8`, 113 ready tx legs uncovered in the backlog the hardcoded type-1 filter had hidden, selection capped at 5 legs including a mid-game split — the designed money guard.
+- **Finding 2 — one inherited assertion turned success into a paging failure.** `confirm_leg_advanced` treated credit==0 after resolveClaim as unconditionally fatal (bonded type-1 R-13 assumption). These type-8 games carry zero-bond claims (on-chain proof: game 73 claimDataLen=1, bond=0, resolved to status 2 by the agent's own legs), so every overnight run sent ~2 legs, exited 1, and paged the operator — progress at 2 legs/hour instead of 5, alerts every cooldown cycle. #183 conditioned the fatal on plan-time `expected_credit_wei != 0` (missing/unparseable stays fatal; bonded protection proven go-red-able at review).
+- **Finding 3 — fixed agent verified live.** First post-#183 run (2026-08-31 09:01): exit 0, `txs_sent=5`, three `OK resolveClaim confirmed with credit 0 (expected 0; zero-bond)` confirmations, err log untouched. `remaining_ready=105` → backlog drains in ~21 hours at cap rate; the resolve-games-nonzero alerts end with the exit-1s. Total gas spent on the false-alert night: ~0.0009 ETH, all on wanted transactions.
+- **Decision:** #182 + #183 verdict: **hold in production; no follow-up.** The once-observed JSON-decode RPC failure (21:01 first run) did not recur; reopen only if it does.
+- **Consequence:** Next free decision id is **D-0114**.
+
+### D-0113 — **cloudflared-watch live verdict: condition present, silent on a healthy daemon, and the not-running hole is closed**
+- **Context:** Live verdict for #181, per the D-0113 reservation.
+- **Finding (corrected per Codex review on #185 — the first draft cited a 20:30 run as "since merge" when #181 merged at 21:14 PT):** verified 2026-08-31 morning against the live system: the checkout the hourly agents actually execute contains the `cloudflared-failing` condition, the latest alert-watch runs log `active conditions: 0` / `no alert` with the real daemon healthy, and `check-launchd.sh` reports `PASS com.cloudflare.cloudflared system domain state=running`. The exact first post-merge run is not reconstructible, because of the next finding. The review round had already proved both directions in shims against the real daemon paths: any `not running` state fires (including clean exit 0, which KeepAlive would never restart — the silent-outage hole the first draft had), unparseable output fails toward alerting, a plist-less host stays quiet.
+- **Finding — surfaced by the correction, worth its own task:** the launchd agents (alerts, resolve-games, health, and the 23:45/03:00 sleep/wake) execute scripts from the mutable shared dev checkout at `~/ForteL2`, which parallel workers check out at will — at verification time it sat on a worker branch (`feat/op-reth-task3-verifier`) that happened to include current main. A worker parking the tree on a stale or broken branch silently changes production agent behavior. Queued: pin the agents to a deployment copy or add a branch guard to the agent entrypoints.
+- **Decision:** #181 verdict: **holds in production; no follow-up.** The incident week's entire queue (D-0105/D-0107/D-0108 items) is now closed: rpckind, challenger resilience + scan cost, funding-gate second opinion, resolve-games filter + cap + zero-bond, cloudflared watch.
+- **Consequence:** Next free decision id is **D-0114**.
+
 
 ---
 
