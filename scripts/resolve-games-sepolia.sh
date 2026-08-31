@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Recover type-1 dispute-game bonds from DelayedWETH on Sepolia L2 852.
+# Recover dispute-game bonds of the on-chain respected type from DelayedWETH
+# on Sepolia L2 852. The filter reads AnchorStateRegistry.respectedGameType()
+# once per run (snapshot field respected_game_type); it does not hardcode 1 or 8.
 #
 # Automates the R-13 sequence per game, checking on-chain state before every
 # send so an interrupted run (the expected case — two mandatory waits) can be
@@ -65,6 +67,13 @@ Env:
                            $DATA_DIR/resolve-games-watermark.json.
                            Analyze-only honors this only when set; otherwise
                            it scans the snapshot from 0 and writes nothing.
+  RESOLVE_GAMES_MAX_TXS_PER_RUN
+                           Cap on transactions actually sent (and on planned
+                           action legs in dry-run / analyze-only). Default 5.
+                           The hourly launchd agent does not pass --max-games,
+                           so this is the first-run money guard: a backlog is
+                           drained across hours via the watermark, not in one
+                           unattended burst. 0 plans/sends nothing.
   FORTEL2_ENV              Must be .env.sepolia for the live path
 EOF
 }
@@ -112,6 +121,17 @@ if [[ -n "$MAX_GAMES" ]]; then
       ;;
   esac
 fi
+
+# --max-games is opt-in and unused by launchd (ProgramArguments is --execute
+# only), so it is not a per-run bound. This env cap is. Default 5.
+MAX_TXS_PER_RUN="${RESOLVE_GAMES_MAX_TXS_PER_RUN:-5}"
+case "$MAX_TXS_PER_RUN" in
+  ''|*[!0-9]*)
+    echo "ERROR: RESOLVE_GAMES_MAX_TXS_PER_RUN must be a non-negative integer (got $MAX_TXS_PER_RUN)" >&2
+    exit 1
+    ;;
+esac
+export RESOLVE_GAMES_MAX_TXS_PER_RUN="$MAX_TXS_PER_RUN"
 
 if [[ "$ANALYZE_ONLY" -eq 1 && "$EXECUTE" -eq 1 ]]; then
   echo "ERROR: --execute is incompatible with --analyze-only" >&2
@@ -199,21 +219,80 @@ def load_json(path):
         return json.load(f)
 
 
-def decide_game(game, now, finality_delay, weth_delay):
+def parse_optional_type(value):
+    """Parse a game type. Return None if missing or unparseable.
+
+    Fail closed: never treat a missing/garbage type as a match. The old
+    decide_game defaulted missing game_type to 1 so offline fixtures passed
+    a hardcoded type-1 filter; after respectedGameType flipped to 8, that
+    same default would select the wrong games for real transactions.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    s = str(value).strip()
+    if not s:
+        return None
+    s = s.split()[0]
+    try:
+        if s.startswith("0x") or s.startswith("0X"):
+            return int(s, 16)
+        return int(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def snapshot_respected_type(snapshot):
+    if not isinstance(snapshot, dict) or "respected_game_type" not in snapshot:
+        return None
+    return parse_optional_type(snapshot.get("respected_game_type"))
+
+
+def parse_max_txs():
+    raw = os.environ.get("RESOLVE_GAMES_MAX_TXS_PER_RUN")
+    if raw is None or str(raw).strip() == "":
+        return 5
+    try:
+        n = int(str(raw).strip().split()[0])
+    except (TypeError, ValueError):
+        raise SystemExit(
+            "ERROR: RESOLVE_GAMES_MAX_TXS_PER_RUN must be a non-negative integer"
+        )
+    if n < 0:
+        raise SystemExit(
+            "ERROR: RESOLVE_GAMES_MAX_TXS_PER_RUN must be a non-negative integer"
+        )
+    return n
+
+
+def decide_game(game, now, finality_delay, weth_delay, respected_game_type):
     """Return disposition for one game. Never infers a claimCredit leg by call count."""
     idx = int(game["index"])
-    # Missing game_type (offline fixtures) defaults to 1; a live fetch always sets it.
-    raw_type = game.get("game_type", 1)
-    try:
-        game_type = int(raw_type)
-    except (TypeError, ValueError):
-        game_type = 1
-    if game_type != 1:
+    # Type filter uses the snapshot's respected_game_type (one on-chain read
+    # at fetch time). decide_game never calls the chain and never hardcodes
+    # 1 or 8. Missing type on the game or snapshot → skip, never select.
+    if "game_type" not in game:
+        game_type = None
+    else:
+        game_type = parse_optional_type(game.get("game_type"))
+    if game_type is None or respected_game_type is None:
         return {
             "index": idx,
             "selected": False,
             "disposition": "skip",
-            "reason": "not_type_1",
+            "reason": "missing_type",
+            "actions": [],
+            "ready_at": None,
+        }
+    if game_type != respected_game_type:
+        return {
+            "index": idx,
+            "selected": False,
+            "disposition": "skip",
+            "reason": "not_respected_type",
             "actions": [],
             "ready_at": None,
         }
@@ -507,9 +586,14 @@ def analyze(snapshot, max_games):
     examined = [g for g in games if int(g["index"]) >= scan_from]
     games_examined = len(examined)
 
+    respected = snapshot_respected_type(snapshot)
+    max_txs = parse_max_txs()
+
     decisions = []
     for game in examined:
-        decisions.append((game, decide_game(game, now, finality_delay, weth_delay)))
+        decisions.append(
+            (game, decide_game(game, now, finality_delay, weth_delay, respected))
+        )
 
     candidates = [(g, d) for (g, d) in decisions if d["selected"]]
     if max_games is not None:
@@ -519,16 +603,48 @@ def analyze(snapshot, max_games):
         selected = candidates
         overflow = []
 
-    selected_idx = set(d["index"] for (_, d) in selected)
+    budget = max_txs
+    capped_selected = []
+    overflow_txs = []
+    txs_cap_truncated = False
+    remaining_ready = 0
+    for g, d in selected:
+        if d["disposition"] != "action":
+            capped_selected.append((g, d))
+            continue
+        legs = list(d.get("actions") or [])
+        n = len(legs)
+        if budget <= 0:
+            overflow_txs.append((g, d))
+            txs_cap_truncated = True
+            remaining_ready += n
+            continue
+        if n <= budget:
+            capped_selected.append((g, d))
+            budget -= n
+            continue
+        partial = dict(d)
+        partial["actions"] = legs[:budget]
+        remaining_ready += n - budget
+        capped_selected.append((g, partial))
+        budget = 0
+        txs_cap_truncated = True
+    selected = capped_selected
+    overflow_tx_idx = set(d["index"] for (_, d) in overflow_txs)
+
+    selected_by_idx = {d["index"]: (g, d) for (g, d) in selected}
     report = []
     for game, dec in decisions:
-        if dec["index"] in selected_idx:
-            report.append((game, dec))
+        if dec["index"] in selected_by_idx:
+            report.append(selected_by_idx[dec["index"]])
         elif dec["selected"]:
             capped = dict(dec)
             capped["selected"] = False
             capped["disposition"] = "skip"
-            capped["reason"] = "max_games"
+            if dec["index"] in overflow_tx_idx:
+                capped["reason"] = "max_txs"
+            else:
+                capped["reason"] = "max_games"
             report.append((game, capped))
         else:
             report.append((game, dec))
@@ -565,6 +681,8 @@ def analyze(snapshot, max_games):
         print("max_games=all")
     else:
         print("max_games=%d" % max_games)
+    print("respected_game_type=%s" % ("missing" if respected is None else respected))
+    print("max_txs=%d" % max_txs)
     print("game_count=%d" % factory_count)
     print("scan_from=%d" % scan_from)
     print("games_examined=%d" % games_examined)
@@ -602,6 +720,13 @@ def analyze(snapshot, max_games):
 
     if overflow:
         print("capped_indexes=%s" % ",".join(str(d["index"]) for (_, d) in overflow))
+    if txs_cap_truncated:
+        print(
+            "txs_cap_truncated=1 remaining_ready=%d (remainder next hour)"
+            % remaining_ready
+        )
+    else:
+        print("txs_cap_truncated=0")
 
     plan = {
         "mode": mode,
@@ -610,6 +735,9 @@ def analyze(snapshot, max_games):
         "recoverable_wei": str(recoverable),
         "estimated_gas_wei": str(est),
         "txs_sent": 0,
+        "respected_game_type": respected,
+        "max_txs": max_txs,
+        "txs_cap_truncated": 1 if txs_cap_truncated else 0,
         "game_count": factory_count,
         "scan_from": scan_from,
         "games_examined": games_examined,
@@ -823,7 +951,9 @@ def main(argv):
         now = parse_uint(os.environ["RESOLVE_GAMES_NOW"])
         finality = parse_uint(os.environ["RESOLVE_GAMES_FINALITY"])
         weth_delay = parse_uint(os.environ["RESOLVE_GAMES_WETH_DELAY"])
-        dec = decide_game(game, now, finality, weth_delay)
+        # Snapshot type, not a per-game RPC. Empty/missing → skip missing_type.
+        respected = parse_optional_type(os.environ.get("RESOLVE_GAMES_RESPECTED_TYPE"))
+        dec = decide_game(game, now, finality, weth_delay, respected)
         json.dump(dec, sys.stdout)
         sys.stdout.write("\n")
         raise SystemExit(0)
@@ -994,9 +1124,16 @@ execute_selected() {
   local snapshot_file="$1"
   local selected_csv="$2"
   local recipient="$3"
-  local finality weth_delay
+  local finality weth_delay respected_type max_txs
   finality="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("finality_delay",0))' "$snapshot_file")"
   weth_delay="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("weth_delay",0))' "$snapshot_file")"
+  respected_type="$(python3 -c '
+import json,sys
+s=json.load(open(sys.argv[1], encoding="utf-8"))
+v=s.get("respected_game_type", "")
+print("" if v is None else v)
+' "$snapshot_file")"
+  max_txs="${RESOLVE_GAMES_MAX_TXS_PER_RUN:-5}"
 
   if [[ -z "$selected_csv" ]]; then
     echo "EXECUTE: no games selected; sending nothing"
@@ -1010,6 +1147,7 @@ execute_selected() {
   cost_sum=0
   export RESOLVE_GAMES_FINALITY="$finality"
   export RESOLVE_GAMES_WETH_DELAY="$weth_delay"
+  export RESOLVE_GAMES_RESPECTED_TYPE="$respected_type"
   game_file="$(mktemp "${TMPDIR:-/tmp}/fortel2-resolve-one.XXXXXX")"
 
   # Split selected_indexes without assigning IFS (Semgrep bash.lang.security.ifs-tampering).
@@ -1037,6 +1175,10 @@ execute_selected() {
       if [[ "$disposition" != "action" || -z "$actions_csv" ]]; then
         echo "game $idx $disposition $(printf '%s' "$dec_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("reason",""))')"
         break
+      fi
+      if [[ "$sent_n" -ge "$max_txs" ]]; then
+        echo "txs_cap_truncated=1 max_txs=$max_txs remainder deferred to next hour"
+        break 2
       fi
       leg="${actions_csv%%,*}"
       if [[ "$leg" == "resolveClaim" && "$claim_already" -eq 1 ]]; then
