@@ -59,6 +59,20 @@ Posted 2026-08-31 09:26 PDT on PR #184: https://github.com/StephenForte/ForteL2/
 
 Continue by default. One 429 is not a loop. Steve to read the QuickNode dashboard against these numbers.
 
+## Mid-sync prefix (not catch-up)
+
+Measured 2026-08-31 ~13:07 PDT while L1-origin lag was still ~29650 (cap is 2). Three-way `eth_getBlockByNumber` on candidate `:19545`, live `:9545`, and `replica.readRpcUrl` (host `fortel2-replica-rpc.onrender.com` only). Not a substitute for `./scripts/verify-reth-parity.sh`.
+
+| Height | Result |
+|---|---|
+| 0 | MATCH `0xe242b1a3312b509e…` txCount=0 |
+| 5 | MATCH `0xd9fd2a33ebadd2a7…` txCount=1 |
+| 10000 | MATCH `0x4457f86234a6ec97…` txCount=1 |
+| 100000 | MATCH `0x562ae6051eabeec6…` txCount=1 |
+| 200000 | MATCH `0x1db822a237391528…` txCount=1 |
+
+Live parity RPC path also probed: candidate op-node `:19547` and live op-node `:9547` both answer `optimism_syncStatus`; replica `eth_chainId` = 852.
+
 ## Sample heights
 
 _Pending `./scripts/verify-reth-parity.sh` after catch-up (must include 0, 5, and ≥18 spread checkpoints)._
@@ -73,4 +87,11 @@ _Pending. One deliberate stop/start of the sidecar after catch-up; the 23:45 lau
 
 ## Safe-head catch-up
 
-_Pending. Verifier safe head = live safe head, or lag ≤ 2 L1 epochs across 3 consecutive samples._
+In progress. Bound is lag ≤ 2 L1 epochs (enforced by `verify-reth-parity.sh` before sampling). Do not treat prefix MATCH as catch-up.
+
+| When (PDT) | Candidate safe | Live safe | Cand L1 origin | Live L1 origin | L1 lag |
+|---|---:|---:|---:|---:|---:|
+| 09:26 (T+35) | 16956 | 380070 | 11548321 | 11606828 | 58507 |
+| 13:07 | 202689 | 386658 | 11578241 | 11607894 | 29653 |
+
+Sidecar pids still up. Projected catch-up ~17:00 PDT if ~130 L1 origin/min holds. Official three consecutive samples (lag ≤ 2) still pending.
