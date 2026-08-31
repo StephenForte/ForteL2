@@ -19,6 +19,8 @@
 # Test-only overrides (names never appear in env files):
 #   CHECK_LAUNCHD_CLOUDFLARED_PLIST  CHECK_LAUNCHD_LAUNCHCTL
 #     (absolute shim path — lib.sh prepends homebrew onto PATH)
+#   CHECK_LAUNCHD_AGENTS_DIR         fake ~/Library/LaunchAgents for fixtures
+#   CHECK_LAUNCHD_PINNED_TREE        fake /Users/steveforte/fortel2-agents
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -30,7 +32,12 @@ require_bin python3
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LAUNCHD_DIR="$REPO_ROOT/launchd"
-AGENTS_DIR="${HOME}/Library/LaunchAgents"
+AGENTS_DIR="${CHECK_LAUNCHD_AGENTS_DIR:-${HOME}/Library/LaunchAgents}"
+# Pinned clone the agents must execute from (D-0113 Finding 2). Not a worktree
+# of the mutable ~/ForteL2 checkout — a sibling `git clone` of main.
+PINNED_TREE="${CHECK_LAUNCHD_PINNED_TREE:-/Users/steveforte/fortel2-agents}"
+PINNED_PREFIX="/Users/steveforte/fortel2-agents"
+OLD_DEV_PREFIX="/Users/steveforte/ForteL2"
 # Verbs for operator-facing hints only (kept out of source as adjacent tokens — see checks).
 _LC_VERB_OUT=bootout
 _LC_VERB_STRAP=bootstrap
@@ -117,6 +124,138 @@ label_base() {
   echo "com.steve.$1"
 }
 
+# True if $1 is the mutable checkout path (exact or a child). fortel2-agents
+# does not match: it does not equal OLD_DEV_PREFIX and does not start with
+# OLD_DEV_PREFIX + "/".
+is_old_dev_path() {
+  local p="$1"
+  [[ "$p" == "$OLD_DEV_PREFIX" || "$p" == "$OLD_DEV_PREFIX"/* ]]
+}
+
+# Print ProgramArguments, WorkingDirectory, and PATH entries from a plist.
+# python3 plistlib reads XML and binary; no plutil (Linux CI fixtures).
+plist_exec_paths() {
+  python3 -c '
+import sys, plistlib
+data = plistlib.loads(open(sys.argv[1], "rb").read())
+for a in data.get("ProgramArguments") or []:
+    print(a)
+wd = data.get("WorkingDirectory")
+if wd:
+    print(wd)
+env = data.get("EnvironmentVariables") or {}
+for p in (env.get("PATH") or "").split(":"):
+    if p:
+        print(p)
+' "$1"
+}
+
+# Nonzero if any exec path still points at the mutable ~/ForteL2 checkout.
+plist_points_at_old_dev() {
+  local line
+  while IFS= read -r line; do
+    if is_old_dev_path "$line"; then
+      return 0
+    fi
+  done < <(plist_exec_paths "$1")
+  return 1
+}
+
+# Print the ProgramArguments script path (last non-flag entry containing /).
+# Independent of plutil so repo-template audits run on Linux CI.
+plist_script_python() {
+  python3 -c '
+import sys, plistlib
+data = plistlib.loads(open(sys.argv[1], "rb").read())
+args = data.get("ProgramArguments") or []
+script = ""
+for a in reversed(args):
+    if not a or a.startswith("-"):
+        continue
+    if "/" in a:
+        script = a
+        break
+sys.stdout.write(script)
+' "$1"
+}
+
+normalize_git_url() {
+  local u="$1"
+  u="${u%.git}"
+  u="${u%/}"
+  u="${u#git@}"
+  u="${u#https://}"
+  u="${u#http://}"
+  u="${u/://}"
+  printf '%s' "$u"
+}
+
+# Repo template: ProgramArguments (and WorkingDirectory / PATH) must target the
+# pinned tree, never the mutable ~/ForteL2 checkout. python3-only — no plutil.
+check_repo_plist_pinned() {
+  local repo_plist="$1"
+  local label script
+  label="$(basename "$repo_plist" .plist)"
+  if plist_points_at_old_dev "$repo_plist"; then
+    echo "FAIL  ${label}  repo template still points at ${OLD_DEV_PREFIX}"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+  script="$(plist_script_python "$repo_plist")"
+  if [[ -z "$script" ]]; then
+    echo "FAIL  ${label}  repo ProgramArguments empty"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+  if [[ "$script" != "$PINNED_PREFIX" && "$script" != "$PINNED_PREFIX"/* ]]; then
+    echo "FAIL  ${label}  repo script not under pinned tree: ${script}"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+  echo "PASS  ${label}  repo script=${script}"
+}
+
+check_pinned_tree() {
+  echo
+  echo "=== pinned agent execution tree (${PINNED_TREE}) ==="
+
+  if ! git -C "$PINNED_TREE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "FAIL  pinned tree missing or not a git checkout (${PINNED_TREE})"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  local pinned_url repo_url
+  pinned_url="$(git -C "$PINNED_TREE" remote get-url origin 2>/dev/null || true)"
+  repo_url="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
+  if [[ -z "$pinned_url" || -z "$repo_url" ]]; then
+    echo "FAIL  pinned tree origin missing or this checkout has no origin"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+  if [[ "$(normalize_git_url "$pinned_url")" != "$(normalize_git_url "$repo_url")" ]]; then
+    echo "FAIL  pinned tree origin is not this repo (pinned=${pinned_url} repo=${repo_url})"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  local branch
+  branch="$(git -C "$PINNED_TREE" rev-parse --abbrev-ref HEAD)"
+  if [[ "$branch" != "main" ]]; then
+    echo "FAIL  pinned tree is not on branch main (on ${branch})"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  if [[ -n "$(git -C "$PINNED_TREE" status --porcelain)" ]]; then
+    echo "FAIL  pinned tree is dirty"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  echo "PASS  pinned tree  branch=main  clean  $(git -C "$PINNED_TREE" log -1 --format='%h %s')"
+}
+
 check_agent() {
   local short="$1"
   local label
@@ -138,6 +277,14 @@ check_agent() {
 
   if [[ ! -f "$host_plist" ]]; then
     echo "FAIL  ${label}  not installed (expected ${host_plist})"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  # Half-migrated host: installed plist still points at ~/ForteL2. Fail before
+  # plutil compares so Linux CI fixtures (no plutil) can still go red.
+  if plist_points_at_old_dev "$host_plist"; then
+    echo "FAIL  ${label}  installed plist still points at ${OLD_DEV_PREFIX} (pinned tree is ${PINNED_PREFIX})"
     FAILS=$((FAILS + 1))
     return
   fi
@@ -231,6 +378,12 @@ else
     _base="$(basename "$_repo_plist" .plist)"
     check_agent "${_base#com.steve.}"
   done
+
+  echo
+  echo "=== repo plist ProgramArguments (must target ${PINNED_PREFIX}) ==="
+  for _repo_plist in "${_repo_plists[@]}"; do
+    check_repo_plist_pinned "$_repo_plist"
+  done
 fi
 
 echo
@@ -255,6 +408,8 @@ fi
 if [[ "$stale_found" -eq 0 ]]; then
   echo "(none)"
 fi
+
+check_pinned_tree
 
 # --- system Cloudflare tunnel daemon (not a user LaunchAgent) ---
 # Read-only. Detection only — remediation is a human run-block (needs root).
