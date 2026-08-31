@@ -7,16 +7,16 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>/Users/steveforte/ForteL2/run_dev_sleep.sh</string>
+    <string>/Users/steveforte/fortel2-agents/run_dev_sleep.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/steveforte/ForteL2</string>
+  <string>/Users/steveforte/fortel2-agents</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>FORTEL2_ENV</key>
     <string>.env.sepolia</string>
     <key>PATH</key>
-    <string>/Users/steveforte/.foundry/bin:/Users/steveforte/ForteL2/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/Users/steveforte/.foundry/bin:/Users/steveforte/fortel2-agents/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <!-- Daily 23:45 local — stop sequencer/batcher/proposer + dApp/viewer HTTP -->
   <key>StartCalendarInterval</key>

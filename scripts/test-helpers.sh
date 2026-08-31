@@ -7945,6 +7945,371 @@ unset -f cleanup_vrp 2>/dev/null || true
 # end verify-reth-parity block
 # =============================================================================
 
+# =============================================================================
+# pin-agents-worktree (D-0113 Finding 2)
+# Standalone clone at /Users/steveforte/fortel2-agents; deploy-agents.sh
+# refusals; plist ProgramArguments; check-launchd pinned-tree audit + old-path.
+# Additive. Do not reorder the tests above.
+# =============================================================================
+
+PA_DEPLOY="$SCRIPT_DIR/deploy-agents.sh"
+PA_CL="$SCRIPT_DIR/check-launchd.sh"
+PA_LAUNCHD="$(cd "$SCRIPT_DIR/../launchd" && pwd)"
+PA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PA_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pin-agents.XXXXXX")"
+cleanup_pa() { rm -rf "$PA_FIX"; }
+trap cleanup_pa EXIT
+
+pa_git() {
+  git -c user.email=pin-agents@test.invalid -c user.name=pin-agents "$@"
+}
+
+# Bare origin + seed commit on main. Prints nothing; uses $1 as origin.git path.
+pa_init_origin() {
+  local origin="$1"
+  local seed="$PA_FIX/seed"
+  git init -q -b main "$seed"
+  printf 'seed\n' > "$seed/README"
+  printf '.env\n.env.sepolia\ndata/\n' > "$seed/.gitignore"
+  pa_git -C "$seed" add README .gitignore
+  pa_git -C "$seed" commit -q -m seed
+  git clone -q --bare "$seed" "$origin"
+  git -C "$seed" remote add origin "$origin"
+  git -C "$seed" push -q -u origin main
+}
+
+pa_dev_secrets() {
+  mkdir -p "$PA_FIX/dev"
+  printf 'SEPOLIA=1\n' > "$PA_FIX/dev/.env.sepolia"
+  printf 'LOCAL=1\n' > "$PA_FIX/dev/.env"
+}
+
+pa_deploy() {
+  env FORTEL2_AGENTS_DIR="$1" FORTEL2_DEV_DIR="$PA_FIX/dev" \
+    FORTEL2_AGENTS_REMOTE="$PA_FIX/origin.git" \
+    "$PA_DEPLOY" 2>&1
+}
+
+pa_cl() {
+  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
+    CHECK_LAUNCHD_AGENTS_DIR="${1:-$PA_HOST}" \
+    CHECK_LAUNCHD_PINNED_TREE="${2:-$PA_AUDIT}" \
+    CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
+    CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
+    "$PA_CL" 2>&1 || true
+}
+
+# --- (c) every plist ProgramArguments references only the pinned tree ---
+PA_PLIST_OLD=0
+PA_PLIST_PINNED=0
+shopt -s nullglob
+for _pa_plist in "$PA_LAUNCHD"/com.steve.fortel2-*.plist; do
+  if grep -q '/Users/steveforte/ForteL2' "$_pa_plist"; then
+    PA_PLIST_OLD=$((PA_PLIST_OLD + 1))
+  fi
+  if grep -q '/Users/steveforte/fortel2-agents' "$_pa_plist"; then
+    PA_PLIST_PINNED=$((PA_PLIST_PINNED + 1))
+  fi
+done
+shopt -u nullglob
+if [[ "$PA_PLIST_OLD" -eq 0 ]] \
+  && [[ "$PA_PLIST_PINNED" -eq 5 ]] \
+  && [[ "$(grep -c 'com.steve.fortel2-' "$PA_LAUNCHD"/*.plist 2>/dev/null | wc -l | tr -d ' ')" -ge 5 ]]; then
+  echo "PASS pin-agents plist ProgramArguments target only /Users/steveforte/fortel2-agents"
+else
+  echo "FAIL every launchd/*.plist must reference fortel2-agents and not ~/ForteL2 (old=$PA_PLIST_OLD pinned=$PA_PLIST_PINNED)" >&2
+  fail=1
+fi
+
+# Wake template must stay without fdautil (host wrapper is LaunchControl-only).
+if grep -q 'fdautil' "$PA_LAUNCHD/com.steve.fortel2-wake.plist"; then
+  echo "FAIL repo wake plist must not embed LaunchControl fdautil (preserve it on the host)" >&2
+  fail=1
+else
+  echo "PASS pin-agents wake template has no fdautil wrapper (host-only)"
+fi
+
+# run_dev_{sleep,wake}.sh cd to dirname — work from the pinned tree unchanged.
+if grep -q 'cd "$(dirname "$0")"' "$PA_ROOT/run_dev_sleep.sh" \
+  && grep -q 'cd "$(dirname "$0")"' "$PA_ROOT/run_dev_wake.sh" \
+  && grep -q 'dev-sleep.sh sleep' "$PA_ROOT/run_dev_sleep.sh" \
+  && grep -q 'dev-sleep.sh wake' "$PA_ROOT/run_dev_wake.sh"; then
+  echo "PASS pin-agents run_dev_{sleep,wake}.sh cd to dirname (work from either tree)"
+else
+  echo "FAIL run_dev_sleep/wake must cd \"\$(dirname \"\$0\")\" so the pinned tree works" >&2
+  fail=1
+fi
+
+# Agent entrypoints must not self-update or refuse-if-not-main.
+if grep -E 'refuse-if-not-main|rev-parse --abbrev-ref HEAD' \
+     "$PA_ROOT/run_dev_sleep.sh" "$PA_ROOT/run_dev_wake.sh" \
+     "$PA_ROOT/refresh_health.sh" "$SCRIPT_DIR/alert-watch.sh" \
+     "$SCRIPT_DIR/resolve-games-sepolia.sh" "$SCRIPT_DIR/dev-sleep.sh" \
+     >/dev/null 2>&1; then
+  echo "FAIL agent entrypoints must not grow a branch guard (fail-closed at 03:00)" >&2
+  fail=1
+else
+  echo "PASS pin-agents no branch guard in sleep/wake/agent scripts"
+fi
+
+# --- deploy-agents.sh fixture repo ---
+pa_dev_secrets
+pa_init_origin "$PA_FIX/origin.git"
+
+PA_PIN="$PA_FIX/pinned"
+PA_OUT="$(pa_deploy "$PA_PIN")" && PA_EC=0 || PA_EC=$?
+if [[ "$PA_EC" -eq 0 ]] \
+  && [[ -d "$PA_PIN/.git" ]] \
+  && [[ "$(git -C "$PA_PIN" rev-parse --abbrev-ref HEAD)" == "main" ]] \
+  && [[ -L "$PA_PIN/.env.sepolia" ]] \
+  && [[ "$(readlink "$PA_PIN/.env.sepolia")" == "$PA_FIX/dev/.env.sepolia" ]] \
+  && [[ -L "$PA_PIN/.env" ]] \
+  && [[ -L "$PA_PIN/data" ]] \
+  && [[ "$(readlink "$PA_PIN/data")" == "$PA_FIX/dev/data" ]] \
+  && echo "$PA_OUT" | grep -q 'agents now run'; then
+  echo "PASS pin-agents deploy creates pinned clone on main with env symlinks"
+else
+  echo "FAIL deploy-agents.sh should create a main clone + .env.sepolia symlink (ec=$PA_EC)" >&2
+  echo "$PA_OUT" >&2
+  fail=1
+fi
+
+# Idempotent second run (already up to date + symlinks already).
+PA_OUT2="$(pa_deploy "$PA_PIN")" && PA_EC2=0 || PA_EC2=$?
+if [[ "$PA_EC2" -eq 0 ]] \
+  && echo "$PA_OUT2" | grep -q 'already' \
+  && [[ -L "$PA_PIN/.env.sepolia" ]]; then
+  echo "PASS pin-agents deploy is idempotent (ff no-op + symlink already)"
+else
+  echo "FAIL second deploy-agents.sh should be idempotent (ec=$PA_EC2)" >&2
+  echo "$PA_OUT2" >&2
+  fail=1
+fi
+
+# Fast-forward: new commit on origin, deploy advances HEAD.
+PA_OLD_HEAD="$(git -C "$PA_PIN" rev-parse HEAD)"
+printf 'next\n' > "$PA_FIX/seed/README"
+pa_git -C "$PA_FIX/seed" add README
+pa_git -C "$PA_FIX/seed" commit -q -m next
+git -C "$PA_FIX/seed" push -q origin main
+PA_FF="$(pa_deploy "$PA_PIN")" && PA_FF_EC=0 || PA_FF_EC=$?
+PA_NEW_HEAD="$(git -C "$PA_PIN" rev-parse HEAD)"
+if [[ "$PA_FF_EC" -eq 0 ]] \
+  && [[ "$PA_NEW_HEAD" != "$PA_OLD_HEAD" ]] \
+  && git -C "$PA_PIN" merge-base --is-ancestor "$PA_OLD_HEAD" "$PA_NEW_HEAD"; then
+  echo "PASS pin-agents deploy fast-forwards from origin/main"
+else
+  echo "FAIL deploy-agents.sh should ff-only update (ec=$PA_FF_EC old=$PA_OLD_HEAD new=$PA_NEW_HEAD)" >&2
+  echo "$PA_FF" >&2
+  fail=1
+fi
+
+# Dirty → distinct refusal, nonzero. Go-red-able: drop the dirty check.
+printf 'dirt\n' >> "$PA_PIN/README"
+PA_DIRTY="$(pa_deploy "$PA_PIN")" && PA_DIRTY_EC=0 || PA_DIRTY_EC=$?
+git -C "$PA_PIN" checkout -q -- README
+if [[ "$PA_DIRTY_EC" -ne 0 ]] \
+  && echo "$PA_DIRTY" | grep -q 'pinned tree is dirty'; then
+  echo "PASS pin-agents deploy refuses a dirty tree"
+else
+  echo "FAIL dirty pinned tree must refuse with the dirty message (ec=$PA_DIRTY_EC)" >&2
+  echo "$PA_DIRTY" >&2
+  fail=1
+fi
+
+# Not-main → distinct refusal. Go-red-able: drop the branch check.
+git -C "$PA_PIN" checkout -q -b not-main
+PA_BRANCH="$(pa_deploy "$PA_PIN")" && PA_BRANCH_EC=0 || PA_BRANCH_EC=$?
+git -C "$PA_PIN" checkout -q main
+git -C "$PA_PIN" branch -q -D not-main
+if [[ "$PA_BRANCH_EC" -ne 0 ]] \
+  && echo "$PA_BRANCH" | grep -q 'pinned tree is not on branch main'; then
+  echo "PASS pin-agents deploy refuses a non-main branch"
+else
+  echo "FAIL non-main pinned tree must refuse with the not-main message (ec=$PA_BRANCH_EC)" >&2
+  echo "$PA_BRANCH" >&2
+  fail=1
+fi
+
+# Diverged → distinct refusal. Go-red-able: reset --hard would "fix" this; we must not.
+printf 'local-only\n' > "$PA_PIN/local.txt"
+pa_git -C "$PA_PIN" add local.txt
+pa_git -C "$PA_PIN" commit -q -m local-only
+printf 'origin-only\n' > "$PA_FIX/seed/other.txt"
+pa_git -C "$PA_FIX/seed" add other.txt
+pa_git -C "$PA_FIX/seed" commit -q -m origin-only
+git -C "$PA_FIX/seed" push -q origin main
+PA_DIV="$(pa_deploy "$PA_PIN")" && PA_DIV_EC=0 || PA_DIV_EC=$?
+if [[ "$PA_DIV_EC" -ne 0 ]] \
+  && echo "$PA_DIV" | grep -q 'pinned tree has diverged from origin/main'; then
+  echo "PASS pin-agents deploy refuses a diverged tree"
+else
+  echo "FAIL diverged pinned tree must refuse with the diverged message (ec=$PA_DIV_EC)" >&2
+  echo "$PA_DIV" >&2
+  fail=1
+fi
+
+# Regular .env.sepolia in the pinned tree → refuse overwrite (never silent).
+# Rebuild a clean pinned tree for this case.
+rm -rf "$PA_PIN"
+PA_CLEAN="$(pa_deploy "$PA_PIN")" && PA_CLEAN_EC=0 || PA_CLEAN_EC=$?
+rm -f "$PA_PIN/.env.sepolia"
+printf 'real-file\n' > "$PA_PIN/.env.sepolia"
+PA_REG="$(pa_deploy "$PA_PIN")" && PA_REG_EC=0 || PA_REG_EC=$?
+if [[ "$PA_CLEAN_EC" -eq 0 ]] \
+  && [[ "$PA_REG_EC" -ne 0 ]] \
+  && echo "$PA_REG" | grep -q 'refusing to overwrite existing file with a symlink'; then
+  echo "PASS pin-agents deploy refuses to replace a real .env.sepolia with a symlink"
+else
+  echo "FAIL existing regular .env.sepolia must refuse overwrite (ec=$PA_REG_EC clean=$PA_CLEAN_EC)" >&2
+  echo "$PA_REG" >&2
+  fail=1
+fi
+
+# Existing clone whose origin is not this repo → refuse before fetch/symlink.
+PA_WRONG="$PA_FIX/wrong-origin"
+git init -q -b main "$PA_WRONG"
+git -C "$PA_WRONG" remote add origin "https://github.com/example/not-fortel2.git"
+pa_git -C "$PA_WRONG" commit -q --allow-empty -m not-us
+PA_WO="$(pa_deploy "$PA_WRONG")" && PA_WO_EC=0 || PA_WO_EC=$?
+if [[ "$PA_WO_EC" -ne 0 ]] \
+  && echo "$PA_WO" | grep -q 'pinned tree origin is not this repo'; then
+  echo "PASS pin-agents deploy refuses a clone whose origin is not this repo"
+else
+  echo "FAIL existing clone with a foreign origin must refuse (ec=$PA_WO_EC)" >&2
+  echo "$PA_WO" >&2
+  fail=1
+fi
+
+# --- (d) check-launchd FAILs a host plist pointing at ~/ForteL2 ---
+PA_HOST="$PA_FIX/host-agents"
+mkdir -p "$PA_HOST"
+cp "$PA_LAUNCHD/com.steve.fortel2-sleep.plist" "$PA_HOST/"
+# Portable in-place substitute (no sed -i difference across BSD/GNU).
+python3 -c '
+from pathlib import Path
+p = Path("'"$PA_HOST"'/com.steve.fortel2-sleep.plist")
+p.write_text(p.read_text().replace("/Users/steveforte/fortel2-agents", "/Users/steveforte/ForteL2"))
+'
+
+# Fixture pinned tree that belongs to this repo (same origin URL), on main, clean.
+PA_AUDIT="$PA_FIX/audit-tree"
+git init -q -b main "$PA_AUDIT"
+git -C "$PA_AUDIT" remote add origin "$(git -C "$PA_ROOT" remote get-url origin)"
+pa_git -C "$PA_AUDIT" commit -q --allow-empty -m audit
+mkdir -p "$PA_AUDIT/.git/info" "$PA_FIX/dev/data"
+printf '.env.sepolia\n.env\ndata\n' >> "$PA_AUDIT/.git/info/exclude"
+
+# Missing .env.sepolia symlink is FAIL even though gitignore hides it.
+PA_CL_NOSYM="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
+if echo "$PA_CL_NOSYM" | grep -q 'FAIL  pinned tree .env.sepolia is missing or not a symlink'; then
+  echo "PASS pin-agents check-launchd FAILs a pinned tree without .env.sepolia symlink"
+else
+  echo "FAIL check-launchd must FAIL when .env.sepolia is not a symlink" >&2
+  echo "$PA_CL_NOSYM" >&2
+  fail=1
+fi
+
+ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
+ln -s "$PA_FIX/dev/data" "$PA_AUDIT/data"
+
+PA_CL_OLD="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
+if echo "$PA_CL_OLD" | grep -q 'FAIL  com.steve.fortel2-sleep' \
+  && echo "$PA_CL_OLD" | grep -q '/Users/steveforte/ForteL2' \
+  && echo "$PA_CL_OLD" | grep -q 'PASS  pinned tree'; then
+  echo "PASS pin-agents check-launchd FAILs a host plist on the old checkout path"
+else
+  echo "FAIL check-launchd must FAIL an installed plist pointing at ~/ForteL2" >&2
+  echo "$PA_CL_OLD" >&2
+  fail=1
+fi
+
+# Pinned-tree audit: dirty / not-main / missing are FAIL (read-only).
+printf 'dirt\n' > "$PA_AUDIT/dirt.txt"
+PA_CL_DIRTY="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
+rm -f "$PA_AUDIT/dirt.txt"
+if echo "$PA_CL_DIRTY" | grep -q 'FAIL  pinned tree is dirty'; then
+  echo "PASS pin-agents check-launchd FAILs a dirty pinned tree"
+else
+  echo "FAIL check-launchd must FAIL when the pinned tree is dirty" >&2
+  echo "$PA_CL_DIRTY" >&2
+  fail=1
+fi
+
+git -C "$PA_AUDIT" checkout -q -b not-main
+PA_CL_NM="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
+git -C "$PA_AUDIT" checkout -q main
+if echo "$PA_CL_NM" | grep -q 'FAIL  pinned tree is not on branch main'; then
+  echo "PASS pin-agents check-launchd FAILs a non-main pinned tree"
+else
+  echo "FAIL check-launchd must FAIL when the pinned tree is not on main" >&2
+  echo "$PA_CL_NM" >&2
+  fail=1
+fi
+
+PA_CL_MISS="$(pa_cl "$PA_HOST" "$PA_FIX/no-such-tree")"
+if echo "$PA_CL_MISS" | grep -q 'FAIL  pinned tree missing'; then
+  echo "PASS pin-agents check-launchd FAILs a missing pinned tree"
+else
+  echo "FAIL check-launchd must FAIL when the pinned tree is absent" >&2
+  echo "$PA_CL_MISS" >&2
+  fail=1
+fi
+
+# Repo template audit (python3, no plutil) PASSes current plists.
+PA_CL_REPO="$(pa_cl "$PA_FIX/empty-agents" "$PA_AUDIT")"
+if echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-sleep  repo script=/Users/steveforte/fortel2-agents/run_dev_sleep.sh' \
+  && echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-wake  repo script=/Users/steveforte/fortel2-agents/run_dev_wake.sh' \
+  && echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-health  repo script=/Users/steveforte/fortel2-agents/refresh_health.sh' \
+  && echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-alerts  repo script=/Users/steveforte/fortel2-agents/scripts/alert-watch.sh' \
+  && echo "$PA_CL_REPO" | grep -q 'PASS  com.steve.fortel2-resolve-games  repo script=/Users/steveforte/fortel2-agents/scripts/resolve-games-sepolia.sh'; then
+  echo "PASS pin-agents check-launchd repo templates target the pinned tree"
+else
+  echo "FAIL check-launchd must PASS repo templates pointing at fortel2-agents" >&2
+  echo "$PA_CL_REPO" >&2
+  fail=1
+fi
+
+# .env.sepolia is gitignored — porcelain cannot see it; audit the symlink.
+rm -f "$PA_AUDIT/.env.sepolia"
+PA_CL_ENV="$(
+  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
+  CHECK_LAUNCHD_AGENTS_DIR="$PA_FIX/empty-agents" \
+  CHECK_LAUNCHD_PINNED_TREE="$PA_AUDIT" \
+  CHECK_LAUNCHD_DEV_DIR="$PA_FIX/dev" \
+  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
+  "$PA_CL" 2>&1 || true
+)"
+ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
+if echo "$PA_CL_ENV" | grep -q 'FAIL  pinned tree .env.sepolia is missing or not a symlink'; then
+  echo "PASS pin-agents check-launchd FAILs a pinned tree missing the .env.sepolia symlink"
+else
+  echo "FAIL check-launchd must FAIL when .env.sepolia is not a symlink to the checkout" >&2
+  echo "$PA_CL_ENV" >&2
+  fail=1
+fi
+
+# deploy-agents.sh is a standalone clone, not a worktree of the dev checkout.
+if grep -q 'git worktree add' "$PA_DEPLOY"; then
+  echo "FAIL deploy-agents.sh must be a standalone clone (worktree shares .git with workers)" >&2
+  fail=1
+else
+  echo "PASS pin-agents deploy uses a standalone clone (not a worktree)"
+fi
+
+cleanup_pa
+trap - EXIT
+unset PA_DEPLOY PA_CL PA_LAUNCHD PA_ROOT PA_FIX PA_PIN PA_OUT PA_EC PA_OUT2 PA_EC2
+unset PA_OLD_HEAD PA_FF PA_FF_EC PA_NEW_HEAD PA_DIRTY PA_DIRTY_EC
+unset PA_BRANCH PA_BRANCH_EC PA_DIV PA_DIV_EC PA_CLEAN PA_CLEAN_EC PA_REG PA_REG_EC
+unset PA_HOST PA_AUDIT PA_CL_OLD PA_CL_DIRTY PA_CL_NM PA_CL_MISS PA_CL_REPO PA_CL_ENV
+unset PA_CL_NOSYM PA_PLIST_OLD PA_PLIST_PINNED PA_WRONG PA_WO PA_WO_EC
+unset -f cleanup_pa pa_git pa_init_origin pa_dev_secrets pa_deploy pa_cl 2>/dev/null || true
+
+# =============================================================================
+# end pin-agents-worktree block
+# =============================================================================
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
