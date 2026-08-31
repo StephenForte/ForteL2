@@ -27,6 +27,9 @@ Exit 0 only on a full three-way match. Any mismatch names block + field.
   --blocks CSV        extra pinned heights (always includes 0,5 when in range)
   --min-blocks N      minimum sample count (default 20)
   --sleep-ms N        pause between live/replica RPC calls (default 400)
+  --max-l1-epoch-lag N  live-mode catch-up bound (default 2). Candidate L1
+                        origin may trail live safe origin by at most this many
+                        L1 blocks; otherwise exit nonzero before sampling.
   --guestbook ADDR    Guestbook address (default deployments/guestbook.txt)
   --fixture PATH      offline JSON fixture (no RPC; CI / helper tests)
   --alter-field F     mutate the candidate fixture copy of F before compare
@@ -46,6 +49,7 @@ LIVE_NODE_RPC="${LIVE_NODE_RPC:-http://127.0.0.1:9547}"
 BLOCKS_CSV=""
 MIN_BLOCKS=20
 SLEEP_MS=400
+MAX_L1_EPOCH_LAG=2
 GUESTBOOK_ADDR="${GUESTBOOK_ADDRESS:-}"
 FIXTURE=""
 ALTER_FIELD=""
@@ -60,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --blocks) BLOCKS_CSV="$2"; shift 2 ;;
     --min-blocks) MIN_BLOCKS="$2"; shift 2 ;;
     --sleep-ms) SLEEP_MS="$2"; shift 2 ;;
+    --max-l1-epoch-lag) MAX_L1_EPOCH_LAG="$2"; shift 2 ;;
     --guestbook) GUESTBOOK_ADDR="$2"; shift 2 ;;
     --fixture) FIXTURE="$2"; shift 2 ;;
     --alter-field) ALTER_FIELD="$2"; shift 2 ;;
@@ -74,6 +79,10 @@ if ! [[ "$MIN_BLOCKS" =~ ^[0-9]+$ ]] || (( MIN_BLOCKS < 1 )); then
 fi
 if ! [[ "$SLEEP_MS" =~ ^[0-9]+$ ]]; then
   echo "ERROR: --sleep-ms must be an integer >= 0" >&2
+  exit 2
+fi
+if ! [[ "$MAX_L1_EPOCH_LAG" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --max-l1-epoch-lag must be an integer >= 0" >&2
   exit 2
 fi
 
@@ -120,6 +129,7 @@ export PARITY_LIVE_NODE_RPC="$LIVE_NODE_RPC"
 export PARITY_BLOCKS_CSV="$BLOCKS_CSV"
 export PARITY_MIN_BLOCKS="$MIN_BLOCKS"
 export PARITY_SLEEP_MS="$SLEEP_MS"
+export PARITY_MAX_L1_EPOCH_LAG="$MAX_L1_EPOCH_LAG"
 export PARITY_GUESTBOOK="${GUESTBOOK_ADDR:-}"
 export PARITY_FIXTURE="$FIXTURE"
 export PARITY_ALTER_FIELD="$ALTER_FIELD"
@@ -134,6 +144,7 @@ CNODE = os.environ["PARITY_CANDIDATE_NODE_RPC"].rstrip("/")
 LNODE = os.environ["PARITY_LIVE_NODE_RPC"].rstrip("/")
 MIN_BLOCKS = int(os.environ["PARITY_MIN_BLOCKS"])
 SLEEP_MS = int(os.environ["PARITY_SLEEP_MS"])
+MAX_L1_EPOCH_LAG = int(os.environ.get("PARITY_MAX_L1_EPOCH_LAG") or "2")
 GUESTBOOK = (os.environ.get("PARITY_GUESTBOOK") or "").strip()
 FIXTURE = os.environ.get("PARITY_FIXTURE") or ""
 ALTER = (os.environ.get("PARITY_ALTER_FIELD") or "").strip()
@@ -280,16 +291,16 @@ def get_receipt(url, label, txh):
     return rpc(url, "eth_getTransactionReceipt", [txh], label)
 
 
-def get_balance(url, label, addr):
-    return norm_hex(rpc(url, "eth_getBalance", [addr, "latest"], label))
+def get_balance(url, label, addr, tag):
+    return norm_hex(rpc(url, "eth_getBalance", [addr, tag], label))
 
 
-def get_storage(url, label, addr, slot):
-    return norm_hash(rpc(url, "eth_getStorageAt", [addr, slot, "latest"], label))
+def get_storage(url, label, addr, slot, tag):
+    return norm_hash(rpc(url, "eth_getStorageAt", [addr, slot, tag], label))
 
 
-def get_codehash(url, label, addr):
-    code = rpc(url, "eth_getCode", [addr, "latest"], label) or "0x"
+def get_codehash(url, label, addr, tag):
+    code = rpc(url, "eth_getCode", [addr, tag], label) or "0x"
     raw = code[2:] if isinstance(code, str) and code.startswith("0x") else ""
     try:
         blob = bytes.fromhex(raw) if raw else b""
@@ -311,6 +322,37 @@ def safe_head(node_url, label):
         return n, h, origin_n
     n = hex_int(safe)
     return n, None, None
+
+
+def assert_safe_catchup(safe_c, hash_c, origin_c, safe_l, hash_l, origin_l):
+    """Fail unless candidate safe is within MAX_L1_EPOCH_LAG of live safe.
+
+    Task 3 bound: lag ≤ 2 L1 epochs. Sampling overlap history is not a substitute.
+    """
+    if origin_c is not None and origin_l is not None:
+        lag = origin_l - origin_c
+        print(
+            f"safe-head lag candidate_l1origin={origin_c} live_l1origin={origin_l} "
+            f"delta={lag} max={MAX_L1_EPOCH_LAG}"
+        )
+        if lag > MAX_L1_EPOCH_LAG:
+            fail(
+                f"candidate L1 origin {origin_c} lags live {origin_l} by {lag} "
+                f"L1 epochs (max {MAX_L1_EPOCH_LAG}); sidecar has not caught the safe head"
+            )
+    else:
+        # 2s L2 / ~12s L1 → ~6 L2 blocks per L1 epoch when origins are missing.
+        l2_lag = (safe_l or 0) - (safe_c or 0)
+        cap = MAX_L1_EPOCH_LAG * 6
+        print(f"safe-head lag candidate_safe={safe_c} live_safe={safe_l} l2_delta={l2_lag} max_l2={cap}")
+        if l2_lag > cap:
+            fail(
+                f"candidate safe {safe_c} lags live safe {safe_l} by {l2_lag} L2 blocks "
+                f"(max {cap} ≈ {MAX_L1_EPOCH_LAG} L1 epochs); sidecar has not caught the safe head"
+            )
+    if safe_c == safe_l and hash_c and hash_l:
+        if norm_hash(hash_c) != norm_hash(hash_l):
+            mismatch("safe_head", safe_c, "hash", norm_hash(hash_c), norm_hash(hash_l))
 
 
 def sample_heights(hi, extra, minimum):
@@ -535,6 +577,7 @@ def run_live():
     )
     if safe_c is None or safe_l is None:
         fail("could not read safe heads from op-node")
+    assert_safe_catchup(safe_c, safe_c_hash, origin_c, safe_l, safe_l_hash, origin_l)
     # Replica is L1-derived; its EL tip is the highest block we can compare there.
     hi = min(safe_c, safe_l, head_r)
     if hi < 5:
@@ -568,9 +611,11 @@ def run_live():
         blocks["live"].append(bl)
         blocks["replica"].append(br)
 
-    # State spot-checks: Guestbook (if code present) + bridge + withdrawal passer nonce.
+    # State spot-checks at the common overlap height (not latest / unsafe tip).
+    tag = hex(hi)
+    print(f"state tag={tag} (common safe overlap {hi})")
     gb = norm_addr(GUESTBOOK)
-    gb_code_live = rpc(LIVE, "eth_getCode", [gb, "latest"], "live") if gb else "0x"
+    gb_code_live = rpc(LIVE, "eth_getCode", [gb, tag], "live") if gb else "0x"
     have_gb = bool(gb) and gb_code_live not in (None, "", "0x")
 
     checks = [
@@ -600,11 +645,11 @@ def run_live():
     print(f"state checks={len(uniq)}")
     for kind, addr, slot, label in uniq:
         if kind == "balance":
-            a, b, c = get_balance(CAND, "candidate", addr), get_balance(LIVE, "live", addr), get_balance(REPL, "replica", addr)
+            a, b, c = get_balance(CAND, "candidate", addr, tag), get_balance(LIVE, "live", addr, tag), get_balance(REPL, "replica", addr, tag)
         elif kind == "storage":
-            a, b, c = get_storage(CAND, "candidate", addr, slot), get_storage(LIVE, "live", addr, slot), get_storage(REPL, "replica", addr, slot)
+            a, b, c = get_storage(CAND, "candidate", addr, slot, tag), get_storage(LIVE, "live", addr, slot, tag), get_storage(REPL, "replica", addr, slot, tag)
         elif kind == "codehash":
-            a, b, c = get_codehash(CAND, "candidate", addr), get_codehash(LIVE, "live", addr), get_codehash(REPL, "replica", addr)
+            a, b, c = get_codehash(CAND, "candidate", addr, tag), get_codehash(LIVE, "live", addr, tag), get_codehash(REPL, "replica", addr, tag)
         else:
             fail(f"unknown state kind {kind}")
         if a != b or a != c:

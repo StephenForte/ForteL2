@@ -7907,6 +7907,33 @@ else
   fail=1
 fi
 
+# Bugbot / Codex: state at the overlap safe tag, not latest; catch-up bound
+# is enforced before sampling (otherwise a 20-block prefix can false-PASS).
+VRP_BAL_FN="$(awk '/^def get_balance\(/,/^def get_storage\(/' "$VRP")"
+VRP_ST_FN="$(awk '/^def get_storage\(/,/^def get_codehash\(/' "$VRP")"
+VRP_CODE_FN="$(awk '/^def get_codehash\(/,/^def safe_head\(/' "$VRP")"
+if echo "$VRP_BAL_FN" | grep -q 'tag' \
+  && echo "$VRP_ST_FN" | grep -q 'tag' \
+  && echo "$VRP_CODE_FN" | grep -q 'tag' \
+  && ! echo "$VRP_BAL_FN" | grep -q '"latest"' \
+  && ! echo "$VRP_ST_FN" | grep -q '"latest"' \
+  && ! echo "$VRP_CODE_FN" | grep -q '"latest"' \
+  && grep -q 'state tag=' "$VRP"; then
+  echo "PASS verify-reth-parity state helpers take a block tag, not latest"
+else
+  echo "FAIL state checks must query a shared safe block tag, not latest" >&2
+  fail=1
+fi
+if grep -q 'def assert_safe_catchup' "$VRP" \
+  && grep -q 'sidecar has not caught the safe head' "$VRP" \
+  && grep -q 'MAX_L1_EPOCH_LAG' "$VRP" \
+  && echo "$VRP_HELP" | grep -q 'max-l1-epoch-lag'; then
+  echo "PASS verify-reth-parity refuses catch-up until L1-origin lag is within 2 epochs"
+else
+  echo "FAIL live parity must fail closed when candidate lags live safe by >2 L1 epochs" >&2
+  fail=1
+fi
+
 cleanup_vrp
 trap - EXIT
 unset VRP VRP_NOTE VRP_HELP VRP_HELP_EC VRP_NL_OUT VRP_NL_EC
