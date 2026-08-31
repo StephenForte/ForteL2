@@ -7056,6 +7056,17 @@ else
   fail=1
 fi
 
+# Linux CI has no plutil; require it only when comparing user-agent plists.
+CFW_PLUTIL_XML="$(awk '/^plist_xml\(\) \{/,/^}$/' "$CFW_CL")"
+CFW_START="$(awk '/^require_bin python3$/,/^REPO_ROOT=/' "$CFW_CL")"
+if echo "$CFW_PLUTIL_XML" | grep -q 'require_bin plutil' \
+  && ! echo "$CFW_START" | grep -q 'require_bin plutil'; then
+  echo "PASS check-launchd defers plutil to plist_xml (Linux CI has none)"
+else
+  echo "FAIL check-launchd must not require plutil at startup (CI is Linux)" >&2
+  fail=1
+fi
+
 cfw_cl_run() {
   CHECK_LAUNCHD_CLOUDFLARED_PLIST="$1" \
     CHECK_LAUNCHD_LAUNCHCTL="$CFW_FIX/shim/launchctl" \

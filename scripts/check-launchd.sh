@@ -24,8 +24,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
-require_bin plutil
 require_bin python3
+# plutil is only needed for user-agent plist compares (plist_xml). The system
+# cloudflared section is launchctl-print-only and must run on Linux CI without it.
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LAUNCHD_DIR="$REPO_ROOT/launchd"
@@ -49,6 +50,7 @@ is_contract_schedule() {
 
 # Normalize plist to xml1 on stdout. $1 = path.
 plist_xml() {
+  require_bin plutil
   plutil -convert xml1 -o - "$1"
 }
 
