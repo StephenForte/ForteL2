@@ -18,6 +18,13 @@
 #                         at least one (incl. op-challenger) is not
 #   stack-down            Sepolia: nothing is up outside the 23:45–03:00 PT
 #                         sleep window (a failed 03:00 wake)
+#   cloudflared-failing   system LaunchDaemon com.cloudflare.cloudflared is
+#                         installed (plist exists) and unhealthy: launchctl print
+#                         missing/unparseable, or nonzero last exit while not
+#                         running. No overnight-sleep grace — KeepAlive 24/7.
+#                         Plist absent is a deliberate no-tunnel host, never an
+#                         alert. Err-log "Failed to read token file" may enrich
+#                         the body; daemon state is the trigger (D-0107 F5).
 #
 # Verdicts OK / WARN / INSUFFICIENT never alert (WARN is inside funding-watch's
 # documented tolerance; alerting on it is the cry-wolf class #146 removed).
@@ -37,7 +44,8 @@
 # On the first run after a long pause (state last_check older than 3 h) log
 # mtime is granted one cycle of grace — launchd fires one missed calendar
 # event on wake, and this watcher may race it. Unloaded / nonzero-exit still
-# alert on that first run; those are not sleep artefacts.
+# alert on that first run; those are not sleep artefacts. cloudflared-failing
+# never takes that grace (the tunnel daemon is KeepAlive, not calendar).
 #
 # Usage: alert-watch.sh [--test]
 #   --test     synthetic alert, tagged TEST, both channels (post-install shakeout)
@@ -57,6 +65,7 @@
 #   ALERT_WATCH_PID_DIR        ALERT_WATCH_EXPECT_STACK (1=up, 0=sleep window)
 #   ALERT_WATCH_CURL  ALERT_WATCH_OSASCRIPT  ALERT_WATCH_LAUNCHCTL
 #     (absolute shim paths — lib.sh prepends homebrew onto PATH)
+#   ALERT_WATCH_CLOUDFLARED_PLIST  ALERT_WATCH_CLOUDFLARED_ERR
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,6 +98,10 @@ REALERT_HOURS="${ALERT_REALERT_HOURS:-6}"
 EMAIL_FROM="${ALERT_EMAIL_FROM:-onboarding@resend.dev}"
 EMAIL_TO="${ALERT_EMAIL_TO:-}"
 LABEL="com.steve.fortel2-resolve-games"
+# System-domain tunnel (D-0034 / D-0035). Override paths are test-only.
+CF_PLIST="${ALERT_WATCH_CLOUDFLARED_PLIST:-/Library/LaunchDaemons/com.cloudflare.cloudflared.plist}"
+CF_ERR="${ALERT_WATCH_CLOUDFLARED_ERR:-/Library/Logs/com.cloudflare.cloudflared.err.log}"
+CF_LABEL="com.cloudflare.cloudflared"
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-alert-watch.XXXXXX")"
 cleanup_aw() { rm -rf "$WORKDIR"; }
@@ -205,7 +218,7 @@ mkdir -p "$(dirname "$STATE_FILE")" "$WORKDIR"
 python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$HEALTH_STALE_SECS" "$RESOLVE_STALE_SECS" "$SLEEP_GRACE_SECS" \
   "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
-  "${ALERT_WATCH_PID_DIR:-$PID_DIR}" <<'PY'
+  "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" <<'PY'
 import json, os, shutil, sys, time, subprocess
 
 funding_json, state_file, resolve_out, resolve_err = sys.argv[1:5]
@@ -217,6 +230,9 @@ label = sys.argv[9]
 workdir = sys.argv[10]
 launchctl_bin = sys.argv[11] if len(sys.argv) > 11 else ""
 pid_dir_arg = sys.argv[12] if len(sys.argv) > 12 else ""
+cf_plist = sys.argv[13] if len(sys.argv) > 13 else ""
+cf_err = sys.argv[14] if len(sys.argv) > 14 else ""
+cf_label = sys.argv[15] if len(sys.argv) > 15 else "com.cloudflare.cloudflared"
 now = time.time()
 realert_secs = realert_hours * 3600.0
 
@@ -436,6 +452,116 @@ if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
             "ForteL2 stack is down",
             "Sepolia stack is not running outside the 23:45-03:00 PT sleep "
             "window: %s." % ", ".join(missing))
+
+# --- cloudflared system daemon (plist present = this host runs the tunnel) ---
+# Absence is not an alert. Unparseable print with plist present fails toward
+# alerting. No sleep-grace: KeepAlive 24/7, not a calendar agent.
+def parse_cf_print(stdout):
+    """Defensive parse of `launchctl print` (format varies across macOS).
+
+    Returns (state, exit_code) where state is 'running', 'not running',
+    or None (unparseable) and exit_code is an int or None.
+    """
+    state = None
+    exit_code = None
+    if not stdout:
+        return None, None
+    for line in stdout.splitlines():
+        line = line.strip()
+        lower = line.lower()
+        if lower.startswith("state =") or lower.startswith("state="):
+            parts = line.split("=", 1)
+            if len(parts) != 2:
+                continue
+            raw = parts[1].strip().lower()
+            if "not running" in raw:
+                state = "not running"
+            elif "running" in raw:
+                state = "running"
+            # other values (waiting, spawned, …) stay None → unparseable
+        elif lower.startswith("last exit code"):
+            parts = line.split("=", 1)
+            if len(parts) != 2:
+                continue
+            raw = parts[1].strip()
+            try:
+                exit_code = int(raw.split()[0])
+            except (ValueError, IndexError):
+                exit_code = None
+    return state, exit_code
+
+def cf_token_hint(path):
+    """Symptom detail only — never the detector. Token file itself is root-only."""
+    if not path:
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 65536))
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    if "Failed to read token file" in text:
+        return (
+            " Likely cause: token file missing (err log: Failed to read token file)."
+        )
+    return ""
+
+if cf_plist and os.path.exists(cf_plist):
+    cf_print_ok = False
+    cf_stdout = ""
+    cf_lc = launchctl_bin or shutil.which("launchctl")
+    if cf_lc:
+        try:
+            cf_proc = subprocess.run(
+                [cf_lc, "print", "system/%s" % cf_label],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                universal_newlines=True, timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            cf_proc = None
+        if cf_proc is not None and cf_proc.returncode == 0:
+            cf_print_ok = True
+            cf_stdout = cf_proc.stdout or ""
+    cf_state, cf_exit = parse_cf_print(cf_stdout)
+    # Unhealthy: print missing/unparseable, or nonzero last exit while not running.
+    cf_unhealthy = False
+    if not cf_print_ok:
+        cf_unhealthy = True
+        cf_why = (
+            "launchctl print system/%s missing or failed — cannot determine "
+            "daemon state." % cf_label
+        )
+    elif cf_state is None:
+        cf_unhealthy = True
+        cf_why = (
+            "launchctl print system/%s output unparseable — cannot determine "
+            "daemon state (fail toward alerting)." % cf_label
+        )
+    elif cf_state == "not running" and cf_exit not in (None, 0):
+        cf_unhealthy = True
+        cf_why = (
+            "system/%s is not running with last exit code %s."
+            % (cf_label, cf_exit)
+        )
+    elif cf_state == "not running" and cf_exit is None:
+        cf_unhealthy = True
+        cf_why = (
+            "system/%s is not running and last exit code is unparseable."
+            % cf_label
+        )
+    elif cf_state not in ("running", "not running"):
+        cf_unhealthy = True
+        cf_why = (
+            "system/%s state %r is not a known running/not-running value."
+            % (cf_label, cf_state)
+        )
+    if cf_unhealthy:
+        add("cloudflared-failing",
+            "ForteL2 cloudflared tunnel failing",
+            "cloudflared system daemon is unhealthy: %s%s"
+            % (cf_why, cf_token_hint(cf_err)))
 
 # --- cooldown filter (per condition × channel) ---
 cd = state.get("cooldown")

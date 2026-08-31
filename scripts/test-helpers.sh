@@ -6797,6 +6797,329 @@ else
   fail=1
 fi
 
+# =============================================================================
+# cloudflared-watch (D-0107 Finding 5) — delimited so the parallel
+# resolve-games-respected-type task can append below without a merge fight.
+# Shim-based: no real launchctl / daemon required.
+# =============================================================================
+
+CFW_AW="$SCRIPT_DIR/alert-watch.sh"
+CFW_CL="$SCRIPT_DIR/check-launchd.sh"
+CFW_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-cloudflared-watch.XXXXXX")"
+cleanup_cfw() { rm -rf "$CFW_FIX"; }
+trap cleanup_cfw EXIT
+mkdir -p "$CFW_FIX/shim" "$CFW_FIX/mock" "$CFW_FIX/data" "$CFW_FIX/bin" "$CFW_FIX/deploy"
+cat > "$CFW_FIX/env" <<EOF
+FORTEL2_ROOT=$CFW_FIX
+DATA_DIR=$CFW_FIX/data
+BIN_DIR=$CFW_FIX/bin
+DEPLOY_DIR=$CFW_FIX/deploy
+EOF
+cat > "$CFW_FIX/shim/curl" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+n=0
+[ -f "$dir/curl.calls" ] && n=$(cat "$dir/curl.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/curl.calls"
+printf 'ARG:%s\n' "$@" >> "$dir/curl.argv"
+cat > "$dir/curl.stdin"
+out=""
+writeout=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then out="$a"; fi
+  if [ "$prev" = "-w" ] || [ "$prev" = "--write-out" ]; then writeout="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] && printf '%s\n' '{"id":"mock-resend"}' > "$out"
+[ -n "$writeout" ] && printf '%s' "${ALERT_WATCH_CURL_HTTP:-200}"
+exit 0
+EOS
+cat > "$CFW_FIX/shim/osascript" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+n=0
+[ -f "$dir/osascript.calls" ] && n=$(cat "$dir/osascript.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/osascript.calls"
+printf 'ARG:%s\n' "$@" >> "$dir/osascript.argv"
+exit 0
+EOS
+# Dispatch on print target so resolve-games stays healthy while cloudflared varies.
+cat > "$CFW_FIX/shim/launchctl" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || true
+if [ -n "$dir" ]; then
+  printf 'ARG:%s\n' "$@" >> "$dir/launchctl.argv"
+fi
+case "$1" in
+  print) ;;
+  bootout|bootstrap|kickstart)
+    echo "cloudflared-watch must not call launchctl $1" >&2
+    exit 99
+    ;;
+  *)
+    echo "unexpected launchctl $1" >&2
+    exit 99
+    ;;
+esac
+target="$2"
+case "$target" in
+  *cloudflared*)
+    if [ "${ALERT_WATCH_CF_MISSING:-}" = "1" ]; then
+      echo "Could not find service" >&2
+      exit 1
+    fi
+    if [ "${ALERT_WATCH_CF_GARBAGE:-}" = "1" ]; then
+      echo "this is not launchctl print output"
+      exit 0
+    fi
+    printf 'system/com.cloudflare.cloudflared = {\n\tstate = %s\n\tlast exit code = %s\n}\n' \
+      "${ALERT_WATCH_CF_STATE:-running}" \
+      "${ALERT_WATCH_CF_EXIT:-0}"
+    exit 0
+    ;;
+  *)
+    printf 'gui/501/com.steve.fortel2-resolve-games = {\n\tstate = not running\n\tlast exit code = 0\n}\n'
+    exit 0
+    ;;
+esac
+EOS
+chmod +x "$CFW_FIX/shim/curl" "$CFW_FIX/shim/osascript" "$CFW_FIX/shim/launchctl"
+: > "$CFW_FIX/cf.err.log"
+cfw_reset() {
+  rm -f "$CFW_FIX/mock"/curl.argv "$CFW_FIX/mock"/curl.calls \
+    "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/osascript.calls \
+    "$CFW_FIX/mock"/launchctl.argv "$CFW_FIX/state.json"
+  : > "$CFW_FIX/resolve.out.log"
+  : > "$CFW_FIX/resolve.err.log"
+  printf '%s\n' '{"verdict":"OK","reason":"balance at or above the funding policy minimum"}' \
+    > "$CFW_FIX/funding-health.json"
+}
+cfw_run() {
+  env -u RESEND_API_TOKEN \
+    PATH="$CFW_FIX/shim:$PATH" \
+    FORTEL2_ENV="$CFW_FIX/env" \
+    ALERT_WATCH_MOCK_DIR="$CFW_FIX/mock" \
+    ALERT_WATCH_FUNDING_JSON="$CFW_FIX/funding-health.json" \
+    ALERT_WATCH_STATE="$CFW_FIX/state.json" \
+    ALERT_WATCH_RESOLVE_OUT="$CFW_FIX/resolve.out.log" \
+    ALERT_WATCH_RESOLVE_ERR="$CFW_FIX/resolve.err.log" \
+    ALERT_WATCH_CLOUDFLARED_PLIST="$CFW_PLIST" \
+    ALERT_WATCH_CLOUDFLARED_ERR="$CFW_FIX/cf.err.log" \
+    ALERT_WATCH_CURL="$CFW_FIX/shim/curl" \
+    ALERT_WATCH_OSASCRIPT="$CFW_FIX/shim/osascript" \
+    ALERT_WATCH_LAUNCHCTL="$CFW_FIX/shim/launchctl" \
+    ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
+    "$@"
+}
+
+# Source-level: condition id exists (fails if the condition is removed).
+if grep -q 'cloudflared-failing' "$CFW_AW" \
+  && grep -q 'ALERT_WATCH_CLOUDFLARED_PLIST' "$CFW_AW" \
+  && grep -q 'ALERT_WATCH_CLOUDFLARED_ERR' "$CFW_AW" \
+  && grep -q 'system/%s' "$CFW_AW" \
+  && ! grep -E 'launchctl[[:space:]]+(bootout|bootstrap|kickstart)' "$CFW_AW"; then
+  echo "PASS alert-watch cloudflared-failing condition id and plist/err shims exist"
+else
+  echo "FAIL alert-watch must define cloudflared-failing with plist/err test overrides" >&2
+  fail=1
+fi
+
+# (a) plist present + nonzero last exit + not running → fires.
+CFW_PLIST="$CFW_FIX/cf.plist"
+: > "$CFW_PLIST"
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='not running' ALERT_WATCH_CF_EXIT=255 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/curl.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-failing"* ]] \
+  && grep -qi 'cloudflared' "$CFW_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch cloudflared-failing fires on nonzero last exit while not running"
+else
+  echo "FAIL alert-watch must alert cloudflared-failing when plist exists and daemon is down (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Token-failure err log enriches the body; state is still the trigger.
+cfw_reset
+printf '%s\n' 'Failed to read token file: open /Library/Application Support/com.cloudflare.cloudflared/token: no such file or directory' \
+  > "$CFW_FIX/cf.err.log"
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='not running' ALERT_WATCH_CF_EXIT=255 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && grep -q 'Failed to read token file' "$CFW_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch cloudflared-failing body includes token-file hint from err log"
+else
+  echo "FAIL cloudflared-failing should enrich the body from the err-log token pattern (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+: > "$CFW_FIX/cf.err.log"
+
+# (b) plist present + healthy (running) → no condition.
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CF_EXIT=0 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ ! -f "$CFW_FIX/mock/curl.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch stays quiet when cloudflared is running"
+else
+  echo "FAIL alert-watch must not alert on a healthy cloudflared daemon (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# (c) plist absent → no condition, even if the shim would report unhealthy.
+CFW_PLIST="$CFW_FIX/no-such-cloudflared.plist"
+rm -f "$CFW_PLIST"
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='not running' ALERT_WATCH_CF_EXIT=255 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch does not alert cloudflared-failing when the plist is absent"
+else
+  echo "FAIL plist-absent hosts must stay quiet regardless of launchctl shim output (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# (d) two distinct conditions in the same run (immediate-second-condition rule).
+CFW_PLIST="$CFW_FIX/cf.plist"
+: > "$CFW_PLIST"
+cfw_reset
+printf '%s\n' '{"verdict":"FAIL","reason":"batcher below policy for 24.0 h with no top-up"}' \
+  > "$CFW_FIX/funding-health.json"
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='not running' ALERT_WATCH_CF_EXIT=255 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 2 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/curl.calls" 2>/dev/null || echo 0)" -eq 2 ]] \
+  && [[ "$CFW_OUT" == *"condition funding-fail"* ]] \
+  && [[ "$CFW_OUT" == *"condition cloudflared-failing"* ]]; then
+  echo "PASS alert-watch fires funding-fail and cloudflared-failing together"
+else
+  echo "FAIL two distinct conditions must both alert in the same run (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# (e) unparseable launchctl output with plist present → fires (fail toward alerting).
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_GARBAGE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-failing"* ]] \
+  && grep -qi 'unparseable' "$CFW_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch cloudflared-failing fires when launchctl output is unparseable"
+else
+  echo "FAIL unparseable launchctl print with plist present must alert (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# launchctl print missing (nonzero) with plist present → fires.
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_MISSING=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-failing"* ]]; then
+  echo "PASS alert-watch cloudflared-failing fires when launchctl print is missing"
+else
+  echo "FAIL missing launchctl print with plist present must alert (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# --- check-launchd audit (system domain; shims; no sudo / no gui) ---
+if grep -q 'check_cloudflared_daemon' "$CFW_CL" \
+  && grep -q 'system/${label}' "$CFW_CL" \
+  && grep -q 'CHECK_LAUNCHD_CLOUDFLARED_PLIST' "$CFW_CL" \
+  && grep -q 'CHECK_LAUNCHD_LAUNCHCTL' "$CFW_CL" \
+  && grep -q 'INFO  ${label}' "$CFW_CL" \
+  && ! grep -E '^[[:space:]]*sudo[[:space:]]' "$CFW_CL"; then
+  echo "PASS check-launchd has a read-only system-domain cloudflared section"
+else
+  echo "FAIL check-launchd must report system/com.cloudflare.cloudflared without sudo" >&2
+  fail=1
+fi
+
+cfw_cl_run() {
+  CHECK_LAUNCHD_CLOUDFLARED_PLIST="$1" \
+    CHECK_LAUNCHD_LAUNCHCTL="$CFW_FIX/shim/launchctl" \
+    ALERT_WATCH_MOCK_DIR="$CFW_FIX/mock" \
+    "$CFW_CL" 2>&1 || true
+}
+
+# Plist absent → INFO, not FAIL for this daemon.
+CFW_CL_OUT="$(cfw_cl_run "$CFW_FIX/no-such-cloudflared.plist")"
+if echo "$CFW_CL_OUT" | grep -q 'INFO  com.cloudflare.cloudflared' \
+  && echo "$CFW_CL_OUT" | grep -q 'not a FAIL' \
+  && ! echo "$CFW_CL_OUT" | grep -q 'FAIL  com.cloudflare.cloudflared'; then
+  echo "PASS check-launchd plist-absent cloudflared is informational, not FAIL"
+else
+  echo "FAIL check-launchd must INFO (not FAIL) when the cloudflared plist is absent" >&2
+  echo "$CFW_CL_OUT" >&2
+  fail=1
+fi
+
+# Plist present + healthy → PASS line, labeled system domain.
+CFW_CL_OUT="$(ALERT_WATCH_CF_STATE=running ALERT_WATCH_CF_EXIT=0 \
+  cfw_cl_run "$CFW_FIX/cf.plist")"
+if echo "$CFW_CL_OUT" | grep -q 'PASS  com.cloudflare.cloudflared' \
+  && echo "$CFW_CL_OUT" | grep -q 'system domain' \
+  && echo "$CFW_CL_OUT" | grep -q 'state=running' \
+  && ! echo "$CFW_CL_OUT" | grep -q 'FAIL  com.cloudflare.cloudflared'; then
+  echo "PASS check-launchd reports healthy system cloudflared as PASS"
+else
+  echo "FAIL check-launchd must PASS a running cloudflared system daemon" >&2
+  echo "$CFW_CL_OUT" >&2
+  fail=1
+fi
+
+# Plist present + crash-loop → FAIL with state and last exit code.
+CFW_CL_OUT="$(ALERT_WATCH_CF_STATE='not running' ALERT_WATCH_CF_EXIT=255 \
+  cfw_cl_run "$CFW_FIX/cf.plist")"
+if echo "$CFW_CL_OUT" | grep -q 'FAIL  com.cloudflare.cloudflared' \
+  && echo "$CFW_CL_OUT" | grep -q 'system domain' \
+  && echo "$CFW_CL_OUT" | grep -q 'state=not running' \
+  && echo "$CFW_CL_OUT" | grep -q 'last exit code=255'; then
+  echo "PASS check-launchd FAILs an unhealthy system cloudflared daemon"
+else
+  echo "FAIL check-launchd must FAIL not-running + nonzero last exit" >&2
+  echo "$CFW_CL_OUT" >&2
+  fail=1
+fi
+
+# The cloudflared section must not mention gui/$UID (user-agent domain).
+if awk '/check_cloudflared_daemon/,/^}$/' "$CFW_CL" | grep -q 'gui/'; then
+  echo "FAIL check-launchd cloudflared section must not use gui/\$UID" >&2
+  fail=1
+else
+  echo "PASS check-launchd cloudflared section is system-domain only (no gui/)"
+fi
+
+cleanup_cfw
+trap - EXIT
+unset CFW_AW CFW_CL CFW_FIX CFW_PLIST CFW_OUT CFW_EC CFW_CL_OUT
+unset -f cleanup_cfw cfw_reset cfw_run cfw_cl_run 2>/dev/null || true
+
+# =============================================================================
+# end cloudflared-watch block
+# =============================================================================
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

@@ -3,14 +3,22 @@
 # Never mutates launchd state (no bootout/bootstrap/kickstart) and never deletes files.
 #
 # Compares checked-in plists to installed plist *files* only. It does NOT inspect
-# what launchd has actually loaded (launchctl print) — a third state where the
-# loaded job differs from both repo and installed file has occurred twice (D-0026).
-# After re-copying a plist, bootout + bootstrap is required; file equality is necessary
-# but not sufficient.
+# what launchd has actually loaded (launchctl print) for user agents — a third
+# state where the loaded job differs from both repo and installed file has
+# occurred twice (D-0026). After re-copying a plist, bootout + bootstrap is
+# required; file equality is necessary but not sufficient.
 #
 # Repo agents are enumerated from launchd/com.steve.fortel2-*.plist (not a
 # hardcoded label list). Script path is the last non-flag ProgramArguments
 # entry that looks like a path, so a trailing --execute is not the script.
+#
+# A separate read-only section reports the *system* Cloudflare tunnel daemon
+# (com.cloudflare.cloudflared / D-0034 / D-0107 Finding 5): plist present or
+# not, launchctl print system/… state and last exit code. Plist absent is
+# informational, not a FAIL. No gui/$UID, no sudo, never attempts a fix.
+# Test-only overrides (names never appear in env files):
+#   CHECK_LAUNCHD_CLOUDFLARED_PLIST  CHECK_LAUNCHD_LAUNCHCTL
+#     (absolute shim path — lib.sh prepends homebrew onto PATH)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -245,6 +253,91 @@ fi
 if [[ "$stale_found" -eq 0 ]]; then
   echo "(none)"
 fi
+
+# --- system Cloudflare tunnel daemon (not a user LaunchAgent) ---
+# Read-only. Detection only — remediation is a human run-block (needs root).
+check_cloudflared_daemon() {
+  local plist="${CHECK_LAUNCHD_CLOUDFLARED_PLIST:-/Library/LaunchDaemons/com.cloudflare.cloudflared.plist}"
+  local lc="${CHECK_LAUNCHD_LAUNCHCTL:-launchctl}"
+  local label="com.cloudflare.cloudflared"
+  local out rc=0
+  local state_raw="" exit_raw="" state_disp="unparseable" exit_disp="unparseable"
+  local unhealthy=0 detail=""
+
+  echo
+  echo "=== system LaunchDaemon (Cloudflare tunnel; not a user agent) ==="
+
+  if [[ ! -f "$plist" ]]; then
+    echo "INFO  ${label}  system domain  plist absent (${plist}) — tunnel not installed on this host (not a FAIL)"
+    return
+  fi
+
+  if ! command -v "$lc" >/dev/null 2>&1; then
+    echo "FAIL  ${label}  system domain  launchctl not found — cannot determine daemon state"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  rc=0
+  out="$("$lc" print "system/${label}" 2>/dev/null)" || rc=$?
+
+  if [[ "$rc" -ne 0 ]]; then
+    echo "FAIL  ${label}  system domain  launchctl print missing/failed (exit ${rc})  plist=${plist}"
+    FAILS=$((FAILS + 1))
+    return
+  fi
+
+  # Defensive parse: macOS launchctl print format varies. Trim around '='.
+  # BSD awk (no IGNORECASE); launchctl prints "state =" / "last exit code =".
+  state_raw="$(printf '%s\n' "$out" | awk -F= '
+    $1 ~ /^[[:space:]]*state[[:space:]]*$/ {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+      print $2
+      exit
+    }')"
+  exit_raw="$(printf '%s\n' "$out" | awk -F= '
+    $1 ~ /last exit code/ {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+      print $2
+      exit
+    }')"
+
+  if [[ "$state_raw" == *"not running"* ]]; then
+    state_disp="not running"
+  elif [[ "$state_raw" == *"running"* ]]; then
+    state_disp="running"
+  elif [[ -n "$state_raw" ]]; then
+    state_disp="$state_raw"
+  fi
+
+  if [[ -n "$exit_raw" ]]; then
+    exit_disp="$(printf '%s\n' "$exit_raw" | awk '{print $1}')"
+  fi
+
+  if [[ "$state_disp" == "unparseable" ]]; then
+    unhealthy=1
+    detail="launchctl print unparseable"
+  elif [[ "$state_disp" == "not running" ]]; then
+    if [[ "$exit_disp" =~ ^[0-9]+$ && "$exit_disp" != "0" ]]; then
+      unhealthy=1
+      detail="nonzero last exit while not running"
+    elif [[ ! "$exit_disp" =~ ^[0-9]+$ ]]; then
+      unhealthy=1
+      detail="not running; last exit code unparseable"
+    fi
+  elif [[ "$state_disp" != "running" ]]; then
+    unhealthy=1
+    detail="unknown state"
+  fi
+
+  if [[ "$unhealthy" -eq 1 ]]; then
+    echo "FAIL  ${label}  system domain  state=${state_disp}  last exit code=${exit_disp}  ${detail}"
+    FAILS=$((FAILS + 1))
+  else
+    echo "PASS  ${label}  system domain  state=${state_disp}  last exit code=${exit_disp}"
+  fi
+}
+check_cloudflared_daemon
 
 echo
 if [[ "$FAILS" -eq 0 ]]; then

@@ -10,7 +10,7 @@ User agents only run while that user session is logged in (auto-login on the min
 | `com.steve.fortel2-wake` | daily **03:00** | `run_dev_wake.sh` → Sepolia `dev-sleep wake` |
 | `com.steve.fortel2-resolve-games` | load + hourly at **:00** | `resolve-games-sepolia.sh --execute` (L1 bond recovery; runs through the sleep window) |
 
-Checked-in plists under `launchd/` are the **source of truth**. Editing a plist (or copying an updated one into `~/Library/LaunchAgents/`) does nothing until you `bootout` + `bootstrap` that agent — launchd keeps the previously loaded job (H4-004). Run `./scripts/check-launchd.sh` to verify installed agents match the repo schedule and script paths (read-only; it never mutates launchd state).
+Checked-in plists under `launchd/` are the **source of truth**. Editing a plist (or copying an updated one into `~/Library/LaunchAgents/`) does nothing until you `bootout` + `bootstrap` that agent — launchd keeps the previously loaded job (H4-004). Run `./scripts/check-launchd.sh` to verify installed agents match the repo schedule and script paths (read-only; it never mutates launchd state). The same script also reports the **system** Cloudflare tunnel daemon (`com.cloudflare.cloudflared`: plist present/absent, `launchctl print system/…` state and last exit code). Plist absent is informational, not a FAIL. That section is read-only (no `gui/$UID`, no sudo, no restart).
 
 **Logs** go to `~/Library/Logs/fortel2-{health,sleep,wake,resolve-games}.{out,err}.log` (not repo `data/`).  
 launchd opens those paths *before* starting the script, so the parent directory must already exist — `~/Library/Logs` always does on macOS; gitignored `data/` does not on a fresh clone.
