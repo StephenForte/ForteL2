@@ -7509,6 +7509,185 @@ unset -f cleanup_rg_rt rg_rt_analyze 2>/dev/null || true
 # end resolve-games-respected-type block
 # =============================================================================
 
+# =============================================================================
+# resolve-games-zero-bond-legs
+# Condition resolveClaim credit confirmation on plan-time expected credit.
+# Additive fixtures only; #182 respected-type block above is untouched.
+# Offline mock-execute; no live RPC.
+# =============================================================================
+
+RG_ZB="$SCRIPT_DIR/resolve-games-sepolia.sh"
+RG_ZB_PY_DIR="$(dirname "$(command -v python3)")"
+RG_ZB_PATH="$RG_ZB_PY_DIR:/usr/bin:/bin"
+RG_ZB_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-rg-zero-bond.XXXXXX")"
+cleanup_rg_zb() { rm -rf "$RG_ZB_FIX"; }
+trap cleanup_rg_zb EXIT
+
+rg_zb_write_game() {
+  python3 - "$1" <<'PY'
+import json, os, sys
+
+out_dir = sys.argv[1]
+
+def game(idx, status, credit, resolved_sub, resolved_at=0):
+    return {
+        "index": idx,
+        "game_type": 8,
+        "address": "0x00000000000000000000000000000000000000%02x" % idx,
+        "created_at": 990000,
+        "max_clock_duration": 7200,
+        "status": status,
+        "resolved_at": resolved_at,
+        "credit_wei": str(credit),
+        "claim_data_len": 1,
+        "resolved_subgame": resolved_sub,
+        "weth_amount_wei": "0",
+        "weth_unlock_ts": 0,
+    }
+
+def snap(path, n_games, init_bond):
+    games = [game(i, 0, 0, False) for i in range(1, n_games + 1)]
+    doc = {
+        "now": 1000000,
+        "mode": "execute",
+        "finality_delay": 1800,
+        "weth_delay": 3600,
+        "init_bond_wei": str(init_bond),
+        "respected_game_type": 8,
+        "games": games,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+        f.write("\n")
+
+def write_complete(root, idx):
+    states = [
+        game(idx, 0, 0, False),
+        game(idx, 0, 0, True),
+        game(idx, 0, 0, True),
+        game(idx, 2, 0, True, 990000),
+        game(idx, 2, 0, True, 990000),
+    ]
+    fetch = os.path.join(root, "fetch")
+    os.makedirs(fetch, exist_ok=True)
+    for n, g in enumerate(states, 1):
+        with open(os.path.join(fetch, "%d.%d.json" % (idx, n)), "w", encoding="utf-8") as f:
+            json.dump(g, f)
+            f.write("\n")
+
+zb = os.path.join(out_dir, "zero")
+os.makedirs(zb, exist_ok=True)
+open(os.path.join(zb, "now"), "w").write("1000000\n")
+snap(os.path.join(zb, "snapshot.json"), 2, 0)
+for i in (1, 2):
+    write_complete(zb, i)
+
+cap = os.path.join(out_dir, "cap")
+os.makedirs(cap, exist_ok=True)
+open(os.path.join(cap, "now"), "w").write("1000000\n")
+snap(os.path.join(cap, "snapshot.json"), 4, 0)
+for i in (1, 2, 3, 4):
+    write_complete(cap, i)
+
+bonded = os.path.join(out_dir, "bonded")
+os.makedirs(bonded, exist_ok=True)
+open(os.path.join(bonded, "now"), "w").write("1000000\n")
+snap(os.path.join(bonded, "snapshot.json"), 1, 80000000000000000)
+fetch = os.path.join(bonded, "fetch")
+os.makedirs(fetch, exist_ok=True)
+for n, g in enumerate([game(1, 0, 0, False), game(1, 0, 0, True)], 1):
+    with open(os.path.join(fetch, "1.%d.json" % n), "w", encoding="utf-8") as f:
+        json.dump(g, f)
+        f.write("\n")
+PY
+}
+
+rg_zb_write_game "$RG_ZB_FIX"
+
+rg_zb_mock() {
+  local mock_dir="$1"
+  local max_txs="$2"
+  env -u FORTEL2_ENV PATH="$RG_ZB_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$mock_dir/snapshot.json" \
+    RESOLVE_GAMES_MOCK_DIR="$mock_dir" \
+    RESOLVE_GAMES_MAX_TXS_PER_RUN="$max_txs" \
+    "$RG_ZB" 2>&1
+}
+
+# (a) zero-bond: resolveClaim credit 0 is success; remaining legs complete; exit 0.
+# Fails if the unconditional credit==0 SystemExit is restored.
+RG_ZB_A="$(rg_zb_mock "$RG_ZB_FIX/zero" 10)" && RG_ZB_A_EC=0 || RG_ZB_A_EC=$?
+RG_ZB_A_SENT="$(printf '%s\n' "$RG_ZB_A" | grep -c '^SENT leg=' || true)"
+RG_ZB_A_OK="$(printf '%s\n' "$RG_ZB_A" | grep -c 'OK resolveClaim confirmed with credit 0 (expected 0; zero-bond)' || true)"
+if [[ "$RG_ZB_A_EC" -eq 0 ]] \
+  && echo "$RG_ZB_A" | grep -q '^EXECUTE done$' \
+  && echo "$RG_ZB_A" | grep -q '^txs_sent=4$' \
+  && [[ "$RG_ZB_A_SENT" -eq 4 ]] \
+  && [[ "$RG_ZB_A_OK" -eq 2 ]] \
+  && echo "$RG_ZB_A" | grep -q 'SENT leg=resolve tx=' \
+  && ! echo "$RG_ZB_A" | grep -q 'ERROR: resolveClaim confirmed but credit is still 0'; then
+  echo "PASS resolve-games zero-bond resolveClaim credit 0 continues remaining legs"
+else
+  echo "FAIL zero-bond resolveClaim should continue and exit 0 (ec=$RG_ZB_A_EC sent=$RG_ZB_A_SENT ok=$RG_ZB_A_OK)" >&2
+  echo "$RG_ZB_A" >&2
+  fail=1
+fi
+
+# (b) bonded: expected credit > 0 and observed credit 0 still aborts.
+# Go-red-able: deleting the expected!=0 guard makes this pass.
+RG_ZB_B="$(rg_zb_mock "$RG_ZB_FIX/bonded" 5)" && RG_ZB_B_EC=0 || RG_ZB_B_EC=$?
+RG_ZB_B_SENT="$(printf '%s\n' "$RG_ZB_B" | grep -c '^SENT leg=' || true)"
+if [[ "$RG_ZB_B_EC" -ne 0 ]] \
+  && echo "$RG_ZB_B" | grep -q 'ERROR: resolveClaim confirmed but credit is still 0' \
+  && [[ "$RG_ZB_B_SENT" -eq 1 ]] \
+  && ! echo "$RG_ZB_B" | grep -q '^EXECUTE done$' \
+  && ! echo "$RG_ZB_B" | grep -q 'OK resolveClaim confirmed with credit 0'; then
+  echo "PASS resolve-games bonded resolveClaim credit 0 still aborts"
+else
+  echo "FAIL bonded resolveClaim with expected credit > 0 must abort (ec=$RG_ZB_B_EC sent=$RG_ZB_B_SENT)" >&2
+  echo "$RG_ZB_B" >&2
+  fail=1
+fi
+
+# (c) cap still bounds total legs across the now-longer (non-aborting) run.
+RG_ZB_C="$(rg_zb_mock "$RG_ZB_FIX/cap" 5)" && RG_ZB_C_EC=0 || RG_ZB_C_EC=$?
+RG_ZB_C_SENT="$(printf '%s\n' "$RG_ZB_C" | grep -c '^SENT leg=' || true)"
+if [[ "$RG_ZB_C_EC" -eq 0 ]] \
+  && echo "$RG_ZB_C" | grep -q '^txs_sent=5$' \
+  && [[ "$RG_ZB_C_SENT" -eq 5 ]] \
+  && echo "$RG_ZB_C" | grep -q 'txs_cap_truncated=1 max_txs=5 remainder deferred to next hour' \
+  && echo "$RG_ZB_C" | grep -q 'OK resolveClaim confirmed with credit 0 (expected 0; zero-bond)'; then
+  echo "PASS resolve-games tx cap still bounds legs after zero-bond confirms"
+else
+  echo "FAIL cap should bound the longer zero-bond run at 5 (ec=$RG_ZB_C_EC sent=$RG_ZB_C_SENT)" >&2
+  echo "$RG_ZB_C" >&2
+  fail=1
+fi
+
+# resolve / claimCredit_unlock / withdraw confirmations stay unconditional.
+if grep -q 'ERROR: resolve confirmed but status is still 0' "$RG_ZB" \
+  && grep -q 'ERROR: claimCredit unlock confirmed but DelayedWETH amount is still 0' "$RG_ZB" \
+  && grep -q 'ERROR: claimCredit withdraw confirmed but credit is still' "$RG_ZB" \
+  && ! awk '/if leg == "resolve" and status == 0/,/raise SystemExit/' "$RG_ZB" | grep -q 'expected' \
+  && ! awk '/if leg == "claimCredit_unlock"/,/raise SystemExit/' "$RG_ZB" | grep -q 'expected'; then
+  echo "PASS resolve-games resolve/unlock/withdraw confirmations are unchanged"
+else
+  echo "FAIL resolve/unlock/withdraw confirmations must stay unconditional" >&2
+  fail=1
+fi
+
+cleanup_rg_zb
+trap - EXIT
+unset RG_ZB RG_ZB_PY_DIR RG_ZB_PATH RG_ZB_FIX
+unset RG_ZB_A RG_ZB_A_EC RG_ZB_A_SENT RG_ZB_A_OK
+unset RG_ZB_B RG_ZB_B_EC RG_ZB_B_SENT
+unset RG_ZB_C RG_ZB_C_EC RG_ZB_C_SENT
+unset -f cleanup_rg_zb rg_zb_write_game rg_zb_mock 2>/dev/null || true
+
+# =============================================================================
+# end resolve-games-zero-bond-legs block
+# =============================================================================
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
