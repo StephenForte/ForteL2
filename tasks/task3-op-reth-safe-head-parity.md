@@ -73,6 +73,8 @@ Measured 2026-08-31 ~13:07 PDT while L1-origin lag was still ~29650 (cap is 2). 
 
 Live parity RPC path also probed: candidate op-node `:19547` and live op-node `:9547` both answer `optimism_syncStatus`; replica `eth_chainId` = 852.
 
+Receipts at 5 and 200000 MATCH three-way (both type `0x7e` deposits). State at 200000 MATCH on candidate + live; replica returns `historical state … is not available` (diskless prune). Replica `eth_getBalance` at its own latest and latest−64 succeeds; latest−256 fails. After catch-up, `verify-reth-parity.sh` queries state at overlap `hi` (within 2 L1 origins ≈ ~12 L2), which is inside that window — not at 200000.
+
 ## Sample heights
 
 _Pending `./scripts/verify-reth-parity.sh` after catch-up (must include 0, 5, and ≥18 spread checkpoints)._
