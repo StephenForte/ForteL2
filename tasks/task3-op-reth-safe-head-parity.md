@@ -40,9 +40,24 @@ First `op-reth node` start (08:46 PT) crashed in ~1s with that panic; the datadi
 
 Live sequencer `:9545/:9546/:9547/:9551` and `$DATA_DIR/l2/op-geth` are not opened for write. Rewind policy: wipe + re-derive; never `debug_setHead`.
 
-## Checkpoint (~30–45 min after first start)
+## Checkpoint (~30–45 min after first successful start)
 
-_Pending. Posted as a PR comment: L2 blocks/min, L1 origin progress, projected time to live safe head, `op-reth-node.log` error counts. Continue by default._
+Posted 2026-08-31 09:26 PDT on PR #184: https://github.com/StephenForte/ForteL2/pull/184#issuecomment-5481270776
+
+| Metric | Value |
+|---|---|
+| Elapsed | 34.8 min (start 08:51:24 PDT) |
+| Candidate safe/unsafe | 16956 / 16956 |
+| Live safe / unsafe | 380070 / 380141 |
+| Candidate L1 origin | 11548321 |
+| Live L1 origin | 11606828 |
+| L2 rate | 487 blocks/min |
+| L1 origin rate | 78.6 blocks/min |
+| Projected time to live safe | ~12.4 h (ETA ~21:50 PDT if rate holds) |
+| `op-reth-node.log` | 0 error-level; 1 recovered HTTP 429 (09:05:47, 50/s burst on receipts of L1 11547600); 0 `got 0 receipts`; 9 warns (startup/beacon-ignore, attach reset, that 429, 5 Sepolia L1 re-org signals) |
+| `op-reth.log` (this start) | 0 panics, 0 ERROR |
+
+Continue by default. One 429 is not a loop. Steve to read the QuickNode dashboard against these numbers.
 
 ## Sample heights
 
