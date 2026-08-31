@@ -422,14 +422,20 @@ def decide_game(game, now, finality_delay, weth_delay, respected_game_type):
     }
 
 
-# Terminal for watermark advance: decide()'s two skip reasons that mean
+# Terminal for watermark advance: decide()'s skip reasons that mean
 # "this game will never need another recovery look."
 # zero_credit covers both return sites in decide_game (early status==2
 # drain, and the later claim-state branch — they share this reason).
 # challenger_wins is also advancing-terminal (a resolved loss will not
 # grow proposer credit) but is recorded and reprinted every run so it
 # is never walked past silently.
-WATERMARK_TERMINAL_REASONS = frozenset(("zero_credit", "challenger_wins"))
+# not_respected_type is terminal because the agent recovers only the
+# snapshot's respected type: leftover games of a previous type must
+# not pin low_water at the first of them (Bugbot on #182). missing_type
+# stays non-terminal so a fetch/parse glitch is retried next hour.
+WATERMARK_TERMINAL_REASONS = frozenset(
+    ("zero_credit", "challenger_wins", "not_respected_type")
+)
 
 
 def snapshot_game_count(snapshot):

@@ -7074,6 +7074,50 @@ else
   fail=1
 fi
 
+# Bugbot #182: not_respected_type must be watermark-terminal so a type-1
+# prefix cannot pin low_water after the respected type flips to 8.
+cat >"$RG_RT_FIX/wm-type.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "respected_game_type": 8,
+  "game_count": 2,
+  "games": [
+    {
+      "index": 0, "game_type": 1, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 990000, "credit_wei": "0",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    },
+    {
+      "index": 1, "game_type": 8, "created_at": 980000, "max_clock_duration": 7200,
+      "status": 2, "resolved_at": 999900, "credit_wei": "80000000000000000",
+      "claim_data_len": 1, "weth_amount_wei": "0", "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+RG_RT_WM="$RG_RT_FIX/wm-type-mark.json"
+RG_RT_WM_OUT="$(
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_RT_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$RG_RT_FIX/wm-type.json" \
+    RESOLVE_GAMES_WATERMARK="$RG_RT_WM" \
+    "$RG_RT" --analyze-only 2>&1
+)" && RG_RT_WM_EC=0 || RG_RT_WM_EC=$?
+RG_RT_WM_MARK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["low_water"])' "$RG_RT_WM" 2>/dev/null || echo missing)"
+if [[ "$RG_RT_WM_EC" -eq 0 ]] \
+  && echo "$RG_RT_WM_OUT" | grep -q 'game 0 SKIP not_respected_type' \
+  && echo "$RG_RT_WM_OUT" | grep -q 'game 1 WAIT finality' \
+  && echo "$RG_RT_WM_OUT" | grep -q '^watermark_next=1$' \
+  && [[ "$RG_RT_WM_MARK" == "1" ]]; then
+  echo "PASS resolve-games not_respected_type does not pin the watermark"
+else
+  echo "FAIL type-1 prefix must be watermark-terminal (ec=$RG_RT_WM_EC mark=$RG_RT_WM_MARK)" >&2
+  echo "$RG_RT_WM_OUT" >&2
+  fail=1
+fi
+
 cleanup_rg_rt
 trap - EXIT
 unset RG_RT RG_RT_PY_DIR RG_RT_PATH RG_RT_FIX RG_RT_AB RG_RT_AB_EC
