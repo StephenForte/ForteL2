@@ -22,6 +22,9 @@ Opt-in 852 verifier sidecar (FORTEL2_EL=reth). Not the live sequencer.
 
 Requires FORTEL2_RETH_PROFILE=sequencer_faultproof | verifier (no silent default).
 Datadir: $DATA_DIR/l2/op-reth (or FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth).
+SafeDB (Task 4): auto-enabled on sequencer_faultproof only, path
+FORTEL2_RETH_SAFEDB_PATH (default $DATA_DIR/l2/op-reth-safedb). Sidecar
+op-node only — live op-node / $DATA_DIR/safedb untouched.
 Ports default 19545/19546/19551/19547/30330 (env-overridable; live 954x refused).
 JWT: fresh file under the verifier datadir — never the live JWT.
 
@@ -118,6 +121,11 @@ if [[ "$PREFLIGHT" -eq 1 ]]; then
   echo "ports http=$(reth_http_port) ws=$(reth_ws_port) auth=$(reth_auth_port) node=$(reth_node_rpc_port) p2p=$(reth_p2p_port)"
   echo "enginekind=reth genesis_hash=$FORTEL2_L2_GENESIS_HASH_852"
   echo "rewind: wipe datadir + re-derive (never debug_setHead)"
+  if [[ "$FORTEL2_RETH_PROFILE" == "sequencer_faultproof" ]]; then
+    echo "safedb=$(require_reth_safedb_path) (sidecar op-node only; live op-node untouched)"
+  else
+    echo "safedb=off (verifier profile)"
+  fi
   exit 0
 fi
 
@@ -229,6 +237,19 @@ start_bg op-reth op-reth node \
 sleep 2
 wait_for_rpc "$EL_HTTP" "op-reth sidecar" 90
 
+# SafeDB is sidecar-only. Never inherit a leaked live OP_NODE_SAFEDB_PATH
+# (that would share or clobber $DATA_DIR/safedb). verifier profile stays off.
+SAFEDB_ARGS=()
+if [[ "$FORTEL2_RETH_PROFILE" == "sequencer_faultproof" ]]; then
+  SAFEDB="$(require_reth_safedb_path)"
+  mkdir -p "$SAFEDB"
+  SAFEDB_ARGS=(--safedb.path="$SAFEDB")
+  export OP_NODE_SAFEDB_PATH="$SAFEDB"
+  echo "SafeDB enabled path=$SAFEDB (sidecar op-node only; live op-node untouched)"
+else
+  unset OP_NODE_SAFEDB_PATH || true
+fi
+
 echo "Starting op-reth-node --l2.enginekind=reth (rpc :$NODE_PORT) l1.rpckind=${L1_RPC_KIND} l1.rpc-rate-limit=${L1_RPC_RATE_LIMIT}"
 start_bg op-reth-node op-node \
   --l1="$L1_RPC_URL" \
@@ -246,7 +267,8 @@ start_bg op-reth-node op-node \
   --p2p.disable=true \
   --rpc.addr=127.0.0.1 \
   --rpc.port="$NODE_PORT" \
-  --log.level=info
+  --log.level=info \
+  "${SAFEDB_ARGS[@]}"
 
 wait_for_opnode_rpc "$NODE_HTTP" "op-reth-node" 90
 
@@ -279,5 +301,9 @@ if [[ "$WAIT_BLOCKS" -gt 0 ]]; then
 fi
 
 echo "op-reth verifier up. EL=$EL_HTTP node=$NODE_HTTP profile=${FORTEL2_RETH_PROFILE}"
+if [[ ${#SAFEDB_ARGS[@]} -gt 0 ]]; then
+  L1_HEAD="$(cast block-number --rpc-url "$L1_RPC_URL" 2>/dev/null || echo unknown)"
+  echo "SafeDB enable L1 head=${L1_HEAD} (sidecar only; pre-enable optimism_safeHeadAtL1Block must fail)"
+fi
 echo "Stop: ./scripts/stop-op-reth-verifier.sh (or stop-all.sh — sidecar names only; live geth stays if on another DATA_DIR)"
 echo "Known-good: op-reth log 'Starting JSON-RPC' / 'RPC'; op-reth-node 'derived' / 'Forkchoice'"
