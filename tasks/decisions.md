@@ -1014,6 +1014,12 @@
 - **Decision:** Task 3 closed. The candidate datadir is Tasks 4–5's input: no `reset-sepolia.sh`, no `--wipe`, no `debug_setHead` on it. The 23:45 sleep stops the sidecar and the 03:00 wake does not restart it — accepted until Task 5 flips the monitors; restart the sidecar manually when Task 4 needs it.
 - **Consequence:** Task 4 (fault-proof/historical workflows against the candidate) is unblocked. Not verified anywhere yet: total QuickNode credit cost of the sync (operator dashboard). Next free decision id is **D-0115**.
 
+### D-0115 — **CVE-2026-56854 cleared (x/crypto v0.55.0, #188); advisory inventory refreshed; new tracked item GO-2026-6278 (gorilla/websocket via go-ethereum)**
+- **Context:** A Trivy DB update failed CI on the docs-only #187 (proof the CVE was main's): CVE-2026-56854, CRITICAL, `golang.org/x/crypto/ssh` auth bypass, indirect v0.54.0 in `batcher/`, `proposer/`, `derivation/`. Fixed by #188 (`fix/x-crypto-cve-2026-56854`): bump to v0.55.0 + tidy transitives (`x/text` 0.41.0; `x/net` 0.57.0 in derivation), go.mod/go.sum only. Codex correctly caught that the first commit left the checked-in advisory inventory stale; follow-up `ba91127` re-ran the GO-2026-5932 validation at v0.55.0 (openpgp grep zero matches; stance unchanged, module-level only) and refreshed README + `tasks/prd-l2-learning-chain.md:477`.
+- **Finding — new tracked advisory GO-2026-6278:** `gorilla/websocket` v1.4.2 (via go-ethereum) is a *symbol-level* govulncheck hit in all three modules; pre-existing, unrelated to the bump, disclosed by the worker rather than recorded as a clean pass. It clears CI because the Trivy gate is scoped `severity: HIGH,CRITICAL` (`security-scans.yml`, verified) — the gate is scoped, not broken. Fix requires go-ethereum pulling websocket ≥ v1.5.3; re-check on every go-ethereum bump.
+- **Decision:** #188 merged after planner verification (diff exactly the disclosed set, no replace directives; batcher build+test re-run locally; Trivy pass confirmed to be a real scan — `[gomod] Detecting vulnerabilities...` present, clean scans print no totals). GO-2026-6278 joins GO-2026-5932 as a tracked, not-actionable-here advisory.
+- **Consequence:** Trivy unblocked for all PRs. Next free decision id is **D-0116**.
+
 ---
 
 ## Escalations
