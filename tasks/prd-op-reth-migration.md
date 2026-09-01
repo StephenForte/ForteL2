@@ -495,8 +495,8 @@ Answer during Task 1 or 2 unless noted.
 
 ## 12. Inspection limits
 
-- **Done:** Mini P:0 sidecar (first-N hash-match; `tasks/spike-op-reth.md`). Task 1 pin + assertion (#176, D-0109). Task 2 selector/guards + 852 sidecar start (#178, D-0110). Task 3 sync-to-tip and 20-sample three-way safe-head parity + restart/resume (#184, D-0114; `tasks/task3-op-reth-safe-head-parity.md`).
-- **Not done:** challenger/SafeDB/withdrawal-prove/proposer-root on op-reth (Task 4), sequencer cutover (Task 5), Render image (Task 7), friend repo (Task 8).
+- **Done:** Mini P:0 sidecar (first-N hash-match; `tasks/spike-op-reth.md`). Task 1 pin + assertion (#176, D-0109). Task 2 selector/guards + 852 sidecar start (#178, D-0110). Task 3 safe-head catch-up (lag 0) and 20-sample three-way parity + restart/resume (#184, D-0114; `tasks/task3-op-reth-safe-head-parity.md`).
+- **Not done:** challenger/SafeDB/withdrawal-prove/proposer-root on op-reth (Task 4); unsafe-tip behavior — an L1-derived verifier with p2p disabled never holds the live unsafe tip, so this is only testable at Task 5 cutover when op-reth produces the tip; sequencer cutover (Task 5); Render image (Task 7); friend repo (Task 8).
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The live start path still has no `admin_stopSequencer` helper — Task 5 must add or document the RPC call.
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
