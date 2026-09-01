@@ -267,6 +267,7 @@ start_bg op-reth-node op-node \
   --p2p.disable=true \
   --rpc.addr=127.0.0.1 \
   --rpc.port="$NODE_PORT" \
+  --rpc.enable-admin \
   --log.level=info \
   "${SAFEDB_ARGS[@]}"
 

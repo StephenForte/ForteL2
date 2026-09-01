@@ -5812,8 +5812,8 @@ sys.exit(0 if started == stopped else 1)
 PY
 )" && SYM_DERIVE_EC=0 || SYM_DERIVE_EC=$?
 if [[ "$SYM_DERIVE_EC" -eq 0 ]] \
-   && echo "$SYM_DERIVE" | grep -q 'STOP=l1-batch-proxy l2-rpc-filter op-batcher op-challenger op-geth op-node op-proposer' \
-   && echo "$SYM_DERIVE" | grep -q 'START=l1-batch-proxy l2-rpc-filter op-batcher op-challenger op-geth op-node op-proposer' \
+   && echo "$SYM_DERIVE" | grep -q 'STOP=l1-batch-proxy l2-rpc-filter op-batcher op-challenger op-geth op-node op-proposer op-reth' \
+   && echo "$SYM_DERIVE" | grep -q 'START=l1-batch-proxy l2-rpc-filter op-batcher op-challenger op-geth op-node op-proposer op-reth' \
    && echo "$SYM_DERIVE" | grep -q '09-start-challenger-sepolia.sh' \
    && echo "$SYM_DERIVE" | grep -q 'start-l1-batch-proxy-sepolia.sh'; then
   echo "PASS start-all-sepolia.sh starts every service stop-all-sepolia.sh stops"
@@ -6173,6 +6173,32 @@ else
   echo "$STK_NATIVE_OUT" >&2
   fail=1
 fi
+
+# Task 5: FORTEL2_EL=reth must expect op-reth the moment the env flips (03:30 class).
+stk_reset
+stk_mark op-geth op-node op-batcher op-proposer l2-rpc-filter op-challenger
+T5_AW_OUT="$(stk_run FORTEL2_EL=reth ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && T5_AW_EC=0 || T5_AW_EC=$?
+if [[ "$T5_AW_EC" -eq 0 ]] \
+   && grep -q 'op-reth' "$STK_FIX/mock/osascript.argv" \
+   && grep -qi 'missing\|not running' "$STK_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch FORTEL2_EL=reth fires stack-missing when op-reth is absent"
+else
+  echo "FAIL alert-watch reth mode must expect op-reth (ec=$T5_AW_EC)" >&2
+  echo "$T5_AW_OUT" >&2
+  fail=1
+fi
+stk_reset
+stk_mark op-reth op-node op-batcher op-proposer l2-rpc-filter op-challenger
+T5_AW_OK="$(stk_run FORTEL2_EL=reth ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && T5_AW_OK_EC=0 || T5_AW_OK_EC=$?
+if [[ "$T5_AW_OK_EC" -eq 0 ]] && [[ ! -f "$STK_FIX/mock/osascript.calls" ]]; then
+  echo "PASS alert-watch FORTEL2_EL=reth is quiet when op-reth is the expected live EL"
+else
+  echo "FAIL alert-watch reth-complete stack must not alert (ec=$T5_AW_OK_EC)" >&2
+  echo "$T5_AW_OK" >&2
+  fail=1
+fi
 rm -rf "$STK_FIX"
 
 # P:0 op-reth spike — tracked files + refusals (no chain, no op-reth required).
@@ -6513,13 +6539,14 @@ else
   echo "$RETH_LIVE_OUT" >&2
   fail=1
 fi
-RETH_SEP_OUT="$(FORTEL2_EL=reth "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" 2>&1)" && RETH_SEP_EC=0 || RETH_SEP_EC=$?
-if [[ "$RETH_SEP_EC" -ne 0 ]] \
-  && echo "$RETH_SEP_OUT" | grep -q 'FORTEL2_EL=reth' \
-  && echo "$RETH_SEP_OUT" | grep -q 'start-op-reth-verifier.sh'; then
-  echo "PASS 04-start-sequencer-sepolia.sh refuses FORTEL2_EL=reth (live sequencer stays geth)"
+# Task 5: Sepolia live start honors FORTEL2_EL (--print-plan; no processes).
+RETH_SEP_OUT="$(FORTEL2_EL=reth "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" --print-plan 2>&1)" && RETH_SEP_EC=0 || RETH_SEP_EC=$?
+if [[ "$RETH_SEP_EC" -eq 0 ]] \
+  && echo "$RETH_SEP_OUT" | grep -q 'EL=op-reth' \
+  && echo "$RETH_SEP_OUT" | grep -q 'ENGINEKIND=reth'; then
+  echo "PASS 04-start-sequencer-sepolia.sh --print-plan names op-reth under FORTEL2_EL=reth"
 else
-  echo "FAIL 04-start-sequencer-sepolia.sh must refuse FORTEL2_EL=reth (ec=$RETH_SEP_EC)" >&2
+  echo "FAIL Sepolia start must honor FORTEL2_EL=reth via --print-plan (ec=$RETH_SEP_EC)" >&2
   echo "$RETH_SEP_OUT" >&2
   fail=1
 fi
@@ -6538,10 +6565,11 @@ else
 fi
 if grep -q -- '--l2.enginekind=reth' "$RETH_START" \
   && ! grep -q -- '--l2.enginekind=geth' "$RETH_START" \
-  && grep -q -- '--l2.enginekind=geth' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
-  echo "PASS sidecar starts enginekind=reth; live Sepolia start still enginekind=geth"
+  && grep -q -- '--l2.enginekind=geth' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -q -- '--l2.enginekind=reth' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
+  echo "PASS sidecar enginekind=reth; live Sepolia script has both geth (default) and reth branches"
 else
-  echo "FAIL sidecar must use enginekind=reth and leave live start on geth" >&2
+  echo "FAIL sidecar must stay enginekind=reth; live Sepolia must contain both enginekinds" >&2
   fail=1
 fi
 
@@ -6668,11 +6696,12 @@ if grep -q -- '--safedb.path' "$RETH_START" \
   && grep -q 'FORTEL2_RETH_PROFILE" == "sequencer_faultproof"' "$RETH_START" \
   && grep -q 'require_reth_safedb_path' "$RETH_START" \
   && grep -q 'unset OP_NODE_SAFEDB_PATH' "$RETH_START" \
-  && ! grep -q -- '--safedb.path' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -q 'fortel2_live_safedb_path' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && ! grep -q 'require_reth_safedb_path' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
   && ! grep -q -- '--safedb.path' "$SCRIPT_DIR/09-start-challenger-sepolia.sh"; then
-  echo "PASS sidecar wires --safedb.path on sequencer_faultproof only; live start/challenger untouched"
+  echo "PASS sidecar SafeDB stays require_reth_safedb_path; live start uses fortel2_live_safedb_path"
 else
-  echo "FAIL SafeDB flag must land in the sidecar op-node only" >&2
+  echo "FAIL sidecar SafeDB must stay sidecar-only; live start must use the live store" >&2
   fail=1
 fi
 RETH_SDB_PF_SF="$(
@@ -6840,19 +6869,21 @@ else
   fail=1
 fi
 
-# Trap 1: default status procs= and overnight monitors must not gain op-reth.
-if grep -q 'procs=(op-geth op-node op-batcher op-proposer)' "$SCRIPT_DIR/status.sh" \
-  && ! grep -q 'procs=(.*op-reth' "$SCRIPT_DIR/status.sh"; then
-  echo "PASS status.sh default procs= does not include op-reth"
+# Task 5: default selector is still geth; reth is opt-in via FORTEL2_EL.
+T5_EL_GETH="$(fortel2_live_el_pid)"
+T5_EL_RETH="$(FORTEL2_EL=reth fortel2_live_el_pid)"
+if [[ "$T5_EL_GETH" == "op-geth" && "$T5_EL_RETH" == "op-reth" ]]; then
+  echo "PASS fortel2_live_el_pid defaults to op-geth and names op-reth when FORTEL2_EL=reth"
 else
-  echo "FAIL status.sh default procs= must stay geth-only until Task 5" >&2
+  echo "FAIL live EL pid helper default=$T5_EL_GETH reth=$T5_EL_RETH" >&2
   fail=1
 fi
-if ! grep -q '"op-reth"' "$SCRIPT_DIR/alert-watch.sh" \
-  && ! grep -q 'op-reth' "$SCRIPT_DIR/dev-sleep.sh"; then
-  echo "PASS alert-watch.sh / dev-sleep.sh do not name op-reth (Task 5 flip)"
+if grep -q 'fortel2_live_el_pid' "$SCRIPT_DIR/status.sh" \
+  && grep -q 'el == "reth"' "$SCRIPT_DIR/alert-watch.sh" \
+  && grep -q 'FORTEL2_EL' "$SCRIPT_DIR/dev-sleep.sh"; then
+  echo "PASS status.sh / alert-watch.sh / dev-sleep.sh are selector-driven (Task 5)"
 else
-  echo "FAIL overnight monitors must not gain op-reth in Task 2" >&2
+  echo "FAIL §10 monitors must honor FORTEL2_EL" >&2
   fail=1
 fi
 
@@ -8738,6 +8769,268 @@ unset -f cleanup_vrf 2>/dev/null || true
 
 # =============================================================================
 # end verify-reth-faultproof block
+# =============================================================================
+
+# --- Task 5: selector flips, admin helper, rollback order (must be able to go red) ---
+T5_ADMIN="$SCRIPT_DIR/sequencer-admin.sh"
+T5_CUT="$SCRIPT_DIR/cutover-to-reth-sepolia.sh"
+T5_ROLL="$SCRIPT_DIR/rollback-to-geth-sepolia.sh"
+T5_SEP="$SCRIPT_DIR/04-start-sequencer-sepolia.sh"
+
+if [[ -x "$T5_ADMIN" && -x "$T5_CUT" && -x "$T5_ROLL" ]]; then
+  echo "PASS Task 5 scripts sequencer-admin/cutover/rollback are executable"
+else
+  echo "FAIL Task 5 scripts must be executable" >&2
+  fail=1
+fi
+
+T5_PLAN_G="$( "$T5_SEP" --print-plan 2>&1 )" && T5_PLAN_G_EC=0 || T5_PLAN_G_EC=$?
+if [[ "$T5_PLAN_G_EC" -eq 0 ]] \
+  && echo "$T5_PLAN_G" | grep -q 'EL=op-geth' \
+  && echo "$T5_PLAN_G" | grep -q 'ENGINEKIND=geth' \
+  && echo "$T5_PLAN_G" | grep -q 'SEQUENCER_STOPPED=false' \
+  && echo "$T5_PLAN_G" | grep -q 'JWT=live'; then
+  echo "PASS 04-start-sequencer-sepolia.sh --print-plan default is geth stopped=false"
+else
+  echo "FAIL default --print-plan must stay geth / stopped=false (ec=$T5_PLAN_G_EC)" >&2
+  echo "$T5_PLAN_G" >&2
+  fail=1
+fi
+
+T5_PLAN_V="$( "$T5_SEP" --verifier-only --print-plan 2>&1 )" && T5_PLAN_V_EC=0 || T5_PLAN_V_EC=$?
+if [[ "$T5_PLAN_V_EC" -eq 0 ]] \
+  && echo "$T5_PLAN_V" | grep -q 'EL=op-geth' \
+  && echo "$T5_PLAN_V" | grep -q 'SEQUENCER_STOPPED=true'; then
+  echo "PASS --verifier-only --print-plan is geth with sequencer.stopped=true"
+else
+  echo "FAIL --verifier-only must print SEQUENCER_STOPPED=true (ec=$T5_PLAN_V_EC)" >&2
+  echo "$T5_PLAN_V" >&2
+  fail=1
+fi
+
+T5_PLAN_RV="$(FORTEL2_EL=reth "$T5_SEP" --verifier-only --print-plan 2>&1 )" && T5_PLAN_RV_EC=0 || T5_PLAN_RV_EC=$?
+if [[ "$T5_PLAN_RV_EC" -ne 0 ]] && echo "$T5_PLAN_RV" | grep -qi 'verifier-only'; then
+  echo "PASS --verifier-only refuses under FORTEL2_EL=reth"
+else
+  echo "FAIL --verifier-only + reth must refuse (ec=$T5_PLAN_RV_EC)" >&2
+  echo "$T5_PLAN_RV" >&2
+  fail=1
+fi
+
+T5_SDB_OUT="$(
+  FORTEL2_RETH_SAFEDB_PATH="$DATA_DIR/l2/op-reth-safedb"
+  OP_NODE_SAFEDB_PATH="$DATA_DIR/l2/op-reth-safedb"
+  fortel2_live_safedb_path 2>&1
+)" && T5_SDB_EC=0 || T5_SDB_EC=$?
+if [[ "$T5_SDB_EC" -ne 0 ]] && echo "$T5_SDB_OUT" | grep -qi 'sidecar SafeDB'; then
+  echo "PASS fortel2_live_safedb_path refuses the sidecar store"
+else
+  echo "FAIL live SafeDB must refuse sidecar path (ec=$T5_SDB_EC)" >&2
+  echo "$T5_SDB_OUT" >&2
+  fail=1
+fi
+
+T5_DRY="$( "$T5_ADMIN" stop --rpc http://127.0.0.1:9547 --dry-run 2>&1 )" && T5_DRY_EC=0 || T5_DRY_EC=$?
+if [[ "$T5_DRY_EC" -eq 0 ]] \
+  && echo "$T5_DRY" | grep -q 'METHOD=admin_stopSequencer' \
+  && echo "$T5_DRY" | grep -q 'CMD=stop'; then
+  echo "PASS sequencer-admin.sh --dry-run stop prints admin_stopSequencer"
+else
+  echo "FAIL sequencer-admin dry-run stop (ec=$T5_DRY_EC)" >&2
+  echo "$T5_DRY" >&2
+  fail=1
+fi
+
+T5_SIDECAR_START="$(
+  "$T5_ADMIN" start --rpc "http://127.0.0.1:$(reth_node_rpc_port)" --dry-run 2>&1
+)" && T5_SIDECAR_START_EC=0 || T5_SIDECAR_START_EC=$?
+if [[ "$T5_SIDECAR_START_EC" -ne 0 ]] && echo "$T5_SIDECAR_START" | grep -qi 'sidecar'; then
+  echo "PASS sequencer-admin.sh start refuses sidecar :19547"
+else
+  echo "FAIL sidecar start must refuse (ec=$T5_SIDECAR_START_EC)" >&2
+  echo "$T5_SIDECAR_START" >&2
+  fail=1
+fi
+
+T5_BAD_RPC="$( "$T5_ADMIN" status --rpc https://example.invalid --dry-run 2>&1 )" && T5_BAD_RPC_EC=0 || T5_BAD_RPC_EC=$?
+if [[ "$T5_BAD_RPC_EC" -ne 0 ]] && echo "$T5_BAD_RPC" | grep -qi 'loopback'; then
+  echo "PASS sequencer-admin.sh refuses a non-loopback admin RPC"
+else
+  echo "FAIL admin RPC must be loopback (ec=$T5_BAD_RPC_EC)" >&2
+  echo "$T5_BAD_RPC" >&2
+  fail=1
+fi
+
+T5_FIX_DIR="$(mktemp -d /tmp/fortel2-t5-admin.XXXXXX)"
+python3 - "$T5_FIX_DIR" <<'PY' &
+import json, sys, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+state = {"active": True}
+class H(BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(n) or b"{}")
+        method = body.get("method")
+        if method == "admin_stopSequencer":
+            state["active"] = False
+            result = True
+        elif method == "admin_startSequencer":
+            state["active"] = True
+            result = True
+        elif method == "admin_sequencerActive":
+            result = state["active"]
+        else:
+            self.send_response(404); self.end_headers(); return
+        payload = json.dumps({"jsonrpc": "2.0", "id": body.get("id", 1), "result": result}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+    def log_message(self, *args):
+        return
+httpd = HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1] + "/port", "w").write(str(httpd.server_address[1]))
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
+open(sys.argv[1] + "/ready", "w").write("1")
+threading.Event().wait()
+PY
+T5_FIX_PID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [[ -f "$T5_FIX_DIR/ready" ]] && break
+  sleep 0.1
+done
+T5_FIX_PORT="$(cat "$T5_FIX_DIR/port" 2>/dev/null || echo 0)"
+T5_FIX_RPC="http://127.0.0.1:${T5_FIX_PORT}"
+T5_ADM_STOP="$("$T5_ADMIN" stop --rpc "$T5_FIX_RPC" 2>&1)" && T5_ADM_STOP_EC=0 || T5_ADM_STOP_EC=$?
+T5_ADM_STAT="$("$T5_ADMIN" status --rpc "$T5_FIX_RPC" 2>&1)" && T5_ADM_STAT_EC=0 || T5_ADM_STAT_EC=$?
+T5_ADM_START="$("$T5_ADMIN" start --rpc "$T5_FIX_RPC" 2>&1)" && T5_ADM_START_EC=0 || T5_ADM_START_EC=$?
+kill "$T5_FIX_PID" 2>/dev/null || true
+wait "$T5_FIX_PID" 2>/dev/null || true
+rm -rf "$T5_FIX_DIR"
+if [[ "$T5_ADM_STOP_EC" -eq 0 && "$T5_ADM_STAT_EC" -eq 0 && "$T5_ADM_START_EC" -eq 0 ]] \
+  && echo "$T5_ADM_STAT" | grep -q 'result=false' \
+  && echo "$T5_ADM_START" | grep -q 'admin_startSequencer'; then
+  echo "PASS sequencer-admin.sh stop/status/start against a loopback fixture"
+else
+  echo "FAIL sequencer-admin fixture stop/start (stop=$T5_ADM_STOP_EC stat=$T5_ADM_STAT_EC start=$T5_ADM_START_EC)" >&2
+  echo "$T5_ADM_STOP" >&2
+  echo "$T5_ADM_STAT" >&2
+  echo "$T5_ADM_START" >&2
+  fail=1
+fi
+
+T5_REH="$("$T5_ROLL" --rehearse 2>&1)" && T5_REH_EC=0 || T5_REH_EC=$?
+if [[ "$T5_REH_EC" -eq 0 ]] \
+  && echo "$T5_REH" | grep -q 'START_GETH=04-start-sequencer-sepolia.sh --verifier-only' \
+  && echo "$T5_REH" | grep -q 'RECORD_CANONICAL_SAFE before stop' \
+  && echo "$T5_REH" | grep -q 'CALLER FORTEL2_EL=geth persists' \
+  && echo "$T5_REH" | grep -q 'FORBIDDEN_FIRST_START=04-start-sequencer-sepolia.sh' \
+  && echo "$T5_REH" | grep -q 'admin_startSequencer' \
+  && echo "$T5_REH" | grep -q 'NEVER debug_setHead'; then
+  echo "PASS rollback --rehearse is verifier-first and forbids stock 04-start"
+else
+  echo "FAIL rollback rehearsal must be verifier-first (ec=$T5_REH_EC)" >&2
+  echo "$T5_REH" >&2
+  fail=1
+fi
+
+if grep -q '_CALLER_EL' "$T5_SEP" \
+  && grep -q 'FORTEL2_EL="$_CALLER_EL"' "$T5_SEP"; then
+  echo "PASS 04-start-sequencer-sepolia.sh restores caller FORTEL2_EL after sourcing .env"
+else
+  echo "FAIL 04-start must snapshot caller FORTEL2_EL (rollback geth while env still says reth)" >&2
+  fail=1
+fi
+
+if awk '/fortel2_el.*reth/,/^fi$/' "$SCRIPT_DIR/reset-sepolia.sh" | grep -q 'stop-all-sepolia.sh'; then
+  echo "PASS reset-sepolia.sh reth path stops the full stack before wipe"
+else
+  echo "FAIL reset-sepolia reth wipe must call stop-all-sepolia.sh (not only stop_reth_sidecar)" >&2
+  fail=1
+fi
+
+T5_CUT_REH="$("$T5_CUT" --rehearse 2>&1)" && T5_CUT_REH_EC=0 || T5_CUT_REH_EC=$?
+if [[ "$T5_CUT_REH_EC" -eq 0 ]] \
+  && echo "$T5_CUT_REH" | grep -q 'sequencer-admin.sh stop' \
+  && echo "$T5_CUT_REH" | grep -qi 'PAUSE FIRST' \
+  && echo "$T5_CUT_REH" | grep -q 'CHECKPOINT 1'; then
+  echo "PASS cutover --rehearse pauses sequencing before drain"
+else
+  echo "FAIL cutover rehearsal must pause first (ec=$T5_CUT_REH_EC)" >&2
+  echo "$T5_CUT_REH" >&2
+  fail=1
+fi
+
+T5_PF_DIR="$(mktemp -d /tmp/fortel2-t5-pf.XXXXXX)"
+cat > "$T5_PF_DIR/ok.json" <<'EOF'
+{"game216_status":2,"withdrawal_finalized":true,"safe_head_lag":0,"verify_reth_parity":0,"verify_reth_faultproof":0,"check_el_pins":0,"batcher_funded":true,"proposer_funded":true,"check_launchd":0}
+EOF
+T5_PF_OK="$(CUTOVER_PREFLIGHT_FIXTURE="$T5_PF_DIR/ok.json" "$T5_CUT" --preflight-only 2>&1)" && T5_PF_OK_EC=0 || T5_PF_OK_EC=$?
+if [[ "$T5_PF_OK_EC" -eq 0 ]] && echo "$T5_PF_OK" | grep -q 'PREFLIGHT PASS'; then
+  echo "PASS cutover --preflight-only green fixture"
+else
+  echo "FAIL green preflight fixture (ec=$T5_PF_OK_EC)" >&2
+  echo "$T5_PF_OK" >&2
+  fail=1
+fi
+python3 - "$T5_PF_DIR/ok.json" "$T5_PF_DIR" <<'PY'
+import json, pathlib, sys
+ok = json.loads(pathlib.Path(sys.argv[1]).read_text())
+d = pathlib.Path(sys.argv[2])
+cases = {
+    "game": dict(ok, game216_status=0),
+    "wd": dict(ok, withdrawal_finalized=False),
+    "lag": dict(ok, safe_head_lag=3),
+    "parity": dict(ok, verify_reth_parity=1),
+}
+for name, payload in cases.items():
+    (d / (name + ".json")).write_text(json.dumps(payload))
+PY
+T5_PF_RED=0
+for name in game wd lag parity; do
+  out="$(CUTOVER_PREFLIGHT_FIXTURE="$T5_PF_DIR/${name}.json" "$T5_CUT" --preflight-only 2>&1)" && ec=0 || ec=$?
+  if [[ "$ec" -eq 0 ]]; then
+    echo "FAIL preflight $name fixture must go red" >&2
+    echo "$out" >&2
+    T5_PF_RED=1
+  fi
+done
+rm -rf "$T5_PF_DIR"
+if [[ "$T5_PF_RED" -eq 0 ]]; then
+  echo "PASS cutover preflight red fixtures (game/withdrawal/lag/parity) fail closed"
+else
+  fail=1
+fi
+
+T5_EXE="$( "$T5_CUT" --execute 2>&1 )" && T5_EXE_EC=0 || T5_EXE_EC=$?
+if [[ "$T5_EXE_EC" -ne 0 ]] && echo "$T5_EXE" | grep -qi 'FORTEL2_CUTOVER_EXECUTE'; then
+  echo "PASS cutover --execute refuses without FORTEL2_CUTOVER_EXECUTE=1"
+else
+  echo "FAIL --execute must refuse without the window confirm (ec=$T5_EXE_EC)" >&2
+  echo "$T5_EXE" >&2
+  fail=1
+fi
+
+if grep -q 'fortel2_live_el_pid' "$SCRIPT_DIR/demo-checklist.sh" \
+  && grep -q 'fortel2_live_el_pid' "$SCRIPT_DIR/07-start-rpc-filter-sepolia.sh" \
+  && grep -q 'op-reth' "$SCRIPT_DIR/stop-all-sepolia.sh" \
+  && ! grep -q 'rm -rf "\$DATA_DIR/l2"' "$SCRIPT_DIR/reset-sepolia.sh"; then
+  echo "PASS §10 demo-checklist / rpc-filter / stop-all / reset-sepolia follow the selector"
+else
+  echo "FAIL §10 stray surfaces must be selector-driven and must not wipe all of l2" >&2
+  fail=1
+fi
+
+if grep -q -- '--rpc.enable-admin' "$SCRIPT_DIR/start-op-reth-verifier.sh"; then
+  echo "PASS sidecar op-node enables admin RPC (loopback rehearsal)"
+else
+  echo "FAIL sidecar must listen for admin_stopSequencer on loopback" >&2
+  fail=1
+fi
+
+# =============================================================================
+# end Task 5 block
 # =============================================================================
 
 if (( fail )); then

@@ -8,7 +8,8 @@
 #   ./scripts/dev-sleep.sh sleep|wake|status          # Phase 1 Anvil stack
 #
 # What to turn OFF while sleeping (Sepolia / QuickNode):
-#   ✓ Mac sequencer stack (op-geth, op-node, batcher, proposer) — main QN + ETH burn
+#   ✓ Mac sequencer stack (live EL per FORTEL2_EL: op-geth or op-reth, plus
+#     op-node, batcher, proposer) — main QN + ETH burn
 #   ✓ Pipeline viewer / dApp HTTP if running — viewer polls L1
 #   ✓ Render fortel2-replica (dashboard Suspend) — optional but recommended
 # What to leave alone:

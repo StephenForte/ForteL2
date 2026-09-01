@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # T5-D1: loopback JSON-RPC method filter for the Sepolia write-facing RPC.
 # Serves eth/net/web3 allowlist only on L2_WRITE_RPC_PORT; forwards to full
-# op-geth on L2_RPC_URL (:9545). Does not change op-geth --http.api.
+# live EL on L2_RPC_URL (:9545). Does not change the EL --http.api.
 # cloudflared (spike step 3) dials this listener — never start a tunnel here.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +35,7 @@ if [[ ! -f "$FILTER_PY" ]]; then
   exit 1
 fi
 
-wait_for_rpc "$L2_RPC_URL" "L2 op-geth (filter upstream)"
+wait_for_rpc "$L2_RPC_URL" "L2 $(fortel2_live_el_pid) (filter upstream)"
 
 export L2_RPC_FILTER_LISTEN="127.0.0.1:${WRITE_PORT}"
 export L2_RPC_FILTER_UPSTREAM="$L2_RPC_URL"

@@ -96,7 +96,7 @@ trap sepolia_start_cleanup ERR
 
 "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"
 sleep 3
-# T5-D1: narrow write-facing door (eth/net/web3 allowlist). Full op-geth stays on L2_RPC_URL.
+# T5-D1: narrow write-facing door (eth/net/web3 allowlist). Full live EL stays on L2_RPC_URL.
 "$SCRIPT_DIR/07-start-rpc-filter-sepolia.sh"
 "$SCRIPT_DIR/05-start-batcher-sepolia.sh"
 "$SCRIPT_DIR/06-start-proposer-sepolia.sh"

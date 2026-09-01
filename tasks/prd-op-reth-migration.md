@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — P:0 + Tasks 1–4 done (#176 D-0109, #178 D-0110, #184 D-0114, #189 D-0116); Task 5 operator-gated (see D-0116 finalize gate)  
+**Status:** In execution — P:0 + Tasks 1–4 done (#176 D-0109, #178 D-0110, #184 D-0114, #189 D-0116); Task 5 Phase A = selector-gated PR (no live flip); Phase B operator-gated (D-0116 finalize gate + announced window)  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  

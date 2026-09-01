@@ -186,12 +186,14 @@ export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
 ./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.2 (da197e45) + op-reth reported 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
-# Opt-in 852 op-reth sidecar (Task 2; live sequencer stays op-geth until Task 5):
+# Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL (default geth).
+# Task 5 Phase A is selector-gated: merging does not flip the producer. Phase B
+# (operator window) sets FORTEL2_EL=reth in .env.sepolia. Rollback = flip back.
 #   unset FORTEL2_ENV
 #   export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"   # do not print
 #   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
 #   ./scripts/stop-op-reth-verifier.sh
-#   ./scripts/status.sh   # default procs= still geth; sidecar listed only if running / FORTEL2_EL=reth
+#   ./scripts/status.sh   # default procs= geth; sidecar listed only while live EL is geth
 # Task 3 candidate (derive 852 to the live safe head in $DATA_DIR/l2/op-reth with
 # sequencer_faultproof from first start — never reset-sepolia.sh while that dir is
 # the Task 4–5 candidate). Evidence: tasks/task3-op-reth-safe-head-parity.md
