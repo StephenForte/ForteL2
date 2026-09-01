@@ -201,7 +201,9 @@ cd contracts && forge test          # Guestbook unit + fuzz tests
 #   ./scripts/verify-reth-parity.sh   # :19545 vs loopback :9545 vs public replica
 # Task 4 fault-proof / historical (sidecar SafeDB + output-root + eth_getProof
 # vs the Mac archive geth — never the replica). Evidence
-# tasks/task4-op-reth-faultproof.md is STATUS blocked — not a Task 5 go:
+# tasks/task4-op-reth-faultproof.md is STATUS blocked — not a Task 5 go.
+# Isolated judge is deferred until after the 03:00 wake: restart the sidecar
+# first (Task 3 env, no wipe), then the #168 retry / poll-offset judge.
 #   ./scripts/verify-reth-faultproof.sh --game-l2-block N \
 #     --safedb-enable-l1 N --pre-enable-l1 N
 node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers

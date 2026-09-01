@@ -1,6 +1,6 @@
 # Task 4 evidence — op-reth candidate fault-proof / historical workflows
 
-**STATUS: blocked** — Task 4 workflows are not closed. This is not a Task 5 go and not a sequencer-cutover authorization. The candidate datadir (`$DATA_DIR/l2/op-reth`) is preserved for a later Task 5; do not wipe it. RPC spot checks below (output-root / SafeDB / `eth_getProof`) do not substitute for a judged valid claim or a withdrawal that succeeded or had its named blocker resolved.
+**STATUS: blocked** — closer 1 (withdrawal) is in flight; closer 2 (isolated judge) is deferred to after the 03:00 wake. This is not a Task 5 go and not a sequencer-cutover authorization. The candidate datadir (`$DATA_DIR/l2/op-reth`) is preserved for a later Task 5; do not wipe it. RPC spot checks below (output-root / SafeDB / `eth_getProof`) do not substitute for a judged valid claim or a finalized withdrawal.
 
 **Date opened:** 2026-08-31  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 4 / §11 Q3  
@@ -12,7 +12,7 @@ This is the one `tasks/` write Task 4 is permitted. L1 provider URLs, JWTs, and 
 
 ## Candidate (inherited, not wiped)
 
-`$DATA_DIR/l2/op-reth` from Task 3 (`sequencer_faultproof`, `--proofs-history` since first start). Restart env is the Task 3 block (`unset FORTEL2_ENV`, `FORTEL2_EL=reth`, `FORTEL2_RETH_PROFILE=sequencer_faultproof`, `SEPOLIA_L1_RPC_RATE_LIMIT=10`). The 23:45 sleep stops the sidecar; wake does not restart it.
+`$DATA_DIR/l2/op-reth` from Task 3 (`sequencer_faultproof`, `--proofs-history` since first start). Restart env is the Task 3 block (`unset FORTEL2_ENV`, `FORTEL2_EL=reth`, `FORTEL2_RETH_PROFILE=sequencer_faultproof`, `SEPOLIA_L1_RPC_RATE_LIMIT=10`). The 23:45 sleep stops the sidecar; wake does not restart it. Morning closer 2 must restart the sidecar first (Task 3 env below), then run the isolated judge. Do not start the judge tonight.
 
 **Do not:** `--wipe`, `reset-sepolia.sh`, `debug_setHead`, stop/reconfigure the live challenger, share its SafeDB/dirs, bind the sidecar off loopback, or query the replica for deep historical state (latest−256 fails; D-0114 Finding 4).
 
@@ -92,33 +92,41 @@ Proofs store served history from block 1. This is the Q3 input: `--proofs-histor
 
 `./scripts/verify-reth-faultproof.sh --game-l2-block 397392 --safedb-enable-l1 11609837 --pre-enable-l1 11600000` → `verify-reth-faultproof: PASS`. Fixture `--alter-field outputRoot` → MISMATCH + nonzero.
 
-## Isolated challenger (non-signing)
+## Isolated challenger (non-signing) — deferred
 
-Binary has **no** dry-run / no-tx flag (`--private-key` / mnemonic required). Ran with an **unfunded** throwaway only. Did not use `09-start-challenger-sepolia.sh`. Did not share live datadir / SafeDB / pid `op-challenger`.
+Binary has **no** dry-run / no-tx flag (`--private-key` / mnemonic required). Earlier same-day runs used unfunded throwaways only. Did not use `09-start-challenger-sepolia.sh`. Did not share live datadir / SafeDB / pid `op-challenger`.
 
-| Field | Value |
-|---|---|
-| Address | `0xa7a60CB10b86dAE73de3eBdB821c95f95D15e31c` |
-| L1 balance | 0 wei |
-| Nonce before | **0** |
-| Nonce after stop | **0** |
-| Pid | 61384 (`op-challenger-reth-task4`); live 45520 untouched |
-| Profile | http-poll 300s, min-update 300s, concurrency 1, game-window binary default |
-| Endpoints | rollup `127.0.0.1:19547`, L2 `127.0.0.1:19545` |
-| Window | 20:03:09–20:08:10 PT, then stopped |
+Planner amendment 2026-08-31 ~21:22 PT: **do not start the judge tonight.** A 23:45 sleep mid-scan wastes the run. Isolated pid **24547** (`op-challenger-reth-task4`) was stopped at 21:22:42 PT before a `Game info` line. Live challenger **45520** stayed up. Throwaway `0x6eaAa9F4C3c08C1eC9E1fC418635b5e80482C418` nonce **0** after stop.
 
-Game **214** L1 head 11609649: candidate SafeDB `not found` (pre-record; expected asymmetry). Game **215** (created during the window): L2 399222, L1 head 11609944, candidate SafeDB answers, `rootClaim` == candidate `outputRoot`. Isolated process sent **zero** L1 txs (nonce unchanged). First 300s scan hit the same QuickNode 50/s 429 class as the live challenger (`Failed to progress games` / `Failed to verify large preimages`) — no attack, no Move, no txmgr send. Unfunded key cannot post a bond even if a later scan wanted to.
+Earlier same-day attempt (not the closer): address `0xa7a60CB10b86dAE73de3eBdB821c95f95D15e31c`, pid 61384, window 20:03:09–20:08:10 PT, nonce 0→0. First 300s scan 429'd on the shared QuickNode 50/s budget with the live challenger (`Failed to progress games` / `Failed to verify large preimages`) — no attack, no Move, no txmgr send.
+
+**Morning closer 2 (after 03:00 wake):**
+
+1. Restart the sidecar first (no wipe). Env: `unset FORTEL2_ENV`, snapshot `L1_RPC_URL` + `DATA_DIR` from `.env.sepolia` into **different** vars (`read_env_assignment`, then `restore_caller_l1_rpc_url` / `restore_caller_data_dir`). `FORTEL2_EL=reth` `FORTEL2_RETH_PROFILE=sequencer_faultproof` `SEPOLIA_L1_RPC_RATE_LIMIT=10`. Confirm `DATA_DIR` is the Sepolia tree (`…/data-sepolia`), not Phase 1 `…/data`.
+2. Then start isolated `op-challenger-reth-task4` with the #168 retry (grace 15–30s, 3 attempts, backoff 5/10), `--http-poll-interval` / `--min-update-interval` **offset** from the live 300s cadence (do not lockstep `:01/:06/…`), `--game-window=3h`, `--game-allowlist` for a known-valid game, candidate `:19547` / `:19545`, throwaway key only.
+3. Success = in-process `Game info` line + throwaway nonce still 0. Then `stop_bg op-challenger-reth-task4` only.
 
 ## Withdrawal
 
-Live `initiateWithdrawal` was **not** broadcast from this session: the host auto-review gate blocked the `cast send` that would spend ADMIN on chain 852, and the approval retry lost its tool-call bubble. That is an operator-approval residual, not a missing-candidate-data blocker.
+Prerequisite deposit (ADMIN L2 was 0 post-wipe): `FORTEL2_ENV=.env.sepolia DEPOSIT_AMOUNT=0.001ether ./scripts/deposit-eth-sepolia.sh`. L1 tx `0x1abc97e6d64f9be2b2d2d21b675f2d43d78e6c25dfd36cdd9f891d395cd9d145` (status `0x1`). ADMIN L2 after: `1000000000000000` wei.
 
-Prove inputs the withdrawal path needs **were** served from the candidate (same RPCs `buildProveWithdrawal` would use):
+Initiate on **live** `:9545` (not the candidate): `1000000000000wei` (0.000001 ETH) to ADMIN `0xBB3E19811B2c3423069B54BDFF3e90Dd8094bb0F`. L2 tx `0x33bcb5934dc7b9acb4126fdefa324abc1fea8ff6dab14b8c7dd4d8a27ddbd937` in L2 block **400804**. Artifact: `$DATA_DIR/bridge-task4/last-withdrawal.json` (gitignored data tree).
 
-- output root: candidate op-node `:19547` (`optimism_outputAtBlock`)
-- storage / account proof: candidate EL `:19545` (`eth_getProof` on messenger/bridge, including near-genesis and tip−100k)
+Prove artifacts from **candidate only** (`L2_RPC_URL=http://127.0.0.1:19545`, output root from `:19547`; never live-geth fallback, never replica):
 
-If an operator later initiates a minimal withdrawal on live `:9545` and points `L2_RPC_URL=http://127.0.0.1:19545` at `scripts/bridge/prove.mjs`, those two artifact classes are already green. Replica must not be used for the proof.
+| Artifact | Endpoint | Result |
+|---|---|---|
+| `optimism_outputAtBlock` 400804 | `:19547` | MATCH live `:9547` |
+| `eth_getProof` passer + nonce slot | `:19545` | MATCH live (storageHash / balance / nonce / codeHash / accountProof / storageProof) |
+| L2 receipt | `:19545` | block 400804 status `0x1` |
+
+`scripts/bridge/prove.mjs` against candidate: covering game **216** proxy `0xbD43A40dED613aabf89e14d2a91CE6E194A3e2Ed`. L1 prove tx `0xf33adedc4dd6f7cf62938d80e9f25f47e0d13efeee95d5b7e822f6c1f3949091`. `provenAt` **1788235512** = 2026-08-31T21:05:12 PT. Portal clocks (on-chain): `proofMaturityDelaySeconds=1800`, `disputeGameFinalityDelaySeconds=1800`. Withdrawal hash `0x06de34692e590ce003bddfa4dcbe9fe78c7360d753773b9804d6f3f9074a8abd`.
+
+Game 216 is **IN_PROGRESS** (`status=0`), `maxClockDuration=7200`, `createdAt=1788235464` (21:04:24 PT). Portal finalize requires DEFENDER_WINS + finality delay — not just `provenAt+3600`. `withdraw-finalize.sh` / `finalize.mjs` are Anvil-only (`evm_increaseTime`) and must not be used on Sepolia.
+
+Closer 1 remainder (no judge): wait for L1 timestamp ≥ `createdAt+maxClock` (23:04:24 PT), `resolveClaim(0,0)` + `resolve()` (permissionless; ADMIN gas; live hourly `resolve-games` at :00 is too late for a 23:45 sleep), then wait `disputeGameFinalityDelaySeconds` (~23:34:24 PT), then `finalizeWithdrawal` with **no** time-warp. Hard stop 23:42 PT. Hourly `com.steve.fortel2-resolve-games` at 00:00 would also resolve, but that is after sleep.
+
+Finalize tx: *pending this wait* — paste here when the waiter prints `FINALIZE_OK`, or record the named blocker if the game is still `IN_PROGRESS` / finality missed 23:42.
 
 ## RPC namespace differences (no public surface widened)
 
@@ -137,15 +145,17 @@ If an operator later initiates a minimal withdrawal on live `:9545` and points `
 
 **Before:** op-geth 44832, op-node 44849, batcher 45087, proposer 45203, filter 44964, challenger 45520; L2 ~399049. Sidecar was the Task 3 pair without SafeDB.
 
-**After:** same live pids; L2 399489; sidecar 58830 / 58867 with SafeDB. Challenger 45520 still running. Isolated judge stopped.
+**After SafeDB enable:** same live pids; L2 399489; sidecar 58830 / 58867 with SafeDB. Challenger 45520 still running.
+
+**Closer session (21:22 PT):** live still 44832 / 44849 / 45087 / 45203 / 44964 / 45520. Sidecar restarted earlier without wipe: op-reth **21151**, op-reth-node **21207**. Isolated judge **24547** stopped at 21:22:42 PT (planner: do not run tonight).
 
 ## Residual
 
-- Withdrawal initiate/prove/finalize on L1 was not executed (approval gate). Candidate can serve the prove artifacts; clocks were not exercised.
-- Isolated challenger's single scan 429'd on L1 (shared QuickNode budget with the live challenger). Judgment of game 215 is from candidate RPC equality + SafeDB answer + zero nonce, not from a completed in-process “valid” log line.
-- Isolated judge logs/pids landed under the Phase 1 `$DATA_DIR` because `lib.sh` was sourced without snapshotting Sepolia `DATA_DIR` first. Live challenger dirs were not used.
+- Withdrawal initiate + candidate prove are on-chain. Finalize is waiting for game 216's 7200s clock (resolve ~23:04 PT, finalize ~23:34 PT, before 23:45 sleep). Named blocker if that window is missed: game still `IN_PROGRESS` or finality not reached by 23:42.
+- Isolated judge is **deferred** (planner amendment): restart sidecar after 03:00 wake, then judge with the #168 retry / poll offset. Do not start it tonight. A `Game info` line + nonce 0 is still required before STATUS can flip to complete.
+- `read_env_assignment` + pre-source snapshot into `_CALLER_DATA_DIR` is the fix for the Phase 1 `$DATA_DIR` clobber. Live challenger dirs were not used.
 - Q3 profile shape (observed, not a Task 5 authorization): `sequencer_faultproof` = archive + `--proofs-history` (init `--skip-backfill` from genesis) + sidecar `--safedb.path` (`$DATA_DIR/l2/op-reth-safedb`). Replica prune window unchanged.
 
-The candidate datadir is preserved so Task 5 can start from it later. Task 4 itself is **blocked**: no judged valid claim, no withdrawal succeed-or-named-blocker-resolved. Never `reset-sepolia` / `--wipe` / `debug_setHead` on the datadir.
+The candidate datadir is preserved so Task 5 can start from it later. Task 4 itself is **blocked** until closer 1 finalize (or named clock) **and** closer 2 `Game info` + nonce 0. Never `reset-sepolia` / `--wipe` / `debug_setHead` on the datadir.
 
 Codex-tightened `verify-reth-faultproof.sh` re-ran live (game L2 397392, `--safedb-enable-l1` 11609837, `--pre-enable-l1` 11600000): PASS on three distinct recorded SafeDB L1s and full `eth_getProof` payloads (storageHash / balance / nonce / codeHash / accountProof / storageProof) vs the Mac archive geth. That does not lift the block.

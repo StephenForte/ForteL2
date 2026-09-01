@@ -909,6 +909,12 @@ restore_caller_l1_rpc_url() {
 # Caller DATA_DIR (e.g. Sepolia runtime without loading .env.sepolia). Phase 1
 # .env always assigns DATA_DIR; restore then re-bind LOG_DIR/PID_DIR so pids
 # and logs land in the caller's tree, not the env-file tree.
+#
+# Trap: do NOT snapshot into DATA_DIR itself. `source lib.sh` loads Phase 1
+# .env and overwrites DATA_DIR, so `restore_caller_data_dir "$DATA_DIR"`
+# after source restores the Phase 1 tree. Snapshot into a different name
+# BEFORE source (see read_env_assignment / start-op-reth-verifier.sh
+# `_CALLER_DATA_DIR`).
 restore_caller_data_dir() {
   local saved="${1:-}"
   if [[ -n "$saved" ]]; then
@@ -918,6 +924,42 @@ restore_caller_data_dir() {
     PID_DIR="$DATA_DIR/pids"
     mkdir -p "$DATA_DIR" "$LOG_DIR" "$PID_DIR"
   fi
+}
+
+# Read KEY=value from an env file without sourcing it. Use this to snapshot
+# Sepolia DATA_DIR (or L1_RPC_URL) before `source lib.sh` so Phase 1 .env
+# cannot clobber the saved value.
+read_env_assignment() {
+  local file="${1:-}"
+  local key="${2:-}"
+  if [[ -z "$file" || -z "$key" || ! -f "$file" ]]; then
+    echo "ERROR: read_env_assignment needs an existing file and KEY" >&2
+    return 1
+  fi
+  if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "ERROR: read_env_assignment: invalid KEY" >&2
+    return 1
+  fi
+  python3 - "$file" "$key" <<'PY'
+import re, sys
+path, key = sys.argv[1], sys.argv[2]
+pat = re.compile(r"^\s*" + re.escape(key) + r"=(.*)$")
+val = None
+with open(path, encoding="utf-8") as f:
+    for raw in f:
+        line = raw.rstrip("\r\n")
+        if not line or line.lstrip().startswith("#"):
+            continue
+        m = pat.match(line)
+        if m:
+            val = m.group(1)
+if val is None:
+    sys.stderr.write(f"ERROR: {key} not set in {path}\n")
+    sys.exit(1)
+if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+    val = val[1:-1]
+sys.stdout.write(val)
+PY
 }
 
 require_reth_enginekind() {

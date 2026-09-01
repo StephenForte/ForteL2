@@ -6921,6 +6921,55 @@ else
 fi
 rm -rf "$RETH_DD_KEEP"
 
+# Task 4 trap: snapshot Sepolia DATA_DIR into a *different* variable before
+# sourcing lib.sh. Saving into DATA_DIR itself then restore "$DATA_DIR"
+# lands in the Phase 1 tree (the disclosed isolated-challenger miss).
+SNAP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-data-dir-snap.XXXXXX")"
+mkdir -p "$SNAP_FIX/sepolia"
+printf 'DATA_DIR=%s/sepolia\n' "$SNAP_FIX" > "$SNAP_FIX/.env.sepolia"
+SNAP_OK="$(read_env_assignment "$SNAP_FIX/.env.sepolia" DATA_DIR)" && SNAP_OK_EC=0 || SNAP_OK_EC=$?
+if [[ "$SNAP_OK_EC" -eq 0 && "$SNAP_OK" == "$SNAP_FIX/sepolia" ]]; then
+  echo "PASS read_env_assignment reads DATA_DIR without sourcing the file"
+else
+  echo "FAIL read_env_assignment should return the file value (got '$SNAP_OK' ec=$SNAP_OK_EC)" >&2
+  fail=1
+fi
+# Trap: export DATA_DIR=sepolia then source lib.sh (Phase 1 .env clobbers)
+# then restore "$DATA_DIR" — must NOT land in the Sepolia snapshot path.
+SNAP_TRAP="$(
+  DATA_DIR="$SNAP_FIX/sepolia"
+  export DATA_DIR
+  bash -c '
+    set -euo pipefail
+    source "'"$SCRIPT_DIR"'/lib.sh"
+    restore_caller_data_dir "$DATA_DIR"
+    printf "%s" "$DATA_DIR"
+  '
+)" && SNAP_TRAP_EC=0 || SNAP_TRAP_EC=$?
+if [[ "$SNAP_TRAP_EC" -eq 0 && "$SNAP_TRAP" != "$SNAP_FIX/sepolia" ]]; then
+  echo "PASS DATA_DIR-then-restore trap lands outside the Sepolia tree (can go red)"
+else
+  echo "FAIL trap reproduction should not restore Sepolia (got '$SNAP_TRAP' ec=$SNAP_TRAP_EC)" >&2
+  fail=1
+fi
+SNAP_PRE="$(read_env_assignment "$SNAP_FIX/.env.sepolia" DATA_DIR)"
+SNAP_FIXED="$(
+  bash -c '
+    set -euo pipefail
+    _CALLER_DATA_DIR="$1"
+    source "'"$SCRIPT_DIR"'/lib.sh"
+    restore_caller_data_dir "$_CALLER_DATA_DIR"
+    printf "%s" "$DATA_DIR"
+  ' bash "$SNAP_PRE"
+)" && SNAP_FIXED_EC=0 || SNAP_FIXED_EC=$?
+if [[ "$SNAP_FIXED_EC" -eq 0 && "$SNAP_FIXED" == "$SNAP_FIX/sepolia" ]]; then
+  echo "PASS pre-source snapshot in a different var restores Sepolia DATA_DIR"
+else
+  echo "FAIL correct snapshot pattern must restore Sepolia (got '$SNAP_FIXED' ec=$SNAP_FIXED_EC)" >&2
+  fail=1
+fi
+rm -rf "$SNAP_FIX"
+
 # Child 03-init-l2.sh must not drop parent EL/genesis (Bugbot: env re-source).
 if grep -q '_CALLER_RETH_GENESIS' "$SCRIPT_DIR/03-init-l2.sh" \
   && grep -q 'restore_caller_data_dir' "$SCRIPT_DIR/03-init-l2.sh" \
