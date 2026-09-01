@@ -487,7 +487,7 @@ Answer during Task 1 or 2 unless noted.
 |---|---|---|
 | 1 | Exact coordinated `op-node` / `op-reth` pin? | **Closed (Task 1, #176, D-0109).** v1.19.2 (`da197e45`) + `op-reth/v2.3.3` (reports `2.3.0-dev` `9384bc53`); enforced by `scripts/check-el-pins.sh`. Bump = Mini sidecar re-run first. |
 | 2 | Does 852 hardfork config need adjustment for that pin (without changing genesis)? | **No change needed for first-N.** Rollup has no `karst_time`; Task 1 research: Jovian minimums far older, no getPayloadV5 required. **Reconfirmed at safe-head (Task 3, D-0114):** full 20-block three-way parity genesis→394470. |
-| 3 | Which historical-proof flags/retention does `cannon-kona` + shortened withdrawal window need? | **Open.** Task 4. |
+| 3 | Which historical-proof flags/retention does `cannon-kona` + shortened withdrawal window need? | **Closed (Task 4, #189, D-0116):** `--proofs-history` with `op-reth proofs init --proofs-history.skip-backfill` before FIRST start of the datadir (store fills forward; no retroactive backfill). Judge + withdrawal-prove + deep `eth_getProof` all ran against this profile. |
 | 4 | Does Render public RPC need archive, or is `--full` enough? | **Open.** Task 7. |
 | 5 | Disk/RAM of a clean 852 op-reth sync on Render under current RPC load? | **Open.** Task 7. |
 | 6 | Mid-chain rewind without `debug_setHead` on a keeper? | **Settled (Task 2, D-0110):** wipe the reth datadir + re-derive from 852 genesis; `debug_setHead` never. Task 3 may revisit only with evidence. |
