@@ -192,6 +192,13 @@ cd contracts && forge test          # Guestbook unit + fuzz tests
 #   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
 #   ./scripts/stop-op-reth-verifier.sh
 #   ./scripts/status.sh   # default procs= still geth; sidecar listed only if running / FORTEL2_EL=reth
+# Task 3 candidate (derive 852 to the live safe head in $DATA_DIR/l2/op-reth with
+# sequencer_faultproof from first start — never reset-sepolia.sh while that dir is
+# the Task 4–5 candidate). Evidence: tasks/task3-op-reth-safe-head-parity.md
+#   export DATA_DIR="$(grep '^DATA_DIR=' .env.sepolia | cut -d= -f2-)"
+#   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=sequencer_faultproof SEPOLIA_L1_RPC_RATE_LIMIT=10 \
+#     ./scripts/start-op-reth-verifier.sh
+#   ./scripts/verify-reth-parity.sh   # :19545 vs loopback :9545 vs public replica
 node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers
 (cd scripts/bridge && npm ci && node --test lib.test.js)  # withdrawal bridge helpers
 ```
@@ -376,11 +383,19 @@ Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike
 
 ### Tracked dependency advisories (Go modules + frontend vendors)
 
-Last refresh: **2026-08-21** (Go modules: stdlib 1.26.7, pion/stun v3.1.7). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
+Last refresh: **2026-08-31** (Go modules: `x/crypto` v0.55.0; stdlib 1.26.7, pion/stun v3.1.7). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
-| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep + `govulncheck -show verbose` on `derivation/` — symbol scan clean; module-level note only). Indirect pin is `golang.org/x/crypto v0.54.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep 2026-08-31 + `govulncheck -show verbose` on `derivation/` at `x/crypto` v0.55.0 — symbol scan clean for `openpgp`; module-level note only). Indirect pin is `golang.org/x/crypto v0.55.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+
+**2026-08-31 bumps:**
+
+| Area | Dependency | From → To | Advisory / reason |
+|---|---|---|---|
+| `batcher/` `proposer/` `derivation/` | `golang.org/x/crypto` | v0.54.0 → **v0.55.0** | [CVE-2026-56854](https://pkg.go.dev/vuln/GO-2026-56854) — x/crypto/ssh auth bypass (CRITICAL; Trivy gate) |
+| `batcher/` `proposer/` `derivation/` | `golang.org/x/text` | v0.40.0 → **v0.41.0** | tidy transitive via `x/crypto` v0.55.0 (`go.sum`; `derivation/go.mod`) |
+| `derivation/` | `golang.org/x/net` | v0.56.0 → **v0.57.0** | tidy transitive via `x/crypto` v0.55.0 (`go.sum` only) |
 
 **2026-08-21 bumps:**
 
