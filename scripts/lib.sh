@@ -909,6 +909,12 @@ restore_caller_l1_rpc_url() {
 # Caller DATA_DIR (e.g. Sepolia runtime without loading .env.sepolia). Phase 1
 # .env always assigns DATA_DIR; restore then re-bind LOG_DIR/PID_DIR so pids
 # and logs land in the caller's tree, not the env-file tree.
+#
+# Trap: do NOT snapshot into DATA_DIR itself. `source lib.sh` loads Phase 1
+# .env and overwrites DATA_DIR, so `restore_caller_data_dir "$DATA_DIR"`
+# after source restores the Phase 1 tree. Snapshot into a different name
+# BEFORE source (see read_env_assignment / start-op-reth-verifier.sh
+# `_CALLER_DATA_DIR`).
 restore_caller_data_dir() {
   local saved="${1:-}"
   if [[ -n "$saved" ]]; then
@@ -918,6 +924,42 @@ restore_caller_data_dir() {
     PID_DIR="$DATA_DIR/pids"
     mkdir -p "$DATA_DIR" "$LOG_DIR" "$PID_DIR"
   fi
+}
+
+# Read KEY=value from an env file without sourcing it. Use this to snapshot
+# Sepolia DATA_DIR (or L1_RPC_URL) before `source lib.sh` so Phase 1 .env
+# cannot clobber the saved value.
+read_env_assignment() {
+  local file="${1:-}"
+  local key="${2:-}"
+  if [[ -z "$file" || -z "$key" || ! -f "$file" ]]; then
+    echo "ERROR: read_env_assignment needs an existing file and KEY" >&2
+    return 1
+  fi
+  if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "ERROR: read_env_assignment: invalid KEY" >&2
+    return 1
+  fi
+  python3 - "$file" "$key" <<'PY'
+import re, sys
+path, key = sys.argv[1], sys.argv[2]
+pat = re.compile(r"^\s*" + re.escape(key) + r"=(.*)$")
+val = None
+with open(path, encoding="utf-8") as f:
+    for raw in f:
+        line = raw.rstrip("\r\n")
+        if not line or line.lstrip().startswith("#"):
+            continue
+        m = pat.match(line)
+        if m:
+            val = m.group(1)
+if val is None:
+    sys.stderr.write(f"ERROR: {key} not set in {path}\n")
+    sys.exit(1)
+if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+    val = val[1:-1]
+sys.stdout.write(val)
+PY
 }
 
 require_reth_enginekind() {
@@ -1137,4 +1179,42 @@ wipe_reth_datadir() {
 stop_reth_sidecar() {
   stop_bg op-reth-node
   stop_bg op-reth
+}
+
+# Sidecar SafeDB (Task 4). Default $DATA_DIR/l2/op-reth-safedb. Never the live
+# op-node store ($DATA_DIR/safedb) and never anything under op-geth.
+# Enabled only when FORTEL2_RETH_PROFILE=sequencer_faultproof.
+reth_safedb_path() {
+  printf '%s' "${FORTEL2_RETH_SAFEDB_PATH:-$DATA_DIR/l2/op-reth-safedb}"
+}
+
+require_reth_safedb_path() {
+  local raw got live_safedb live_geth reth_prod reth_spike parent leaf
+  raw="$(reth_safedb_path)"
+  if [[ -z "$raw" ]]; then
+    echo "ERROR: FORTEL2_RETH_SAFEDB_PATH is empty" >&2
+    exit 1
+  fi
+  mkdir -p "$DATA_DIR/l2"
+  got="$(fortel2_canon_path "$raw")"
+  live_safedb="$(fortel2_canon_path "$DATA_DIR/safedb")"
+  live_geth="$(fortel2_canon_path "$DATA_DIR/l2/op-geth")"
+  reth_prod="$(fortel2_canon_path "$DATA_DIR/l2/op-reth")"
+  reth_spike="$(fortel2_canon_path "$DATA_DIR/l2/spike-op-reth")"
+  leaf="$(basename "$got")"
+  parent="$(dirname "$got")"
+  if [[ "$got" == "$live_safedb" ]]; then
+    echo "ERROR: refusing live SafeDB $got — sidecar SafeDB is \$DATA_DIR/l2/op-reth-safedb (live op-node untouched)" >&2
+    exit 1
+  fi
+  if [[ "$leaf" == "op-geth" || "$got" == "$live_geth" || "$got" == "$live_geth"/* || "$parent" == "$live_geth" ]]; then
+    echo "ERROR: refusing SafeDB under op-geth datadir $got" >&2
+    exit 1
+  fi
+  if [[ "$got" == "$reth_prod" || "$got" == "$reth_prod"/* || "$parent" == "$reth_prod" \
+     || "$got" == "$reth_spike" || "$got" == "$reth_spike"/* || "$parent" == "$reth_spike" ]]; then
+    echo "ERROR: refusing SafeDB inside op-reth datadir $got — use \$DATA_DIR/l2/op-reth-safedb" >&2
+    exit 1
+  fi
+  printf '%s\n' "$got"
 }
