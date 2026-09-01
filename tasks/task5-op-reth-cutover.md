@@ -80,6 +80,55 @@ _Empty until the announced morning window. Record timestamps, block numbers, eve
 
 Copy the closed list from the PRD; tick here after the window, not in Phase A.
 
+## D-0116 gate cleared (2026-09-01)
+
+Live L1 reads + one ADMIN `finalizeWithdrawal` send. No Phase B flip. Live stack and both datadirs untouched. Hourly `resolve-games` agent untouched.
+
+**On-chain (factory / game 216 / portal) before any send this session:**
+
+| Item | Value |
+|---|---|
+| factory `gameAtIndex(216)` proxy | `0xbD43A40dED613aabf89e14d2a91CE6E194A3e2Ed` (type 8) |
+| `status()` | **2 DEFENDER_WINS** (already resolved; resolveClaim/resolve skipped) |
+| `resolvedSubgames(0)` | true |
+| `createdAt` | 1788235464 |
+| `resolvedAt` | **1788285852** (2026-09-01 11:04:12 PT) |
+| `disputeGameFinalityDelaySeconds` | **1800** |
+| readyAt (`resolvedAt+delay`) | **1788287652** (2026-09-01 11:34:12 PT) |
+| `proofMaturityDelaySeconds` | 1800 |
+| withdrawal hash | `0x06de34692e590ce003bddfa4dcbe9fe78c7360d753773b9804d6f3f9074a8abd` |
+| `provenWithdrawals(hash, ADMIN)` | game `0xbD43A40d…e2Ed`, `provenAt` 1788235512 |
+| `finalizedWithdrawals` before send | false |
+
+Hourly agent reached 216 first (success, not a conflict). From `~/Library/Logs/fortel2-resolve-games.out.log` and the game’s `Resolved` log:
+
+| Leg | Tx | Notes |
+|---|---|---|
+| `resolveClaim(0,0)` | `0x9b72c9cc5b68c04967310914aed505b004ae065146e748f2dd91245166263b45` | zero-bond; credit 0 |
+| `resolve()` | `0xe051fc39c47a2442c15318addff2ef2d1d2199e386e7778e8282d08c31d478ce` | L1 block 11614238; status topic = 2 |
+
+Waited on-chain until L1 timestamp **1788287676** ≥ readyAt. No Anvil `evm_increaseTime`. `withdraw-finalize.sh` / `finalize.mjs` were not run.
+
+**Finalize** (node from `scripts/bridge`, viem `finalizeWithdrawal`, Sepolia `deployments.json`; no time-warp):
+
+| Item | Value |
+|---|---|
+| L1 tx | `0x96e29fe38c602ab2fbc2761fd6f3d496087e4dec8457178a2f7769cb3c2aefea` |
+| receipt | status `0x1`, L1 block **11614388**, `to` portal `0xf8c7da6c…b54e` |
+| L1 timestamp at send | 1788287700 (48s after readyAt) |
+| `finalizedWithdrawals` after | **true** (independent `cast` re-read) |
+| game `status` after | still 2 |
+
+**Preflight** (shipped flag is `--preflight-only`; there is no `--preflight`):
+
+```
+$ FORTEL2_ENV=.env.sepolia ./scripts/cutover-to-reth-sepolia.sh --preflight-only
+PREFLIGHT FAIL
+verify_reth_faultproof want exit 0 got 2
+```
+
+D-0116 subset is green: `game216_status` and `withdrawal_finalized` were not in the FAIL list. Independent casts at the same moment: `status()=2`, `finalizedWithdrawals=true`. Other live gates that passed this run: sidecar safe-head lag 0, `verify-reth-parity.sh` exit 0, `check-el-pins.sh` exit 0, batcher/proposer funded, `check-launchd.sh` exit 0. Remaining red (window-day, not fixed here): `verify-reth-faultproof.sh` exit 2 because live mode requires `--game-l2-block N` and the cutover script invokes it with no args (`/tmp/fortel2-cutover-fp.out`).
+
 ## Out of scope (this file)
 
 Task 6 beyond night one; Render (7); friend repo (8); geth removal (9); `karst_time`; editing `.env.sepolia` or launchd plists in Phase A.
