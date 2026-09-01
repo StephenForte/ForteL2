@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — P:0 done; Tasks 1–3 done (#176 D-0109, #178 D-0110, #184 D-0114); Task 4 next; Task 5 operator-gated  
+**Status:** In execution — P:0 + Tasks 1–4 done (#176 D-0109, #178 D-0110, #184 D-0114, #189 D-0116); Task 5 operator-gated (see D-0116 finalize gate)  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
@@ -496,7 +496,8 @@ Answer during Task 1 or 2 unless noted.
 ## 12. Inspection limits
 
 - **Done:** Mini P:0 sidecar (first-N hash-match; `tasks/spike-op-reth.md`). Task 1 pin + assertion (#176, D-0109). Task 2 selector/guards + 852 sidecar start (#178, D-0110). Task 3 safe-head catch-up (lag 0) and 20-sample three-way parity + restart/resume (#184, D-0114; `tasks/task3-op-reth-safe-head-parity.md`).
-- **Not done:** challenger/SafeDB/withdrawal-prove/proposer-root on op-reth (Task 4); unsafe-tip behavior — an L1-derived verifier with p2p disabled never holds the live unsafe tip, so this is only testable at Task 5 cutover when op-reth produces the tip; sequencer cutover (Task 5); Render image (Task 7); friend repo (Task 8).
+- **Done (Task 4, #189, D-0116):** SafeDB post-enable, historical proofs, output-root parity, judged-valid claim, withdrawal initiate+prove from candidate artifacts. Finalize tail = Task 5 gate (D-0116).
+- **Not done:** unsafe-tip behavior — an L1-derived verifier with p2p disabled never holds the live unsafe tip, so this is only testable at Task 5 cutover when op-reth produces the tip; sequencer cutover (Task 5); Render image (Task 7); friend repo (Task 8).
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The live start path still has no `admin_stopSequencer` helper — Task 5 must add or document the RPC call.
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
