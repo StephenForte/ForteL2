@@ -1,5 +1,7 @@
 # Task 4 evidence — op-reth candidate fault-proof / historical workflows
 
+**STATUS: blocked** — Task 4 workflows are not closed. This is not a Task 5 go and not a sequencer-cutover authorization. The candidate datadir (`$DATA_DIR/l2/op-reth`) is preserved for a later Task 5; do not wipe it. RPC spot checks below (output-root / SafeDB / `eth_getProof`) do not substitute for a judged valid claim or a withdrawal that succeeded or had its named blocker resolved.
+
 **Date opened:** 2026-08-31  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 4 / §11 Q3  
 **Decisions consumed:** D-0109 (pin), D-0110 (identifiers, wipe+re-derive), D-0114 (candidate datadir, restart env, replica prune window)  
@@ -142,6 +144,8 @@ If an operator later initiates a minimal withdrawal on live `:9545` and points `
 - Withdrawal initiate/prove/finalize on L1 was not executed (approval gate). Candidate can serve the prove artifacts; clocks were not exercised.
 - Isolated challenger's single scan 429'd on L1 (shared QuickNode budget with the live challenger). Judgment of game 215 is from candidate RPC equality + SafeDB answer + zero nonce, not from a completed in-process “valid” log line.
 - Isolated judge logs/pids landed under the Phase 1 `$DATA_DIR` because `lib.sh` was sourced without snapshotting Sepolia `DATA_DIR` first. Live challenger dirs were not used.
-- Q3 standing answer for Task 5: `sequencer_faultproof` = archive + `--proofs-history` (init `--skip-backfill` from genesis) + sidecar `--safedb.path` (`$DATA_DIR/l2/op-reth-safedb`). Replica prune window unchanged.
+- Q3 profile shape (observed, not a Task 5 authorization): `sequencer_faultproof` = archive + `--proofs-history` (init `--skip-backfill` from genesis) + sidecar `--safedb.path` (`$DATA_DIR/l2/op-reth-safedb`). Replica prune window unchanged.
 
-Candidate datadir is Task 5's input. Never `reset-sepolia` / `--wipe` / `debug_setHead` on it.
+The candidate datadir is preserved so Task 5 can start from it later. Task 4 itself is **blocked**: no judged valid claim, no withdrawal succeed-or-named-blocker-resolved. Never `reset-sepolia` / `--wipe` / `debug_setHead` on the datadir.
+
+Codex-tightened `verify-reth-faultproof.sh` re-ran live (game L2 397392, `--safedb-enable-l1` 11609837, `--pre-enable-l1` 11600000): PASS on three distinct recorded SafeDB L1s and full `eth_getProof` payloads (storageHash / balance / nonce / codeHash / accountProof / storageProof) vs the Mac archive geth. That does not lift the block.

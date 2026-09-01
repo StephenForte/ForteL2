@@ -6581,10 +6581,12 @@ else
   fail=1
 fi
 
-# Task 4 SafeDB: default path, refuse live $DATA_DIR/safedb and op-geth, auto-enable
-# only on sequencer_faultproof. Live op-node / 09-start-challenger untouched.
+# Task 4 SafeDB: default path, refuse live $DATA_DIR/safedb, op-geth, and the
+# op-reth / spike-op-reth datadirs. Auto-enable only on sequencer_faultproof.
+# Live op-node / 09-start-challenger untouched.
 RETH_SDB_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-safedb.XXXXXX")"
-mkdir -p "$RETH_SDB_FIX/l2/op-geth" "$RETH_SDB_FIX/safedb"
+mkdir -p "$RETH_SDB_FIX/l2/op-geth" "$RETH_SDB_FIX/l2/op-reth/db" \
+  "$RETH_SDB_FIX/l2/spike-op-reth" "$RETH_SDB_FIX/safedb"
 echo live > "$RETH_SDB_FIX/safedb/KEEP"
 RETH_SDB_DEF="$(
   DATA_DIR="$RETH_SDB_FIX"
@@ -6622,6 +6624,42 @@ if [[ "$RETH_SDB_GETH_EC" -ne 0 ]] && echo "$RETH_SDB_GETH" | grep -qi 'op-geth'
 else
   echo "FAIL SafeDB under op-geth must refuse (ec=$RETH_SDB_GETH_EC)" >&2
   echo "$RETH_SDB_GETH" >&2
+  fail=1
+fi
+RETH_SDB_RETH="$(
+  DATA_DIR="$RETH_SDB_FIX"
+  FORTEL2_RETH_SAFEDB_PATH="$RETH_SDB_FIX/l2/op-reth"
+  require_reth_safedb_path 2>&1
+)" && RETH_SDB_RETH_EC=0 || RETH_SDB_RETH_EC=$?
+if [[ "$RETH_SDB_RETH_EC" -ne 0 ]] && echo "$RETH_SDB_RETH" | grep -qi 'op-reth datadir'; then
+  echo "PASS require_reth_safedb_path refuses \$DATA_DIR/l2/op-reth"
+else
+  echo "FAIL SafeDB at the op-reth datadir must refuse (ec=$RETH_SDB_RETH_EC)" >&2
+  echo "$RETH_SDB_RETH" >&2
+  fail=1
+fi
+RETH_SDB_RETH_DB="$(
+  DATA_DIR="$RETH_SDB_FIX"
+  FORTEL2_RETH_SAFEDB_PATH="$RETH_SDB_FIX/l2/op-reth/db"
+  require_reth_safedb_path 2>&1
+)" && RETH_SDB_RETH_DB_EC=0 || RETH_SDB_RETH_DB_EC=$?
+if [[ "$RETH_SDB_RETH_DB_EC" -ne 0 ]] && echo "$RETH_SDB_RETH_DB" | grep -qi 'op-reth datadir'; then
+  echo "PASS require_reth_safedb_path refuses a path under op-reth"
+else
+  echo "FAIL SafeDB under op-reth/db must refuse (ec=$RETH_SDB_RETH_DB_EC)" >&2
+  echo "$RETH_SDB_RETH_DB" >&2
+  fail=1
+fi
+RETH_SDB_SPIKE="$(
+  DATA_DIR="$RETH_SDB_FIX"
+  FORTEL2_RETH_SAFEDB_PATH="$RETH_SDB_FIX/l2/spike-op-reth/safedb"
+  require_reth_safedb_path 2>&1
+)" && RETH_SDB_SPIKE_EC=0 || RETH_SDB_SPIKE_EC=$?
+if [[ "$RETH_SDB_SPIKE_EC" -ne 0 ]] && echo "$RETH_SDB_SPIKE" | grep -qi 'op-reth datadir'; then
+  echo "PASS require_reth_safedb_path refuses a path under spike-op-reth"
+else
+  echo "FAIL SafeDB under spike-op-reth must refuse (ec=$RETH_SDB_SPIKE_EC)" >&2
+  echo "$RETH_SDB_SPIKE" >&2
   fail=1
 fi
 rm -rf "$RETH_SDB_FIX"
@@ -8413,6 +8451,14 @@ else
   echo "FAIL Task 4 evidence file must be tracked" >&2
   fail=1
 fi
+if grep -q 'STATUS: blocked' "$VRF_NOTE" \
+  && grep -qi 'not a Task 5 go' "$VRF_NOTE" \
+  && ! grep -q "Candidate datadir is Task 5's input" "$VRF_NOTE"; then
+  echo "PASS Task 4 evidence is STATUS blocked (not a Task 5 go)"
+else
+  echo "FAIL Task 4 evidence must stay blocked until workflows close" >&2
+  fail=1
+fi
 
 VRF_HELP="$("$VRF" --help 2>&1)" && VRF_HELP_EC=0 || VRF_HELP_EC=$?
 if [[ "$VRF_HELP_EC" -eq 0 ]] \
@@ -8473,13 +8519,49 @@ else
   fail=1
 fi
 
+# Live mode without --pre-enable-l1 must fail closed (do not default enable-1).
+VRF_PRE_REQ_OUT="$(
+  "$VRF" --candidate http://127.0.0.1:19545 --live http://127.0.0.1:9545 \
+    --game-l2-block 1 --safedb-enable-l1 100 2>&1
+)" && VRF_PRE_REQ_EC=0 || VRF_PRE_REQ_EC=$?
+if [[ "$VRF_PRE_REQ_EC" -ne 0 ]] \
+  && echo "$VRF_PRE_REQ_OUT" | grep -q 'pre-enable-l1' \
+  && echo "$VRF_PRE_REQ_OUT" | grep -qi 'known-unrecorded'; then
+  echo "PASS verify-reth-faultproof live mode requires --pre-enable-l1"
+else
+  echo "FAIL live mode must require a known-unrecorded --pre-enable-l1 (ec=$VRF_PRE_REQ_EC)" >&2
+  echo "$VRF_PRE_REQ_OUT" >&2
+  fail=1
+fi
+
 VRF_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-faultproof.XXXXXX")"
 cleanup_vrf() { rm -rf "$VRF_FIX"; }
 trap cleanup_vrf EXIT
-python3 - "$VRF_FIX/match.json" "$VRF_FIX/short.json" <<'PY'
+python3 - "$VRF_FIX/match.json" "$VRF_FIX/short.json" "$VRF_FIX/collapse.json" <<'PY'
 import json, sys
 
+def proof(block, addr, tag, with_slot=True):
+    item = {
+        "block": block,
+        "address": addr,
+        "storageHash": "0x" + tag * 32,
+        "balance": "0x0",
+        "nonce": "0x1",
+        "codeHash": "0x" + "77" * 32,
+        "accountProof": ["0x" + "88" * 32, "0x" + tag * 32],
+        "storageProof": [],
+    }
+    if with_slot:
+        item["storageProof"] = [{
+            "key": "0x" + "00" * 32,
+            "value": "0x1",
+            "proof": ["0x" + "99" * 32],
+        }]
+    return item
+
 def doc():
+    passer = "0x4200000000000000000000000000000000000016"
+    bridge = "0x4200000000000000000000000000000000000010"
     return {
         "gameL2Block": 3000,
         "safedbEnableL1": 90,
@@ -8491,26 +8573,14 @@ def doc():
             {"l2Block": 3000, "outputRoot": "0x" + "cc" * 32},
         ],
         "safeHeads": [
-            {"l1Block": 100, "l2Number": 50, "l2Hash": "0x" + "11" * 32},
-            {"l1Block": 110, "l2Number": 110, "l2Hash": "0x" + "22" * 32},
-            {"l1Block": 120, "l2Number": 170, "l2Hash": "0x" + "33" * 32},
+            {"l1Block": 100, "recordedL1": 100, "l2Number": 50, "l2Hash": "0x" + "11" * 32},
+            {"l1Block": 110, "recordedL1": 110, "l2Number": 110, "l2Hash": "0x" + "22" * 32},
+            {"l1Block": 120, "recordedL1": 120, "l2Number": 170, "l2Hash": "0x" + "33" * 32},
         ],
         "proofs": [
-            {
-                "block": 5,
-                "address": "0x4200000000000000000000000000000000000016",
-                "storageHash": "0x" + "44" * 32,
-            },
-            {
-                "block": 1000,
-                "address": "0x4200000000000000000000000000000000000010",
-                "storageHash": "0x" + "55" * 32,
-            },
-            {
-                "block": 100000,
-                "address": "0x4200000000000000000000000000000000000016",
-                "storageHash": "0x" + "66" * 32,
-            },
+            proof(5, passer, "44", True),
+            proof(1000, bridge, "55", False),
+            proof(100000, passer, "66", True),
         ],
     }
 
@@ -8521,6 +8591,16 @@ short = doc()
 short["outputRoots"] = short["outputRoots"][:1]
 with open(sys.argv[2], "w", encoding="utf-8") as f:
     json.dump(short, f)
+    f.write("\n")
+# Floor-semantics trap: three queries, one recorded L1. Must go red.
+collapse = doc()
+collapse["safeHeads"] = [
+    {"l1Block": 100, "recordedL1": 100, "l2Number": 50, "l2Hash": "0x" + "11" * 32},
+    {"l1Block": 110, "recordedL1": 100, "l2Number": 50, "l2Hash": "0x" + "11" * 32},
+    {"l1Block": 120, "recordedL1": 100, "l2Number": 50, "l2Hash": "0x" + "11" * 32},
+]
+with open(sys.argv[3], "w", encoding="utf-8") as f:
+    json.dump(collapse, f)
     f.write("\n")
 PY
 
@@ -8587,12 +8667,23 @@ else
   fail=1
 fi
 
+VRF_COLLAPSE="$("$VRF" --fixture "$VRF_FIX/collapse.json" 2>&1)" && VRF_COLLAPSE_EC=0 || VRF_COLLAPSE_EC=$?
+if [[ "$VRF_COLLAPSE_EC" -ne 0 ]] \
+  && echo "$VRF_COLLAPSE" | grep -qi 'not distinct' \
+  && ! echo "$VRF_COLLAPSE" | grep -q 'verify-reth-faultproof: PASS'; then
+  echo "PASS verify-reth-faultproof collapsed SafeDB records fail distinct-L1 check"
+else
+  echo "FAIL three queries to one recorded L1 must not PASS (ec=$VRF_COLLAPSE_EC)" >&2
+  echo "$VRF_COLLAPSE" >&2
+  fail=1
+fi
+
 cleanup_vrf
 trap - EXIT
 unset VRF VRF_NOTE VRF_HELP VRF_HELP_EC VRF_NL_OUT VRF_NL_EC
-unset VRF_GAME_OUT VRF_GAME_EC VRF_FIX VRF_OK VRF_OK_EC
+unset VRF_GAME_OUT VRF_GAME_EC VRF_PRE_REQ_OUT VRF_PRE_REQ_EC VRF_FIX VRF_OK VRF_OK_EC
 unset VRF_BAD VRF_BAD_EC VRF_SH VRF_SH_EC VRF_PR VRF_PR_EC
-unset VRF_PRE VRF_PRE_EC VRF_SHORT VRF_SHORT_EC
+unset VRF_PRE VRF_PRE_EC VRF_SHORT VRF_SHORT_EC VRF_COLLAPSE VRF_COLLAPSE_EC
 unset -f cleanup_vrf 2>/dev/null || true
 
 # =============================================================================

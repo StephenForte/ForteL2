@@ -25,9 +25,10 @@ Exit 0 only when every required probe matches. Any mismatch names the field.
   --candidate-node URL  candidate op-node (loopback)
   --live-node URL       live op-node (loopback)
   --game-l2-block N     latest proposed game's L2 block (required live)
-  --safedb-enable-l1 N  L1 head when sidecar SafeDB was enabled (required live)
-  --pre-enable-l1 N     pre-enable L1 block for the required negative
-                        (default: enable-1)
+  --safedb-enable-l1 N  first recorded SafeDB L1 (or last unrecorded); required live
+  --pre-enable-l1 N     a known-unrecorded L1 for the required negative
+                        (required live; do not default to enable-1 — catch-up
+                        can already have recorded that block)
   --min-output-roots N  default 3
   --min-safedb N        default 3
   --min-proofs N        default 3
@@ -108,11 +109,11 @@ if [[ -z "$FIXTURE" ]]; then
     exit 2
   fi
   if ! [[ "${SAFEDB_ENABLE_L1:-}" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: --safedb-enable-l1 N is required in live mode (L1 head at SafeDB enable)" >&2
+    echo "ERROR: --safedb-enable-l1 N is required in live mode (first recorded SafeDB L1)" >&2
     exit 2
   fi
-  if [[ -n "$PRE_ENABLE_L1" ]] && ! [[ "$PRE_ENABLE_L1" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: --pre-enable-l1 must be an integer" >&2
+  if ! [[ "${PRE_ENABLE_L1:-}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: --pre-enable-l1 N is required in live mode (a known-unrecorded L1; not enable-1)" >&2
     exit 2
   fi
 else
@@ -198,6 +199,18 @@ def norm_hash(v):
     return "0x" + s[2:].zfill(64)
 
 
+def norm_hex(v):
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if not s.startswith("0x"):
+        s = "0x" + s
+    if s == "0x":
+        return "0x0"
+    body = s[2:].lstrip("0")
+    return "0x" + (body if body else "0")
+
+
 def sleep_rpc():
     if SLEEP_MS > 0:
         time.sleep(SLEEP_MS / 1000.0)
@@ -260,24 +273,56 @@ def output_root_of(res):
 def safe_head_fields(res):
     if not isinstance(res, dict):
         return None
+    l1 = res.get("l1Block") or res.get("l1_block") or {}
     safe = res.get("safeHead") or res.get("safe_head") or res.get("l2") or res
     if not isinstance(safe, dict):
         return None
     return {
+        "recordedL1": hex_int(l1.get("number") if isinstance(l1, dict) else None),
         "number": hex_int(safe.get("number")),
         "hash": norm_hash(safe.get("hash")),
     }
+
+
+def norm_proof_list(nodes):
+    if not isinstance(nodes, list):
+        return []
+    out = []
+    for n in nodes:
+        if isinstance(n, str):
+            out.append(n.strip().lower())
+        else:
+            out.append(n)
+    return out
+
+
+def storage_proof_fields(keys):
+    out = []
+    if not isinstance(keys, list):
+        return out
+    for sp in keys:
+        if not isinstance(sp, dict):
+            continue
+        out.append({
+            "key": norm_hash(sp.get("key")),
+            "value": norm_hex(sp.get("value")),
+            "proof": norm_proof_list(sp.get("proof") or []),
+        })
+    return out
 
 
 def proof_fields(res):
     if not isinstance(res, dict):
         return None
     keys = res.get("storageProof") or res.get("storage_proof") or []
+    acct = res.get("accountProof") or res.get("account_proof") or []
     return {
         "storageHash": norm_hash(res.get("storageHash") or res.get("storage_hash")),
-        "accountProofLen": len(res.get("accountProof") or res.get("account_proof") or []),
-        "storageProofLen": len(keys),
-        "nonce": str(res.get("nonce") or ""),
+        "balance": norm_hex(res.get("balance")),
+        "nonce": norm_hex(res.get("nonce")),
+        "codeHash": norm_hash(res.get("codeHash") or res.get("code_hash")),
+        "accountProof": norm_proof_list(acct),
+        "storageProof": storage_proof_fields(keys),
     }
 
 
@@ -346,11 +391,13 @@ def run_fixture():
     enable = hex_int(live.get("safedbEnableL1"))
     if enable is None:
         fail("fixture must include safedbEnableL1")
+    recorded = []
     for i in range(MIN_SAFEDB):
         hc, hl = heads_c[i], heads_l[i]
-        l1 = hex_int(hl.get("l1Block"))
+        l1 = hex_int(hl.get("recordedL1") or hl.get("l1Block"))
         if l1 is None or l1 <= enable:
             fail(f"fixture safeHead L1 {l1} must be > safedbEnableL1 {enable}")
+        recorded.append(l1)
         a_n, b_n = hex_int(hc.get("l2Number")), hex_int(hl.get("l2Number"))
         a_h, b_h = norm_hash(hc.get("l2Hash")), norm_hash(hl.get("l2Hash"))
         if a_n != b_n:
@@ -358,7 +405,12 @@ def run_fixture():
         if a_h != b_h:
             mismatch("safeHead", l1, "l2Hash", a_h, b_h)
         print(f"  safeHead l1={l1} l2={a_n} {a_h} MATCH")
-    print(f"SafeDB post-enable: PASS ({MIN_SAFEDB} L1 blocks after {enable})")
+    if len(set(recorded)) < MIN_SAFEDB:
+        fail(
+            f"fixture SafeDB records are not distinct "
+            f"(recorded={recorded}; need >= {MIN_SAFEDB} unique L1 mappings)"
+        )
+    print(f"SafeDB post-enable: PASS ({MIN_SAFEDB} distinct L1 records after {enable})")
 
     pre = hex_int(live.get("preEnableL1"))
     if pre is None or pre >= enable:
@@ -379,10 +431,19 @@ def run_fixture():
     for i in range(MIN_PROOFS):
         pc, pl = proofs_c[i], proofs_l[i]
         ident = f"{pl.get('block')}:{pl.get('address')}"
-        a, b = norm_hash(pc.get("storageHash")), norm_hash(pl.get("storageHash"))
-        if a != b:
-            mismatch("proof", ident, "storageHash", a, b)
-        print(f"  proof {ident} storageHash={a} MATCH")
+        fc, fl = proof_fields(pc), proof_fields(pl)
+        if fc is None or fl is None:
+            fail(f"fixture missing proof payload at {ident}")
+        for field in ("storageHash", "balance", "nonce", "codeHash"):
+            if fc.get(field) != fl.get(field):
+                mismatch("proof", ident, field, fc.get(field), fl.get(field))
+        if fc["accountProof"] != fl["accountProof"]:
+            mismatch("proof", ident, "accountProof", fc["accountProof"], fl["accountProof"])
+        if fc["storageProof"] != fl["storageProof"]:
+            mismatch("proof", ident, "storageProof", fc["storageProof"], fl["storageProof"])
+        if not fc["accountProof"]:
+            fail(f"fixture proof {ident} has empty accountProof")
+        print(f"  proof {ident} storageHash={fc['storageHash']} MATCH")
     print(f"historical eth_getProof: PASS ({MIN_PROOFS} depths)")
     print("verify-reth-faultproof: PASS")
 
@@ -439,22 +500,24 @@ def pick_safedb_l1(enable, origin_c, origin_l):
             "no post-enable L1 heads to query yet"
         )
     span = hi - enable
+    # Over-sample: floor semantics can map many queries to one recorded L1.
+    want = max(MIN_SAFEDB * 4, 8)
     picks = []
-    for i in range(1, MIN_SAFEDB + 1):
-        n = enable + max(1, round(i * span / (MIN_SAFEDB + 1)))
+    for i in range(1, want + 1):
+        n = enable + max(1, round(i * span / (want + 1)))
         if n > hi:
-            n = hi - (MIN_SAFEDB - i)
+            n = hi - (want - i)
         if n > enable:
             picks.append(n)
     if hi not in picks:
         picks.append(hi)
     out = sorted({n for n in picks if enable < n <= hi})
-    if len(out) < MIN_SAFEDB:
+    if not out:
         fail(
-            f"only {len(out)} L1 blocks after SafeDB enable {enable} "
-            f"(origin {hi}); need >= {MIN_SAFEDB}"
+            f"no L1 blocks after SafeDB enable {enable} (origin {hi}); "
+            f"need >= {MIN_SAFEDB} distinct recorded mappings"
         )
-    return out[:MIN_SAFEDB] if len(out) > MIN_SAFEDB else out
+    return out
 
 
 def pick_proof_heights(hi):
@@ -485,7 +548,7 @@ def pick_proof_heights(hi):
 def run_live():
     game = int(GAME_L2)
     enable = int(ENABLE_L1)
-    pre = int(PRE_L1) if PRE_L1 else enable - 1
+    pre = int(PRE_L1)
     if pre < 0 or pre >= enable:
         fail(f"pre-enable L1 {pre} must be >= 0 and < enable {enable}")
 
@@ -525,9 +588,10 @@ def run_live():
         print(f"  outputRoot l2={n} {a} MATCH")
     print(f"output-root compare: PASS ({len(blocks)} blocks incl game {game})")
 
-    # --- SafeDB post-enable ---
+    # --- SafeDB post-enable (distinct recorded L1 mappings, not query count) ---
     l1s = pick_safedb_l1(enable, origin_c, origin_l)
-    print(f"SafeDB post-enable l1={l1s}")
+    print(f"SafeDB post-enable queries={l1s}")
+    distinct = {}
     for l1 in l1s:
         tag = hex(l1)
         try:
@@ -540,15 +604,30 @@ def run_live():
         fields = safe_head_fields(rc)
         if not fields or fields["number"] is None or not fields["hash"]:
             fail(f"SafeDB returned empty safe head at L1 {l1}: {rc}")
+        rec = fields["recordedL1"]
+        if rec is None:
+            fail(f"SafeDB omitted recorded l1Block at query {l1}: {rc}")
+        if rec <= enable:
+            fail(f"SafeDB recorded L1 {rec} is not after enable {enable} (query {l1})")
+        if rec in distinct:
+            continue
         blk = rpc(LIVE, "eth_getBlockByNumber", [hex(fields["number"]), False], "live")
         live_hash = norm_hash((blk or {}).get("hash"))
         if live_hash != fields["hash"]:
-            mismatch("safeHead", l1, "l2Hash", fields["hash"], live_hash)
+            mismatch("safeHead", rec, "l2Hash", fields["hash"], live_hash)
+        distinct[rec] = fields
         print(
-            f"  safeHead l1={l1} l2={fields['number']} {fields['hash']} "
-            f"matches live archive block MATCH"
+            f"  safeHead query_l1={l1} recorded_l1={rec} l2={fields['number']} "
+            f"{fields['hash']} matches live archive block MATCH"
         )
-    print(f"SafeDB post-enable: PASS ({len(l1s)} L1 blocks after {enable})")
+        if len(distinct) >= MIN_SAFEDB:
+            break
+    if len(distinct) < MIN_SAFEDB:
+        fail(
+            f"only {len(distinct)} distinct SafeDB records after enable {enable} "
+            f"(recorded={sorted(distinct)}; need >= {MIN_SAFEDB})"
+        )
+    print(f"SafeDB post-enable: PASS ({len(distinct)} distinct L1 records after {enable})")
 
     # --- required pre-enable negative ---
     print(f"SafeDB pre-enable negative query l1={pre} (enable={enable})")
@@ -581,13 +660,23 @@ def run_live():
         fc, fl = proof_fields(pc), proof_fields(pl)
         if fc is None or fl is None:
             fail(f"missing eth_getProof at block {n} addr {addr}")
-        if fc["storageHash"] != fl["storageHash"]:
-            mismatch("proof", f"{n}:{addr}", "storageHash", fc["storageHash"], fl["storageHash"])
-        if fc["accountProofLen"] < 1 or fl["accountProofLen"] < 1:
-            fail(f"eth_getProof at {n}:{addr} returned empty accountProof")
+        ident = f"{n}:{addr}"
+        for field in ("storageHash", "balance", "nonce", "codeHash"):
+            if fc.get(field) != fl.get(field):
+                mismatch("proof", ident, field, fc.get(field), fl.get(field))
+        if fc["accountProof"] != fl["accountProof"]:
+            mismatch("proof", ident, "accountProof",
+                     f"len={len(fc['accountProof'])}", f"len={len(fl['accountProof'])}")
+        if fc["storageProof"] != fl["storageProof"]:
+            mismatch("proof", ident, "storageProof", fc["storageProof"], fl["storageProof"])
+        if not fc["accountProof"] or not fl["accountProof"]:
+            fail(f"eth_getProof at {ident} returned empty accountProof")
+        if addr == L2_PASSER and not fc["storageProof"]:
+            fail(f"eth_getProof at {ident} missing storageProof for messageNonce slot")
         print(
             f"  proof block={n} addr={addr} storageHash={fc['storageHash']} "
-            f"accountProofLen={fc['accountProofLen']} MATCH"
+            f"accountProofLen={len(fc['accountProof'])} "
+            f"storageProofs={len(fc['storageProof'])} MATCH"
         )
         compared += 1
     if compared < MIN_PROOFS:

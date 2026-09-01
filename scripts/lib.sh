@@ -1147,7 +1147,7 @@ reth_safedb_path() {
 }
 
 require_reth_safedb_path() {
-  local raw got live_safedb live_geth parent leaf
+  local raw got live_safedb live_geth reth_prod reth_spike parent leaf
   raw="$(reth_safedb_path)"
   if [[ -z "$raw" ]]; then
     echo "ERROR: FORTEL2_RETH_SAFEDB_PATH is empty" >&2
@@ -1157,18 +1157,21 @@ require_reth_safedb_path() {
   got="$(fortel2_canon_path "$raw")"
   live_safedb="$(fortel2_canon_path "$DATA_DIR/safedb")"
   live_geth="$(fortel2_canon_path "$DATA_DIR/l2/op-geth")"
+  reth_prod="$(fortel2_canon_path "$DATA_DIR/l2/op-reth")"
+  reth_spike="$(fortel2_canon_path "$DATA_DIR/l2/spike-op-reth")"
   leaf="$(basename "$got")"
   parent="$(dirname "$got")"
   if [[ "$got" == "$live_safedb" ]]; then
     echo "ERROR: refusing live SafeDB $got — sidecar SafeDB is \$DATA_DIR/l2/op-reth-safedb (live op-node untouched)" >&2
     exit 1
   fi
-  if [[ "$leaf" == "op-geth" || "$got" == "$live_geth" || "$got" == "$live_geth"/* ]]; then
+  if [[ "$leaf" == "op-geth" || "$got" == "$live_geth" || "$got" == "$live_geth"/* || "$parent" == "$live_geth" ]]; then
     echo "ERROR: refusing SafeDB under op-geth datadir $got" >&2
     exit 1
   fi
-  if [[ "$parent" == "$live_geth" ]]; then
-    echo "ERROR: refusing SafeDB under op-geth datadir $got" >&2
+  if [[ "$got" == "$reth_prod" || "$got" == "$reth_prod"/* || "$parent" == "$reth_prod" \
+     || "$got" == "$reth_spike" || "$got" == "$reth_spike"/* || "$parent" == "$reth_spike" ]]; then
+    echo "ERROR: refusing SafeDB inside op-reth datadir $got — use \$DATA_DIR/l2/op-reth-safedb" >&2
     exit 1
   fi
   printf '%s\n' "$got"
