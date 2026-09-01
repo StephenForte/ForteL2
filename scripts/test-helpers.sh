@@ -6581,6 +6581,87 @@ else
   fail=1
 fi
 
+# Task 4 SafeDB: default path, refuse live $DATA_DIR/safedb and op-geth, auto-enable
+# only on sequencer_faultproof. Live op-node / 09-start-challenger untouched.
+RETH_SDB_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-safedb.XXXXXX")"
+mkdir -p "$RETH_SDB_FIX/l2/op-geth" "$RETH_SDB_FIX/safedb"
+echo live > "$RETH_SDB_FIX/safedb/KEEP"
+RETH_SDB_DEF="$(
+  DATA_DIR="$RETH_SDB_FIX"
+  unset FORTEL2_RETH_SAFEDB_PATH || true
+  require_reth_safedb_path
+)" && RETH_SDB_DEF_EC=0 || RETH_SDB_DEF_EC=$?
+RETH_SDB_DEF_CANON="$(cd "$RETH_SDB_FIX" && pwd -P)/l2/op-reth-safedb"
+if [[ "$RETH_SDB_DEF_EC" -eq 0 && "$RETH_SDB_DEF" == "$RETH_SDB_DEF_CANON" ]]; then
+  echo "PASS require_reth_safedb_path defaults to \$DATA_DIR/l2/op-reth-safedb"
+else
+  echo "FAIL SafeDB default path (got '$RETH_SDB_DEF' want '$RETH_SDB_DEF_CANON' ec=$RETH_SDB_DEF_EC)" >&2
+  fail=1
+fi
+RETH_SDB_LIVE="$(
+  DATA_DIR="$RETH_SDB_FIX"
+  FORTEL2_RETH_SAFEDB_PATH="$RETH_SDB_FIX/safedb"
+  require_reth_safedb_path 2>&1
+)" && RETH_SDB_LIVE_EC=0 || RETH_SDB_LIVE_EC=$?
+if [[ "$RETH_SDB_LIVE_EC" -ne 0 ]] \
+  && echo "$RETH_SDB_LIVE" | grep -qi 'live SafeDB' \
+  && [[ -f "$RETH_SDB_FIX/safedb/KEEP" ]]; then
+  echo "PASS require_reth_safedb_path refuses live \$DATA_DIR/safedb (marker intact)"
+else
+  echo "FAIL sidecar SafeDB must refuse the live store (ec=$RETH_SDB_LIVE_EC)" >&2
+  echo "$RETH_SDB_LIVE" >&2
+  fail=1
+fi
+RETH_SDB_GETH="$(
+  DATA_DIR="$RETH_SDB_FIX"
+  FORTEL2_RETH_SAFEDB_PATH="$RETH_SDB_FIX/l2/op-geth/safedb"
+  require_reth_safedb_path 2>&1
+)" && RETH_SDB_GETH_EC=0 || RETH_SDB_GETH_EC=$?
+if [[ "$RETH_SDB_GETH_EC" -ne 0 ]] && echo "$RETH_SDB_GETH" | grep -qi 'op-geth'; then
+  echo "PASS require_reth_safedb_path refuses a path under op-geth"
+else
+  echo "FAIL SafeDB under op-geth must refuse (ec=$RETH_SDB_GETH_EC)" >&2
+  echo "$RETH_SDB_GETH" >&2
+  fail=1
+fi
+rm -rf "$RETH_SDB_FIX"
+
+if grep -q -- '--safedb.path' "$RETH_START" \
+  && grep -q 'FORTEL2_RETH_PROFILE" == "sequencer_faultproof"' "$RETH_START" \
+  && grep -q 'require_reth_safedb_path' "$RETH_START" \
+  && grep -q 'unset OP_NODE_SAFEDB_PATH' "$RETH_START" \
+  && ! grep -q -- '--safedb.path' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && ! grep -q -- '--safedb.path' "$SCRIPT_DIR/09-start-challenger-sepolia.sh"; then
+  echo "PASS sidecar wires --safedb.path on sequencer_faultproof only; live start/challenger untouched"
+else
+  echo "FAIL SafeDB flag must land in the sidecar op-node only" >&2
+  fail=1
+fi
+RETH_SDB_PF_SF="$(
+  FORTEL2_EL=reth FORTEL2_RETH_PROFILE=sequencer_faultproof "$RETH_START" --preflight 2>&1
+)" && RETH_SDB_PF_SF_EC=0 || RETH_SDB_PF_SF_EC=$?
+if [[ "$RETH_SDB_PF_SF_EC" -eq 0 ]] \
+  && echo "$RETH_SDB_PF_SF" | grep -q 'safedb=' \
+  && echo "$RETH_SDB_PF_SF" | grep -q 'op-reth-safedb' \
+  && echo "$RETH_SDB_PF_SF" | grep -q 'sidecar op-node only'; then
+  echo "PASS sidecar --preflight sequencer_faultproof names sidecar SafeDB path"
+else
+  echo "FAIL sequencer_faultproof preflight must name SafeDB (ec=$RETH_SDB_PF_SF_EC)" >&2
+  echo "$RETH_SDB_PF_SF" >&2
+  fail=1
+fi
+RETH_SDB_PF_VF="$(
+  FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier "$RETH_START" --preflight 2>&1
+)" && RETH_SDB_PF_VF_EC=0 || RETH_SDB_PF_VF_EC=$?
+if [[ "$RETH_SDB_PF_VF_EC" -eq 0 ]] \
+  && echo "$RETH_SDB_PF_VF" | grep -q 'safedb=off'; then
+  echo "PASS sidecar --preflight verifier leaves SafeDB off"
+else
+  echo "FAIL verifier preflight must leave SafeDB off (ec=$RETH_SDB_PF_VF_EC)" >&2
+  echo "$RETH_SDB_PF_VF" >&2
+  fail=1
+fi
+
 # reth pointed at the geth datadir refuses.
 RETH_DD_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-dd.XXXXXX")"
 mkdir -p "$RETH_DD_FIX/l2/op-geth" "$RETH_DD_FIX/l2/op-reth"
@@ -8308,6 +8389,214 @@ unset -f cleanup_pa pa_git pa_init_origin pa_dev_secrets pa_deploy pa_cl 2>/dev/
 
 # =============================================================================
 # end pin-agents-worktree block
+# =============================================================================
+
+# =============================================================================
+# verify-reth-faultproof (op-reth Task 4)
+# Offline fixtures only; no live RPC, no L1 URL, no JWT.
+# Negative --alter-field outputRoot must be able to go red.
+# =============================================================================
+
+VRF="$SCRIPT_DIR/verify-reth-faultproof.sh"
+VRF_NOTE="$FORTEL2_ROOT/tasks/task4-op-reth-faultproof.md"
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch scripts/verify-reth-faultproof.sh >/dev/null 2>&1 \
+  && [[ -x "$VRF" ]]; then
+  echo "PASS verify-reth-faultproof.sh is tracked and executable"
+else
+  echo "FAIL scripts/verify-reth-faultproof.sh must be tracked and executable" >&2
+  fail=1
+fi
+if git -C "$FORTEL2_ROOT" ls-files --error-unmatch tasks/task4-op-reth-faultproof.md >/dev/null 2>&1 \
+  && [[ -f "$VRF_NOTE" ]]; then
+  echo "PASS tasks/task4-op-reth-faultproof.md is tracked"
+else
+  echo "FAIL Task 4 evidence file must be tracked" >&2
+  fail=1
+fi
+
+VRF_HELP="$("$VRF" --help 2>&1)" && VRF_HELP_EC=0 || VRF_HELP_EC=$?
+if [[ "$VRF_HELP_EC" -eq 0 ]] \
+  && echo "$VRF_HELP" | grep -q '19545' \
+  && echo "$VRF_HELP" | grep -q '9545' \
+  && echo "$VRF_HELP" | grep -q 'outputRoot' \
+  && echo "$VRF_HELP" | grep -qi 'safedb' \
+  && echo "$VRF_HELP" | grep -q 'fixture' \
+  && echo "$VRF_HELP" | grep -q 'alter-field'; then
+  echo "PASS verify-reth-faultproof --help names ports, output-root, SafeDB, fixture, alter-field"
+else
+  echo "FAIL verify-reth-faultproof --help must name ports/output-root/SafeDB/fixture/alter-field (ec=$VRF_HELP_EC)" >&2
+  echo "$VRF_HELP" >&2
+  fail=1
+fi
+
+if grep -E "['\"]debug_setHead|['\"]admin_" "$VRF"; then
+  echo "FAIL verify-reth-faultproof.sh must not invoke debug_setHead or admin_ methods" >&2
+  fail=1
+else
+  echo "PASS verify-reth-faultproof.sh does not invoke debug_setHead or admin_ methods"
+fi
+if grep -q 'replica' "$VRF" && grep -q 'never queried' "$VRF"; then
+  echo "PASS verify-reth-faultproof.sh documents replica-never-queried (prune window)"
+else
+  echo "FAIL faultproof script must refuse replica historical reads" >&2
+  fail=1
+fi
+if grep -q 'print.*L1_RPC_URL\|echo.*L1_RPC_URL' "$VRF"; then
+  echo "FAIL verify-reth-faultproof.sh must not print L1_RPC_URL" >&2
+  fail=1
+else
+  echo "PASS verify-reth-faultproof.sh does not print L1_RPC_URL"
+fi
+
+# Live non-loopback must refuse (fixture-less path).
+VRF_NL_OUT="$(
+  "$VRF" --live http://example.invalid:8545 --candidate http://127.0.0.1:19545 \
+    --game-l2-block 1 --safedb-enable-l1 1 2>&1
+)" && VRF_NL_EC=0 || VRF_NL_EC=$?
+if [[ "$VRF_NL_EC" -ne 0 ]] && echo "$VRF_NL_OUT" | grep -qi 'loopback'; then
+  echo "PASS verify-reth-faultproof refuses a non-loopback live URL"
+else
+  echo "FAIL live sequencer URL must stay loopback (ec=$VRF_NL_EC)" >&2
+  echo "$VRF_NL_OUT" >&2
+  fail=1
+fi
+
+# Live mode without --game-l2-block must fail closed (can go red).
+VRF_GAME_OUT="$(
+  "$VRF" --candidate http://127.0.0.1:19545 --live http://127.0.0.1:9545 2>&1
+)" && VRF_GAME_EC=0 || VRF_GAME_EC=$?
+if [[ "$VRF_GAME_EC" -ne 0 ]] && echo "$VRF_GAME_OUT" | grep -q 'game-l2-block'; then
+  echo "PASS verify-reth-faultproof live mode requires --game-l2-block"
+else
+  echo "FAIL live mode must require the proposed game L2 block (ec=$VRF_GAME_EC)" >&2
+  echo "$VRF_GAME_OUT" >&2
+  fail=1
+fi
+
+VRF_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-faultproof.XXXXXX")"
+cleanup_vrf() { rm -rf "$VRF_FIX"; }
+trap cleanup_vrf EXIT
+python3 - "$VRF_FIX/match.json" "$VRF_FIX/short.json" <<'PY'
+import json, sys
+
+def doc():
+    return {
+        "gameL2Block": 3000,
+        "safedbEnableL1": 90,
+        "preEnableL1": 80,
+        "preEnableError": "safe head not found for L1 block 80",
+        "outputRoots": [
+            {"l2Block": 1000, "outputRoot": "0x" + "aa" * 32},
+            {"l2Block": 2000, "outputRoot": "0x" + "bb" * 32},
+            {"l2Block": 3000, "outputRoot": "0x" + "cc" * 32},
+        ],
+        "safeHeads": [
+            {"l1Block": 100, "l2Number": 50, "l2Hash": "0x" + "11" * 32},
+            {"l1Block": 110, "l2Number": 110, "l2Hash": "0x" + "22" * 32},
+            {"l1Block": 120, "l2Number": 170, "l2Hash": "0x" + "33" * 32},
+        ],
+        "proofs": [
+            {
+                "block": 5,
+                "address": "0x4200000000000000000000000000000000000016",
+                "storageHash": "0x" + "44" * 32,
+            },
+            {
+                "block": 1000,
+                "address": "0x4200000000000000000000000000000000000010",
+                "storageHash": "0x" + "55" * 32,
+            },
+            {
+                "block": 100000,
+                "address": "0x4200000000000000000000000000000000000016",
+                "storageHash": "0x" + "66" * 32,
+            },
+        ],
+    }
+
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump(doc(), f)
+    f.write("\n")
+short = doc()
+short["outputRoots"] = short["outputRoots"][:1]
+with open(sys.argv[2], "w", encoding="utf-8") as f:
+    json.dump(short, f)
+    f.write("\n")
+PY
+
+VRF_OK="$("$VRF" --fixture "$VRF_FIX/match.json" 2>&1)" && VRF_OK_EC=0 || VRF_OK_EC=$?
+if [[ "$VRF_OK_EC" -eq 0 ]] \
+  && echo "$VRF_OK" | grep -q 'verify-reth-faultproof: PASS' \
+  && echo "$VRF_OK" | grep -q 'output-root compare: PASS' \
+  && echo "$VRF_OK" | grep -q 'SafeDB post-enable: PASS' \
+  && echo "$VRF_OK" | grep -q 'SafeDB pre-enable negative' \
+  && echo "$VRF_OK" | grep -q 'historical eth_getProof: PASS'; then
+  echo "PASS verify-reth-faultproof fixture full-match exits 0"
+else
+  echo "FAIL fixture match should exit 0 (ec=$VRF_OK_EC)" >&2
+  echo "$VRF_OK" >&2
+  fail=1
+fi
+
+# Negative: altered output root must name field and exit nonzero (can go red).
+VRF_BAD="$("$VRF" --fixture "$VRF_FIX/match.json" --alter-field outputRoot 2>&1)" && VRF_BAD_EC=0 || VRF_BAD_EC=$?
+if [[ "$VRF_BAD_EC" -ne 0 ]] \
+  && echo "$VRF_BAD" | grep -q 'MISMATCH' \
+  && echo "$VRF_BAD" | grep -q 'outputRoot' \
+  && ! echo "$VRF_BAD" | grep -q 'verify-reth-faultproof: PASS'; then
+  echo "PASS verify-reth-faultproof --alter-field outputRoot exits nonzero and names field"
+else
+  echo "FAIL altered outputRoot must exit nonzero (ec=$VRF_BAD_EC)" >&2
+  echo "$VRF_BAD" >&2
+  fail=1
+fi
+
+VRF_SH="$("$VRF" --fixture "$VRF_FIX/match.json" --alter-field safeHead 2>&1)" && VRF_SH_EC=0 || VRF_SH_EC=$?
+if [[ "$VRF_SH_EC" -ne 0 ]] && echo "$VRF_SH" | grep -q 'MISMATCH'; then
+  echo "PASS verify-reth-faultproof --alter-field safeHead exits nonzero"
+else
+  echo "FAIL altered safeHead must exit nonzero (ec=$VRF_SH_EC)" >&2
+  echo "$VRF_SH" >&2
+  fail=1
+fi
+
+VRF_PR="$("$VRF" --fixture "$VRF_FIX/match.json" --alter-field proof 2>&1)" && VRF_PR_EC=0 || VRF_PR_EC=$?
+if [[ "$VRF_PR_EC" -ne 0 ]] && echo "$VRF_PR" | grep -q 'MISMATCH'; then
+  echo "PASS verify-reth-faultproof --alter-field proof exits nonzero"
+else
+  echo "FAIL altered proof must exit nonzero (ec=$VRF_PR_EC)" >&2
+  echo "$VRF_PR" >&2
+  fail=1
+fi
+
+VRF_PRE="$("$VRF" --fixture "$VRF_FIX/match.json" --alter-field preEnable 2>&1)" && VRF_PRE_EC=0 || VRF_PRE_EC=$?
+if [[ "$VRF_PRE_EC" -ne 0 ]] && echo "$VRF_PRE" | grep -qi 'pre-enable'; then
+  echo "PASS verify-reth-faultproof --alter-field preEnable fails the required negative"
+else
+  echo "FAIL a succeeding pre-enable query must fail closed (ec=$VRF_PRE_EC)" >&2
+  echo "$VRF_PRE" >&2
+  fail=1
+fi
+
+VRF_SHORT="$("$VRF" --fixture "$VRF_FIX/short.json" 2>&1)" && VRF_SHORT_EC=0 || VRF_SHORT_EC=$?
+if [[ "$VRF_SHORT_EC" -ne 0 ]] && echo "$VRF_SHORT" | grep -q 'need >= 3'; then
+  echo "PASS verify-reth-faultproof short fixture fails the 3-root floor"
+else
+  echo "FAIL a 1-root fixture must not PASS (ec=$VRF_SHORT_EC)" >&2
+  echo "$VRF_SHORT" >&2
+  fail=1
+fi
+
+cleanup_vrf
+trap - EXIT
+unset VRF VRF_NOTE VRF_HELP VRF_HELP_EC VRF_NL_OUT VRF_NL_EC
+unset VRF_GAME_OUT VRF_GAME_EC VRF_FIX VRF_OK VRF_OK_EC
+unset VRF_BAD VRF_BAD_EC VRF_SH VRF_SH_EC VRF_PR VRF_PR_EC
+unset VRF_PRE VRF_PRE_EC VRF_SHORT VRF_SHORT_EC
+unset -f cleanup_vrf 2>/dev/null || true
+
+# =============================================================================
+# end verify-reth-faultproof block
 # =============================================================================
 
 if (( fail )); then

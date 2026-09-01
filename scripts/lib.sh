@@ -1138,3 +1138,38 @@ stop_reth_sidecar() {
   stop_bg op-reth-node
   stop_bg op-reth
 }
+
+# Sidecar SafeDB (Task 4). Default $DATA_DIR/l2/op-reth-safedb. Never the live
+# op-node store ($DATA_DIR/safedb) and never anything under op-geth.
+# Enabled only when FORTEL2_RETH_PROFILE=sequencer_faultproof.
+reth_safedb_path() {
+  printf '%s' "${FORTEL2_RETH_SAFEDB_PATH:-$DATA_DIR/l2/op-reth-safedb}"
+}
+
+require_reth_safedb_path() {
+  local raw got live_safedb live_geth parent leaf
+  raw="$(reth_safedb_path)"
+  if [[ -z "$raw" ]]; then
+    echo "ERROR: FORTEL2_RETH_SAFEDB_PATH is empty" >&2
+    exit 1
+  fi
+  mkdir -p "$DATA_DIR/l2"
+  got="$(fortel2_canon_path "$raw")"
+  live_safedb="$(fortel2_canon_path "$DATA_DIR/safedb")"
+  live_geth="$(fortel2_canon_path "$DATA_DIR/l2/op-geth")"
+  leaf="$(basename "$got")"
+  parent="$(dirname "$got")"
+  if [[ "$got" == "$live_safedb" ]]; then
+    echo "ERROR: refusing live SafeDB $got — sidecar SafeDB is \$DATA_DIR/l2/op-reth-safedb (live op-node untouched)" >&2
+    exit 1
+  fi
+  if [[ "$leaf" == "op-geth" || "$got" == "$live_geth" || "$got" == "$live_geth"/* ]]; then
+    echo "ERROR: refusing SafeDB under op-geth datadir $got" >&2
+    exit 1
+  fi
+  if [[ "$parent" == "$live_geth" ]]; then
+    echo "ERROR: refusing SafeDB under op-geth datadir $got" >&2
+    exit 1
+  fi
+  printf '%s\n' "$got"
+}

@@ -199,6 +199,10 @@ cd contracts && forge test          # Guestbook unit + fuzz tests
 #   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=sequencer_faultproof SEPOLIA_L1_RPC_RATE_LIMIT=10 \
 #     ./scripts/start-op-reth-verifier.sh
 #   ./scripts/verify-reth-parity.sh   # :19545 vs loopback :9545 vs public replica
+# Task 4 fault-proof / historical (sidecar SafeDB + output-root + eth_getProof
+# vs the Mac archive geth — never the replica; evidence:
+# tasks/task4-op-reth-faultproof.md):
+#   ./scripts/verify-reth-faultproof.sh --game-l2-block N --safedb-enable-l1 N
 node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers
 (cd scripts/bridge && npm ci && node --test lib.test.js)  # withdrawal bridge helpers
 ```
