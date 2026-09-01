@@ -77,23 +77,55 @@ Receipts at 5 and 200000 MATCH three-way (both type `0x7e` deposits). State at 2
 
 ## Sample heights
 
-_Pending `./scripts/verify-reth-parity.sh` after catch-up (must include 0, 5, and ≥18 spread checkpoints)._
+Live `./scripts/verify-reth-parity.sh` 2026-08-31 17:15 PDT. Overlap high-water `hi=394152` (candidate safe = live safe = replica EL). Twenty heights including 0 and 5:
+
+`[0, 5, 21897, 43795, 65692, 87589, 109487, 131384, 153281, 175179, 197076, 218973, 240871, 262768, 284665, 306563, 328460, 350357, 372255, 394152]`
 
 ## Parity output
 
-_Pending. Exit 0 full-match against live `:9545` and the public replica read URL. Negative fixture (`--alter-field`) exit nonzero — see helper tests._
+Exit 0. `full-match: candidate = live sequencer = replica`. `verify-reth-parity: PASS (20 blocks)`.
+
+Heads: `candidate_el=394152 live_el=394203 replica_el=394152 candidate_safe=394152 live_safe=394152 candidate_l1origin=11609112 live_l1origin=11609112`. Lag delta=0 (max 2).
+
+Every sampled block MATCH on number, hash, parentHash, stateRoot, receiptsRoot, txCount. Anchors:
+
+| Height | Hash (prefix) | txCount |
+|---|---|---:|
+| 0 | `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` | 0 |
+| 5 | `0xd9fd2a33ebadd2a734924d8f76bac945709ba4a1df352a7d4fd50383dee209e9` | 1 |
+| 394152 | `0x2ffa1fb0f16d9a4dde0b02eec33adee01a666f4aeaef6c987099e9b76739cae3` | 1 |
+
+State at tag `0x603a8` (block 394152, not `latest`). `deployments/guestbook.txt` has no code at that height — script fell back to WETH (documented WARN). Four checks MATCH: WETH codehash, L2StandardBridge balance `0x0`, `L2ToL1MessagePasser.messageNonce` slot 1 `0x0…0`, WETH.balance `0x0`. Two receipts MATCH (`0xc3425ec1…` status 0x1, `0xbe5a242d…` status 0x1). Deposit type `0x7e` at block 5 MATCH.
+
+Negative fixture (`--alter-field`) exit nonzero is covered by helper tests, not this live run.
+
+Live `:9545` was eth_* reads only. Replica was comparison only.
 
 ## Restart / resume
 
-_Pending. One deliberate stop/start of the sidecar after catch-up; the 23:45 launchd sleep counts as a natural iteration if it occurs. Proof: timestamps + head continuity, no re-init line in `op-reth.log`._
+Deliberate stop/start **without** `--wipe` after the PASS. Same env as first start (`unset FORTEL2_ENV`, `FORTEL2_EL=reth`, `FORTEL2_RETH_PROFILE=sequencer_faultproof`, `SEPOLIA_L1_RPC_RATE_LIMIT=10`). Live `:9545` stayed up (`eth_blockNumber` after stop still advancing; listen on 9545 throughout).
+
+| Event | PDT |
+|---|---|
+| Pre-stop safe | 394152 `0x2ffa1fb0f16d9a4dde0b02eec33adee01a666f4aeaef6c987099e9b76739cae3` |
+| Stop | 17:16:02–17:16:04 (pids 16626 / 17194) |
+| Start | 17:16:12–17:16:18 (new pids 16725 / 16736) |
+| EL immediately after start | block **394152** (same hash as pre-stop) |
+
+`03-init-l2.sh`: `op-reth datadir already initialized … (skipping)` — **no** `Initializing op-reth with` genesis re-init. `op-reth proofs init --skip-backfill`: `Proofs storage already initialized` at genesis `0xe242b1a3…`. Genesis sidecar hash match.
+
+After attach, `safe` briefly sat at 393558 then climbed (393708 → 394002 within ~24s) while `latest` stayed 394152 — op-node re-derived the safe label, not a wipe. Hash at height 394152 unchanged. Live sequencer untouched.
 
 ## Safe-head catch-up
 
-In progress. Bound is lag ≤ 2 L1 epochs (enforced by `verify-reth-parity.sh` before sampling). Do not treat prefix MATCH as catch-up.
+Done. Three consecutive samples 2026-08-31 ~17:14 PDT, lag = 0 (cap 2):
 
 | When (PDT) | Candidate safe | Live safe | Cand L1 origin | Live L1 origin | L1 lag |
 |---|---:|---:|---:|---:|---:|
 | 09:26 (T+35) | 16956 | 380070 | 11548321 | 11606828 | 58507 |
 | 13:07 | 202689 | 386658 | 11578241 | 11607894 | 29653 |
+| 17:14 sample 1 | 394152 | 394152 | 11609112 | 11609112 | 0 |
+| 17:14 sample 2 | 394152 | 394152 | 11609112 | 11609112 | 0 |
+| 17:14 sample 3 | 394152 | 394152 | 11609112 | 11609112 | 0 |
 
-Sidecar pids still up. Projected catch-up ~17:00 PDT if ~130 L1 origin/min holds. Official three consecutive samples (lag ≤ 2) still pending.
+Datadir `$DATA_DIR/l2/op-reth` was not wiped. Tasks 4–5 inherit it.
