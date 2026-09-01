@@ -8923,6 +8923,8 @@ fi
 T5_REH="$("$T5_ROLL" --rehearse 2>&1)" && T5_REH_EC=0 || T5_REH_EC=$?
 if [[ "$T5_REH_EC" -eq 0 ]] \
   && echo "$T5_REH" | grep -q 'START_GETH=04-start-sequencer-sepolia.sh --verifier-only' \
+  && echo "$T5_REH" | grep -q 'RECORD_CANONICAL_SAFE before stop' \
+  && echo "$T5_REH" | grep -q 'CALLER FORTEL2_EL=geth persists' \
   && echo "$T5_REH" | grep -q 'FORBIDDEN_FIRST_START=04-start-sequencer-sepolia.sh' \
   && echo "$T5_REH" | grep -q 'admin_startSequencer' \
   && echo "$T5_REH" | grep -q 'NEVER debug_setHead'; then
@@ -8930,6 +8932,21 @@ if [[ "$T5_REH_EC" -eq 0 ]] \
 else
   echo "FAIL rollback rehearsal must be verifier-first (ec=$T5_REH_EC)" >&2
   echo "$T5_REH" >&2
+  fail=1
+fi
+
+if grep -q '_CALLER_EL' "$T5_SEP" \
+  && grep -q 'FORTEL2_EL="$_CALLER_EL"' "$T5_SEP"; then
+  echo "PASS 04-start-sequencer-sepolia.sh restores caller FORTEL2_EL after sourcing .env"
+else
+  echo "FAIL 04-start must snapshot caller FORTEL2_EL (rollback geth while env still says reth)" >&2
+  fail=1
+fi
+
+if awk '/fortel2_el.*reth/,/^fi$/' "$SCRIPT_DIR/reset-sepolia.sh" | grep -q 'stop-all-sepolia.sh'; then
+  echo "PASS reset-sepolia.sh reth path stops the full stack before wipe"
+else
+  echo "FAIL reset-sepolia reth wipe must call stop-all-sepolia.sh (not only stop_reth_sidecar)" >&2
   fail=1
 fi
 

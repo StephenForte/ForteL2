@@ -7,8 +7,12 @@
 # --print-plan: print selector + flags and exit (no processes). Tests use this.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Snapshot before lib.sh sources .env.sepolia — rollback exports FORTEL2_EL=geth
+# while the file may still say reth. Same trap as 03-init-l2.sh.
+_CALLER_EL="${FORTEL2_EL:-}"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+[[ -n "$_CALLER_EL" ]] && { FORTEL2_EL="$_CALLER_EL"; export FORTEL2_EL; }
 
 require_fortel2_el
 
