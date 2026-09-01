@@ -207,6 +207,12 @@ cd contracts && forge test          # Guestbook unit + fuzz tests
 # and not a sequencer-cutover authorization.
 #   ./scripts/verify-reth-faultproof.sh --game-l2-block N \
 #     --safedb-enable-l1 N --pre-enable-l1 N
+# Task 5 cutover preflight resolves those three args automatically (fail-closed):
+#   FORTEL2_ENV=.env.sepolia ./scripts/cutover-to-reth-sepolia.sh --preflight-only
+# Override only if automatic factory lookup fails mid-window:
+#   FORTEL2_CUTOVER_GAME_L2_BLOCK      latest proposed game L2 (default: on-chain factory lookup)
+#   FORTEL2_CUTOVER_SAFEDB_ENABLE_L1   sidecar SafeDB enable L1 (default 11609837; Task 4)
+#   FORTEL2_CUTOVER_PRE_ENABLE_L1      known-unrecorded L1 negative (default 11600000; not enable-1)
 node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers
 (cd scripts/bridge && npm ci && node --test lib.test.js)  # withdrawal bridge helpers
 ```

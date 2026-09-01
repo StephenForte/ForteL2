@@ -8983,12 +8983,13 @@ cases = {
     "wd": dict(ok, withdrawal_finalized=False),
     "lag": dict(ok, safe_head_lag=3),
     "parity": dict(ok, verify_reth_parity=1),
+    "fp": dict(ok, verify_reth_faultproof=1),
 }
 for name, payload in cases.items():
     (d / (name + ".json")).write_text(json.dumps(payload))
 PY
 T5_PF_RED=0
-for name in game wd lag parity; do
+for name in game wd lag parity fp; do
   out="$(CUTOVER_PREFLIGHT_FIXTURE="$T5_PF_DIR/${name}.json" "$T5_CUT" --preflight-only 2>&1)" && ec=0 || ec=$?
   if [[ "$ec" -eq 0 ]]; then
     echo "FAIL preflight $name fixture must go red" >&2
@@ -8998,8 +8999,181 @@ for name in game wd lag parity; do
 done
 rm -rf "$T5_PF_DIR"
 if [[ "$T5_PF_RED" -eq 0 ]]; then
-  echo "PASS cutover preflight red fixtures (game/withdrawal/lag/parity) fail closed"
+  echo "PASS cutover preflight red fixtures (game/withdrawal/lag/parity/fp) fail closed"
 else
+  fail=1
+fi
+
+if grep -q 'resolve_cutover_game_l2_block' "$T5_CUT" \
+  && grep -q 'resolve_cutover_safedb_enable_l1' "$T5_CUT" \
+  && grep -q 'resolve_cutover_pre_enable_l1' "$T5_CUT" \
+  && grep -q 'TASK5_SAFEDB_ENABLE_L1=11609837' "$T5_CUT" \
+  && grep -q 'TASK5_PRE_ENABLE_L1=11600000' "$T5_CUT" \
+  && grep -q 'FORTEL2_CUTOVER_GAME_L2_BLOCK' "$T5_CUT" \
+  && grep -q 'FORTEL2_CUTOVER_SAFEDB_ENABLE_L1' "$T5_CUT" \
+  && grep -q 'FORTEL2_CUTOVER_PRE_ENABLE_L1' "$T5_CUT" \
+  && grep -q '\-\-game-l2-block "\$game_l2_block"' "$T5_CUT" \
+  && grep -q '\-\-safedb-enable-l1 "\$safedb_enable_l1"' "$T5_CUT" \
+  && grep -q '\-\-pre-enable-l1 "\$pre_enable_l1"' "$T5_CUT"; then
+  echo "PASS cutover preflight resolves all three verify-reth-faultproof live args"
+else
+  echo "FAIL cutover must resolve game-l2-block, safedb-enable-l1, and pre-enable-l1" >&2
+  fail=1
+fi
+
+T5_L2_FN="$(awk '/^resolve_cutover_game_l2_block\(\)/,/^}$/' "$T5_CUT")"
+T5_FP_FNS="$( {
+  awk '/^TASK5_SAFEDB_ENABLE_L1=/,/^TASK5_PRE_ENABLE_L1=/ {print}' "$T5_CUT"
+  awk '/^resolve_cutover_safedb_enable_l1\(\)/,/^}$/ {print}' "$T5_CUT"
+  awk '/^resolve_cutover_pre_enable_l1\(\)/,/^}$/ {print}' "$T5_CUT"
+} )"
+T5_L2_BAD_OVERRIDE="$(
+  FORTEL2_CUTOVER_GAME_L2_BLOCK=notanumber bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_L2_FN"'
+    resolve_cutover_game_l2_block
+  ' 2>&1
+)" && T5_L2_BAD_OVERRIDE_EC=0 || T5_L2_BAD_OVERRIDE_EC=$?
+if [[ "$T5_L2_BAD_OVERRIDE_EC" -ne 0 ]] \
+  && echo "$T5_L2_BAD_OVERRIDE" | grep -qi 'FORTEL2_CUTOVER_GAME_L2_BLOCK'; then
+  echo "PASS cutover game L2 override rejects non-numeric values"
+else
+  echo "FAIL invalid FORTEL2_CUTOVER_GAME_L2_BLOCK must fail closed (ec=$T5_L2_BAD_OVERRIDE_EC)" >&2
+  echo "$T5_L2_BAD_OVERRIDE" >&2
+  fail=1
+fi
+
+T5_L2_LOOKUP_FAIL="$(
+  FORTEL2_CUTOVER_GAME_L2_BLOCK= \
+  L1_RPC_URL=http://127.0.0.1:9 \
+  L2_CHAIN_ID=852 \
+  bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    FORTEL2_ROOT="'"$FORTEL2_ROOT"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_L2_FN"'
+    resolve_cutover_game_l2_block
+  ' 2>&1
+)" && T5_L2_LOOKUP_FAIL_EC=0 || T5_L2_LOOKUP_FAIL_EC=$?
+if [[ "$T5_L2_LOOKUP_FAIL_EC" -ne 0 ]] \
+  && echo "$T5_L2_LOOKUP_FAIL" | grep -Eqi 'gameCount|gameAtIndex|l2BlockNumber|DisputeGameFactory'; then
+  echo "PASS cutover game L2 lookup fails closed when L1 read fails"
+else
+  echo "FAIL game L2 lookup must fail closed on L1 read failure (ec=$T5_L2_LOOKUP_FAIL_EC)" >&2
+  echo "$T5_L2_LOOKUP_FAIL" >&2
+  fail=1
+fi
+
+T5_L2_OVERRIDE_OK="$(
+  FORTEL2_CUTOVER_GAME_L2_BLOCK=397392 bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_L2_FN"'
+    resolve_cutover_game_l2_block
+  ' 2>&1
+)" && T5_L2_OVERRIDE_OK_EC=0 || T5_L2_OVERRIDE_OK_EC=$?
+if [[ "$T5_L2_OVERRIDE_OK_EC" -eq 0 && "$T5_L2_OVERRIDE_OK" == "397392" ]]; then
+  echo "PASS cutover game L2 override returns the configured block"
+else
+  echo "FAIL FORTEL2_CUTOVER_GAME_L2_BLOCK override must win (ec=$T5_L2_OVERRIDE_OK_EC got=$T5_L2_OVERRIDE_OK)" >&2
+  fail=1
+fi
+
+T5_SDB_DEFAULT="$(
+  bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_FP_FNS"'
+    resolve_cutover_safedb_enable_l1
+  ' 2>&1
+)" && T5_SDB_DEFAULT_EC=0 || T5_SDB_DEFAULT_EC=$?
+if [[ "$T5_SDB_DEFAULT_EC" -eq 0 && "$T5_SDB_DEFAULT" == "11609837" ]]; then
+  echo "PASS cutover safedb-enable-l1 defaults to Task 4 constant 11609837"
+else
+  echo "FAIL safedb-enable-l1 must default to 11609837 (ec=$T5_SDB_DEFAULT_EC got=$T5_SDB_DEFAULT)" >&2
+  fail=1
+fi
+
+T5_SDB_BAD="$(
+  FORTEL2_CUTOVER_SAFEDB_ENABLE_L1=notanumber bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_FP_FNS"'
+    resolve_cutover_safedb_enable_l1
+  ' 2>&1
+)" && T5_SDB_BAD_EC=0 || T5_SDB_BAD_EC=$?
+if [[ "$T5_SDB_BAD_EC" -ne 0 ]] \
+  && echo "$T5_SDB_BAD" | grep -Eqi 'safedb-enable-l1|FORTEL2_CUTOVER_SAFEDB_ENABLE_L1'; then
+  echo "PASS cutover safedb-enable-l1 rejects non-numeric override"
+else
+  echo "FAIL invalid FORTEL2_CUTOVER_SAFEDB_ENABLE_L1 must fail closed (ec=$T5_SDB_BAD_EC)" >&2
+  echo "$T5_SDB_BAD" >&2
+  fail=1
+fi
+
+T5_PRE_DEFAULT="$(
+  bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_FP_FNS"'
+    resolve_cutover_pre_enable_l1
+  ' 2>&1
+)" && T5_PRE_DEFAULT_EC=0 || T5_PRE_DEFAULT_EC=$?
+if [[ "$T5_PRE_DEFAULT_EC" -eq 0 && "$T5_PRE_DEFAULT" == "11600000" ]]; then
+  echo "PASS cutover pre-enable-l1 defaults to Task 4 constant 11600000"
+else
+  echo "FAIL pre-enable-l1 must default to 11600000 (ec=$T5_PRE_DEFAULT_EC got=$T5_PRE_DEFAULT)" >&2
+  fail=1
+fi
+
+T5_PRE_BAD="$(
+  FORTEL2_CUTOVER_PRE_ENABLE_L1=notanumber bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_FP_FNS"'
+    resolve_cutover_pre_enable_l1
+  ' 2>&1
+)" && T5_PRE_BAD_EC=0 || T5_PRE_BAD_EC=$?
+if [[ "$T5_PRE_BAD_EC" -ne 0 ]] \
+  && echo "$T5_PRE_BAD" | grep -Eqi 'pre-enable-l1|FORTEL2_CUTOVER_PRE_ENABLE_L1'; then
+  echo "PASS cutover pre-enable-l1 rejects non-numeric override"
+else
+  echo "FAIL invalid FORTEL2_CUTOVER_PRE_ENABLE_L1 must fail closed (ec=$T5_PRE_BAD_EC)" >&2
+  echo "$T5_PRE_BAD" >&2
+  fail=1
+fi
+
+T5_PRE_TRAP="$(
+  FORTEL2_CUTOVER_SAFEDB_ENABLE_L1=100 FORTEL2_CUTOVER_PRE_ENABLE_L1=99 bash -c '
+    set -euo pipefail
+    SCRIPT_DIR="'"$SCRIPT_DIR"'"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib.sh"
+    '"$T5_FP_FNS"'
+    resolve_cutover_pre_enable_l1
+  ' 2>&1
+)" && T5_PRE_TRAP_EC=0 || T5_PRE_TRAP_EC=$?
+if [[ "$T5_PRE_TRAP_EC" -ne 0 ]] \
+  && echo "$T5_PRE_TRAP" | grep -Eqi 'enable-1|minus 1'; then
+  echo "PASS cutover pre-enable-l1 rejects safedb-enable-l1 minus 1"
+else
+  echo "FAIL pre-enable-l1 must not equal enable-1 (ec=$T5_PRE_TRAP_EC)" >&2
+  echo "$T5_PRE_TRAP" >&2
   fail=1
 fi
 

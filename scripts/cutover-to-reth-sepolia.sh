@@ -25,7 +25,96 @@ Preflight (all must pass):
   check-launchd.sh green
 
 CUTOVER_PREFLIGHT_FIXTURE=path.json  offline gates for helper tests.
+FORTEL2_CUTOVER_GAME_L2_BLOCK=N       override latest-game L2 block lookup
+FORTEL2_CUTOVER_SAFEDB_ENABLE_L1=N      override sidecar SafeDB enable L1 (default Task 4)
+FORTEL2_CUTOVER_PRE_ENABLE_L1=N         override known-unrecorded L1 negative (default Task 4)
 EOF
+}
+
+# Sidecar SafeDB first recorded L1 — Task 4 evidence (tasks/task4-op-reth-faultproof.md).
+TASK5_SAFEDB_ENABLE_L1=11609837
+# Known-unrecorded L1 for the required negative — NOT enable-1 (Task 4 rule).
+TASK5_PRE_ENABLE_L1=11600000
+
+# Latest proposed game L2 block: factory → gameAtIndex(count-1) → l2BlockNumber().
+# Fail closed — preflight must not skip the faultproof gate silently.
+resolve_cutover_game_l2_block() {
+  if [[ -n "${FORTEL2_CUTOVER_GAME_L2_BLOCK:-}" ]]; then
+    if ! [[ "${FORTEL2_CUTOVER_GAME_L2_BLOCK}" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: FORTEL2_CUTOVER_GAME_L2_BLOCK must be a non-negative integer" >&2
+      return 1
+    fi
+    echo "$FORTEL2_CUTOVER_GAME_L2_BLOCK"
+    return 0
+  fi
+  local factory count idx meta proxy l2
+  factory="$(jq -r '.DisputeGameFactoryProxy // .disputeGameFactoryProxy // empty' "$(deployments_json_path)")"
+  if ! is_eth_address "$factory"; then
+    echo "ERROR: missing or invalid DisputeGameFactoryProxy in $(deployments_json_path)" >&2
+    return 1
+  fi
+  if ! count="$(cast call "$factory" "gameCount()(uint256)" --rpc-url "$L1_RPC_URL" 2>/dev/null)"; then
+    echo "ERROR: failed to read DisputeGameFactory gameCount from L1" >&2
+    return 1
+  fi
+  count="${count%%[^0-9]*}"
+  if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count == 0 )); then
+    echo "ERROR: DisputeGameFactory gameCount is zero or unreadable (got: ${count:-<empty>})" >&2
+    return 1
+  fi
+  idx=$(( count - 1 ))
+  if ! meta="$(cast call "$factory" "gameAtIndex(uint256)(uint32,uint64,address)" "$idx" --rpc-url "$L1_RPC_URL" 2>/dev/null)"; then
+    echo "ERROR: failed to read gameAtIndex($idx) from DisputeGameFactory" >&2
+    return 1
+  fi
+  proxy="$(python3 -c '
+import re, sys
+m = re.search(r"0x[a-fA-F0-9]{40}", sys.argv[1])
+if not m:
+    sys.exit(1)
+print(m.group(0))
+' "$meta")" || {
+    echo "ERROR: could not parse game proxy from gameAtIndex($idx)" >&2
+    return 1
+  }
+  if ! l2="$(cast call "$proxy" "l2BlockNumber()(uint256)" --rpc-url "$L1_RPC_URL" 2>/dev/null)"; then
+    echo "ERROR: failed to read l2BlockNumber() from latest proposed game $proxy" >&2
+    return 1
+  fi
+  l2="${l2%%[^0-9]*}"
+  if ! [[ "$l2" =~ ^[0-9]+$ ]] || (( l2 == 0 )); then
+    echo "ERROR: latest proposed game l2BlockNumber invalid (got: ${l2:-<empty>})" >&2
+    return 1
+  fi
+  echo "$l2"
+}
+
+# Sidecar SafeDB enable L1: committed Task 4 constant, env-overridable.
+resolve_cutover_safedb_enable_l1() {
+  local val="${FORTEL2_CUTOVER_SAFEDB_ENABLE_L1:-$TASK5_SAFEDB_ENABLE_L1}"
+  if ! [[ "$val" =~ ^[0-9]+$ ]] || (( val == 0 )); then
+    echo "ERROR: unresolved safedb-enable-l1 (set FORTEL2_CUTOVER_SAFEDB_ENABLE_L1 or TASK5_SAFEDB_ENABLE_L1)" >&2
+    return 1
+  fi
+  echo "$val"
+}
+
+# Pre-enable negative L1: committed Task 4 constant, env-overridable; must not be enable-1.
+resolve_cutover_pre_enable_l1() {
+  local val enable
+  val="${FORTEL2_CUTOVER_PRE_ENABLE_L1:-$TASK5_PRE_ENABLE_L1}"
+  if ! [[ "$val" =~ ^[0-9]+$ ]] || (( val == 0 )); then
+    echo "ERROR: unresolved pre-enable-l1 (set FORTEL2_CUTOVER_PRE_ENABLE_L1 or TASK5_PRE_ENABLE_L1)" >&2
+    return 1
+  fi
+  if ! enable="$(resolve_cutover_safedb_enable_l1)"; then
+    return 1
+  fi
+  if (( val == enable - 1 )); then
+    echo "ERROR: pre-enable-l1 must not be safedb-enable-l1 minus 1 (enable-1 trap)" >&2
+    return 1
+  fi
+  echo "$val"
 }
 
 MODE=""
@@ -154,8 +243,25 @@ print(abs(n(l, "safe_l2") - n(c, "safe_l2")))
 ' "$cand" "$live")"
   fi
   local parity_ec=1 fp_ec=1 pins_ec=1 launchd_ec=1
+  local game_l2_block safedb_enable_l1 pre_enable_l1
+  if ! game_l2_block="$(resolve_cutover_game_l2_block)"; then
+    echo "ERROR: could not resolve --game-l2-block for verify-reth-faultproof" >&2
+    exit 1
+  fi
+  if ! safedb_enable_l1="$(resolve_cutover_safedb_enable_l1)"; then
+    echo "ERROR: could not resolve --safedb-enable-l1 for verify-reth-faultproof" >&2
+    exit 1
+  fi
+  if ! pre_enable_l1="$(resolve_cutover_pre_enable_l1)"; then
+    echo "ERROR: could not resolve --pre-enable-l1 for verify-reth-faultproof" >&2
+    exit 1
+  fi
   "$SCRIPT_DIR/verify-reth-parity.sh" >/tmp/fortel2-cutover-parity.out 2>&1 && parity_ec=0 || parity_ec=$?
-  "$SCRIPT_DIR/verify-reth-faultproof.sh" >/tmp/fortel2-cutover-fp.out 2>&1 && fp_ec=0 || fp_ec=$?
+  "$SCRIPT_DIR/verify-reth-faultproof.sh" \
+    --game-l2-block "$game_l2_block" \
+    --safedb-enable-l1 "$safedb_enable_l1" \
+    --pre-enable-l1 "$pre_enable_l1" \
+    >/tmp/fortel2-cutover-fp.out 2>&1 && fp_ec=0 || fp_ec=$?
   "$SCRIPT_DIR/check-el-pins.sh" >/tmp/fortel2-cutover-pins.out 2>&1 && pins_ec=0 || pins_ec=$?
   "$SCRIPT_DIR/check-launchd.sh" >/tmp/fortel2-cutover-launchd.out 2>&1 && launchd_ec=0 || launchd_ec=$?
   local batcher_ok=false proposer_ok=false
