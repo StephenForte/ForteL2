@@ -1,6 +1,6 @@
 # Task 4 evidence — op-reth candidate fault-proof / historical workflows
 
-**STATUS: blocked** — closer 1 (withdrawal) is in flight; closer 2 (isolated judge) is deferred to after the 03:00 wake. This is not a Task 5 go and not a sequencer-cutover authorization. The candidate datadir (`$DATA_DIR/l2/op-reth`) is preserved for a later Task 5; do not wipe it. RPC spot checks below (output-root / SafeDB / `eth_getProof`) do not substitute for a judged valid claim or a finalized withdrawal.
+**STATUS: complete** — closer 2 isolated judge landed (`Game info` + nonce 0). This is not a Task 5 go and not a sequencer-cutover authorization. The candidate datadir (`$DATA_DIR/l2/op-reth`) is preserved for a later Task 5; do not wipe it.
 
 **Date opened:** 2026-08-31  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 4 / §11 Q3  
@@ -12,7 +12,7 @@ This is the one `tasks/` write Task 4 is permitted. L1 provider URLs, JWTs, and 
 
 ## Candidate (inherited, not wiped)
 
-`$DATA_DIR/l2/op-reth` from Task 3 (`sequencer_faultproof`, `--proofs-history` since first start). Restart env is the Task 3 block (`unset FORTEL2_ENV`, `FORTEL2_EL=reth`, `FORTEL2_RETH_PROFILE=sequencer_faultproof`, `SEPOLIA_L1_RPC_RATE_LIMIT=10`). The 23:45 sleep stops the sidecar; wake does not restart it. Morning closer 2 must restart the sidecar first (Task 3 env below), then run the isolated judge. Do not start the judge tonight.
+`$DATA_DIR/l2/op-reth` from Task 3 (`sequencer_faultproof`, `--proofs-history` since first start). Restart env is the Task 3 block (`unset FORTEL2_ENV`, `FORTEL2_EL=reth`, `FORTEL2_RETH_PROFILE=sequencer_faultproof`, `SEPOLIA_L1_RPC_RATE_LIMIT=10`). The 23:45 sleep stops the sidecar; wake does not restart it. Morning closer 2 restarted it (no wipe) with the Task 3 env before the judge.
 
 **Do not:** `--wipe`, `reset-sepolia.sh`, `debug_setHead`, stop/reconfigure the live challenger, share its SafeDB/dirs, bind the sidecar off loopback, or query the replica for deep historical state (latest−256 fails; D-0114 Finding 4).
 
@@ -92,19 +92,23 @@ Proofs store served history from block 1. This is the Q3 input: `--proofs-histor
 
 `./scripts/verify-reth-faultproof.sh --game-l2-block 397392 --safedb-enable-l1 11609837 --pre-enable-l1 11600000` → `verify-reth-faultproof: PASS`. Fixture `--alter-field outputRoot` → MISMATCH + nonzero.
 
-## Isolated challenger (non-signing) — deferred
+## Isolated challenger (non-signing) — closer 2
 
-Binary has **no** dry-run / no-tx flag (`--private-key` / mnemonic required). Earlier same-day runs used unfunded throwaways only. Did not use `09-start-challenger-sepolia.sh`. Did not share live datadir / SafeDB / pid `op-challenger`.
+Binary has **no** dry-run / no-tx flag (`--private-key` / mnemonic required). Unfunded throwaways only. Did not use `09-start-challenger-sepolia.sh`. Did not share live datadir / SafeDB / pid `op-challenger`.
 
-Planner amendment 2026-08-31 ~21:22 PT: **do not start the judge tonight.** A 23:45 sleep mid-scan wastes the run. Isolated pid **24547** (`op-challenger-reth-task4`) was stopped at 21:22:42 PT before a `Game info` line. Live challenger **45520** stayed up. Throwaway `0x6eaAa9F4C3c08C1eC9E1fC418635b5e80482C418` nonce **0** after stop.
+**2026-09-01 morning (after 03:00 wake):** sidecar restarted first (no wipe; Task 3 env). Safe-head L1-origin lag reached **0** at 07:16:56 PT (candidate safe 419383 = live safe). `0xa7a60CB10b86dAE73de3eBdB821c95f95D15e31c` key was not persisted; that address stayed unfunded (nonce 0 / 0 wei) and was not reused. Fresh throwaway `0x5c7470Df70F763Bd747c30cffa04DdB9c753103E` (also unfunded).
 
-Earlier same-day attempt (not the closer): address `0xa7a60CB10b86dAE73de3eBdB821c95f95D15e31c`, pid 61384, window 20:03:09–20:08:10 PT, nonce 0→0. First 300s scan 429'd on the shared QuickNode 50/s budget with the live challenger (`Failed to progress games` / `Failed to verify large preimages`) — no attack, no Move, no txmgr send.
+Game **215** is 11h old and outside `--game-window=3h`. Allowlisted game **220** (`0x52151b45fC1E4dbBd1806A89f6ccBD3229d8c9d5`, L2 418291): `rootClaim` MATCH candidate `:19547` and live `:9547`. First isolated start (pid 91730) used the L1 HTTPS provider directly and 429'd every 180s (`Failed to progress games` — allowlist does not shrink the factory fetch). Restarted at 07:34:30 PT via the existing loopback L1 batch proxy (`127.0.0.1:9549`, same provider as live; live 85931 untouched). #168 retry (grace 20s, 3 attempts, backoff 5/10) — first attempt survived. Poll 180s offset from live 300s. Logs/pids under `$DATA_DIR` Sepolia tree (`…/data-sepolia/logs/op-challenger-reth-task4.log`).
 
-**Morning closer 2 (after 03:00 wake):**
+Paste (in-process honest-valid line — op-challenger has no literal `VALID`; `claims=1` + `In Progress` + no Attack/Move is AgreeWithRootClaim / no actions):
 
-1. Restart the sidecar first (no wipe). Env: `unset FORTEL2_ENV`, snapshot `L1_RPC_URL` + `DATA_DIR` from `.env.sepolia` into **different** vars (`read_env_assignment`, then `restore_caller_l1_rpc_url` / `restore_caller_data_dir`). `FORTEL2_EL=reth` `FORTEL2_RETH_PROFILE=sequencer_faultproof` `SEPOLIA_L1_RPC_RATE_LIMIT=10`. Confirm `DATA_DIR` is the Sepolia tree (`…/data-sepolia`), not Phase 1 `…/data`.
-2. Then start isolated `op-challenger-reth-task4` with the #168 retry (grace 15–30s, 3 attempts, backoff 5/10), `--http-poll-interval` / `--min-update-interval` **offset** from the live 300s cadence (do not lockstep `:01/:06/…`), `--game-window=3h`, `--game-allowlist` for a known-valid game, candidate `:19547` / `:19545`, throwaway key only.
-3. Success = in-process `Game info` line + throwaway nonce still 0. Then `stop_bg op-challenger-reth-task4` only.
+```
+t=2026-09-01T07:37:43-0700 lvl=info msg="Game info" game=0x52151b45fC1E4dbBd1806A89f6ccBD3229d8c9d5 claims=1 status="In Progress"
+```
+
+Throwaway nonce after that line and after stop: **0**. Isolated pid **92547** stopped; live **85931** still up.
+
+Earlier 2026-08-31 attempts (not this closer): `0xa7a60CB1…e31c` pid 61384 (Phase 1 DATA_DIR trap) and `0x6eaAa9F4…C418` pid 24547 (stopped 21:22:42 PT per planner — no `Game info`). Both nonce 0→0.
 
 ## Withdrawal
 
@@ -126,7 +130,7 @@ Game 216 is **IN_PROGRESS** (`status=0`), `maxClockDuration=7200`, `createdAt=17
 
 Closer 1 remainder (no judge): wait for L1 timestamp ≥ `createdAt+maxClock` (23:04:24 PT), `resolveClaim(0,0)` + `resolve()` (permissionless; ADMIN gas; live hourly `resolve-games` at :00 is too late for a 23:45 sleep), then wait `disputeGameFinalityDelaySeconds` (~23:34:24 PT), then `finalizeWithdrawal` with **no** time-warp. Hard stop 23:42 PT. Hourly `com.steve.fortel2-resolve-games` at 00:00 would also resolve, but that is after sleep.
 
-Finalize tx: *pending this wait* — paste here when the waiter prints `FINALIZE_OK`, or record the named blocker if the game is still `IN_PROGRESS` / finality missed 23:42.
+**Closer 1 named blocker (2026-08-31 23:04 PT):** L1 timestamp reached `createdAt+maxClock`. The waiter then failed `ERR_MODULE_NOT_FOUND: viem` because `node --input-type=module` ran from the repo root, not `scripts/bridge`. No `resolve` / `finalize` was sent. Game 216 was still `IN_PROGRESS` on the morning of 2026-09-01. Hourly `resolve-games` did not resolve it overnight. `withdraw-finalize.sh` / `finalize.mjs` remain Anvil-only. PRD Task 4 allows succeed-or-named-blocker; this is the named clock/script blocker.
 
 ## RPC namespace differences (no public surface widened)
 
@@ -149,13 +153,14 @@ Finalize tx: *pending this wait* — paste here when the waiter prints `FINALIZE
 
 **Closer session (21:22 PT):** live still 44832 / 44849 / 45087 / 45203 / 44964 / 45520. Sidecar restarted earlier without wipe: op-reth **21151**, op-reth-node **21207**. Isolated judge **24547** stopped at 21:22:42 PT (planner: do not run tonight).
 
+**2026-09-01 morning:** 03:00 wake brought live pids 85333 / 85340 / 85563 / 85662 / 85931. Sidecar restarted 06:54 PT (no wipe): op-reth **88387**, op-reth-node **88446**. Isolated judge **92547** stopped after `Game info`. Live 85931 untouched.
+
 ## Residual
 
-- Withdrawal initiate + candidate prove are on-chain. Finalize is waiting for game 216's 7200s clock (resolve ~23:04 PT, finalize ~23:34 PT, before 23:45 sleep). Named blocker if that window is missed: game still `IN_PROGRESS` or finality not reached by 23:42.
-- Isolated judge is **deferred** (planner amendment): restart sidecar after 03:00 wake, then judge with the #168 retry / poll offset. Do not start it tonight. A `Game info` line + nonce 0 is still required before STATUS can flip to complete.
-- `read_env_assignment` + pre-source snapshot into `_CALLER_DATA_DIR` is the fix for the Phase 1 `$DATA_DIR` clobber. Live challenger dirs were not used.
+- Closer 1 finalize did not send: named blocker is the 23:04 `viem` cwd miss (game 216 still `IN_PROGRESS` as of 2026-09-01 morning). Initiate + candidate prove remain on-chain.
+- Isolated L1 must use the loopback batch proxy (`127.0.0.1:9549`). Direct provider HTTPS 429s the factory fetch even with `--game-allowlist` + 3h window.
 - Q3 profile shape (observed, not a Task 5 authorization): `sequencer_faultproof` = archive + `--proofs-history` (init `--skip-backfill` from genesis) + sidecar `--safedb.path` (`$DATA_DIR/l2/op-reth-safedb`). Replica prune window unchanged.
 
-The candidate datadir is preserved so Task 5 can start from it later. Task 4 itself is **blocked** until closer 1 finalize (or named clock) **and** closer 2 `Game info` + nonce 0. Never `reset-sepolia` / `--wipe` / `debug_setHead` on the datadir.
+The candidate datadir is preserved so Task 5 can start from it later. Never `reset-sepolia` / `--wipe` / `debug_setHead` on the datadir. This STATUS complete is not a cutover.
 
 Codex-tightened `verify-reth-faultproof.sh` re-ran live (game L2 397392, `--safedb-enable-l1` 11609837, `--pre-enable-l1` 11600000): PASS on three distinct recorded SafeDB L1s and full `eth_getProof` payloads (storageHash / balance / nonce / codeHash / accountProof / storageProof) vs the Mac archive geth. That does not lift the block.

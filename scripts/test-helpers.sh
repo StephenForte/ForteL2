@@ -8500,12 +8500,13 @@ else
   echo "FAIL Task 4 evidence file must be tracked" >&2
   fail=1
 fi
-if grep -q 'STATUS: blocked' "$VRF_NOTE" \
+if grep -q 'STATUS: complete' "$VRF_NOTE" \
   && grep -qi 'not a Task 5 go' "$VRF_NOTE" \
+  && grep -qi 'not a sequencer-cutover' "$VRF_NOTE" \
   && ! grep -q "Candidate datadir is Task 5's input" "$VRF_NOTE"; then
-  echo "PASS Task 4 evidence is STATUS blocked (not a Task 5 go)"
+  echo "PASS Task 4 evidence is STATUS complete (not a Task 5 go / not a cutover)"
 else
-  echo "FAIL Task 4 evidence must stay blocked until workflows close" >&2
+  echo "FAIL Task 4 evidence must be STATUS complete and still refuse Task 5 / cutover" >&2
   fail=1
 fi
 
