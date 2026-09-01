@@ -438,8 +438,10 @@ sepolia_env = "sepolia" in fortel2_env.lower()
 test_hook = bool(os.environ.get("ALERT_WATCH_PID_DIR") or expect_override)
 
 if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
+    el = (os.environ.get("FORTEL2_EL") or "geth").strip()
+    el_pid = "op-reth" if el == "reth" else "op-geth"
     expected = [
-        "op-geth", "op-node", "op-batcher", "op-proposer",
+        el_pid, "op-node", "op-batcher", "op-proposer",
         "l2-rpc-filter", "op-challenger",
     ]
     if want_proxy:

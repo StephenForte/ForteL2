@@ -5,7 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 echo "=== Process status ==="
-procs=(op-geth op-node op-batcher op-proposer)
+# Selector-driven live EL (default geth). After FORTEL2_EL=reth, procs names op-reth
+# so 03:30 alert-watch / 23:45 sleep match the running pid set.
+el_pid="$(fortel2_live_el_pid)"
+procs=("$el_pid" op-node op-batcher op-proposer)
 if [[ "${L2_CHAIN_ID:-}" == "852" ]]; then
   procs+=(l2-rpc-filter)
   # Opt-in (not in start-all-sepolia.sh): only report when running so a stopped
@@ -24,10 +27,10 @@ for name in "${procs[@]}"; do
   fi
 done
 
-# Selector-gated / running-only: do NOT add op-reth to procs= above (Task 5).
-# An expected-but-absent op-reth would false-fire stack-service-missing overnight.
-if [[ "$(fortel2_el)" == "reth" ]] || is_running op-reth || is_running op-reth-node; then
-  echo "  --- op-reth sidecar (not the live EL; FORTEL2_EL=$(fortel2_el)) ---"
+# Sidecar listing only while the live EL is still geth. After the env flip,
+# op-reth is the live pid above — do not also label it a sidecar.
+if [[ "$(fortel2_el)" == "geth" ]] && { is_running op-reth || is_running op-reth-node; }; then
+  echo "  --- op-reth sidecar (not the live EL; FORTEL2_EL=geth) ---"
   for name in op-reth op-reth-node; do
     if is_running "$name"; then
       echo "  $name: RUNNING pid=$(cat "$PID_DIR/$name.pid")"

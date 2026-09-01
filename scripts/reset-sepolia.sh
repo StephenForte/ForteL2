@@ -21,9 +21,11 @@ fi
 
 "$SCRIPT_DIR/stop-all-sepolia.sh" || true
 
-echo "Wiping Sepolia runtime under $DATA_DIR ..."
-rm -rf "$DATA_DIR/l2" "$DATA_DIR/jwt" "$DATA_DIR/pids" "$DATA_DIR/logs"
-mkdir -p "$DATA_DIR"
+echo "Wiping Sepolia geth runtime under $DATA_DIR (op-reth candidate / rollback asset kept) ..."
+# Never wipe $DATA_DIR/l2 wholesale — that would delete the Task 3–5 op-reth
+# datadir and sidecar SafeDB. Geth reset is op-geth + jwt/pids/logs only.
+rm -rf "$DATA_DIR/l2/op-geth" "$DATA_DIR/jwt" "$DATA_DIR/pids" "$DATA_DIR/logs"
+mkdir -p "$DATA_DIR" "$DATA_DIR/l2"
 
 if [[ "${WIPE_SEPOLIA_DEPLOY:-}" == "1" ]]; then
   echo "WIPE_SEPOLIA_DEPLOY=1 — removing $DEPLOY_DIR (L1 contracts on Sepolia remain; need re-inspect/redeploy for local genesis)"

@@ -63,6 +63,10 @@ FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh            # Phase 2c (n
 FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh          # Phase 2d QuickNode/public L1 check
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+# Task 5: selector-gated; default geth. --rehearse only until the operator window.
+./scripts/cutover-to-reth-sepolia.sh --rehearse
+./scripts/rollback-to-geth-sepolia.sh --rehearse
+./scripts/sequencer-admin.sh --help
 FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep            # overnight: stop stack + HTTP; wake with … wake
 # Mac mini schedule: launchd health 05:00 / sleep 23:45 / wake 03:00 — see launchd/README.md (not cron)
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/ (publish to fortel2-replica)

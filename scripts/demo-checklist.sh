@@ -145,7 +145,7 @@ print_checklist_sepolia() {
 ══════════════════════════════════════════════════════════════════
 
 ── A. Stack health (Phase 2c) ────────────────────────────────────
-  [ ] [auto] Processes: op-geth, op-node, op-batcher, op-proposer (no Anvil)
+  [ ] [auto] Processes: live EL (op-geth or op-reth per FORTEL2_EL), op-node, op-batcher, op-proposer (no Anvil)
   [ ] [auto] L1 RPC reachable (Sepolia 11155111) — QuickNode or equivalent
   [ ] [auto] L2 RPC reachable on loopback (chain 852), block number increasing
   [ ] [auto] op-node optimism_syncStatus returns unsafe + safe heads
@@ -228,9 +228,9 @@ run_auto() {
   echo "-- Processes --"
   local name
   local any_proc_missing=0
-  local procs=(op-geth op-node op-batcher op-proposer)
+  local procs=("$(fortel2_live_el_pid)" op-node op-batcher op-proposer)
   if (( ! IS_SEPOLIA )); then
-    procs=(anvil "${procs[@]}")
+    procs=(anvil op-geth op-node op-batcher op-proposer)
   fi
   for name in "${procs[@]}"; do
     if is_running "$name"; then

@@ -857,9 +857,11 @@ PY
   exec python3 -m http.server "${port}" --bind 127.0.0.1
 }
 
-# --- op-reth migration Task 2 (additive; start_bg/stop_bg bodies unchanged) ---
-# Selector: FORTEL2_EL=geth|reth, default geth until Task 5. Live sequencer
-# scripts refuse reth rather than hijacking :9545. Sidecar: start-op-reth-verifier.sh.
+# --- op-reth migration Task 2/5 (additive; start_bg/stop_bg bodies unchanged) ---
+# Selector: FORTEL2_EL=geth|reth, default geth. Task 5 Phase A makes every §10
+# live surface honor the selector; merging flips nothing until .env.sepolia
+# sets FORTEL2_EL=reth in the operator window. Local 901 still refuses reth.
+# Sidecar (start-op-reth-verifier.sh) stays on verifier ports / sidecar SafeDB.
 # Mid-chain rewind without debug_setHead (PRD §11 Q6): wipe the reth datadir and
 # re-derive from 852 genesis. Never debug_setHead on a keeper (live or candidate).
 
@@ -882,18 +884,55 @@ require_fortel2_el() {
   esac
 }
 
-# Live sequencer start paths stay op-geth until Task 5. FORTEL2_EL=reth here
-# would otherwise start (or skip) geth with --l2.enginekind=geth — the silent
-# overnight class. Sidecar is scripts/start-op-reth-verifier.sh.
+# Local 901 has no reth sequencer path. Sepolia honors FORTEL2_EL (Task 5).
 refuse_reth_on_live_sequencer() {
   local which="${1:-this live sequencer script}"
   require_fortel2_el
   if [[ "$(fortel2_el)" == "reth" ]]; then
-    echo "ERROR: FORTEL2_EL=reth — $which stays op-geth until Task 5" >&2
-    echo "Start the isolated 852 verifier: ./scripts/start-op-reth-verifier.sh" >&2
-    echo "Live ports :9545/:9546/:9547/:9551 stay on op-geth; this task never restarts the live stack." >&2
+    echo "ERROR: FORTEL2_EL=reth — $which is local chain 901 and stays op-geth" >&2
+    echo "Sepolia live EL is scripts/04-start-sequencer-sepolia.sh (selector-gated)." >&2
+    echo "Isolated 852 verifier: ./scripts/start-op-reth-verifier.sh" >&2
     exit 1
   fi
+}
+
+# Live Sepolia EL pid / enginekind / log name. Default geth so unset == today.
+fortel2_live_el_pid() {
+  require_fortel2_el
+  if [[ "$(fortel2_el)" == "reth" ]]; then
+    printf '%s' op-reth
+  else
+    printf '%s' op-geth
+  fi
+}
+
+fortel2_live_enginekind() {
+  require_fortel2_el
+  printf '%s' "$(fortel2_el)"
+}
+
+fortel2_live_el_log() {
+  printf '%s.log' "$(fortel2_live_el_pid)"
+}
+
+# Live sequencer op-node SafeDB (Task 5). Always $DATA_DIR/safedb (or the
+# operator's OP_NODE_SAFEDB_PATH). Never the sidecar store — D-0116 is
+# enable-forward; swapping stores would drop pre-Task-4 L1 records the
+# challenger still queries.
+fortel2_live_safedb_path() {
+  local raw got sidecar
+  raw="${OP_NODE_SAFEDB_PATH:-$DATA_DIR/safedb}"
+  if [[ -z "$raw" ]]; then
+    echo "ERROR: live SafeDB path is empty" >&2
+    exit 1
+  fi
+  got="$(fortel2_canon_path "$raw")"
+  sidecar="$(fortel2_canon_path "${FORTEL2_RETH_SAFEDB_PATH:-$DATA_DIR/l2/op-reth-safedb}")"
+  if [[ "$got" == "$sidecar" ]]; then
+    echo "ERROR: refusing sidecar SafeDB $got as the live op-node store — live stays \$DATA_DIR/safedb" >&2
+    exit 1
+  fi
+  printf '%s\n' "$got"
 }
 
 # Scripts that need a caller-exported L1_RPC_URL (QuickNode) snapshot it BEFORE
