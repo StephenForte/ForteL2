@@ -192,6 +192,13 @@ cd contracts && forge test          # Guestbook unit + fuzz tests
 #   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
 #   ./scripts/stop-op-reth-verifier.sh
 #   ./scripts/status.sh   # default procs= still geth; sidecar listed only if running / FORTEL2_EL=reth
+# Task 3 candidate (derive 852 to the live safe head in $DATA_DIR/l2/op-reth with
+# sequencer_faultproof from first start — never reset-sepolia.sh while that dir is
+# the Task 4–5 candidate). Evidence: tasks/task3-op-reth-safe-head-parity.md
+#   export DATA_DIR="$(grep '^DATA_DIR=' .env.sepolia | cut -d= -f2-)"
+#   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=sequencer_faultproof SEPOLIA_L1_RPC_RATE_LIMIT=10 \
+#     ./scripts/start-op-reth-verifier.sh
+#   ./scripts/verify-reth-parity.sh   # :19545 vs loopback :9545 vs public replica
 node --test viewer/lib.test.js dapp/lib.test.js  # viewer + guestbook UTF-8 helpers
 (cd scripts/bridge && npm ci && node --test lib.test.js)  # withdrawal bridge helpers
 ```
