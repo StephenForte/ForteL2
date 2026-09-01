@@ -1005,6 +1005,15 @@
 - **Consequence:** Next free decision id is **D-0114**.
 
 
+### D-0114 — **op-reth Task 3 closed: candidate derived 852 to the live safe head with full three-way parity; restart/resume proven; proofs-store init landmine found**
+- **Context:** op-reth PRD Task 3 (`feat/op-reth-task3-verifier`, #184, 2026-08-31). Candidate `$DATA_DIR/l2/op-reth` (sequencer_faultproof, `--proofs-history`) derived chain 852 from Sepolia L1 genesis→safe head in one day: start 08:51 PDT, caught up 17:14 PDT (~394K L2 blocks, sustained ~780–930 L2 blocks/min at `SEPOLIA_L1_RPC_RATE_LIMIT=10`; 14 recovered 429s, zero receipts-empty).
+- **Finding 1 — parity holds at safe-head depth.** Worker run 17:15 PDT: exit 0, 20 pinned safe blocks genesis→394152, candidate = live op-geth = Render replica on number/hash/parentHash/stateRoot/receiptsRoot/txCount + state/receipt/deposit spot-checks. **Planner re-ran independently at review (different hour, fresh heights, hi=394470): exit 0, lag delta=0, full three-way match.** Negative paths verified: lag gate exits 1 pre-sampling when behind; dead candidate-node RPC errors (Codex P1 false-PASS class closed, probed); `--alter-field` red tests in the suite (463/0 re-run at `6282c94`).
+- **Finding 2 — restart/resume proven.** Deliberate stop/start 17:16 PDT, no wipe: EL resumed at 394152 same hash, `03-init-l2.sh` skipped (already initialized), proofs store "already initialized". Transient safe-label dip during op-node re-derivation is expected behavior, not data loss.
+- **Finding 3 — `--proofs-history` requires `op-reth proofs init` before first start.** ExEx panics otherwise, and the panic names a non-existent command (`initialize-op-proofs`); the real one is `op-reth proofs init --datadir --chain --proofs-history.skip-backfill`. Now encoded in `start-op-reth-verifier.sh` (idempotent). Task 5 would have hit this live.
+- **Finding 4 — replica prune window measured (Task 4/7 input):** the diskless replica serves state at latest and latest−64 but fails at latest−256; deep historical comparisons must use the candidate or the Mac archive, never the replica.
+- **Decision:** Task 3 closed. The candidate datadir is Tasks 4–5's input: no `reset-sepolia.sh`, no `--wipe`, no `debug_setHead` on it. The 23:45 sleep stops the sidecar and the 03:00 wake does not restart it — accepted until Task 5 flips the monitors; restart the sidecar manually when Task 4 needs it.
+- **Consequence:** Task 4 (fault-proof/historical workflows against the candidate) is unblocked. Not verified anywhere yet: total QuickNode credit cost of the sync (operator dashboard). Next free decision id is **D-0115**.
+
 ---
 
 ## Escalations
