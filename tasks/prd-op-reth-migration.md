@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — P:0 done; Task 1 (#176, D-0109) and Task 2 (#178, D-0110) done; Tasks 3–9 unstarted  
+**Status:** In execution — P:0 done; Tasks 1–3 done (#176 D-0109, #178 D-0110, #184 D-0114); Task 4 next; Task 5 operator-gated  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
@@ -486,7 +486,7 @@ Answer during Task 1 or 2 unless noted.
 | # | Question | Status after P:0 |
 |---|---|---|
 | 1 | Exact coordinated `op-node` / `op-reth` pin? | **Closed (Task 1, #176, D-0109).** v1.19.2 (`da197e45`) + `op-reth/v2.3.3` (reports `2.3.0-dev` `9384bc53`); enforced by `scripts/check-el-pins.sh`. Bump = Mini sidecar re-run first. |
-| 2 | Does 852 hardfork config need adjustment for that pin (without changing genesis)? | **No change needed for first-N.** Rollup has no `karst_time`; Task 1 research: Jovian minimums far older, no getPayloadV5 required. Reconfirm at safe-head (Task 3). |
+| 2 | Does 852 hardfork config need adjustment for that pin (without changing genesis)? | **No change needed for first-N.** Rollup has no `karst_time`; Task 1 research: Jovian minimums far older, no getPayloadV5 required. **Reconfirmed at safe-head (Task 3, D-0114):** full 20-block three-way parity genesis→394470. |
 | 3 | Which historical-proof flags/retention does `cannon-kona` + shortened withdrawal window need? | **Open.** Task 4. |
 | 4 | Does Render public RPC need archive, or is `--full` enough? | **Open.** Task 7. |
 | 5 | Disk/RAM of a clean 852 op-reth sync on Render under current RPC load? | **Open.** Task 7. |
