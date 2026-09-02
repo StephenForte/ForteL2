@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B CHECKPOINT 2 (2026-09-02).** Live EL is **op-reth**. First reth block **473032** extends cutover parent **473031** / `0x7f526029…`. Batcher posting (nonce 11452→11453). Awaiting proceed to treat writes as re-enabled, or abort → `rollback-to-geth-sepolia.sh`. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B CHECKPOINT 2 (2026-09-02).** Live EL is **op-reth**. First reth block **473032** extends **473031**. L1→L2 deposit **PASS** (0.01 ETH, ~87s). Awaiting proceed to treat writes as re-enabled, or abort → `rollback-to-geth-sepolia.sh`. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -243,10 +243,24 @@ Stopped challenger, l1-batch-proxy, proposer, batcher, op-node, op-geth, sidecar
 
 **Not yet (need Steve go / funded accounts):**
 
-- `smoke-transfer.sh` — DEMO_A/B L2 balance **0** (estimate fail `have 0`; not an EL reject). Did **not** spend ADMIN.
-- `deposit-eth-sepolia.sh` — not run (L1 spend; needs explicit go).
+- `smoke-transfer.sh` — DEMO_A/B L2 balance **0** (estimate fail `have 0`; not an EL reject).
 - Viewer — not re-served this step.
 - Writes: filter is up because `start-all` starts it. Access unauthenticated path was already 403. Treat **CHECKPOINT 2** as the go to leave writes enabled vs rollback.
+
+### Window health — L1→L2 deposit (2026-09-02 13:40–13:42 PT)
+
+Steve approved `deposit`. Stack still `FORTEL2_EL=reth` (same pids as step 5). `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` → **exit 0** in ~87s.
+
+| Item | Value |
+|---|---|
+| Amount | 0.01 ETH via `L1StandardBridge.bridgeETH` |
+| Bridge / portal | `0x113aad08047e9a9b1556627a658f87f0ebef85a7` / `0xf8c7da6c009d5d05bb98f8cd8286b9b838a3b54e` |
+| L1 tx | `0xfcc9f786e761ba21e13981fff65aa4f00413c3f906b831d12e40c7e5bf81b875` |
+| L1 receipt | status `0x1`, block **11621975**, `to` bridge |
+| ADMIN L2 before | 998993188453469 wei |
+| ADMIN L2 after | 10998993188453469 wei (**+10000000000000000**) |
+| L2 deposit tx | not in last-40 / last-200 tip scan (script + follow-up); **balance rise is the inclusion proof** |
+| Live after | op-reth 3634 still producing; L2 474218; batcher nonce **11457**; safe **474188**; finalized **473570** (first reth channel now finalized) |
 
 **CHECKPOINT 2 — health green enough to leave the filter up, or abort → `rollback-to-geth-sepolia.sh` (verifier-first).** Overnight 23:45 / 03:00 still required before the fenced handoff.
 
