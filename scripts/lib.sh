@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Inherited FORTEL2_ROOT is honoured only long enough to resolve the env file
+# (fixture tests; operator FORTEL2_ENV=basename). After source, location wins.
 export FORTEL2_ROOT="${FORTEL2_ROOT:-$ROOT}"
 
 # Resolve env file: FORTEL2_ENV (basename or absolute) → .env → .env.example
@@ -138,6 +140,18 @@ refuse_duplicate_env_assignments
 set -a
 source "$FORTEL2_ENV_FILE"
 set +a
+
+# Location-derived root is authoritative (D-0118 Finding 5). The env file and
+# an inherited FORTEL2_ROOT must not redirect tracked artifacts at another
+# checkout. Never refuse — a fail-closed exit here runs at 03:00. Idempotent
+# on re-source: one WARN, then the flag suppresses repeats.
+if [[ "$FORTEL2_ROOT" != "$ROOT" ]]; then
+  if [[ "${_FORTEL2_ROOT_PIN_WARNED:-}" != "1" ]]; then
+    echo "WARN: FORTEL2_ROOT=${FORTEL2_ROOT} differs from script-derived root ${ROOT} (env file ${FORTEL2_ENV_FILE}); using ${ROOT}" >&2
+    export _FORTEL2_ROOT_PIN_WARNED=1
+  fi
+  export FORTEL2_ROOT="$ROOT"
+fi
 
 BIN_DIR="${BIN_DIR:-$FORTEL2_ROOT/bin}"
 DATA_DIR="${DATA_DIR:-$FORTEL2_ROOT/data}"

@@ -2,7 +2,7 @@
 
 Checked-in LaunchAgents for the operator Mac mini. They execute a **pinned clone** of `main` at `/Users/steveforte/fortel2-agents`, not the mutable `~/ForteL2` checkout (D-0113 Finding 2). Parallel workers check branches out of `~/ForteL2` at will; a stale or broken branch there would silently change overnight sleep/wake.
 
-Deploy / update that clone with `./scripts/deploy-agents.sh` (fast-forward-only; refuses dirty / diverged / not-main / wrong origin). `.env.sepolia` in the pinned tree is a symlink back to the dev checkout — one source of secrets. `data/` is also a symlink so `refresh_health.sh` (writes repo-relative `data/`) and `alert-watch.sh` (reads `$FORTEL2_ROOT/data` after the env file sets `FORTEL2_ROOT` to the checkout) share the same files. The pinned tree does **not** self-update; agents never refuse-if-not-main (a fail-closed guard at 03:00 is worse than the hazard).
+Deploy / update that clone with `./scripts/deploy-agents.sh` (fast-forward-only; refuses dirty / diverged / not-main / wrong origin). `.env.sepolia` in the pinned tree is a symlink back to the dest checkout — one source of secrets. `data/` is also a symlink so `refresh_health.sh` (writes repo-relative `data/`) and `alert-watch.sh` (reads `$FORTEL2_ROOT/data`) share the same files. `deployments/sepolia/.deployer` is a symlink too (untracked challenger `rollup.json` / `genesis.json`); tracked `deployments/sepolia/deployments.json` and `rollup.json` stay as copies from `main`. `lib.sh` derives `FORTEL2_ROOT` from the script location and ignores a `FORTEL2_ROOT=` line in the env file (warns once). You may delete that leftover line from `.env.sepolia`. The pinned tree does **not** self-update; agents never refuse-if-not-main (a fail-closed guard at 03:00 is worse than the hazard).
 
 User agents only run while that user session is logged in (auto-login on the mini is fine).
 
@@ -25,7 +25,7 @@ Sleep/wake stop and start the **Mac** stack only. They do **not** Suspend Render
 
 ## Install / reload
 
-Wrappers (`run_dev_sleep.sh`, `run_dev_wake.sh`, `refresh_health.sh`) `cd "$(dirname "$0")"`, so they run from the pinned tree without edits. `scripts/dev-sleep.sh` and `scripts/*-sepolia.sh` resolve the repo via `lib.sh` (`FORTEL2_ROOT` from the symlinked `.env.sepolia`).
+Wrappers (`run_dev_sleep.sh`, `run_dev_wake.sh`, `refresh_health.sh`) `cd "$(dirname "$0")"`, so they run from the pinned tree without edits. `scripts/dev-sleep.sh` and `scripts/*-sepolia.sh` resolve the repo via `lib.sh` (`FORTEL2_ROOT` is the tree that contains the sourced `lib.sh`, not a value from `.env.sepolia`).
 
 The installed **wake** plist is wrapped by LaunchControl `fdautil exec`. A blind `cp` of the repo template drops that wrapper; the failure mode is silent (job "ran" and did nothing). Patch paths in place for wake; `cp` the others.
 
@@ -91,4 +91,6 @@ If you previously used `crontab` for `dev-sleep`, remove those lines (`crontab -
 ls -la data/pipeline-health.json
 ```
 
-That `data/` is the **dev checkout's** `data/` (symlinked from the pinned tree). `refresh_health.sh` writes repo-relative `data/pipeline-health.json`; `alert-watch.sh` reads `$FORTEL2_ROOT/data` after the env file sets `FORTEL2_ROOT` to the mutable checkout. The symlink is what keeps those two paths the same file.
+That `data/` is the **dev checkout's** `data/` (symlinked from the pinned tree). `refresh_health.sh` writes repo-relative `data/pipeline-health.json`; `alert-watch.sh` reads `$FORTEL2_ROOT/data` (now the pinned tree). The symlink is what keeps those two paths the same file.
+
+After `deploy-agents.sh` adds or retargets a runtime symlink (`data/`, `deployments/sepolia/.deployer`), supervised-kickstart the wake job before the next 03:00 — this changes what the wake reads (privilege-wrapped-job rule above). Success: wake out log shows the challenger's `rollup=` path under `/Users/steveforte/fortel2-agents/...` (through the symlink) and all services RUNNING.

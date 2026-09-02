@@ -250,18 +250,18 @@ check_pinned_tree() {
   fi
 
   local leftover
-  leftover="$(git -C "$PINNED_TREE" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data)$' || true)"
+  leftover="$(git -C "$PINNED_TREE" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|deployments/sepolia/\.deployer)$' || true)"
   if [[ -n "$leftover" ]]; then
     echo "FAIL  pinned tree is dirty"
     FAILS=$((FAILS + 1))
     return
   fi
 
-  # .env.sepolia is gitignored — porcelain cannot see a missing/dangling link.
-  # Health writes repo-relative data/; alerts read $FORTEL2_ROOT/data after the
-  # env overwrites FORTEL2_ROOT to the dev checkout. data/ must be a symlink.
+  # .env.sepolia / .deployer are gitignored — porcelain cannot see a missing
+  # link. lib.sh pins FORTEL2_ROOT to this tree; data/ and .deployer must
+  # still be dest-checkout symlinks. Tracked sepolia/ files stay copies.
   local name expected link target
-  for name in .env.sepolia data; do
+  for name in .env.sepolia data deployments/sepolia/.deployer; do
     expected="$DEV_DIR/$name"
     link="$PINNED_TREE/$name"
     if [[ ! -L "$link" ]]; then
@@ -281,6 +281,13 @@ check_pinned_tree() {
       return
     fi
   done
+
+  local env_link="$PINNED_TREE/.env.sepolia"
+  if grep -E '^[[:space:]]*(export[[:space:]]+)?FORTEL2_ROOT=' "$env_link" >/dev/null 2>&1; then
+    echo "INFO  pinned tree env still sets FORTEL2_ROOT (lib.sh ignores it with a warning; you may delete the line)"
+  else
+    echo "INFO  pinned tree env does not set FORTEL2_ROOT"
+  fi
 
   echo "PASS  pinned tree  branch=main  clean  $(git -C "$PINNED_TREE" log -1 --format='%h %s')"
 }
