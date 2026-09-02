@@ -1563,20 +1563,28 @@ fi
 # Task 5: stock Sepolia batcher disables builder throttle only under reth.
 # op-reth has no miner_setMaxDASize; a later checkout must not depend on
 # .env.sepolia OP_BATCHER_THROTTLE_* alone. Geth path must keep the default.
-if grep -q 'fortel2_el' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+# bash 3.2 + set -u: empty "${arr[@]}" is unbound (would abort start-all after
+# the sequencer is up). Require the + idiom and prove both expansions survive.
+if grep -qE '[[:space:]]"\$\{BATCHER_THROTTLE_FLAGS\[@\]\}"[[:space:]]' \
+     "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  echo "FAIL 05-start-batcher-sepolia.sh must not expand empty \"\${arr[@]}\" under set -u" >&2
+  fail=1
+elif grep -q 'fortel2_el' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && grep -q -- '--throttle.unsafe-da-bytes-lower-threshold=0' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
-  && grep -q 'BATCHER_THROTTLE_FLAGS' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'BATCHER_THROTTLE_FLAGS\[@\]+' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
   && awk '
        /fortel2_el/ && /reth/ { gated=1 }
        gated && /throttle.unsafe-da-bytes-lower-threshold=0/ { flag=1 }
        /start_bg op-batcher op-batcher/ { start=1 }
-       start && /BATCHER_THROTTLE_FLAGS\[@\]/ { expanded=1 }
+       start && /BATCHER_THROTTLE_FLAGS\[@\]\+/ { expanded=1 }
        END { exit !(gated && flag && expanded) }
      ' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
-  && grep -q 'throttle.unsafe-da-bytes-lower-threshold=0' "$FORTEL2_ROOT/.env.sepolia.example"; then
+  && grep -q 'throttle.unsafe-da-bytes-lower-threshold=0' "$FORTEL2_ROOT/.env.sepolia.example" \
+  && bash -c 'set -euo pipefail; BATCHER_THROTTLE_FLAGS=(); set -- ${BATCHER_THROTTLE_FLAGS[@]+"${BATCHER_THROTTLE_FLAGS[@]}"}; [[ $# -eq 0 ]]' \
+  && bash -c 'set -euo pipefail; BATCHER_THROTTLE_FLAGS=(--throttle.unsafe-da-bytes-lower-threshold=0); set -- ${BATCHER_THROTTLE_FLAGS[@]+"${BATCHER_THROTTLE_FLAGS[@]}"}; [[ $# -eq 1 && $1 == --throttle.unsafe-da-bytes-lower-threshold=0 ]]'; then
   echo "PASS Sepolia stock batcher disables throttle when FORTEL2_EL=reth"
 else
-  echo "FAIL 05-start-batcher-sepolia.sh must pass throttle-off only when fortel2_el is reth" >&2
+  echo "FAIL 05-start-batcher-sepolia.sh must pass throttle-off only when fortel2_el is reth (nounset-safe)" >&2
   fail=1
 fi
 

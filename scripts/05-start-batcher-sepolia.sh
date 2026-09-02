@@ -96,6 +96,7 @@ else
   fi
   # op-reth has no miner_setMaxDASize. Zero disables builder throttle so the
   # stock batcher does not exit on attach (Task 5). Geth keeps the default.
+  # Expand with ${arr[@]+...}: bash 3.2 + set -u treats empty "${arr[@]}" as unbound.
   BATCHER_THROTTLE_FLAGS=()
   if [[ "$(fortel2_el)" == "reth" ]]; then
     BATCHER_THROTTLE_FLAGS+=(--throttle.unsafe-da-bytes-lower-threshold=0)
@@ -117,7 +118,7 @@ else
     --max-channel-duration="${BATCHER_CHANNEL_DURATION}" \
     --txmgr.receipt-query-interval="${BATCHER_RECEIPT_QUERY}" \
     --txmgr.rebroadcast-interval="${BATCHER_REBROADCAST}" \
-    "${BATCHER_THROTTLE_FLAGS[@]}" \
+    ${BATCHER_THROTTLE_FLAGS[@]+"${BATCHER_THROTTLE_FLAGS[@]}"} \
     --log.level=info
   echo "Sepolia batcher started (DA=${BATCHER_DA_TYPE}, batch-type=${BATCHER_BATCH_TYPE_FLAG}/${BATCHER_BATCH_TYPE}, confs=${BATCHER_CONFS}, poll=${BATCHER_POLL}, max-channel-duration=${BATCHER_CHANNEL_DURATION}). Revert to singular: BATCHER_BATCH_TYPE=singular"
 fi
