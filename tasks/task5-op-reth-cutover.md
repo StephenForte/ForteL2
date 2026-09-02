@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B Step 0 complete (2026-09-02).** Catch-up lag 0 at 12:19 PT; `--preflight-only` PASS at 12:38 PT. Live lever still geth. Window steps 1–7 not started. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B window step 1 done (2026-09-02).** Write filter `:9555` stopped; live geth still producing. Step 0 preflight PASS. Steps 2–7 not started. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -155,7 +155,22 @@ Independent loopback `optimism_syncStatus` on :9547 vs :19547. Live lever still 
 | batcher + proposer funded | included in PREFLIGHT PASS |
 | `check-launchd` | Result: OK with 1 warning (wake fdautil wrapper; pinned tree `bcac677`) |
 
-Live lever still geth. Window steps 1–7 **not started**. Next: operator disables Access / write path (blocks continue), then `sequencer-admin.sh stop`.
+Live lever still geth.
+
+### Window step 1 — write path disabled (2026-09-02 ~12:52 PT)
+
+Steve approved in-session. Stopped **only** `l2-rpc-filter` via `stop_bg` (pid 79402). Did not stop cloudflared, live geth stack, or sidecar. Did not edit `.env.sepolia`.
+
+| Check | After |
+|---|---|
+| :9555 | not listening; `cast` to write filter fails |
+| :9545 / :9547 | still listening (geth 79296 / op-node 79307) |
+| L2 | 472748 → 472750 (+4s) then 472761 at 12:53:30 — production continued |
+| pidfile | `l2-rpc-filter.pid` removed; batcher/proposer/challenger/geth/node/sidecar pidfiles remain |
+| Access hostname (unauthenticated GET) | HTTP 403 (Access still in front; origin :9555 is dark) |
+| `FORTEL2_EL` | still absent |
+
+Window steps 2–7 not started. Next: `sequencer-admin.sh stop` after Steve's go, then drain `unsafe == safe`.
 
 ### §10 checklist (walk line-by-line in the window)
 
