@@ -189,6 +189,10 @@ cd contracts && forge test          # Guestbook unit + fuzz tests
 # Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL (default geth).
 # Task 5 Phase A is selector-gated: merging does not flip the producer. Phase B
 # (operator window) sets FORTEL2_EL=reth in .env.sepolia. Rollback = flip back.
+# Stock 05-start-batcher-sepolia.sh passes --throttle.unsafe-da-bytes-lower-threshold=0
+# only when FORTEL2_EL=reth (op-reth has no miner_setMaxDASize). Geth keeps the
+# default. Do not leave OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0 in
+# .env.sepolia — that env survives rollback and silently drops geth backpressure.
 #   unset FORTEL2_ENV
 #   export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"   # do not print
 #   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
@@ -707,6 +711,8 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 | `07-start-rpc-filter-sepolia.sh` | Start the eth/net/web3 allowlist proxy alone (upstream must already be up) |
 | `deposit-eth-sepolia.sh` | L1→L2 via Sepolia `deployments.json` |
 | `reset-sepolia.sh` | Wipes `data-sepolia` only |
+
+**Stock batcher throttle (`FORTEL2_EL`):** `05-start-batcher-sepolia.sh` passes `--throttle.unsafe-da-bytes-lower-threshold=0` only when `FORTEL2_EL=reth`. op-reth has no `miner_setMaxDASize`; without that flag the stock batcher exits on attach. `FORTEL2_EL=geth` keeps the stock default (unsafe-DA backpressure on). Rollback is flip `FORTEL2_EL` back — do **not** leave `OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0` in `.env.sepolia`. Stock op-batcher reads that env on every start, so a leftover `=0` would keep throttle off after rollback. The start script unsets it and uses the CLI flag only for reth.
 
 ### Write RPC filter (T5-D1 — eth/net/web3 allowlist)
 

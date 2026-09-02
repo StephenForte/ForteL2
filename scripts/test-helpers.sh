@@ -1560,6 +1560,70 @@ else
   fail=1
 fi
 
+# Task 5: stock Sepolia batcher disables builder throttle only under reth.
+# op-reth has no miner_setMaxDASize; a later checkout must not depend on
+# .env.sepolia OP_BATCHER_THROTTLE_* alone. Geth path must keep the default.
+# bash 3.2 + set -u: empty "${arr[@]}" is unbound (would abort start-all after
+# the sequencer is up). Require the + idiom and prove both expansions survive.
+if grep -qE '[[:space:]]"\$\{BATCHER_THROTTLE_FLAGS\[@\]\}"[[:space:]]' \
+     "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  echo "FAIL 05-start-batcher-sepolia.sh must not expand empty \"\${arr[@]}\" under set -u" >&2
+  fail=1
+elif grep -q 'fortel2_el' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q -- '--throttle.unsafe-da-bytes-lower-threshold=0' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'BATCHER_THROTTLE_FLAGS\[@\]+' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && awk '
+       /fortel2_el/ && /reth/ { gated=1 }
+       gated && /throttle.unsafe-da-bytes-lower-threshold=0/ { flag=1 }
+       /start_bg op-batcher op-batcher/ { start=1 }
+       start && /BATCHER_THROTTLE_FLAGS\[@\]\+/ { expanded=1 }
+       /unset OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD/ { unset_env=1 }
+       END { exit !(gated && flag && expanded && unset_env) }
+     ' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'throttle.unsafe-da-bytes-lower-threshold=0' "$FORTEL2_ROOT/.env.sepolia.example" \
+  && bash -c 'set -euo pipefail; BATCHER_THROTTLE_FLAGS=(); set -- ${BATCHER_THROTTLE_FLAGS[@]+"${BATCHER_THROTTLE_FLAGS[@]}"}; [[ $# -eq 0 ]]' \
+  && bash -c 'set -euo pipefail; BATCHER_THROTTLE_FLAGS=(--throttle.unsafe-da-bytes-lower-threshold=0); set -- ${BATCHER_THROTTLE_FLAGS[@]+"${BATCHER_THROTTLE_FLAGS[@]}"}; [[ $# -eq 1 && $1 == --throttle.unsafe-da-bytes-lower-threshold=0 ]]'; then
+  echo "PASS Sepolia stock batcher disables throttle when FORTEL2_EL=reth"
+else
+  echo "FAIL 05-start-batcher-sepolia.sh must pass throttle-off only when fortel2_el is reth (nounset-safe)" >&2
+  fail=1
+fi
+
+# Mistyped FORTEL2_EL must fail closed before stop_bg (else a live batcher is
+# interrupted and the replacement exits on miner_setMaxDASize).
+if awk '
+     /require_fortel2_el/ && !req { req=NR }
+     /stop_bg op-batcher/ && !stop { stop=NR }
+     END { exit !(req && stop && req < stop) }
+   ' "$SCRIPT_DIR/05-start-batcher-sepolia.sh"; then
+  echo "PASS Sepolia stock batcher validates FORTEL2_EL before stopping op-batcher"
+else
+  echo "FAIL 05-start-batcher-sepolia.sh must call require_fortel2_el before stop_bg" >&2
+  fail=1
+fi
+
+# Example must warn, not recommend, the env override (it survives geth rollback).
+if grep -qE 'OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=' \
+     "$FORTEL2_ROOT/.env.sepolia.example"; then
+  echo "FAIL .env.sepolia.example must not assign or recommend OP_BATCHER_THROTTLE_*" >&2
+  fail=1
+elif grep -q 'Do not set OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD' \
+       "$FORTEL2_ROOT/.env.sepolia.example"; then
+  echo "PASS .env.sepolia.example refuses a persistent batcher throttle env"
+else
+  echo "FAIL .env.sepolia.example must warn not to persist OP_BATCHER_THROTTLE_*" >&2
+  fail=1
+fi
+
+if grep -q -- '--throttle.unsafe-da-bytes-lower-threshold=0' "$FORTEL2_ROOT/README.md" \
+  && grep -q 'FORTEL2_EL=reth' "$FORTEL2_ROOT/README.md" \
+  && grep -q 'OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD' "$FORTEL2_ROOT/README.md"; then
+  echo "PASS README documents EL-gated batcher throttle and rollback"
+else
+  echo "FAIL README.md must document reth/geth batcher throttle and the leftover env" >&2
+  fail=1
+fi
+
 # --- l1-batch-proxy: split oversized L1 batches for op-challenger ---
 L1_PROXY_PY="$SCRIPT_DIR/l1-batch-proxy.py"
 L1_PROXY_START="$SCRIPT_DIR/start-l1-batch-proxy-sepolia.sh"

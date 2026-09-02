@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_bin jq
 require_sepolia_env
+require_fortel2_el
 refuse_foundry_defaults_unless_local_l2 "${BATCHER_PRIVATE_KEY:-}" "BATCHER_PRIVATE_KEY"
 require_min_balance_eth "$BATCHER_ADDRESS" "${SEPOLIA_BATCHER_MIN_ETH:-0.15}" "BATCHER"
 
@@ -90,9 +91,20 @@ else
   # rerun with BATCHER_BATCH_TYPE=singular (or span) would otherwise leave the
   # old flags running while this script claimed success. Stop first — same
   # pattern as the custom path above. Sequencer keeps producing; batcher catches up.
+  # require_fortel2_el already ran: a mistyped selector must not stop a live batcher.
+  # Leftover OP_BATCHER_THROTTLE_* from .env.sepolia would disable geth backpressure
+  # after rollback (CLI flag is omitted on geth). Unset so FORTEL2_EL is the only lever.
+  unset OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD
   if is_running op-batcher; then
     echo "Stopping existing op-batcher (pid $(cat "$PID_DIR/op-batcher.pid")) so stock start picks up current flags…"
     stop_bg op-batcher
+  fi
+  # op-reth has no miner_setMaxDASize. Zero disables builder throttle so the
+  # stock batcher does not exit on attach (Task 5). Geth keeps the default.
+  # Expand with ${arr[@]+...}: bash 3.2 + set -u treats empty "${arr[@]}" as unbound.
+  BATCHER_THROTTLE_FLAGS=()
+  if [[ "$(fortel2_el)" == "reth" ]]; then
+    BATCHER_THROTTLE_FLAGS+=(--throttle.unsafe-da-bytes-lower-threshold=0)
   fi
   start_bg op-batcher op-batcher \
     --l1-eth-rpc="$L1_RPC_URL" \
@@ -111,6 +123,7 @@ else
     --max-channel-duration="${BATCHER_CHANNEL_DURATION}" \
     --txmgr.receipt-query-interval="${BATCHER_RECEIPT_QUERY}" \
     --txmgr.rebroadcast-interval="${BATCHER_REBROADCAST}" \
+    ${BATCHER_THROTTLE_FLAGS[@]+"${BATCHER_THROTTLE_FLAGS[@]}"} \
     --log.level=info
   echo "Sepolia batcher started (DA=${BATCHER_DA_TYPE}, batch-type=${BATCHER_BATCH_TYPE_FLAG}/${BATCHER_BATCH_TYPE}, confs=${BATCHER_CONFS}, poll=${BATCHER_POLL}, max-channel-duration=${BATCHER_CHANNEL_DURATION}). Revert to singular: BATCHER_BATCH_TYPE=singular"
 fi
