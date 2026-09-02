@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B Step 0 in progress (2026-09-02).** Sidecar restarted; safe-head catch-up not yet ≤ 2; `--preflight-only` not re-run; live lever still geth. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B Step 0 catch-up closed (2026-09-02 12:19 PT, lag 0).** `--preflight-only` not yet completed this session (agent L1 sandbox, not a chain red). Live lever still geth. Window steps 1–7 not started. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -131,6 +131,25 @@ The brief's "~15 min at measured rates" assumed a near-tip sidecar. The candidat
 | 11:55:39 | 470888 | 449423 | 21465 | 449425 | 11618878 | (EL insert started; +402 L2 / 30s) |
 
 `--preflight-only` **not run** while lag > 2. Window steps 1–7 **not started**. Neither datadir wiped. Learning oracles still on geth.
+
+**Catch-up closed (12:19:12 PT) — lag 0, hashes match:**
+
+| Time (PT) | live safe | side safe | safe lag | side EL | note |
+|---|---|---|---|---|---|
+| 12:17:12 | 471506 | 469811 | 1695 | 469811 | inserting ~400–500 L2 / 30s |
+| 12:18:42 | 471662 | 471257 | 405 | 471257 | |
+| 12:19:12 | 471662 | 471662 | **0** | 471662 | `CATCHUP_OK`; safe hash `0xc5e8bac5464cc4aa…` both sides |
+| 12:35:16 | 472136 | 472136 | **0** | 472136 | still matched (`0x71bd97c8d3e35d91…`) while live unsafe 472214 |
+
+Independent loopback `optimism_syncStatus` on :9547 vs :19547. Live lever still geth. Sidecar pids unchanged (86439 / 86508).
+
+**`--preflight-only` (this session):** not completed. Two agent invocations died before any gate on L1 connect from the sandboxed runner (`tunnel error: unsuccessful`). That is **not** a chain-side red and produced no `/tmp/fortel2-cutover-*.out` for this run. Re-run unsandboxed:
+
+```
+FORTEL2_ENV=.env.sepolia ./scripts/cutover-to-reth-sepolia.sh --preflight-only
+```
+
+Every printed gate must be green before window step 1 (disable Access / write path).
 
 ### §10 checklist (walk line-by-line in the window)
 
