@@ -264,8 +264,9 @@ ensure_env_symlink ".env" 0
 ensure_data_symlink
 # Untracked challenger artifacts (rollup.json / genesis.json). Symlink the
 # subdirectory only — never deployments/sepolia (that would shadow the
-# pinned tracked deployments.json / rollup.json).
-ensure_runtime_symlink "deployments/sepolia/.deployer" 1 1
+# pinned tracked deployments.json / rollup.json). required=1, mkdir_src=0:
+# a missing dest .deployer must refuse (do not mkdir an empty stand-in).
+ensure_runtime_symlink "deployments/sepolia/.deployer" 1 0
 
 echo
 echo "agents now run:"

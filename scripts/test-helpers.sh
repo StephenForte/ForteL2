@@ -9378,6 +9378,24 @@ else
   fail=1
 fi
 
+# Missing dest .deployer must refuse — do not mkdir an empty stand-in (Bugbot).
+PRR_NODEP="$PRR_FIX/nodeployer-dev"
+mkdir -p "$PRR_NODEP"
+printf 'SEPOLIA=1\n' > "$PRR_NODEP/.env.sepolia"
+PRR_NO_OUT="$(
+  env FORTEL2_AGENTS_DIR="$PRR_FIX/nodeployer-pin" FORTEL2_DEV_DIR="$PRR_NODEP" \
+    FORTEL2_AGENTS_REMOTE="$PRR_ORIGIN" \
+    "$PRR_DEPLOY" 2>&1
+)" && PRR_NO_EC=0 || PRR_NO_EC=$?
+if [[ "$PRR_NO_EC" -ne 0 ]] \
+  && [[ ! -e "$PRR_NODEP/deployments/sepolia/.deployer" ]]; then
+  echo "PASS pin-runtime-root deploy-agents refuses when dest .deployer is missing"
+else
+  echo "FAIL missing dest .deployer must refuse, not mkdir an empty dir (ec=$PRR_NO_EC exists=$([[ -e $PRR_NODEP/deployments/sepolia/.deployer ]] && echo y || echo n))" >&2
+  echo "$PRR_NO_OUT" >&2
+  fail=1
+fi
+
 # --- (d) check-launchd FAILs when the required .deployer symlink is missing ---
 PRR_AUDIT="$PRR_FIX/audit"
 PRR_ADEV="$PRR_FIX/adev"
