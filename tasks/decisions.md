@@ -1045,6 +1045,12 @@
 - **Decision:** **#186 holds in production; the D-0113 hazard is narrowed, not closed.** Executable paths are pinned; one tracked runtime artifact is not, and the follow-up above closes it. Deploys to the pinned tree happen only via `scripts/deploy-agents.sh` after merges the operator wants live.
 - **Consequence:** External-permission-store dependencies (fdautil allowlist, provider quotas) are now a named review question for any infra change. Next free decision id is **D-0119**.
 
+### D-0119 — **Runtime root pinned (#197): the D-0113 hazard is closed — scripts and tracked artifacts both resolve from the pinned tree; proven by supervised kickstart**
+- **Context:** Closes D-0118 Finding 5. #197 makes `lib.sh`'s location-derived root authoritative (env/inherited `FORTEL2_ROOT` ignored with one WARN, never refused), `deploy-agents.sh` symlinks the untracked `deployments/sepolia/.deployer` into the pinned tree, `check-launchd.sh` audits the symlink and the stale env line. `DEPLOY_DIR` (operator env, absolute) reaches only untracked `.deployer/` artifacts, so it is not a branch-dependent path.
+- **Verification (2026-09-02, planner-run):** review gate 529 PASS / 0 FAIL on macOS with a CI-style env present (three pre-existing cutover tests require an env file; CI generates one — a harness dependency, deliberately not pursued). Deployed to the pinned tree at `bcac677`; audit `PASS pinned tree branch=main clean`; **supervised `launchctl kickstart` of the wake through fdautil exited 0** with every service running as a single instance and the challenger monitoring. The audit's WARN (`FORTEL2_ROOT=/Users/steveforte/ForteL2 differs from script-derived root … using /Users/steveforte/fortel2-agents`) is the fix visibly working.
+- **Decision:** **Closed.** Workers may park any branch in `~/ForteL2`; production agents read only the pinned tree plus operator-local untracked artifacts via symlink. No follow-ups: the cutover-test env dependency and the optional deletion of the env's `FORTEL2_ROOT` line are noted here and not queued (operator direction 2026-09-02: no nicety tasks).
+- **Consequence:** The incident arc that began at D-0102 is fully closed, including its fleet-hazard tail. Next free decision id is **D-0120**.
+
 ---
 
 ## Escalations
