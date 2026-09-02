@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase A complete (scripts + selector; no live flip).** Phase B is the operator window. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B Step 0 in progress (2026-09-02).** Sidecar restarted; safe-head catch-up not yet ≤ 2; `--preflight-only` not re-run; live lever still geth. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -74,7 +74,63 @@ Do not restart the sidecar in Phase A just to enable admin (candidate datadir). 
 
 ## Phase B execution log (append only after Steve's go)
 
-_Empty until the announced morning window. Record timestamps, block numbers, every command outcome (redacted). Next-morning sleep/wake result is part of this handoff (Task 6 entry)._
+Window dispatched 2026-09-02 (announced 08:30 PT; this session started 11:45 PT). Next-morning sleep/wake result is part of this handoff (Task 6 entry). Secrets redacted.
+
+### Step 0 — sidecar restart + catch-up (2026-09-02)
+
+**Overnight context (not this session's mutation):**
+
+| Item | Evidence |
+|---|---|
+| 23:45 sleep 2026-09-01 | `~/Library/Logs/fortel2-sleep.out.log` — stopped live geth stack **and** sidecar (`op-reth` / `op-reth-node`) |
+| 03:00 wake | Did **not** run on schedule. First successful wake this morning is **11:14–11:15 PT** (`fortel2-wake.out.log`). `fortel2-wake.err.log` has `fdautil` permission errors (D-0118 class) plus earlier fund-floor refusals that later cleared |
+| 11:30 alerts | `fortel2-alerts.out.log` — `active conditions: 0` |
+| Pinned agents tree | `/Users/steveforte/fortel2-agents` at `bcac677` (#197) when this session started; `~/ForteL2` fast-forwarded to `3d04800` (#199). `check-launchd.sh` exit 0 (1 fdautil warning) |
+
+**Live producer (unchanged — no `.env.sepolia` `FORTEL2_EL` line):**
+
+| When (PT) | Item | Value |
+|---|---|---|
+| 11:15 wake | L2 head | 469806 |
+| 11:15 wake | L1 | 11621262 |
+| 11:48:26 | `status.sh` | op-geth 79296, op-node 79307, filter 79402, batcher 79503, proposer 79601, challenger 79855 — all RUNNING |
+| 11:48:26 | L2 / L1 | L2 470809 / L1 11621427 |
+| 11:48:26 | enginekind | live `geth` (confirmed via listen :9545 / :9547; sidecar ports empty before restart) |
+| 11:54 | role funds | harvest / admin / batcher / proposer all above `sepolia-fund-check.sh` floors |
+
+**Sidecar restart** (documented env; **not** `FORTEL2_ENV=.env.sepolia`; **not** `--wipe`):
+
+```
+unset FORTEL2_ENV
+export L1_RPC_URL=…   # from .env.sepolia; not printed
+export DATA_DIR=/Users/steveforte/src/fortel2/data-sepolia
+export FORTEL2_EL=reth FORTEL2_RETH_PROFILE=sequencer_faultproof
+export SEPOLIA_L1_RPC_RATE_LIMIT=10
+./scripts/start-op-reth-verifier.sh
+```
+
+| Item | Outcome |
+|---|---|
+| Time | 11:48:26 PT |
+| proofs init | already initialized; genesis `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` |
+| op-reth | pid 86439 — HTTP :19545 auth :19551 — EL head **449023** at attach |
+| op-reth-node | pid 86508 — RPC :19547 — `--l2.enginekind=reth` `--rpc.enable-admin` rate-limit 10 |
+| SafeDB | `$DATA_DIR/l2/op-reth-safedb` (sidecar only; live `$DATA_DIR/safedb` untouched) |
+| Live lever | `.env.sepolia` still has **no** `FORTEL2_EL` line |
+
+**Catch-up (in progress at first append — not yet lag ≤ 2):**
+
+The brief's "~15 min at measured rates" assumed a near-tip sidecar. The candidate EL woke at **449023**; live safe was **470888**. Safe-head lag **21865**. Sidecar first walked recorded safe from 448405 → 449023, then walked L1 origins (~180 L1/min) with EL still at 449023.
+
+| Time (PT) | live safe | side safe | safe lag | side EL | side current_l1 | live L1 head |
+|---|---|---|---|---|---|---|
+| 11:48:55 | 470726 | 448405 | 22321 | 449023 | (not sampled; L1 head 11621428) | 11621428 |
+| 11:49:55 | 470726 | 449023 | 21703 | 449023 | (not sampled; L1 head 11621433) | 11621433 |
+| 11:51:49 | 470888 | 449023 | 21865 | 449023 | 11618243 | 11621441 |
+| 11:54:39 | 470888 | 449023 | 21865 | 449023 | 11618762 | 11621456 |
+| 11:55:39 | 470888 | 449423 | 21465 | 449425 | 11618878 | (EL insert started; +402 L2 / 30s) |
+
+`--preflight-only` **not run** while lag > 2. Window steps 1–7 **not started**. Neither datadir wiped. Learning oracles still on geth.
 
 ### §10 checklist (walk line-by-line in the window)
 
