@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B window step 1 done (2026-09-02).** Write filter `:9555` stopped; live geth still producing. Step 0 preflight PASS. Steps 2–7 not started. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B CHECKPOINT 1 (2026-09-02).** Sequencer paused; unsafe==safe at **473031**. Writes dark. Live lever still geth. Awaiting proceed/abort before stop-geth / `FORTEL2_EL=reth`. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -170,7 +170,25 @@ Steve approved in-session. Stopped **only** `l2-rpc-filter` via `stop_bg` (pid 7
 | Access hostname (unauthenticated GET) | HTTP 403 (Access still in front; origin :9555 is dark) |
 | `FORTEL2_EL` | still absent |
 
-Window steps 2–7 not started. Next: `sequencer-admin.sh stop` after Steve's go, then drain `unsafe == safe`.
+### Window step 2 — sequencer paused + drained (2026-09-02 ~13:03 PT)
+
+Steve approved `proceed`. `FORTEL2_ENV=.env.sepolia ./scripts/sequencer-admin.sh stop` then drain. Independent re-read 13:04:51 PT:
+
+| Field | Value |
+|---|---|
+| `admin_sequencerActive` | **false** |
+| drain | ~70s; unsafe caught safe |
+| **cutover height/hash** | **473031** / `0x7f526029bfd86b4f466fe09aeb5c9b2f6265fc58d42ebff7b7dc89cd473ebe9e` |
+| unsafe == safe | yes (same hash both; EL `:9545` same) |
+| finalized | 472436 / `0x3198650e8378b1832386ac6b979a29129e636a8cb17d7fe147a4f0a3937a6663` |
+| output root (`optimism_outputAtBlock(473031)`) | `0x59baf49616e16e9c1e780abfdef8059510b89561633655943518a90640a8d9d6` |
+| sidecar safe | 473031 same hash (lag 0) |
+| batcher L1 nonce | 11452 @ `0x3D54FD6353cd66D143fb94D178c9eEB1aE98a31d` |
+| proposer L1 nonce | 252 @ `0x350A0F7becCE56598962C501CaA02f900F256803` |
+| write filter `:9555` | still down |
+| `FORTEL2_EL` | still absent (geth still live EL) |
+
+Geth / op-node / batcher / proposer / challenger / sidecar left running. **CHECKPOINT 1 — proceed (stop geth + flip lever) or abort (`admin_startSequencer` + re-enable filter).**
 
 ### §10 checklist (walk line-by-line in the window)
 
