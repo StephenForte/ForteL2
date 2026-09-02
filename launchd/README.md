@@ -29,6 +29,10 @@ Wrappers (`run_dev_sleep.sh`, `run_dev_wake.sh`, `refresh_health.sh`) `cd "$(dir
 
 The installed **wake** plist is wrapped by LaunchControl `fdautil exec`. A blind `cp` of the repo template drops that wrapper; the failure mode is silent (job "ran" and did nothing). Patch paths in place for wake; `cp` the others.
 
+**Privilege-wrapped jobs: two mandatory rules (D-0118, learned from a ~6 h outage).**
+1. **Test-fire before the first scheduled run.** fdautil authorizes *exact command strings* from LaunchControl's private allowlist — invisible to the plist, `launchctl print`, `check-launchd.sh`, and CI. After any change to a wrapped job's script path or arguments, update the allowlist in LaunchControl and then run `launchctl kickstart "gui/$(id -u)/com.steve.fortel2-wake"` supervised, confirming the run reaches the script (a fresh line in `~/Library/Logs/fortel2-wake.out.log`, and no "You don't have permission to run this command via fdautil" in the err log). Never leave that proof to 03:00.
+2. **Never re-edit the job in LaunchControl's job editor afterwards.** It saves its stale view of the job over the installed plist (it reverted `ProgramArguments` to the old path and wrote the script path into the `PATH` environment variable, producing exit 127 "command not found"). Edit only the allowlist there; rebuild the plist from the repo template + re-add the wrapper, then `bootout`/`bootstrap`.
+
 ```bash
 # 1. Create / fast-forward the pinned clone; symlink secrets.
 ./scripts/deploy-agents.sh
