@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_bin jq
 require_sepolia_env
+require_fortel2_el
 refuse_foundry_defaults_unless_local_l2 "${BATCHER_PRIVATE_KEY:-}" "BATCHER_PRIVATE_KEY"
 require_min_balance_eth "$BATCHER_ADDRESS" "${SEPOLIA_BATCHER_MIN_ETH:-0.15}" "BATCHER"
 
@@ -90,6 +91,10 @@ else
   # rerun with BATCHER_BATCH_TYPE=singular (or span) would otherwise leave the
   # old flags running while this script claimed success. Stop first — same
   # pattern as the custom path above. Sequencer keeps producing; batcher catches up.
+  # require_fortel2_el already ran: a mistyped selector must not stop a live batcher.
+  # Leftover OP_BATCHER_THROTTLE_* from .env.sepolia would disable geth backpressure
+  # after rollback (CLI flag is omitted on geth). Unset so FORTEL2_EL is the only lever.
+  unset OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD
   if is_running op-batcher; then
     echo "Stopping existing op-batcher (pid $(cat "$PID_DIR/op-batcher.pid")) so stock start picks up current flags…"
     stop_bg op-batcher
