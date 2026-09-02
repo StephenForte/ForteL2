@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B CHECKPOINT 1 (2026-09-02).** Sequencer paused; unsafe==safe at **473031**. Writes dark. Live lever still geth. Awaiting proceed/abort before stop-geth / `FORTEL2_EL=reth`. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B CHECKPOINT 2 (2026-09-02).** Live EL is **op-reth**. First reth block **473032** extends cutover parent **473031** / `0x7f526029…`. Batcher posting (nonce 11452→11453). Awaiting proceed to treat writes as re-enabled, or abort → `rollback-to-geth-sepolia.sh`. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -189,6 +189,66 @@ Steve approved `proceed`. `FORTEL2_ENV=.env.sepolia ./scripts/sequencer-admin.sh
 | `FORTEL2_EL` | still absent (geth still live EL) |
 
 Geth / op-node / batcher / proposer / challenger / sidecar left running. **CHECKPOINT 1 — proceed (stop geth + flip lever) or abort (`admin_startSequencer` + re-enable filter).**
+
+### Window steps 3–5 — stop geth, flip lever, start reth (2026-09-02 13:17–13:22 PT)
+
+Steve approved `proceed` (typed `procees`). Did **not** re-run `cutover-to-reth-sepolia.sh --execute` (no tty; steps 1–2 already done). Ran the script’s post-Checkpoint-1 body: record heads → `stop-all-sepolia.sh` → operator `.env.sepolia` flip → `start-all-sepolia.sh`.
+
+**Re-read immediately before stop (13:17:17 PT):** still **473031** / `0x7f526029bfd86b4f466fe09aeb5c9b2f6265fc58d42ebff7b7dc89cd473ebe9e`; `admin_sequencerActive=false`; sidecar lag 0 same hash; filter down; no `FORTEL2_EL` line.
+
+**Step 3 — `FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh` (13:17:29 PT):**
+
+Stopped challenger, l1-batch-proxy, proposer, batcher, op-node, op-geth, sidecar op-reth + op-reth-node. Live + sidecar ports empty. Both datadirs + live JWT + live SafeDB **PRESENT** (no wipe). Geth datadir left read-only.
+
+**Step 4 — `.env.sepolia` lever (13:17:52 PT):** appended `FORTEL2_EL=reth` and `FORTEL2_RETH_PROFILE=sequencer_faultproof`. `--print-plan`: `EL=op-reth` `ENGINEKIND=reth` `SEQUENCER_STOPPED=false` datadir `$DATA_DIR/l2/op-reth` SafeDB `$DATA_DIR/safedb` (sidecar SafeDB untouched) `PROFILE=sequencer_faultproof`.
+
+**Step 5 — `FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh` (13:17:52–13:18:29 PT, exit 0):**
+
+| Item | Value |
+|---|---|
+| op-reth | pid 3634 — HTTP `:9545` — attach head **473031** — `sequencer_faultproof` |
+| op-node | pid 3642 — `:9547` — `--l2.enginekind=reth` — live SafeDB `$DATA_DIR/safedb` |
+| proofs init | already initialized; genesis `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` |
+| filter / batcher / proposer / challenger | started with the stack (filter pid 3729 `:9555`) |
+| op-geth datadir | still PRESENT; start path never opened it |
+
+**First reth block extends the recorded parent:**
+
+| Block | Hash | Parent |
+|---|---|---|
+| 473031 (cutover) | `0x7f526029bfd86b4f466fe09aeb5c9b2f6265fc58d42ebff7b7dc89cd473ebe9e` | `0x9ecbca302743414efe750fc5b3304cfdb373751720f29fa9769481d2bd003d75` |
+| **473032 (first reth)** | `0x554b5258fe3eadb14d367f70a85497326d034caa07995aba46a794c74121bb59` | **`0x7f526029…` (match)** |
+| 473033 | `0x0fce70e1b98bd800baf77d1bd70a9fda379ea65ce8c127d015233327a8e85cdc` | `0x554b5258…` |
+
+`optimism_outputAtBlock(473031)` still `0x59baf49616e16e9c1e780abfdef8059510b89561633655943518a90640a8d9d6`.
+
+**Batcher first start died (13:18:17 PT):** stock `op-batcher` exited `miner_setMaxDASize unavailable at :9545` (geth miner API; op-reth does not expose it). Sequencer kept producing. Restarted 13:20:04 with `OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0` (also appended to `.env.sepolia` so launchd wake on the pinned tree inherits it via the env symlink). Log: `Throttling loop is DISABLED due to 0 throttle-threshold`. No new critical after restart. Published nonce **11452** (channel oldest L2 **473032** → latest **473570**); next nonce **11453**. Safe advanced to **473570** / `0x3232ec2ce9097d851b226f1907e7093a16f58d50742d2a40df3b994992cfcb6a` by 13:21:16.
+
+**Independent re-read 13:22:10 PT:**
+
+| Field | Value |
+|---|---|
+| `FORTEL2_EL` | **reth** (`sequencer_faultproof`) |
+| `admin_sequencerActive` | **true** |
+| live EL | op-reth 3634 `:9545` — chain **852** — head 473621 |
+| unsafe | 473621 / `0xd5b37c5fc265d54502e14e726ea8c9b4a9ccde40d4d73f8c2b1ae5d769c6df2e` |
+| safe | 473570 / `0x3232ec2ce9097d851b226f1907e7093a16f58d50742d2a40df3b994992cfcb6a` |
+| finalized | 472436 / `0x3198650e8378b1832386ac6b979a29129e636a8cb17d7fe147a4f0a3937a6663` |
+| batcher L1 nonce | **11453** (was 11452 at Checkpoint 1) |
+| proposer L1 nonce | 252 (1h interval; no new game expected yet) |
+| challenger | pid 4183 — `starting monitoring` / `game service start completed` |
+| `check-el-pins` | ok op-node v1.19.2 `da197e45`; op-reth/v2.3.3 `9384bc53`; `FORTEL2_EL=reth` |
+| sidecar `:19545` / `:19547` | down (stop-all; shared `$DATA_DIR/l2/op-reth` now bound on live ports) |
+| geth datadir | PRESENT (rollback asset) |
+
+**Not yet (need Steve go / funded accounts):**
+
+- `smoke-transfer.sh` — DEMO_A/B L2 balance **0** (estimate fail `have 0`; not an EL reject). Did **not** spend ADMIN.
+- `deposit-eth-sepolia.sh` — not run (L1 spend; needs explicit go).
+- Viewer — not re-served this step.
+- Writes: filter is up because `start-all` starts it. Access unauthenticated path was already 403. Treat **CHECKPOINT 2** as the go to leave writes enabled vs rollback.
+
+**CHECKPOINT 2 — health green enough to leave the filter up, or abort → `rollback-to-geth-sepolia.sh` (verifier-first).** Overnight 23:45 / 03:00 still required before the fenced handoff.
 
 ### §10 checklist (walk line-by-line in the window)
 
