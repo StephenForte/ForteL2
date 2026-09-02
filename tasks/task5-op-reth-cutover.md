@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B CHECKPOINT 2 (2026-09-02).** Live EL is **op-reth**. First reth block **473032** extends **473031**. L1→L2 deposit **PASS** (0.01 ETH, ~87s). Awaiting proceed to treat writes as re-enabled, or abort → `rollback-to-geth-sepolia.sh`. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B cutover held (2026-09-02).** Live EL is **op-reth**. First reth block **473032** extends **473031**. Deposit PASS. Writes left enabled at Checkpoint 2. Overnight 23:45 / 03:00 still required before the fenced handoff. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -241,11 +241,11 @@ Stopped challenger, l1-batch-proxy, proposer, batcher, op-node, op-geth, sidecar
 | sidecar `:19545` / `:19547` | down (stop-all; shared `$DATA_DIR/l2/op-reth` now bound on live ports) |
 | geth datadir | PRESENT (rollback asset) |
 
-**Not yet (need Steve go / funded accounts):**
+**Still open after Checkpoint 2 (not blockers for leaving writes up):**
 
 - `smoke-transfer.sh` — DEMO_A/B L2 balance **0** (estimate fail `have 0`; not an EL reject).
 - Viewer — not re-served this step.
-- Writes: filter is up because `start-all` starts it. Access unauthenticated path was already 403. Treat **CHECKPOINT 2** as the go to leave writes enabled vs rollback.
+- Overnight 23:45 sleep / 03:00 wake / 03:30 alert-absence — required before the fenced handoff.
 
 ### Window health — L1→L2 deposit (2026-09-02 13:40–13:42 PT)
 
@@ -263,6 +263,29 @@ Steve approved `deposit`. Stack still `FORTEL2_EL=reth` (same pids as step 5). `
 | Live after | op-reth 3634 still producing; L2 474218; batcher nonce **11457**; safe **474188**; finalized **473570** (first reth channel now finalized) |
 
 **CHECKPOINT 2 — health green enough to leave the filter up, or abort → `rollback-to-geth-sepolia.sh` (verifier-first).** Overnight 23:45 / 03:00 still required before the fenced handoff.
+
+### Window step 7 — Checkpoint 2 proceed; writes left enabled (2026-09-02 13:46 PT)
+
+Steve approved `proceed`. Did not run rollback. Filter was already up from `start-all`; this step **leaves it up** and treats the authenticated write path as re-enabled (step 1 had stopped only the filter; Access / cloudflared were never taken down).
+
+Independent re-read 13:46:28 PT:
+
+| Check | Result |
+|---|---|
+| `FORTEL2_EL` | **reth** (`sequencer_faultproof`; throttle-off still set) |
+| live stack | same pids: op-reth 3634, op-node 3642, batcher 4637, proposer 3936, filter 3729, challenger 4183 |
+| `admin_sequencerActive` | **true** |
+| L2 / filter | 474350 chain **852** on both `:9545` and `:9555` |
+| filter `admin_` | refused (allowlist) |
+| Access hostname unauthenticated GET | **HTTP 403** (Access still in front) |
+| public replica / sequencer-tip `eth_sendRawTransaction` | **-32601 method not allowed** both gateways |
+| 473032 parent | still cutover `0x7f526029…` |
+| unsafe / safe / finalized | 474351 / 474188 / **473720** |
+| batcher L1 nonce | **11458** (still posting) |
+| proposer L1 nonce | 252 |
+| geth datadir | PRESENT (rollback asset) |
+
+Window summary comment lands on the evidence PR. Fenced handoff waits on the 09-03 wake check.
 
 ### §10 checklist (walk line-by-line in the window)
 
