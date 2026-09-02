@@ -93,4 +93,8 @@ ls -la data/pipeline-health.json
 
 That `data/` is the **dev checkout's** `data/` (symlinked from the pinned tree). `refresh_health.sh` writes repo-relative `data/pipeline-health.json`; `alert-watch.sh` reads `$FORTEL2_ROOT/data` (now the pinned tree). The symlink is what keeps those two paths the same file.
 
-After `deploy-agents.sh` adds or retargets a runtime symlink (`data/`, `deployments/sepolia/.deployer`), supervised-kickstart the wake job before the next 03:00 — this changes what the wake reads (privilege-wrapped-job rule above). Success: wake out log shows the challenger's `rollup=` path under `/Users/steveforte/fortel2-agents/...` (through the symlink) and all services RUNNING.
+After `deploy-agents.sh` adds or retargets a runtime symlink (`data/`, `deployments/sepolia/.deployer`), supervised-kickstart the wake job before the next 03:00 — this changes what the wake reads (privilege-wrapped-job rule above). Success:
+- a fresh wake line in `~/Library/Logs/fortel2-wake.out.log` (err log has no fdautil denial)
+- one `WARN: FORTEL2_ROOT=... differs from script-derived root /Users/steveforte/fortel2-agents` if `.env.sepolia` still assigns `FORTEL2_ROOT` (harmless; you may delete the line)
+- challenger `rollup=` is a readable `$DEPLOY_DIR/rollup.json` — today's operator env keeps `DEPLOY_DIR` as the dest-checkout absolute path (`~/ForteL2/deployments/sepolia/.deployer/...`), which is the same untracked files the new symlink points at. `canonical_abs_path` will print that dest path, not `fortel2-agents/...`, unless you also change `DEPLOY_DIR` to the pinned symlink (optional; not required)
+- all services RUNNING
