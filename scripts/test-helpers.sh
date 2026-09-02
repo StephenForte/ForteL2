@@ -1560,6 +1560,26 @@ else
   fail=1
 fi
 
+# Task 5: stock Sepolia batcher disables builder throttle only under reth.
+# op-reth has no miner_setMaxDASize; a later checkout must not depend on
+# .env.sepolia OP_BATCHER_THROTTLE_* alone. Geth path must keep the default.
+if grep -q 'fortel2_el' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q -- '--throttle.unsafe-da-bytes-lower-threshold=0' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'BATCHER_THROTTLE_FLAGS' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && awk '
+       /fortel2_el/ && /reth/ { gated=1 }
+       gated && /throttle.unsafe-da-bytes-lower-threshold=0/ { flag=1 }
+       /start_bg op-batcher op-batcher/ { start=1 }
+       start && /BATCHER_THROTTLE_FLAGS\[@\]/ { expanded=1 }
+       END { exit !(gated && flag && expanded) }
+     ' "$SCRIPT_DIR/05-start-batcher-sepolia.sh" \
+  && grep -q 'throttle.unsafe-da-bytes-lower-threshold=0' "$FORTEL2_ROOT/.env.sepolia.example"; then
+  echo "PASS Sepolia stock batcher disables throttle when FORTEL2_EL=reth"
+else
+  echo "FAIL 05-start-batcher-sepolia.sh must pass throttle-off only when fortel2_el is reth" >&2
+  fail=1
+fi
+
 # --- l1-batch-proxy: split oversized L1 batches for op-challenger ---
 L1_PROXY_PY="$SCRIPT_DIR/l1-batch-proxy.py"
 L1_PROXY_START="$SCRIPT_DIR/start-l1-batch-proxy-sepolia.sh"
