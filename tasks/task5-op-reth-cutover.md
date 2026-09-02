@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B Step 0 catch-up closed (2026-09-02 12:19 PT, lag 0).** `--preflight-only` not yet completed this session (agent L1 sandbox, not a chain red). Live lever still geth. Window steps 1–7 not started. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B Step 0 complete (2026-09-02).** Catch-up lag 0 at 12:19 PT; `--preflight-only` PASS at 12:38 PT. Live lever still geth. Window steps 1–7 not started. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -143,13 +143,19 @@ The brief's "~15 min at measured rates" assumed a near-tip sidecar. The candidat
 
 Independent loopback `optimism_syncStatus` on :9547 vs :19547. Live lever still geth. Sidecar pids unchanged (86439 / 86508).
 
-**`--preflight-only` (this session):** not completed. Two agent invocations died before any gate on L1 connect from the sandboxed runner (`tunnel error: unsuccessful`). That is **not** a chain-side red and produced no `/tmp/fortel2-cutover-*.out` for this run. Re-run unsandboxed:
+**`--preflight-only` (this session):** first sandboxed attempts died on L1 connect before any gate (not a chain red). Unsandboxed re-run **12:38 PT** → `PREFLIGHT_EXIT=0` / `PREFLIGHT PASS`. Aux files timestamped Sep 2 12:38:
 
-```
-FORTEL2_ENV=.env.sepolia ./scripts/cutover-to-reth-sepolia.sh --preflight-only
-```
+| Gate | Result |
+|---|---|
+| `game216_status` + `withdrawal_finalized` | included in PREFLIGHT PASS (script fail-closed) |
+| `safe_head_lag` | 0 (independent loopback: live safe 472286 == sidecar 472286, hash `0xfc2c2754f3cd7015…`) |
+| `verify-reth-parity` | PASS (20 blocks; full-match candidate = live = replica; heads safe 472136) |
+| `verify-reth-faultproof` | PASS (output-root incl game L2 471206; SafeDB post-enable; historical eth_getProof) |
+| `check-el-pins` | ok op-node v1.19.2 `da197e45`; op-reth/v2.3.3 `9384bc53`; `FORTEL2_EL=geth` |
+| batcher + proposer funded | included in PREFLIGHT PASS |
+| `check-launchd` | Result: OK with 1 warning (wake fdautil wrapper; pinned tree `bcac677`) |
 
-Every printed gate must be green before window step 1 (disable Access / write path).
+Live lever still geth. Window steps 1–7 **not started**. Next: operator disables Access / write path (blocks continue), then `sequencer-admin.sh stop`.
 
 ### §10 checklist (walk line-by-line in the window)
 
