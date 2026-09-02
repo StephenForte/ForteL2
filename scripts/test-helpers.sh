@@ -362,7 +362,8 @@ cleanup_fixtures() {
   rm -rf "$FIXTURE" "$SEPOLIA_FIXTURE"
 }
 trap cleanup_fixtures EXIT
-mkdir -p "$FIXTURE/deployments/.deployer" "$FIXTURE/viewer" "$FIXTURE/data"
+mkdir -p "$FIXTURE/deployments/.deployer" "$FIXTURE/viewer" "$FIXTURE/data" "$FIXTURE/scripts"
+cp "$SCRIPT_DIR/lib.sh" "$SCRIPT_DIR/gen-viewer-config.sh" "$FIXTURE/scripts/"
 cat > "$FIXTURE/.env" <<EOF
 FORTEL2_ROOT=$FIXTURE
 DATA_DIR=$FIXTURE/data
@@ -382,7 +383,7 @@ echo '{"batch_inbox_address":"0x00289c189bee4e70334629f04cd5ed602b6600eb"}' \
 
 # env -u: the fixture has no .env.sepolia — an inherited FORTEL2_ENV (e.g. from
 # demo-checklist --sepolia) must not leak into the fixture run.
-if env -u FORTEL2_ENV FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null; then
+if env -u FORTEL2_ENV FORTEL2_ROOT="$FIXTURE" "$FIXTURE/scripts/gen-viewer-config.sh" >/dev/null; then
   if grep -q 'BATCH_INBOX_ADDRESS = "0x00289c189bee4e70334629f04cd5ed602b6600eb"' "$FIXTURE/viewer/config.js" \
     && grep -q 'DISPUTE_GAME_FACTORY = "0xb3cc73ce8efac81f5c1ee1943b9f1ffeed98c4d2"' "$FIXTURE/viewer/config.js" \
     && grep -q 'L2_NODE_RPC_URL = "http://127.0.0.1:9547"' "$FIXTURE/viewer/config.js"; then
@@ -397,7 +398,8 @@ else
 fi
 
 # Sepolia: remote L1 allowed; CSP header must include L1 origin (no path token)
-mkdir -p "$SEPOLIA_FIXTURE/viewer" "$SEPOLIA_FIXTURE/deployments/sepolia/.deployer" "$SEPOLIA_FIXTURE/data"
+mkdir -p "$SEPOLIA_FIXTURE/viewer" "$SEPOLIA_FIXTURE/deployments/sepolia/.deployer" "$SEPOLIA_FIXTURE/data" "$SEPOLIA_FIXTURE/scripts"
+cp "$SCRIPT_DIR/lib.sh" "$SCRIPT_DIR/gen-viewer-config.sh" "$SEPOLIA_FIXTURE/scripts/"
 cat > "$SEPOLIA_FIXTURE/.env.sepolia" <<EOF
 FORTEL2_ROOT=$SEPOLIA_FIXTURE
 DATA_DIR=$SEPOLIA_FIXTURE/data
@@ -418,7 +420,7 @@ echo '{"DisputeGameFactoryProxy":"0xb3cc73ce8efac81f5c1ee1943b9f1ffeed98c4d2"}' 
 echo '{"batch_inbox_address":"0x00289c189bee4e70334629f04cd5ed602b6600eb"}' \
   > "$SEPOLIA_FIXTURE/deployments/sepolia/.deployer/rollup.json"
 if FORTEL2_ROOT="$SEPOLIA_FIXTURE" FORTEL2_ENV=.env.sepolia \
-  "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null; then
+  "$SEPOLIA_FIXTURE/scripts/gen-viewer-config.sh" >/dev/null; then
   if grep -q 'L2_CHAIN_ID = 852' "$SEPOLIA_FIXTURE/viewer/config.js" \
     && grep -q 'REFRESH_MS = 15000' "$SEPOLIA_FIXTURE/viewer/config.js" \
     && grep -q 'https://example.ethereum-sepolia.quiknode.pro' "$SEPOLIA_FIXTURE/viewer/.csp-header" \
@@ -437,7 +439,7 @@ fi
 sed -i.bak 's/BATCHER_ADDRESS=.*/BATCHER_ADDRESS=not-an-address/' "$FIXTURE/.env"
 # env -u: same FORTEL2_ENV leak as the fixture run above — an inherited
 # absolute FORTEL2_ENV would load a valid BATCHER_ADDRESS and this would pass.
-if env -u FORTEL2_ENV FORTEL2_ROOT="$FIXTURE" "$SCRIPT_DIR/gen-viewer-config.sh" >/dev/null 2>&1; then
+if env -u FORTEL2_ENV FORTEL2_ROOT="$FIXTURE" "$FIXTURE/scripts/gen-viewer-config.sh" >/dev/null 2>&1; then
   echo "FAIL gen-viewer-config should reject bad BATCHER_ADDRESS" >&2
   fail=1
 else
@@ -8179,6 +8181,7 @@ pa_init_origin() {
 
 pa_dev_secrets() {
   mkdir -p "$PA_FIX/dev"
+  mkdir -p "$PA_FIX/dev/deployments/sepolia/.deployer"
   printf 'SEPOLIA=1\n' > "$PA_FIX/dev/.env.sepolia"
   printf 'LOCAL=1\n' > "$PA_FIX/dev/.env"
 }
@@ -8397,7 +8400,7 @@ git init -q -b main "$PA_AUDIT"
 git -C "$PA_AUDIT" remote add origin "$(git -C "$PA_ROOT" remote get-url origin)"
 pa_git -C "$PA_AUDIT" commit -q --allow-empty -m audit
 mkdir -p "$PA_AUDIT/.git/info" "$PA_FIX/dev/data"
-printf '.env.sepolia\n.env\ndata\n' >> "$PA_AUDIT/.git/info/exclude"
+printf '.env.sepolia\n.env\ndata\ndeployments/sepolia/.deployer\n' >> "$PA_AUDIT/.git/info/exclude"
 
 # Missing .env.sepolia symlink is FAIL even though gitignore hides it.
 PA_CL_NOSYM="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
@@ -8411,6 +8414,8 @@ fi
 
 ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
 ln -s "$PA_FIX/dev/data" "$PA_AUDIT/data"
+mkdir -p "$PA_AUDIT/deployments/sepolia" "$PA_FIX/dev/deployments/sepolia/.deployer"
+ln -s "$PA_FIX/dev/deployments/sepolia/.deployer" "$PA_AUDIT/deployments/sepolia/.deployer"
 
 PA_CL_OLD="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
 if echo "$PA_CL_OLD" | grep -q 'FAIL  com.steve.fortel2-sleep' \
@@ -9205,6 +9210,221 @@ fi
 
 # =============================================================================
 # end Task 5 block
+# =============================================================================
+
+# =============================================================================
+# pin-runtime-root (D-0118 Finding 5)
+# Two-root fixture: env/inherited FORTEL2_ROOT must not redirect tracked
+# artifacts. Additive. Do not reorder the tests above.
+# =============================================================================
+
+PRR_FIX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pin-runtime-root.XXXXXX")" && pwd)"
+cleanup_prr() { rm -rf "$PRR_FIX"; }
+trap cleanup_prr EXIT
+PRR_LIB="$SCRIPT_DIR/lib.sh"
+PRR_DEPLOY="$SCRIPT_DIR/deploy-agents.sh"
+PRR_CL="$SCRIPT_DIR/check-launchd.sh"
+PRR_REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+PRR_ORIGIN_URL="$(git -C "$PRR_REPO" remote get-url origin)"
+
+prr_git() {
+  git -c user.email=pin-runtime-root@test.invalid -c user.name=pin-runtime-root "$@"
+}
+
+prr_clear=(env -u FORTEL2_ENV -u FORTEL2_ROOT -u FORTEL2_ENV_FILE -u _FORTEL2_ROOT_PIN_WARNED)
+
+# --- (a) two-root fixture: env FORTEL2_ROOT=dev, lib.sh sourced from pinned ---
+PRR_DEV="$PRR_FIX/dev"
+PRR_PIN="$PRR_FIX/pinned"
+mkdir -p "$PRR_DEV/scripts" "$PRR_DEV/deployments/sepolia" "$PRR_DEV/data"
+mkdir -p "$PRR_PIN/scripts" "$PRR_PIN/deployments/sepolia" "$PRR_PIN/data"
+PRR_DEV="$(cd "$PRR_DEV" && pwd)"
+PRR_PIN="$(cd "$PRR_PIN" && pwd)"
+cp "$PRR_LIB" "$PRR_DEV/scripts/lib.sh"
+cp "$PRR_LIB" "$PRR_PIN/scripts/lib.sh"
+printf '%s\n' '{"from":"dev"}' > "$PRR_DEV/deployments/sepolia/deployments.json"
+printf '%s\n' '{"from":"pinned"}' > "$PRR_PIN/deployments/sepolia/deployments.json"
+cat > "$PRR_DEV/.env.sepolia" <<EOF
+FORTEL2_ROOT=$PRR_DEV
+L2_CHAIN_ID=852
+DATA_DIR=$PRR_DEV/data
+L1_CHAIN_ID=11155111
+L1_RPC_URL=https://example.invalid
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+EOF
+PRR_A_PATH="$("${prr_clear[@]}" FORTEL2_ENV="$PRR_DEV/.env.sepolia" \
+  bash -c 'source "'"$PRR_PIN"'/scripts/lib.sh" && deployments_json_path' \
+  2>"$PRR_FIX/a.err")" && PRR_A_EC=0 || PRR_A_EC=$?
+if [[ "$PRR_A_EC" -eq 0 ]] \
+  && [[ "$PRR_A_PATH" == "$PRR_PIN/deployments/sepolia/deployments.json" ]] \
+  && grep -q "WARN: FORTEL2_ROOT=${PRR_DEV}" "$PRR_FIX/a.err" \
+  && grep -q "script-derived root ${PRR_PIN}" "$PRR_FIX/a.err" \
+  && grep -q "env file ${PRR_DEV}/.env.sepolia" "$PRR_FIX/a.err"; then
+  echo "PASS pin-runtime-root two-root fixture uses pinned deployments.json and WARNs"
+else
+  echo "FAIL two-root fixture must return the pinned deployments.json and WARN (ec=$PRR_A_EC path=$PRR_A_PATH)" >&2
+  cat "$PRR_FIX/a.err" >&2
+  fail=1
+fi
+
+# --- (b) inherited FORTEL2_ROOT is overridden with a WARN ---
+cat > "$PRR_DEV/.env.sepolia" <<EOF
+L2_CHAIN_ID=852
+DATA_DIR=$PRR_DEV/data
+L1_CHAIN_ID=11155111
+L1_RPC_URL=https://example.invalid
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+EOF
+PRR_B_ROOT="$(env -u FORTEL2_ENV -u FORTEL2_ENV_FILE -u _FORTEL2_ROOT_PIN_WARNED \
+  FORTEL2_ROOT="$PRR_DEV" FORTEL2_ENV="$PRR_DEV/.env.sepolia" \
+  bash -c 'source "'"$PRR_PIN"'/scripts/lib.sh" && printf %s "$FORTEL2_ROOT"' \
+  2>"$PRR_FIX/b.err")" && PRR_B_EC=0 || PRR_B_EC=$?
+if [[ "$PRR_B_EC" -eq 0 ]] \
+  && [[ "$PRR_B_ROOT" == "$PRR_PIN" ]] \
+  && grep -q "WARN: FORTEL2_ROOT=${PRR_DEV}" "$PRR_FIX/b.err"; then
+  echo "PASS pin-runtime-root inherited FORTEL2_ROOT is overridden with a WARN"
+else
+  echo "FAIL inherited FORTEL2_ROOT must be pinned to the lib.sh tree with a WARN (ec=$PRR_B_EC root=$PRR_B_ROOT)" >&2
+  cat "$PRR_FIX/b.err" >&2
+  fail=1
+fi
+
+# --- (e) re-source is idempotent: same root, one WARN ---
+PRR_E_OUT="$(env -u FORTEL2_ENV -u FORTEL2_ROOT -u FORTEL2_ENV_FILE -u _FORTEL2_ROOT_PIN_WARNED \
+  FORTEL2_ENV="$PRR_DEV/.env.sepolia" FORTEL2_ROOT="$PRR_DEV" \
+  bash -c '
+    source "'"$PRR_PIN"'/scripts/lib.sh"
+    echo ROOT1="$FORTEL2_ROOT"
+    source "'"$PRR_PIN"'/scripts/lib.sh"
+    echo ROOT2="$FORTEL2_ROOT"
+  ' 2>"$PRR_FIX/e.err")" && PRR_E_EC=0 || PRR_E_EC=$?
+PRR_E_WARNS="$(grep -c 'WARN: FORTEL2_ROOT=' "$PRR_FIX/e.err" || true)"
+if [[ "$PRR_E_EC" -eq 0 ]] \
+  && echo "$PRR_E_OUT" | grep -q "ROOT1=${PRR_PIN}" \
+  && echo "$PRR_E_OUT" | grep -q "ROOT2=${PRR_PIN}" \
+  && [[ "$PRR_E_WARNS" -eq 1 ]]; then
+  echo "PASS pin-runtime-root re-source is idempotent (one WARN)"
+else
+  echo "FAIL sourcing lib.sh twice must keep the pinned root and emit a single WARN (ec=$PRR_E_EC warns=$PRR_E_WARNS)" >&2
+  echo "$PRR_E_OUT" >&2
+  cat "$PRR_FIX/e.err" >&2
+  fail=1
+fi
+
+# --- (c) deploy-agents.sh .deployer symlink: create / idempotent / refuse / not sepolia dir ---
+PRR_SEED="$PRR_FIX/seed"
+PRR_ORIGIN="$PRR_FIX/origin.git"
+PRR_CDEV="$PRR_FIX/cdev"
+PRR_CPIN="$PRR_FIX/cpinned"
+git init -q -b main "$PRR_SEED"
+mkdir -p "$PRR_SEED/deployments/sepolia"
+printf '%s\n' '{"from":"pinned-seed"}' > "$PRR_SEED/deployments/sepolia/deployments.json"
+printf '%s\n' '{"from":"pinned-seed"}' > "$PRR_SEED/deployments/sepolia/rollup.json"
+printf 'seed\n' > "$PRR_SEED/README"
+printf '.env\n.env.sepolia\ndata/\ndeployments/sepolia/.deployer/\n' > "$PRR_SEED/.gitignore"
+prr_git -C "$PRR_SEED" add README .gitignore deployments
+prr_git -C "$PRR_SEED" commit -q -m seed
+git clone -q --bare "$PRR_SEED" "$PRR_ORIGIN"
+git -C "$PRR_SEED" remote add origin "$PRR_ORIGIN"
+git -C "$PRR_SEED" push -q -u origin main
+mkdir -p "$PRR_CDEV/deployments/sepolia/.deployer"
+printf 'SEPOLIA=1\n' > "$PRR_CDEV/.env.sepolia"
+printf 'LOCAL=1\n' > "$PRR_CDEV/.env"
+printf 'challenger-rollup\n' > "$PRR_CDEV/deployments/sepolia/.deployer/rollup.json"
+
+prr_deploy() {
+  env FORTEL2_AGENTS_DIR="$1" FORTEL2_DEV_DIR="$PRR_CDEV" \
+    FORTEL2_AGENTS_REMOTE="$PRR_ORIGIN" \
+    "$PRR_DEPLOY" 2>&1
+}
+
+PRR_C_OUT="$(prr_deploy "$PRR_CPIN")" && PRR_C_EC=0 || PRR_C_EC=$?
+if [[ "$PRR_C_EC" -eq 0 ]] \
+  && [[ -L "$PRR_CPIN/deployments/sepolia/.deployer" ]] \
+  && [[ "$(readlink "$PRR_CPIN/deployments/sepolia/.deployer")" == "$PRR_CDEV/deployments/sepolia/.deployer" ]] \
+  && [[ -f "$PRR_CPIN/deployments/sepolia/deployments.json" ]] \
+  && [[ ! -L "$PRR_CPIN/deployments/sepolia/deployments.json" ]] \
+  && [[ -d "$PRR_CPIN/deployments/sepolia" ]] \
+  && [[ ! -L "$PRR_CPIN/deployments/sepolia" ]]; then
+  echo "PASS pin-runtime-root deploy-agents creates .deployer symlink and leaves tracked deployments.json"
+else
+  echo "FAIL deploy-agents must symlink .deployer only, not deployments/sepolia (ec=$PRR_C_EC)" >&2
+  echo "$PRR_C_OUT" >&2
+  fail=1
+fi
+
+PRR_C2_OUT="$(prr_deploy "$PRR_CPIN")" && PRR_C2_EC=0 || PRR_C2_EC=$?
+if [[ "$PRR_C2_EC" -eq 0 ]] \
+  && echo "$PRR_C2_OUT" | grep -q 'already' \
+  && [[ -L "$PRR_CPIN/deployments/sepolia/.deployer" ]]; then
+  echo "PASS pin-runtime-root deploy-agents .deployer symlink is idempotent"
+else
+  echo "FAIL second deploy-agents must be idempotent for .deployer (ec=$PRR_C2_EC)" >&2
+  echo "$PRR_C2_OUT" >&2
+  fail=1
+fi
+
+rm -f "$PRR_CPIN/deployments/sepolia/.deployer"
+printf 'regular-file\n' > "$PRR_CPIN/deployments/sepolia/.deployer"
+PRR_CREG="$(prr_deploy "$PRR_CPIN")" && PRR_CREG_EC=0 || PRR_CREG_EC=$?
+if [[ "$PRR_CREG_EC" -ne 0 ]] \
+  && echo "$PRR_CREG" | grep -q 'refusing to overwrite existing file with a symlink'; then
+  echo "PASS pin-runtime-root deploy-agents refuses to replace a regular .deployer with a symlink"
+else
+  echo "FAIL regular .deployer must refuse overwrite (ec=$PRR_CREG_EC)" >&2
+  echo "$PRR_CREG" >&2
+  fail=1
+fi
+
+# Missing dest .deployer must refuse — do not mkdir an empty stand-in (Bugbot).
+PRR_NODEP="$PRR_FIX/nodeployer-dev"
+mkdir -p "$PRR_NODEP"
+printf 'SEPOLIA=1\n' > "$PRR_NODEP/.env.sepolia"
+PRR_NO_OUT="$(
+  env FORTEL2_AGENTS_DIR="$PRR_FIX/nodeployer-pin" FORTEL2_DEV_DIR="$PRR_NODEP" \
+    FORTEL2_AGENTS_REMOTE="$PRR_ORIGIN" \
+    "$PRR_DEPLOY" 2>&1
+)" && PRR_NO_EC=0 || PRR_NO_EC=$?
+if [[ "$PRR_NO_EC" -ne 0 ]] \
+  && [[ ! -e "$PRR_NODEP/deployments/sepolia/.deployer" ]]; then
+  echo "PASS pin-runtime-root deploy-agents refuses when dest .deployer is missing"
+else
+  echo "FAIL missing dest .deployer must refuse, not mkdir an empty dir (ec=$PRR_NO_EC exists=$([[ -e $PRR_NODEP/deployments/sepolia/.deployer ]] && echo y || echo n))" >&2
+  echo "$PRR_NO_OUT" >&2
+  fail=1
+fi
+
+# --- (d) check-launchd FAILs when the required .deployer symlink is missing ---
+PRR_AUDIT="$PRR_FIX/audit"
+PRR_ADEV="$PRR_FIX/adev"
+git init -q -b main "$PRR_AUDIT"
+git -C "$PRR_AUDIT" remote add origin "$PRR_ORIGIN_URL"
+prr_git -C "$PRR_AUDIT" commit -q --allow-empty -m audit
+mkdir -p "$PRR_AUDIT/.git/info" "$PRR_ADEV/data" "$PRR_ADEV/deployments/sepolia/.deployer"
+printf '.env.sepolia\n.env\ndata\ndeployments/sepolia/.deployer\n' >> "$PRR_AUDIT/.git/info/exclude"
+printf 'SEPOLIA=1\n' > "$PRR_ADEV/.env.sepolia"
+ln -s "$PRR_ADEV/.env.sepolia" "$PRR_AUDIT/.env.sepolia"
+ln -s "$PRR_ADEV/data" "$PRR_AUDIT/data"
+PRR_D_OUT="$(
+  env -u FORTEL2_ENV FORTEL2_ROOT="$PRR_REPO" \
+    CHECK_LAUNCHD_AGENTS_DIR="$PRR_FIX/empty-agents" \
+    CHECK_LAUNCHD_PINNED_TREE="$PRR_AUDIT" \
+    CHECK_LAUNCHD_DEV_DIR="$PRR_ADEV" \
+    CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PRR_FIX/no-such-cloudflared.plist" \
+    "$PRR_CL" 2>&1 || true
+)"
+if echo "$PRR_D_OUT" | grep -q 'FAIL  pinned tree deployments/sepolia/.deployer is missing or not a symlink'; then
+  echo "PASS pin-runtime-root check-launchd FAILs a pinned tree missing the .deployer symlink"
+else
+  echo "FAIL check-launchd must FAIL when deployments/sepolia/.deployer is not a symlink" >&2
+  echo "$PRR_D_OUT" >&2
+  fail=1
+fi
+
+# =============================================================================
+# end pin-runtime-root
 # =============================================================================
 
 if (( fail )); then

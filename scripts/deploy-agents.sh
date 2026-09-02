@@ -66,7 +66,7 @@ is_dirty() {
   # for `data/` (trailing slash = directory only). A symlink named data is not
   # a directory, so it would otherwise show as untracked and block every update.
   local leftover
-  leftover="$(git -C "$1" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data)$' || true)"
+  leftover="$(git -C "$1" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|deployments/sepolia/\.deployer)$' || true)"
   [[ -n "$leftover" ]]
 }
 
@@ -136,8 +136,8 @@ ensure_git_exclude() {
 }
 
 # refresh_health.sh writes repo-relative data/; alert-watch.sh reads
-# $FORTEL2_ROOT/data after sourcing .env.sepolia (FORTEL2_ROOT still names
-# the checkout). One symlink keeps those files in the same place.
+# $FORTEL2_ROOT/data. lib.sh now pins FORTEL2_ROOT to this tree, so data/
+# must still be a symlink — the two paths are one file.
 ensure_data_symlink() {
   local src="$DEV/data"
   local dst="$PINNED/data"
@@ -158,6 +158,51 @@ ensure_data_symlink() {
   ln -s "$src" "$dst"
   ensure_git_exclude "data"
   echo "symlink data → $src (created)"
+}
+
+# Nested untracked runtime path (e.g. deployments/sepolia/.deployer).
+# Same refuse-to-overwrite / refuse-to-retarget rules as ensure_env_symlink.
+# $2=1 required when the source is missing (after optional mkdir). $3=1
+# mkdir -p the source first. Always gitignores the symlink via local exclude
+# (trailing-slash gitignore matches directories only — a symlink is dirty).
+ensure_runtime_symlink() {
+  local rel="$1"
+  local required="${2:-0}"
+  local mkdir_src="${3:-0}"
+  local src="$DEV/$rel"
+  local dst="$PINNED/$rel"
+
+  if [[ "$mkdir_src" -eq 1 ]]; then
+    mkdir -p "$src"
+  fi
+
+  if [[ ! -e "$src" && ! -L "$src" ]]; then
+    if [[ "$required" -eq 1 ]]; then
+      die "$rel is missing in the dev checkout ($src) — agents need the untracked runtime artifact"
+    fi
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$dst")"
+
+  if [[ -L "$dst" ]]; then
+    local target
+    target="$(readlink "$dst")"
+    if [[ "$target" == "$src" ]]; then
+      echo "symlink $rel → $src (already)"
+      ensure_git_exclude "$rel"
+      return 0
+    fi
+    die "symlink $dst points at $target, expected $src — refuse to retarget (operator decision)"
+  fi
+
+  if [[ -e "$dst" ]]; then
+    die_regular_env "$dst"
+  fi
+
+  ln -s "$src" "$dst"
+  ensure_git_exclude "$rel"
+  echo "symlink $rel → $src (created)"
 }
 
 REMOTE="$(resolve_remote)"
@@ -217,6 +262,11 @@ fi
 ensure_env_symlink ".env.sepolia" 1
 ensure_env_symlink ".env" 0
 ensure_data_symlink
+# Untracked challenger artifacts (rollup.json / genesis.json). Symlink the
+# subdirectory only — never deployments/sepolia (that would shadow the
+# pinned tracked deployments.json / rollup.json). required=1, mkdir_src=0:
+# a missing dest .deployer must refuse (do not mkdir an empty stand-in).
+ensure_runtime_symlink "deployments/sepolia/.deployer" 1 0
 
 echo
 echo "agents now run:"
