@@ -53,6 +53,7 @@ if [[ "$PRINT_PLAN" -eq 1 ]]; then
   echo "LOG=$(fortel2_live_el_log)"
   if [[ "$(fortel2_el)" == "reth" ]]; then
     echo "PROFILE=${FORTEL2_RETH_PROFILE:-<required sequencer_faultproof>}"
+    echo 'CORS=*'
   fi
   exit 0
 fi
@@ -118,6 +119,7 @@ if [[ "$(fortel2_el)" == "reth" ]]; then
     --http.addr=127.0.0.1 \
     --http.port="${L2_EL_HTTP_PORT}" \
     --http.api=eth,net,web3,debug,txpool \
+    --http.corsdomain="*" \
     --ws \
     --ws.addr=127.0.0.1 \
     --ws.port="${L2_EL_WS_PORT}" \
