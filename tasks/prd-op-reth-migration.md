@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — P:0 + Tasks 1–4 done; **Task 5 cutover HELD 2026-09-02 13:17 (block 473032, D-0120)**, closeout (transfer / auth write / withdrawal / viewer CORS) pending; Task 6 observation running  
+**Status:** In execution — P:0 + **Tasks 1–5 done** (Task 5 cutover 2026-09-02, closed D-0121); Task 6 observation running (≥72 h from 2026-09-02 13:17); Tasks 7–9 unstarted  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
@@ -498,7 +498,8 @@ Answer during Task 1 or 2 unless noted.
 - **Done:** Mini P:0 sidecar (first-N hash-match; `tasks/spike-op-reth.md`). Task 1 pin + assertion (#176, D-0109). Task 2 selector/guards + 852 sidecar start (#178, D-0110). Task 3 safe-head catch-up (lag 0) and 20-sample three-way parity + restart/resume (#184, D-0114; `tasks/task3-op-reth-safe-head-parity.md`).
 - **Done (Task 4, #189, D-0116):** SafeDB post-enable, historical proofs, output-root parity, judged-valid claim, withdrawal initiate+prove from candidate artifacts. Finalize tail = Task 5 gate (D-0116).
 - **Done (Task 5 Phase B, D-0120):** live cutover to op-reth at 473031→473032, two launchd cycles clean on the renamed process set; unsafe-tip behavior now proven by production (reth is the producer).
-- **Not done:** Task 5 end-to-end closeout (L2 transfer, authenticated write, withdrawal on reth, viewer CORS); Render image (Task 7); friend repo (Task 8).
+- **Done (Task 5 closeout, #200/#203, D-0121):** L2 transfer, authenticated write, reth-era withdrawal initiate→prove→finalize on real clocks, viewer CORS on reth.
+- **Not done:** Task 6 sign-off (observation in progress); Render image (Task 7); friend repo (Task 8); geth removal (Task 9).
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The live start path still has no `admin_stopSequencer` helper — Task 5 must add or document the RPC call.
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
