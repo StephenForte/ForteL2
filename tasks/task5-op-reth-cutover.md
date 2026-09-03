@@ -340,7 +340,7 @@ Copied from `tasks/prd-op-reth-migration.md` §10. Unticked rows are unproven or
 - [x] Batcher posts new channel data to Sepolia (first reth channel 473032–473570; nonce 11452→11458+; #201 for the throttle-off start).
 - [x] Proposer posts after cutover (L1 14:05 and 15:05 PT 2026-09-02).
 - [x] Challenger stays up (overnight 1/3 grace death then 2/3; 429s background).
-- [ ] SafeDB queries succeed. **Unticked:** Phase B did not record a live `optimism_safeHeadAtL1Block` on a pre-Task-4 L1 and a post-cutover L1.
+- [x] SafeDB queries succeed (live `:9547`, 2026-09-03). Pre-Task-4 L1 **11600000** → recorded L1 **11599983**, safe L2 **336960** / `0xe79b7e23…`. Post-cutover L1 **11621975** (deposit block) → recorded L1 **11621951**, safe L2 **474026** / `0xe3a1666b…` (after first reth 473032). Current L1 **11627298** → recorded L1 **11627283**, safe L2 **507005** / `0xf1f83269…` (matches viewer SAFE).
 - [ ] Historical proof / withdrawal requirements satisfied. **Unticked:** D-0116 finalize was 2026-09-01 on **geth**. Reth-era initiate/prove/finalize not run.
 
 #### End-to-end
