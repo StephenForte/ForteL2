@@ -28,6 +28,9 @@ Usage: withdraw-prove-sepolia.sh [--dry-run] [artifact.json]
 readiness (not-proven / proven-waiting-until-<ts> / finalizable /
 already-finalized), and sends nothing. Exit 0 only when the next step is
 not-proven.
+
+Live prove waits for a covering dispute game. Sepolia posts hourly, so this
+wrapper defaults PROVE_WAIT_MS=3900000 (65 min). Override to shorten/lengthen.
 EOF
       exit 0
       ;;
@@ -73,6 +76,8 @@ wait_for_rpc "$L2_RPC_URL" "L2"
 export DEPLOYMENTS_JSON
 DEPLOYMENTS_JSON="$(deployments_json_path)"
 export L1_RPC_URL L2_RPC_URL L1_CHAIN_ID L2_CHAIN_ID ADMIN_ADDRESS ADMIN_PRIVATE_KEY
+# Hourly Sepolia proposer: 180s Anvil default would time out. Operator can override.
+export PROVE_WAIT_MS="${PROVE_WAIT_MS:-3900000}"
 
 NODE_ARGS=("$ARTIFACT")
 if [[ "$DRY_RUN" -eq 1 ]]; then

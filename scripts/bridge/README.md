@@ -43,6 +43,10 @@ When `L1_CHAIN_ID=11155111`, `finalize.mjs` **never** calls `evm_increaseTime` o
 
 Max wait: `FINALIZE_REAL_CLOCK_MAX_WAIT_MS` (default **7200000** = 2h). Poll interval: `FINALIZE_REAL_CLOCK_POLL_MS` (default 12000). Exceeding the cap exits nonzero; raise the env var and re-run.
 
+Readiness uses the **later** of `resolvedAt + disputeGameFinalityDelaySeconds` and `proofTimestamp + proofMaturityDelaySeconds` (both on-chain). Proving against an already-resolved game starts the proof-maturity clock after `resolvedAt`.
+
+`withdraw-prove-sepolia.sh` defaults `PROVE_WAIT_MS` to **3900000** (65 min) because the Sepolia proposer posts about once an hour. The Anvil wrapper keeps the 180s default. Override with `PROVE_WAIT_MS`.
+
 Artifacts may carry `l1ChainId` / `l2ChainId`. A 901 artifact on 852 (and vice versa) is refused. Legacy artifacts without those fields are allowed; prove/finalize stamp them on write.
 
 ```bash

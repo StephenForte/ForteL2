@@ -22,6 +22,7 @@ import {
   dryRunExitCode,
   portalReadAbi,
   disputeGameAbi,
+  readProofTimestamp,
 } from './lib.mjs'
 import {
   buildProveWithdrawal,
@@ -96,6 +97,17 @@ if (dryRun) {
         abi: portalReadAbi,
         functionName: 'disputeGameFinalityDelaySeconds',
       })
+      const proofMaturity = await readContract(publicL1, {
+        address: portal,
+        abi: portalReadAbi,
+        functionName: 'proofMaturityDelaySeconds',
+      })
+      const proofTimestamp = await readProofTimestamp(
+        publicL1,
+        portal,
+        withdrawal.withdrawalHash,
+        account.address,
+      )
       const block = await publicL1.getBlock()
       classification = classifyFinalizeReadiness({
         finalized,
@@ -104,6 +116,8 @@ if (dryRun) {
         resolvedAt: Number(resolvedAt),
         finalityDelaySeconds: Number(finalityDelay),
         l1HeadTimestamp: Number(block.timestamp),
+        proofTimestamp: proofTimestamp ?? (artifact.provenAt != null ? Number(artifact.provenAt) : null),
+        proofMaturityDelaySeconds: Number(proofMaturity),
       })
     } catch (e) {
       console.log('game/portal classify note:', e?.shortMessage || e?.message || e)
@@ -237,8 +251,9 @@ const proveHash = await proveWithdrawal(walletL1, {
   withdrawalProof: proveArgs.withdrawalProof,
   withdrawal: proveArgs.withdrawal,
   // Local Anvil fees can be zero; pin a floor so the tx is accepted.
-  maxFeePerGas: 1_500_000_000n,
-  maxPriorityFeePerGas: 1_000_000_000n,
+  // Sepolia: override L1_MAX_FEE_PER_GAS / L1_MAX_PRIORITY_FEE_PER_GAS if base fee is higher.
+  maxFeePerGas: BigInt(process.env.L1_MAX_FEE_PER_GAS || 1_500_000_000),
+  maxPriorityFeePerGas: BigInt(process.env.L1_MAX_PRIORITY_FEE_PER_GAS || 1_000_000_000),
 })
 
 console.log('L1 prove tx:', proveHash)

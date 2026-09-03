@@ -349,6 +349,63 @@ export function proxyFromGameAtIndexResult(result, gameIndex = 0) {
  * Resolve dispute-game proxy address from factory index.
  * viem getGame()/findLatestGames do not include `proxy` — only gameAtIndex does.
  */
+/**
+ * On-chain proof timestamp for a withdrawal (OptimismPortal.provenWithdrawals).
+ * Returns null when no proof is recorded for the submitter / first submitter.
+ */
+export async function readProofTimestamp(
+  publicClient,
+  portal,
+  withdrawalHash,
+  preferredSubmitter,
+) {
+  try {
+    const n = await readContract(publicClient, {
+      address: portal,
+      abi: portalReadAbi,
+      functionName: 'numProofSubmitters',
+      args: [withdrawalHash],
+    })
+    if (n === 0n) return null
+    let submitter = preferredSubmitter
+    if (!submitter) {
+      submitter = await readContract(publicClient, {
+        address: portal,
+        abi: portalReadAbi,
+        functionName: 'proofSubmitters',
+        args: [withdrawalHash, 0n],
+      })
+    }
+    const result = await readContract(publicClient, {
+      address: portal,
+      abi: portalReadAbi,
+      functionName: 'provenWithdrawals',
+      args: [withdrawalHash, submitter],
+    })
+    const ts = result?.timestamp ?? result?.[1]
+    if (ts != null && Number(ts) > 0) return Number(ts)
+    if (preferredSubmitter) {
+      const first = await readContract(publicClient, {
+        address: portal,
+        abi: portalReadAbi,
+        functionName: 'proofSubmitters',
+        args: [withdrawalHash, 0n],
+      })
+      const retry = await readContract(publicClient, {
+        address: portal,
+        abi: portalReadAbi,
+        functionName: 'provenWithdrawals',
+        args: [withdrawalHash, first],
+      })
+      const ts2 = retry?.timestamp ?? retry?.[1]
+      if (ts2 != null && Number(ts2) > 0) return Number(ts2)
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 export async function resolveGameProxy(publicClient, factoryAddress, gameIndex) {
   const result = await readContract(publicClient, {
     address: factoryAddress,

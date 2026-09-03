@@ -22,6 +22,7 @@ import {
   portalFinalizeAbi,
   sleep,
   resolveGameProxy,
+  readProofTimestamp,
   parseBridgeArgs,
   assertArtifactChainIds,
   stampArtifactChainIds,
@@ -169,6 +170,12 @@ async function snapshot() {
   const { status, resolvedAt, createdAt, maxClock } = await readGameFields()
   const { finalized, proven } = await readPortalFlags()
   const head = await l1HeadTimestamp()
+  const proofTimestamp = await readProofTimestamp(
+    publicL1,
+    portal,
+    withdrawalHash,
+    account.address,
+  )
   return {
     finalized,
     proven,
@@ -178,6 +185,8 @@ async function snapshot() {
     l1HeadTimestamp: head,
     createdAt: Number(createdAt),
     maxClockDuration: Number(maxClock),
+    proofTimestamp: proofTimestamp ?? (artifact.provenAt != null ? Number(artifact.provenAt) : null),
+    proofMaturityDelaySeconds: Number(proofDelay),
   }
 }
 

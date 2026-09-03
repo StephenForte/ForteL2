@@ -9611,6 +9611,13 @@ else
   fail=1
 fi
 
+if grep -q 'PROVE_WAIT_MS:-3900000' "$WD_PROVE"; then
+  echo "PASS withdraw-prove-sepolia.sh defaults PROVE_WAIT_MS to 65 min"
+else
+  echo "FAIL Sepolia prove wrapper must default PROVE_WAIT_MS for hourly games" >&2
+  fail=1
+fi
+
 if grep -q 'ARTIFACT" != /\*' "$WD_PROVE" && grep -q 'ARTIFACT" != /\*' "$WD_FIN"; then
   echo "PASS sepolia withdraw wrappers make artifact path absolute"
 else
@@ -9624,6 +9631,15 @@ if grep -q 'isRealClockL1' "$SCRIPT_DIR/bridge/finalize.mjs" \
   echo "PASS finalize.mjs/lib.mjs refuse warp on Sepolia L1"
 else
   echo "FAIL Sepolia path must refuse evm_mine / evm_increaseTime" >&2
+  fail=1
+fi
+
+if grep -q 'proofTimestamp' "$SCRIPT_DIR/bridge/finalize.mjs" \
+  && grep -q 'proofMaturityDelaySeconds' "$SCRIPT_DIR/bridge/finalize.mjs" \
+  && grep -q 'readProofTimestamp' "$SCRIPT_DIR/bridge/finalize.mjs"; then
+  echo "PASS finalize snapshot includes proof maturity"
+else
+  echo "FAIL finalize snapshot must pass proofTimestamp + proofMaturityDelaySeconds" >&2
   fail=1
 fi
 

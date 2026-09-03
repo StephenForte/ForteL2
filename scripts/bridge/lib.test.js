@@ -337,6 +337,31 @@ describe("classifyFinalizeReadiness / dry-run states", () => {
     assert.equal(dryRunExitCode(c.verdict, "finalizable"), 1);
   });
 
+  it("waits for the later of proof maturity and finality delay", () => {
+    const waiting = classifyFinalizeReadiness({
+      finalized: false,
+      proven: true,
+      gameStatus: GAME_DEFENDER_WINS,
+      resolvedAt: 1000,
+      finalityDelaySeconds: 1800,
+      l1HeadTimestamp: 3000,
+      proofTimestamp: 1500,
+      proofMaturityDelaySeconds: 1800,
+    });
+    assert.equal(waiting.verdict, "proven-waiting-until-3300");
+    const ready = classifyFinalizeReadiness({
+      finalized: false,
+      proven: true,
+      gameStatus: GAME_DEFENDER_WINS,
+      resolvedAt: 1000,
+      finalityDelaySeconds: 1800,
+      l1HeadTimestamp: 3300,
+      proofTimestamp: 1500,
+      proofMaturityDelaySeconds: 1800,
+    });
+    assert.equal(ready.verdict, "finalizable");
+  });
+
   it("finalizable when DEFENDER_WINS and delay has passed", () => {
     const resolvedAt = 1_000_000 - 1800;
     const c = classifyFinalizeReadiness({
