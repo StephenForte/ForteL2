@@ -277,6 +277,12 @@ export function classifyFinalizeReadiness({
     return { verdict: `proven-waiting-until-${readyAt}`, readyAt }
   }
 
+  // Swallowed RPC reads become 0n. DEFENDER_WINS + resolvedAt 0 would make
+  // readyAt = 0 + delay, which is always in the past (fail-open).
+  if (resolvedAt == null || Number(resolvedAt) === 0) {
+    return { verdict: 'unknown-resolvedAt', readyAt: null, error: 'resolvedAt unreadable or zero' }
+  }
+
   readyAt = finalizeReadyAt(resolvedAt, finalityDelaySeconds)
   if (proofTimestamp != null && proofMaturityDelaySeconds != null) {
     const proofReady = Number(proofTimestamp) + Number(proofMaturityDelaySeconds)
@@ -316,7 +322,11 @@ export async function waitUntilRealClockReady({
     const snap = await getSnapshot()
     last = classifyFinalizeReadiness(snap)
     if (last.verdict === 'finalizable') return last
-    if (last.verdict === 'already-finalized' || last.verdict === 'not-proven') {
+    if (
+      last.verdict === 'already-finalized' ||
+      last.verdict === 'not-proven' ||
+      last.verdict === 'unknown-resolvedAt'
+    ) {
       return last
     }
     if (last.error === 'CHALLENGER_WINS') return last

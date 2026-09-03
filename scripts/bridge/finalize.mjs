@@ -264,6 +264,7 @@ if (isRealClockL1()) {
     process.exit(1)
   }
   console.log('readiness:', classification.verdict)
+  // Send path: only finalizable. unknown-resolvedAt / waiting / already-finalized all refuse.
   if (classification.verdict !== 'finalizable') {
     console.error(
       `ERROR: refuse finalize — need DEFENDER_WINS + disputeGameFinalityDelaySeconds (got ${classification.verdict})`,

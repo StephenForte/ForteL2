@@ -390,6 +390,24 @@ describe("classifyFinalizeReadiness / dry-run states", () => {
     assert.equal(dryRunExitCode(c.verdict, "finalizable"), 1);
   });
 
+  it("DEFENDER_WINS + resolvedAt 0 (swallowed read) is not finalizable", () => {
+    const c = classifyFinalizeReadiness({
+      finalized: false,
+      proven: true,
+      gameStatus: 2,
+      resolvedAt: 0n,
+      finalityDelaySeconds: 1800,
+      l1HeadTimestamp: 1788474228,
+      proofTimestamp: 1788400000,
+      proofMaturityDelaySeconds: 0,
+      createdAt: 1788460000n,
+      maxClockDuration: 7200n,
+    });
+    assert.equal(c.verdict, "unknown-resolvedAt");
+    assert.equal(c.error, "resolvedAt unreadable or zero");
+    assert.equal(dryRunExitCode(c.verdict, "finalizable"), 1);
+  });
+
   it("CHALLENGER_WINS is not finalizable", () => {
     const c = classifyFinalizeReadiness({
       ...base,
@@ -456,6 +474,29 @@ describe("real-clock wait logic", () => {
     });
     assert.equal(classification.verdict, "finalizable");
     assert.equal(n, 2);
+  });
+
+  it("waitUntilRealClockReady returns unknown-resolvedAt instead of finalizable", async () => {
+    const classification = await waitUntilRealClockReady({
+      getSnapshot: async () => ({
+        finalized: false,
+        proven: true,
+        gameStatus: GAME_DEFENDER_WINS,
+        resolvedAt: 0n,
+        finalityDelaySeconds: 1800,
+        l1HeadTimestamp: 1788474228,
+        proofTimestamp: 1788400000,
+        proofMaturityDelaySeconds: 0,
+      }),
+      maxWaitMs: 10_000,
+      pollMs: 1,
+      sleepFn: async () => {
+        throw new Error("must not poll after unknown-resolvedAt");
+      },
+      nowFn: () => 0,
+    });
+    assert.equal(classification.verdict, "unknown-resolvedAt");
+    assert.notEqual(classification.verdict, "finalizable");
   });
 
   it("waitUntilRealClockReady throws when max wait is exceeded (can go red)", async () => {
