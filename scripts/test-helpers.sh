@@ -6624,11 +6624,12 @@ GETH_SEP_CORS="$( "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" --print-plan 2>&1 
 if echo "$RETH_SEP_OUT" | grep -q 'CORS=\*' \
   && ! echo "$GETH_SEP_CORS" | grep -q 'CORS=' \
   && awk '
-       /start_bg op-reth/ { reth_start=1 }
-       reth_start && /--http.corsdomain="\*"/ { reth_flag=1 }
-       /start_bg op-geth/ { geth_start=1 }
-       geth_start && /--http.corsdomain="\*"/ { geth_flag=1 }
-       END { exit !(reth_start && reth_flag && geth_start && geth_flag) }
+       /start_bg op-reth/ { in_reth=1 }
+       in_reth && /--http.corsdomain="\*"/ { reth_flag=1 }
+       in_reth && /exit 0/ { in_reth=0 }
+       /start_bg op-geth/ { in_geth=1 }
+       in_geth && /--http.corsdomain="\*"/ { geth_flag=1 }
+       END { exit !(reth_flag && geth_flag) }
      ' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
   echo "PASS reth --print-plan and start_bg include --http.corsdomain=*"
 else
