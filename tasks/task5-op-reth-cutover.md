@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS. Closeout deposit PASS (2026-09-03). Smoke / Access write / reth withdrawal not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Two launchd cycles on the renamed set. Live `#203` bounce: pause tip **507288** / `0xb391d74d…`; first new block **507289** parent match; viewer LIVE. Closeout deposit L1 tx `0x0bacc586…` (+0.01 ETH ADMIN L2). **STATUS complete is not true** until smoke-transfer, Access authenticated write, and L2→L1 withdrawal on reth are evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS. Closeout deposit + smoke-transfer PASS (2026-09-03). Access write / reth withdrawal not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Two launchd cycles on the renamed set. Live `#203` bounce: pause tip **507288**; first new block **507289** parent match; viewer LIVE. Closeout deposit L1 `0x0bacc586…`. Smoke L2 `0xf15d5ac8…`. **STATUS complete is not true** until Access authenticated write and L2→L1 withdrawal on reth are evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -315,7 +315,7 @@ Three sends still keep STATUS incomplete. CORS bounce is closed below.
 
 | Item | Evidence as of 2026-09-03 08:05 PT |
 |---|---|
-| `smoke-transfer.sh` | Not run. DEMO_A funded (see below); waiting on Steve go for `smoke-transfer.sh`. |
+| `smoke-transfer.sh` | **PASS 2026-09-03** — see smoke section. |
 | Access authenticated write | Unauthenticated GET / `eth_chainId` to `https://fortel2-write.ente.ltd` → **HTTP 403**. Authenticated signed tx not run (operator CF Access service-token headers; do not paste). |
 | L2→L1 withdrawal on reth | Not run. Stock `withdraw-*.sh` / `finalize.mjs` are Anvil-local (`assert_local_rpc_urls` + `evm_increaseTime`) — forbidden on Sepolia. |
 | Viewer CORS | **PASS 2026-09-03 ~08:04 PT.** See bounce section. |
@@ -346,6 +346,17 @@ Steve `go`. Sent **0.01 ether** (not 0.0105 — ADMIN L2 after the deposit was 1
 | DEMO_A before | 499993317017894 wei |
 | DEMO_A after | 10499993317017894 wei (**+1e16**) |
 | ADMIN L2 after | 498979044744876 wei (value + gas) |
+
+### Closeout — smoke-transfer on reth (2026-09-03) — PASS
+
+Steve `go`. `FORTEL2_ENV=.env.sepolia ./scripts/smoke-transfer.sh` → exit 0. Live EL op-reth.
+
+| Item | Value |
+|---|---|
+| L2 tx | `0xf15d5ac860a0fac78d54fd38b4103fb429d4c69f172fb9f98485c9ac13c997c8` |
+| Receipt | status 1, L2 block **510093** |
+| DEMO_A | 10499993317017894 → 499986613572233 wei (0.01 + gas) |
+| DEMO_B | 10000000000000000 → **20000000000000000** wei (**+1e16**) |
 
 ### Closeout — viewer CORS bounce (2026-09-03 08:03–08:05 PT) — PASS
 
@@ -386,7 +397,7 @@ Copied from `tasks/prd-op-reth-migration.md` §10. Unticked rows are unproven or
 
 #### End-to-end
 
-- [ ] Ordinary L2 transfer (`scripts/smoke-transfer.sh`).
+- [x] Ordinary L2 transfer (`scripts/smoke-transfer.sh`) 2026-09-03 on live reth. L2 tx `0xf15d5ac8…`, DEMO_B +1e16 wei.
 - [x] L1→L2 deposit (`deposit-eth-sepolia.sh`) 2026-09-02 13:40 PT, L1 tx `0xfcc9f786…`.
 - [ ] L2→L1 initiate/prove/finalize on reth.
 - [ ] Authenticated SettlementOS submit + receipt poll (Access write hostname).
