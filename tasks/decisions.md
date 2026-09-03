@@ -1059,6 +1059,13 @@
 - **Decision:** Cutover HELD; the geth datadir stays the rollback asset through Task 6. Task 5 is **not yet closed**: PRD §8 success requires deposit ✅, ordinary L2 transfer ❌ (never run), authenticated write ❌, L2→L1 withdrawal on reth ❌ — plus a real §10 defect: the reth sequencer start lacks `--http.corsdomain` (geth had `"*"`), so the viewer cannot read :9545. One closeout dispatch covers all four plus the evidence file's §10 walk and overnight section; STATUS complete follows it. Task 6's ≥72 h / ≥2-cycle observation clock started 13:17 on 2026-09-02.
 - **Consequence:** Next free decision id is **D-0121**.
 
+### D-0121 — **Task 5 CLOSED: every PRD §8 success check passes on op-reth; withdrawal finalized on real clocks; reth CORS gap fixed (#203)**
+- **Context:** Closeout dispatch 2026-09-03 (~08:00–13:00 PT), all sends operator-approved in-session; evidence PR #200, fix PR #203. Reth sequencer start gained `--http.corsdomain="*"` (parity with geth); the EL+node bounce to apply it kept continuity (507289.parentHash == 507288.hash).
+- **Verified on-chain by the planner (independent provider for L1, :9545 for L2):** deposit `0x0bacc586…` L1 status 1 @ 11627725; smoke-transfer `0xf15d5ac8…` L2 status 1; Access authenticated write `0x9aaf10bf…` L2 status 1 (unauthenticated host still 403); withdrawal initiate `0x1d3c00cc…` L2 → prove `0x14689fcd…` L1 @ 11628188 → resolve ×2 on game 266 → **finalize `0x4fd6facf…` L1 @ 11628910; portal `finalizedWithdrawals(0xe4f01f75…52f7) = true`** — real `maxClockDuration` + finality delay, no time-warp. CORS header live on :9545. #203 gate 531/0; cursor[bot] test-scoping finding fixed and red-proven.
+- **§10 walk:** 41 items ticked with evidence; 5 unticked with stated reasons (sidecar stopped at cutover; Guestbook is the Phase 1 local demo; Render/friend items are Tasks 7–8).
+- **Decision:** Task 5 STATUS complete. PRD §8 Success met in full: first reth block extends the recorded parent, no tx lost, batcher posts, proposer roots as expected, challenger healthy, deposit / L2 transfer / authenticated write / withdrawal pass. The op-geth datadir remains the rollback asset until Task 6 signs off (≥72 h from 2026-09-02 13:17, ≥2 launchd cycles — two already clean). Task 7 (Render replica on a new service/disk) is next after Task 6.
+- **Consequence:** Next free decision id is **D-0122**.
+
 ---
 
 ## Escalations
