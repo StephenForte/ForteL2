@@ -12,7 +12,7 @@ Base-style rollups don't have PoS validators. The roles here are:
 
 | Component | Role | Implementation |
 |---|---|---|
-| **Sequencer** | Orders transactions, builds L2 blocks | op-node + op-geth (sequencer mode) |
+| **Sequencer** | Orders transactions, builds L2 blocks | op-node + **op-reth** (sequencer mode; live since 2026-09-02, `FORTEL2_EL=reth`; op-geth datadir kept as the rollback asset) |
 | **Batcher** | Compresses L2 tx data, posts it to L1 | op-batcher → custom rebuild (Phase 4) |
 | **Proposer** | Posts L2 state output roots to L1 | op-proposer → custom rebuild (Phase 5) |
 | **Replica / verifier** | Derives the L2 independently from L1 data | stock op-node + EL (verifier mode); remote on Render, then friend-operated |
@@ -35,7 +35,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | ✅ Done |
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap; no redeploy) | ✅ Done |
 | **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
-| **EL** | **op-geth → op-reth** (parallel; not a phase number) | P:0 done — [`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); Mini sidecar `--blocks 5` PASS; no sequencer cutover until Task 5 |
+| **EL** | **op-geth → op-reth** (parallel; not a phase number) | **Tasks 1–5 done — cutover HELD 2026-09-02** (block 473032, [D-0120](tasks/decisions.md)); [`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); closeout + Task 6 observation in progress |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned — runbook [`replica/FRIENDS.md`](replica/FRIENDS.md); recruiting is operator-owned |
 | **4** | **Reimplement the batcher** from scratch; swap out op-batcher | ✅ Done — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/); `USE_CUSTOM_BATCHER=1` opt-in |
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | ✅ Done — [`tasks/prd-phase-5-proposer.md`](tasks/prd-phase-5-proposer.md) + [`proposer/`](proposer/); `USE_CUSTOM_PROPOSER=1` opt-in |
@@ -134,7 +134,7 @@ flowchart LR
     DGF[DisputeGameFactory]
   end
   subgraph Seq["Sequencer"]
-    Geth["op-geth :9545"]
+    Geth["op-reth :9545 (op-geth until 2026-09-02)"]
     Node["op-node :9547"]
     Node -->|engine API + JWT| Geth
   end
@@ -152,8 +152,8 @@ flowchart LR
 
 ## Roles (who does what)
 
-- **op-geth** — L2 execution client (EVM, state, tx pool). Engine API on `:9551`.
-- **op-node** — consensus / derivation / sequencing. With `--sequencer.enabled` it builds L2 blocks and drives op-geth. `--l2.enginekind=geth`.
+- **op-reth** — L2 execution client (EVM, state, tx pool), live since 2026-09-02 via `FORTEL2_EL=reth` (D-0120). Engine API on `:9551`. The op-geth datadir stays on disk as the rollback asset (`scripts/rollback-to-geth-sepolia.sh`, verifier-first).
+- **op-node** — consensus / derivation / sequencing. With `--sequencer.enabled` it builds L2 blocks and drives the EL. `--l2.enginekind` follows the selector (`reth` live; `geth` on rollback).
 - **op-batcher** — compresses L2 tx data into frames and posts them to L1 (here: calldata to the batch inbox).
 - **op-proposer** — posts L2 output roots to L1 via DisputeGameFactory so withdrawals can later be proven (Phase 1b).
 
@@ -716,11 +716,11 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 ### Write RPC filter (T5-D1 — eth/net/web3 allowlist)
 
-op-geth cannot run a second HTTP listener, so the narrow write surface is a **loopback JSON-RPC proxy** (`scripts/rpc-method-filter.py`), not a second geth.
+The EL cannot run a second HTTP listener, so the narrow write surface is a **loopback JSON-RPC proxy** (`scripts/rpc-method-filter.py`), not a second EL.
 
 | Port | Process | Surface | Who uses it |
 |---|---|---|---|
-| **9545** (`L2_EL_HTTP_PORT` / `L2_RPC_URL`) | op-geth | Full `eth,net,web3,debug,txpool,admin,miner` | Operator tooling on the mini |
+| **9545** (`L2_EL_HTTP_PORT` / `L2_RPC_URL`) | op-reth (live EL) | `eth,net,web3,debug,txpool` — no `admin`/`miner` namespace on reth (`miner_setMaxDASize` absent → batcher throttle-off under reth, #201) | Operator tooling on the mini |
 | **9555** (`L2_WRITE_RPC_PORT`) | `l2-rpc-filter` | Explicit eth/net/web3 **method allowlist** only | `cloudflared` origin (dashboard-managed system LaunchDaemon). Never publish `:9545`. |
 
 **Availability:** the sequencer (and therefore this filter’s upstream) is stopped nightly **23:45–03:00** `America/Los_Angeles` (D-0026). There is no uptime commitment.
@@ -1000,8 +1000,8 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 | Component | Log file | Known-good line |
 |---|---|---|
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
-| op-geth | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
-| op-reth (opt-in sidecar) | `data/logs/op-reth.log` | JSON-RPC / `Starting` — not the live EL until Task 5 |
+| op-geth (rollback asset; not running since 2026-09-02) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
+| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | `reth 2.3.0-dev (9384bc5) starting` / `Status … latest_block=` |
 | op-reth-node (sidecar) | `data/logs/op-reth-node.log` | `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
