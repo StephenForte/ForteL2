@@ -6620,23 +6620,85 @@ fi
 # Viewer Sequencer card needs CORS on the live EL. Geth already has
 # --http.corsdomain="*" on start_bg. Reth must too (print-plan + start argv).
 # Geth --print-plan stays without CORS= so that path is unchanged.
+#
+# start_bg window is the backslash continuation only. A sticky flag after
+# `start_bg op-reth` used to let geth's later --http.corsdomain="*" set
+# reth_flag; closing at `exit 0` still counted a decoy echo in the reth
+# if-block. Comments do not count. `start_bg op-reth ` does not match
+# `start_bg op-reth-node`.
+start_bg_has_http_corsdomain() {
+  local script="$1" name="$2"
+  awk -v name="$name" '
+    function ends_cont() { return $0 ~ /\\[[:space:]]*$/ }
+    index($0, "start_bg " name " ") && $0 !~ /^[[:space:]]*#/ { in_block = 1 }
+    in_block && $0 !~ /^[[:space:]]*#/ && /--http.corsdomain="\*"/ { found = 1 }
+    in_block && !ends_cont() { in_block = 0 }
+    END { exit !found }
+  ' "$script"
+}
+
 GETH_SEP_CORS="$( "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" --print-plan 2>&1 )" || true
 if echo "$RETH_SEP_OUT" | grep -q 'CORS=\*' \
-  && ! echo "$GETH_SEP_CORS" | grep -q 'CORS=' \
-  && awk '
-       /start_bg op-reth/ { in_reth=1 }
-       in_reth && /--http.corsdomain="\*"/ { reth_flag=1 }
-       in_reth && /exit 0/ { in_reth=0 }
-       /start_bg op-geth/ { in_geth=1 }
-       in_geth && /--http.corsdomain="\*"/ { geth_flag=1 }
-       END { exit !(reth_flag && geth_flag) }
-     ' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
-  echo "PASS reth --print-plan and start_bg include --http.corsdomain=*"
+  && ! echo "$GETH_SEP_CORS" | grep -q 'CORS='; then
+  echo "PASS reth --print-plan emits CORS=* and geth plan does not"
 else
-  echo "FAIL reth live start must pass --http.corsdomain=* (print-plan CORS=*)" >&2
+  echo "FAIL reth --print-plan must emit CORS=* (geth plan must omit CORS=)" >&2
   echo "$RETH_SEP_OUT" >&2
+  echo "$GETH_SEP_CORS" >&2
   fail=1
 fi
+if start_bg_has_http_corsdomain "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" op-reth \
+  && start_bg_has_http_corsdomain "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" op-geth; then
+  echo "PASS reth and geth start_bg include --http.corsdomain=*"
+else
+  echo "FAIL live start_bg argv must pass --http.corsdomain=* on op-reth and op-geth" >&2
+  fail=1
+fi
+
+# Mutation: dropping only the reth start_bg flag must go red. print-plan
+# CORS=* and geth's later --http.corsdomain="*" must not keep this green.
+CORS_MUT="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-cors-mut.XXXXXX")"
+cp "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" "$CORS_MUT/start.sh"
+if python3 - "$CORS_MUT/start.sh" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+out = []
+in_reth = False
+dropped = 0
+for line in p.read_text().splitlines(keepends=True):
+    raw = line.lstrip()
+    if (not raw.startswith("#")) and "start_bg op-reth " in line:
+        in_reth = True
+    if in_reth and (not raw.startswith("#")) and "--http.corsdomain=" in line:
+        dropped += 1
+        continue
+    out.append(line)
+    if in_reth and not line.rstrip().endswith("\\"):
+        in_reth = False
+if dropped != 1:
+    raise SystemExit(f"expected to drop 1 reth corsdomain line, dropped {dropped}")
+p.write_text("".join(out))
+PY
+then
+  if start_bg_has_http_corsdomain "$CORS_MUT/start.sh" op-reth; then
+    echo "FAIL dropping reth start_bg --http.corsdomain=* must go red" >&2
+    fail=1
+  else
+    echo "PASS dropping reth start_bg --http.corsdomain=* goes red"
+  fi
+  if start_bg_has_http_corsdomain "$CORS_MUT/start.sh" op-geth; then
+    echo "PASS mutated copy still has geth --http.corsdomain=*"
+  else
+    echo "FAIL mutation must not strip geth --http.corsdomain=*" >&2
+    fail=1
+  fi
+else
+  echo "FAIL cors mutation could not drop the reth start_bg flag" >&2
+  fail=1
+fi
+rm -rf "$CORS_MUT"
 
 # enginekind=geth under FORTEL2_EL=reth fails (helper — can go red).
 RETH_EK_OUT="$(
