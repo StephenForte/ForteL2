@@ -6617,6 +6617,26 @@ else
   fail=1
 fi
 
+# Viewer Sequencer card needs CORS on the live EL. Geth already has
+# --http.corsdomain="*" on start_bg. Reth must too (print-plan + start argv).
+# Geth --print-plan stays without CORS= so that path is unchanged.
+GETH_SEP_CORS="$( "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" --print-plan 2>&1 )" || true
+if echo "$RETH_SEP_OUT" | grep -q 'CORS=\*' \
+  && ! echo "$GETH_SEP_CORS" | grep -q 'CORS=' \
+  && awk '
+       /start_bg op-reth/ { reth_start=1 }
+       reth_start && /--http.corsdomain="\*"/ { reth_flag=1 }
+       /start_bg op-geth/ { geth_start=1 }
+       geth_start && /--http.corsdomain="\*"/ { geth_flag=1 }
+       END { exit !(reth_start && reth_flag && geth_start && geth_flag) }
+     ' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
+  echo "PASS reth --print-plan and start_bg include --http.corsdomain=*"
+else
+  echo "FAIL reth live start must pass --http.corsdomain=* (print-plan CORS=*)" >&2
+  echo "$RETH_SEP_OUT" >&2
+  fail=1
+fi
+
 # enginekind=geth under FORTEL2_EL=reth fails (helper — can go red).
 RETH_EK_OUT="$(
   FORTEL2_EL=reth
