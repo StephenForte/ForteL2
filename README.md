@@ -35,7 +35,7 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | ✅ Done |
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap; no redeploy) | ✅ Done |
 | **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
-| **EL** | **op-geth → op-reth** (parallel; not a phase number) | **Tasks 1–5 done — cutover HELD 2026-09-02** (block 473032, [D-0120](tasks/decisions.md)); [`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); closeout + Task 6 observation in progress |
+| **EL** | **op-geth → op-reth** (parallel; not a phase number) | **Tasks 1–5 done — cutover HELD 2026-09-02** (block 473032, [D-0120](tasks/decisions.md)); [`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); closeout done ([D-0121](tasks/decisions.md)); Task 6 observation in progress |
 | **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned — runbook [`replica/FRIENDS.md`](replica/FRIENDS.md); recruiting is operator-owned |
 | **4** | **Reimplement the batcher** from scratch; swap out op-batcher | ✅ Done — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/); `USE_CUSTOM_BATCHER=1` opt-in |
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | ✅ Done — [`tasks/prd-phase-5-proposer.md`](tasks/prd-phase-5-proposer.md) + [`proposer/`](proposer/); `USE_CUSTOM_PROPOSER=1` opt-in |
