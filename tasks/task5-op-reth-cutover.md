@@ -318,7 +318,7 @@ These four are why STATUS is not complete. CORS code is #203 (`fix/reth-sequence
 | `smoke-transfer.sh` | Not run. DEMO_A L2 too small for the hard-coded `0.01ether` (needs a deposit or fund first). |
 | Access authenticated write | Unauthenticated GET / `eth_chainId` to `https://fortel2-write.ente.ltd` → **HTTP 403**. Authenticated signed tx not run (operator CF Access service-token headers; do not paste). |
 | L2→L1 withdrawal on reth | Not run. Stock `withdraw-*.sh` / `finalize.mjs` are Anvil-local (`assert_local_rpc_urls` + `evm_increaseTime`) — forbidden on Sepolia. |
-| Viewer CORS | Reth start on **main** has no `--http.corsdomain=*`. #203 adds it. Live EL+node bounce **not** done. Viewer Sequencer card unread this window. |
+| Viewer CORS | **Pre-bounce defect confirmed 2026-09-03 ~07:59 PT.** `serve-viewer.sh` on `:8081` (Sepolia config): Sequencer **STALE** “Sequencer RPC failed: Failed to fetch”; Aggregate same. Browser `fetch` to `:9545` → `TypeError: Failed to fetch`. `:9547` OPTIONS **204** `Access-Control-Allow-Origin: *` (heads still render from op-node). `:9545` OPTIONS **405** with no CORS headers (curl POST still 200 — curl is not a browser). #203 adds `--http.corsdomain=*`. Live EL+node bounce **not** done. |
 
 ### §10 checklist (PRD closed list; tick only with evidence)
 
