@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B cutover held (2026-09-02). Overnight PASS; closeout not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Deposit PASS. Two launchd cycles on the renamed set (manual 15:28/15:31 + scheduled 23:45/03:00). **STATUS complete is not true** until smoke-transfer, Access authenticated write, L2→L1 withdrawal on reth, and a live viewer CORS bounce (#203) are evidenced. Phase A remains merged (#192/#193/#195). #201 (batcher reth throttle) merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS (2026-09-03). Closeout sends not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Deposit PASS. Two launchd cycles on the renamed set. Live `#203` bounce: pause tip **507288** / `0xb391d74d…`; first new block **507289** parent match; `:9545` OPTIONS now `Access-Control-Allow-Origin: *`; viewer LIVE. **STATUS complete is not true** until smoke-transfer, Access authenticated write, and L2→L1 withdrawal on reth are evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -311,14 +311,28 @@ Two launchd cycles on the renamed process set are on record. #201 merged 15:11 P
 
 ### Closeout still open (2026-09-03 morning)
 
-These four are why STATUS is not complete. CORS code is #203 (`fix/reth-sequencer-corsdomain`); live bounce and every L1/L2 send wait for Steve go.
+Three sends still keep STATUS incomplete. CORS bounce is closed below.
 
-| Item | Evidence as of 2026-09-03 morning |
+| Item | Evidence as of 2026-09-03 08:05 PT |
 |---|---|
 | `smoke-transfer.sh` | Not run. DEMO_A L2 too small for the hard-coded `0.01ether` (needs a deposit or fund first). |
 | Access authenticated write | Unauthenticated GET / `eth_chainId` to `https://fortel2-write.ente.ltd` → **HTTP 403**. Authenticated signed tx not run (operator CF Access service-token headers; do not paste). |
 | L2→L1 withdrawal on reth | Not run. Stock `withdraw-*.sh` / `finalize.mjs` are Anvil-local (`assert_local_rpc_urls` + `evm_increaseTime`) — forbidden on Sepolia. |
-| Viewer CORS | **Pre-bounce defect confirmed 2026-09-03 ~07:59 PT.** `serve-viewer.sh` on `:8081` (Sepolia config): Sequencer **STALE** “Sequencer RPC failed: Failed to fetch”; Aggregate same. Browser `fetch` to `:9545` → `TypeError: Failed to fetch`. `:9547` OPTIONS **204** `Access-Control-Allow-Origin: *` (heads still render from op-node). `:9545` OPTIONS **405** with no CORS headers (curl POST still 200 — curl is not a browser). #203 adds `--http.corsdomain=*`. Live EL+node bounce **not** done. |
+| Viewer CORS | **PASS 2026-09-03 ~08:04 PT.** See bounce section. |
+
+### Closeout — viewer CORS bounce (2026-09-03 08:03–08:05 PT) — PASS
+
+Steve `go` for EL+node-only bounce. Did **not** run stock `04-start-sequencer-sepolia.sh` (`assert_l2_ports_free` also wants batcher/proposer ports empty). Did not `debug_setHead`, wipe, or flip `FORTEL2_EL`.
+
+**Before (08:03 PT):** op-reth pid **45707**, op-node **45731**, batcher **46065**, proposer **46186**, filter **45938**. Sequencer active. L2 **507270** / `0x7f93551c…`. `:9545` OPTIONS **405** (no CORS). Viewer Sequencer/Aggregate **Failed to fetch**.
+
+**Pause:** `sequencer-admin.sh stop` → pause tip **507288** / `0xb391d74d61356aa7eec371445bd2084751091dfa1ef097ebfbe250a0d1252d12`. `stop_bg` op-node then op-reth. Ports 9545/9546/9551/9547 free. Batcher still **46065**. Geth datadir PRESENT, not opened. Live SafeDB `$DATA_DIR/safedb`.
+
+**Start (CORS branch flags, this checkout):** op-reth pid **96834** with `--http.corsdomain=*`; op-node pid **96844** `enginekind=reth` `--sequencer.stopped=false`. Attach head **507288** chain **852**.
+
+**Continuity:** first new block **507289** / `0xd725826f…` parent = pause `0xb391d74d…`. Tip advanced (507292+). `admin_sequencerActive=true`. Batcher/proposer/filter pids **unchanged**. Batcher closed a channel at 08:05:22 covering L2 507156–507287 (pre-pause).
+
+**CORS after:** `:9545` OPTIONS **200** `access-control-allow-origin: *` `allow-methods: GET,POST`. Browser `fetch` to `:9545` **200** (`eth_blockNumber`). Viewer `:8081` **LIVE** — Sequencer UNSAFE ~507325 interval 2.0s; Aggregate mempool reads; no “Failed to fetch”.
 
 ### §10 checklist (PRD closed list; tick only with evidence)
 
@@ -349,9 +363,9 @@ Copied from `tasks/prd-op-reth-migration.md` §10. Unticked rows are unproven or
 - [x] L1→L2 deposit (`deposit-eth-sepolia.sh`) 2026-09-02 13:40 PT, L1 tx `0xfcc9f786…`.
 - [ ] L2→L1 initiate/prove/finalize on reth.
 - [ ] Authenticated SettlementOS submit + receipt poll (Access write hostname).
-- [ ] Pipeline viewer (`serve-viewer.sh`) and block viewer (`blocks/`) correct. **Unticked:** viewer not re-served; live reth missing CORS until #203 bounce.
+- [x] Pipeline viewer (`serve-viewer.sh`) correct after #203 bounce (LIVE, Sequencer + Aggregate read `:9545`). Block viewer (`blocks/`) not re-served this window (same EL CORS now).
 - [x] Public read gateways still reject writes (`-32601` on both; `eth_chainId` `0x354`). Re-probed 2026-09-03.
-- [ ] Guestbook dApp still reads via loopback `JsonRpcProvider`. **Unticked:** not exercised this window.
+- [ ] Guestbook dApp still reads via loopback `JsonRpcProvider`. **Skip on 852:** `demo-checklist.sh` treats Guestbook as Phase 1 local demo (optional on Sepolia). No 852 deploy artifact under `deployments/sepolia/`. Not a closeout blocker.
 
 #### Security
 
@@ -378,7 +392,7 @@ Copied from `tasks/prd-op-reth-migration.md` §10. Unticked rows are unproven or
 Ticked as Phase A shipped + live start-all/stop-all/status used those helpers under `FORTEL2_EL=reth`. Local 901 still refuses reth.
 
 - [x] `03-init-l2.sh` / `04-start-sequencer.sh` (901 refuse reth) / `04-start-sequencer-sepolia.sh` / `start-all-sepolia.sh` / `stop-all-sepolia.sh` / `status.sh` / `reset-sepolia.sh` (geth rollback dir preserved) / `07-start-rpc-filter-sepolia.sh` / log `op-reth.log`.
-- [ ] Live reth `start_bg` CORS on the **running** process. **Unticked:** #203 not bounced.
+- [x] Live reth `start_bg` CORS on the **running** process (#203 bounce 08:04 PT; OPTIONS `*`).
 
 #### Stray surfaces — monitors, checklists, helpers
 
