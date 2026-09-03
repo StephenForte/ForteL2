@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS. Closeout deposit + smoke + Access write PASS. Reth withdrawal initiate PASS (2026-09-03); prove/finalize not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Access write L2 `0x9aaf10bf…`. Withdraw initiate L2 `0x1d3c00cc…` (0.0002 ETH, block **510822**). **STATUS complete is not true** until prove + finalize on reth (no Anvil warp) are evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS. Closeout deposit + smoke + Access write PASS. Reth withdrawal initiate + prove PASS (2026-09-03); finalize not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Withdraw initiate L2 `0x1d3c00cc…` (block **510822**). Prove L1 `0x14689fcd…` against type-8 game **266** (L2 **512579**). **STATUS complete is not true** until finalize on reth (no Anvil warp) is evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -317,7 +317,7 @@ Three sends still keep STATUS incomplete. CORS bounce is closed below.
 |---|---|
 | `smoke-transfer.sh` | **PASS 2026-09-03** — see smoke section. |
 | Access authenticated write | **PASS 2026-09-03** — see Access section. Unauthenticated hostname still HTTP 403. |
-| L2→L1 withdrawal on reth | **Initiate PASS.** Prove/finalize not run. See withdraw section. |
+| L2→L1 withdrawal on reth | **Initiate + prove PASS.** Finalize not run. See withdraw section. |
 | Viewer CORS | **PASS 2026-09-03 ~08:04 PT.** See bounce section. |
 | L1→L2 deposit (closeout) | **PASS 2026-09-03** — see deposit section. |
 
@@ -380,7 +380,20 @@ Steve `GO`. Did **not** run stock `withdraw-initiate.sh` (`assert_local_rpc_urls
 | Receipt | status `0x1`, L2 block **510822** (`0x7cb66`) |
 | Amount | 0.0002 ETH to ADMIN via `L2ToL1MessagePasser` |
 | ADMIN L2 | 498979044744876 → 298971746925903 wei |
-| Next | prove after a type-8 game covers 510822; then real portal clocks (~1800s + 1800s); finalize **without** `evm_increaseTime` |
+| Next | prove PASS below. Finalize after real portal clocks; **no** `evm_increaseTime`. |
+
+### Closeout — reth withdrawal prove (2026-09-03) — PASS
+
+Steve `GO`. Did **not** run stock `withdraw-prove.sh` (`assert_local_rpc_urls`). `node prove.mjs` from `scripts/bridge` after type-8 game **266** (L2 **512579** > initiate **510822**). Artifact `$DATA_DIR/bridge/last-withdrawal.json` (not committed).
+
+| Item | Value |
+|---|---|
+| L1 prove tx | `0x14689fcd2bc7190fa490b3255b70e0bc6a787cb697283a6b00768cebca88ec46` |
+| Receipt | status `0x1`, L1 block **11628188** |
+| withdrawalHash | `0xe4f01f7535519f34f3249cfa8a72b2af5fc02e2cb82bbe1030e60deec0c952f7` |
+| Game | index **266**, L2 **512579**, status `0` (IN_PROGRESS), `maxClockDuration=7200` |
+| Portal delays | `proofMaturityDelaySeconds=1800`, `disputeGameFinalityDelaySeconds=1800` |
+| Next | wait real clocks (game resolve + maturity + finality); finalize **without** `evm_increaseTime` |
 
 ### Closeout — viewer CORS bounce (2026-09-03 08:03–08:05 PT) — PASS
 
@@ -417,7 +430,7 @@ Copied from `tasks/prd-op-reth-migration.md` §10. Unticked rows are unproven or
 - [x] Proposer posts after cutover (L1 14:05 and 15:05 PT 2026-09-02).
 - [x] Challenger stays up (overnight 1/3 grace death then 2/3; 429s background).
 - [x] SafeDB queries succeed (live `:9547`, 2026-09-03). Pre-Task-4 L1 **11600000** → recorded L1 **11599983**, safe L2 **336960** / `0xe79b7e23…`. Post-cutover L1 **11621975** (deposit block) → recorded L1 **11621951**, safe L2 **474026** / `0xe3a1666b…` (after first reth 473032). Current L1 **11627298** → recorded L1 **11627283**, safe L2 **507005** / `0xf1f83269…` (matches viewer SAFE).
-- [ ] Historical proof / withdrawal requirements satisfied. **Unticked:** D-0116 finalize was 2026-09-01 on **geth**. Reth-era initiate PASS (`0x1d3c00cc…`, L2 **510822**). Prove + finalize not run.
+- [ ] Historical proof / withdrawal requirements satisfied. **Unticked:** D-0116 finalize was 2026-09-01 on **geth**. Reth-era initiate + prove PASS (L1 `0x14689fcd…`, game **266**). Finalize not run.
 
 #### End-to-end
 
