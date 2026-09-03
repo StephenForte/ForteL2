@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B cutover held (2026-09-02).** Live EL is **op-reth**. First reth block **473032** extends **473031**. Deposit PASS. Writes left enabled at Checkpoint 2. Overnight 23:45 / 03:00 still required before the fenced handoff. Phase A remains merged (#192/#193/#195). This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B cutover held (2026-09-02). Overnight PASS; closeout not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Deposit PASS. Two launchd cycles on the renamed set (manual 15:28/15:31 + scheduled 23:45/03:00). **STATUS complete is not true** until smoke-transfer, Access authenticated write, L2→L1 withdrawal on reth, and a live viewer CORS bounce (#203) are evidenced. Phase A remains merged (#192/#193/#195). #201 (batcher reth throttle) merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -285,11 +285,122 @@ Independent re-read 13:46:28 PT:
 | proposer L1 nonce | 252 |
 | geth datadir | PRESENT (rollback asset) |
 
-Window summary comment lands on the evidence PR. Fenced handoff waits on the 09-03 wake check.
+Window summary comment lands on the evidence PR. Overnight 23:45 / 03:00 was still required at this timestamp; it is recorded below.
 
-### §10 checklist (walk line-by-line in the window)
+### Overnight — manual cycle (2026-09-02 15:28 → 15:31 PT) — PASS
 
-Copy the closed list from the PRD; tick here after the window, not in Phase A.
+Planner read from launchd logs (`~/Library/Logs/fortel2-sleep.out.log` / `fortel2-wake.out.log`; older `fortel2-dev-*.log` files are stale). PR #200 comment 2026-09-02 22:51Z.
+
+- **Sleep** stopped the renamed set by name: `Stopping op-reth (pid 3634)`, plus op-node/batcher/proposer/challenger/filter/proxy. `op-geth not running (no pidfile)`. op-reth.log SIGTERM 15:28:02.
+- **Wake** started reth (`reth 2.3.0-dev (9384bc5) starting`); proofs store idempotent; six services RUNNING under new pids; RPC green (L2 477422, filter `:9555` up). Zero stderr for this run.
+- **Proposer under reth:** L1 proposals 14:03→14:05:33 and 15:03→15:05:44.
+- alert-watch 15:35: `active conditions: 0`. Kickstarting alerts while slept (daytime) sent a real “stack is down” email — expected.
+
+### Overnight — scheduled cycle #2 (2026-09-02 23:45 → 2026-09-03 03:00) — PASS
+
+Planner read 07:08 PT 2026-09-03 from the same launchd logs + service logs. PR #200 comment 2026-09-03 14:09Z.
+
+- **Sleep 23:45:** `Stopping op-reth (pid 97073)` + node/batcher/proposer/challenger/filter. `Mac stack is down. Datadir kept`.
+- **Wake 03:00:** `Sepolia sequencer up (FORTEL2_EL=reth). L2 block=492311`; six services RUNNING under new pids (wake op-reth pid **45707**); status L2 492467.
+- **Challenger:** attempt 1/3 died in the 15 s grace (`failed to register cannon-kona game type` — D-0107 429 class); attempt 2/3 survived. #168 retry doing its job.
+- Overnight error-level lines 04:00–08:00: 36 challenger, all QuickNode 429 `50/second` — background; no derivation or batcher errors.
+- alert-watch 06:30: `active conditions: 0` (no 03:30 email). Health 05:00 snapshot `captured_at` `2026-09-03T12:00:03Z`.
+- Morning re-probe: `:9545` = `reth/v2.3.0-9384bc5`, blocks advancing. Public replica + sequencer-tip: `eth_chainId` `0x354`, `eth_sendRawTransaction` **-32601**.
+
+Two launchd cycles on the renamed process set are on record. #201 merged 15:11 PT 2026-09-02 (stock batcher `--throttle.unsafe-da-bytes-lower-threshold=0` only when `fortel2_el` is `reth`; leftover env unset in the start script).
+
+### Closeout still open (2026-09-03 morning)
+
+These four are why STATUS is not complete. CORS code is #203 (`fix/reth-sequencer-corsdomain`); live bounce and every L1/L2 send wait for Steve go.
+
+| Item | Evidence as of 2026-09-03 morning |
+|---|---|
+| `smoke-transfer.sh` | Not run. DEMO_A L2 too small for the hard-coded `0.01ether` (needs a deposit or fund first). |
+| Access authenticated write | Unauthenticated GET / `eth_chainId` to `https://fortel2-write.ente.ltd` → **HTTP 403**. Authenticated signed tx not run (operator CF Access service-token headers; do not paste). |
+| L2→L1 withdrawal on reth | Not run. Stock `withdraw-*.sh` / `finalize.mjs` are Anvil-local (`assert_local_rpc_urls` + `evm_increaseTime`) — forbidden on Sepolia. |
+| Viewer CORS | Reth start on **main** has no `--http.corsdomain=*`. #203 adds it. Live EL+node bounce **not** done. Viewer Sequencer card unread this window. |
+
+### §10 checklist (PRD closed list; tick only with evidence)
+
+Copied from `tasks/prd-op-reth-migration.md` §10. Unticked rows are unproven or out of this task, not implied-green.
+
+#### Chain continuity
+
+- [x] L1 11155111, L2 852 (live `:9545` / `:9547` / public reads `0x354`).
+- [x] Genesis, rollup, L1 contracts unchanged. No `karst_time` (cutover attach at 473031; output root unchanged).
+- [ ] Sampled safe/finalized hashes match across candidate verifier, sequencer, Render replica, and friend node. **Unticked:** sidecar was stopped at cutover (shared datadir now live); Render/friend are Task 7–8.
+- [x] First post-cutover block extends the recorded parent (473032 parent = 473031 / `0x7f526029…`).
+- [x] No unsafe/unbatched tx discarded at cutover (`admin_stopSequencer` then drain until unsafe == safe at 473031).
+- [x] Cutover used `admin_stopSequencer` before `unsafe == safe`.
+- [x] Rollback did **not** run. Verifier-first rollback remains `--rehearse` / fixture-proven (Phase A). Geth datadir kept.
+
+#### Core services
+
+- [x] Sequencer produces before and after restart (cutover + both launchd cycles).
+- [x] Batcher posts new channel data to Sepolia (first reth channel 473032–473570; nonce 11452→11458+; #201 for the throttle-off start).
+- [x] Proposer posts after cutover (L1 14:05 and 15:05 PT 2026-09-02).
+- [x] Challenger stays up (overnight 1/3 grace death then 2/3; 429s background).
+- [ ] SafeDB queries succeed. **Unticked:** Phase B did not record a live `optimism_safeHeadAtL1Block` on a pre-Task-4 L1 and a post-cutover L1.
+- [ ] Historical proof / withdrawal requirements satisfied. **Unticked:** D-0116 finalize was 2026-09-01 on **geth**. Reth-era initiate/prove/finalize not run.
+
+#### End-to-end
+
+- [ ] Ordinary L2 transfer (`scripts/smoke-transfer.sh`).
+- [x] L1→L2 deposit (`deposit-eth-sepolia.sh`) 2026-09-02 13:40 PT, L1 tx `0xfcc9f786…`.
+- [ ] L2→L1 initiate/prove/finalize on reth.
+- [ ] Authenticated SettlementOS submit + receipt poll (Access write hostname).
+- [ ] Pipeline viewer (`serve-viewer.sh`) and block viewer (`blocks/`) correct. **Unticked:** viewer not re-served; live reth missing CORS until #203 bounce.
+- [x] Public read gateways still reject writes (`-32601` on both; `eth_chainId` `0x354`). Re-probed 2026-09-03.
+- [ ] Guestbook dApp still reads via loopback `JsonRpcProvider`. **Unticked:** not exercised this window.
+
+#### Security
+
+- [x] No role key, provider token, Cloudflare secret, or JWT committed or logged in this file / PR #200.
+- [x] EL and op-node admin RPC stay loopback (`:9545` / `:9547`).
+- [x] Friend nodes receive no operator key (no Task 8 publish this window).
+- [ ] New Render and friend services use independent JWTs. **Out of scope** (Task 7–8).
+- [x] Write filter still proxies loopback EL (`:9555` → `:9545`); Access origin is the filter. Unauthenticated Access hostname stays 403.
+
+#### Operations — launchd / sleep / wake (P7 miss)
+
+- [x] `dev-sleep.sh sleep` stops the new EL (manual 15:28 + scheduled 23:45 named `op-reth`).
+- [x] `dev-sleep.sh wake` starts it again (`FORTEL2_EL=reth`; L2 492311 at 03:00).
+- [x] Sleep/wake plists still match the pinned agents tree (`check-launchd.sh` green at cutover; jobs ran).
+- [x] Two wakes after Task 5: daytime supervised + scheduled 03:00.
+- [x] Health plist wrote `data/pipeline-health.json` (`captured_at` `2026-09-03T12:00:03Z`).
+- [x] `alert-watch.sh` expected-stack includes `op-reth` (`active conditions: 0` through 06:30).
+- [x] `resolve-games` still scheduled (untouched this window; D-0116 used it on 09-01).
+- [x] `check-launchd.sh` green at cutover preflight.
+- [x] No leftover crontab double-start (existing `launchd/README.md` rule; not re-introduced).
+
+#### Stray surfaces — Mac start/stop/status
+
+Ticked as Phase A shipped + live start-all/stop-all/status used those helpers under `FORTEL2_EL=reth`. Local 901 still refuses reth.
+
+- [x] `03-init-l2.sh` / `04-start-sequencer.sh` (901 refuse reth) / `04-start-sequencer-sepolia.sh` / `start-all-sepolia.sh` / `stop-all-sepolia.sh` / `status.sh` / `reset-sepolia.sh` (geth rollback dir preserved) / `07-start-rpc-filter-sepolia.sh` / log `op-reth.log`.
+- [ ] Live reth `start_bg` CORS on the **running** process. **Unticked:** #203 not bounced.
+
+#### Stray surfaces — monitors, checklists, helpers
+
+- [x] `alert-watch.sh` / `demo-checklist.sh` / `dev-sleep.sh` honor the selector (overnight is the proof).
+- [x] `test-helpers.sh` dual-client until Task 9 (#201 + #203 helpers).
+- [x] `.env.example` / `AGENTS.md` / `README.md` / `.cursor/rules/fortel2.mdc` live-EL truth-up via #202 (`docs/d0120-task5-cutover`).
+- [x] Learning oracles stay on geth (Phase A exception; not retargeted).
+
+#### Stray surfaces — replica / friends / rail (Task 7–8)
+
+- [ ] `replica/FRIENDS.md` / Render image / `fortel2-node` / rail wording. **Out of scope.**
+
+#### Operations (other)
+
+- [x] Mac `stop-all-sepolia` / `start-all-sepolia` on the reth datadir (cutover 13:17).
+- [ ] Render restart on a new disk. **Task 7.**
+- [x] Rollback mechanically validated verifier-first (`--rehearse`); geth support not removed.
+- [x] `status.sh` names `op-reth`; no live `op-geth` pidfile after cutover.
+
+#### Repository boundaries
+
+- [x] `ForteL2` still owns sequencing. Replica / friend repos not cut over.
 
 ## D-0116 gate cleared (2026-09-01)
 
