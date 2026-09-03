@@ -315,7 +315,7 @@ Three sends still keep STATUS incomplete. CORS bounce is closed below.
 
 | Item | Evidence as of 2026-09-03 08:05 PT |
 |---|---|
-| `smoke-transfer.sh` | Not run. DEMO_A L2 still ~5e14 wei; needs an ADMIN→DEMO_A fund before the hard-coded `0.01ether` smoke. |
+| `smoke-transfer.sh` | Not run. DEMO_A funded (see below); waiting on Steve go for `smoke-transfer.sh`. |
 | Access authenticated write | Unauthenticated GET / `eth_chainId` to `https://fortel2-write.ente.ltd` → **HTTP 403**. Authenticated signed tx not run (operator CF Access service-token headers; do not paste). |
 | L2→L1 withdrawal on reth | Not run. Stock `withdraw-*.sh` / `finalize.mjs` are Anvil-local (`assert_local_rpc_urls` + `evm_increaseTime`) — forbidden on Sepolia. |
 | Viewer CORS | **PASS 2026-09-03 ~08:04 PT.** See bounce section. |
@@ -334,6 +334,18 @@ Steve `go`. `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` → exit
 | ADMIN L2 before | 498986505471363 wei |
 | ADMIN L2 after | 10498986505471363 wei (**+10000000000000000**) |
 | L2 deposit tx | not in recent tip scan; **balance rise is the inclusion proof** |
+
+### Closeout — ADMIN→DEMO_A fund (2026-09-03) — PASS
+
+Steve `go`. Sent **0.01 ether** (not 0.0105 — ADMIN L2 after the deposit was 10498986505471363 wei, below 0.0105). Loopback L2 only.
+
+| Item | Value |
+|---|---|
+| L2 tx | `0x823ae0cfa9dc8260efffbc55701e143c7749b95c5c63a131ca3d98c3ac01bafc` |
+| Receipt | status `0x1`, L2 block **509937** |
+| DEMO_A before | 499993317017894 wei |
+| DEMO_A after | 10499993317017894 wei (**+1e16**) |
+| ADMIN L2 after | 498979044744876 wei (value + gas) |
 
 ### Closeout — viewer CORS bounce (2026-09-03 08:03–08:05 PT) — PASS
 
