@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Resolve dispute game if needed, Anvil time-warp past maturity/finality delays, finalize withdrawal.
- * Usage: node finalize.mjs <withdrawal.json>
+ * L1_CHAIN_ID=11155111: real-clock poll (no evm_mine / warp). --dry-run sends nothing.
+ * Usage: node finalize.mjs <withdrawal.json> [--dry-run]
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,9 +14,25 @@ import {
   readJson,
   writeJson,
   increaseTime,
+  mineBlocks,
+  refuseAnvilWarp,
+  isRealClockL1,
   disputeGameAbi,
+  portalReadAbi,
+  portalFinalizeAbi,
   sleep,
   resolveGameProxy,
+  readProofTimestamp,
+  parseBridgeArgs,
+  assertArtifactChainIds,
+  stampArtifactChainIds,
+  classifyFinalizeReadiness,
+  dryRunExitCode,
+  waitUntilRealClockReady,
+  realClockMaxWaitMs,
+  realClockPollMs,
+  GAME_IN_PROGRESS,
+  GAME_CHALLENGER_WINS,
 } from './lib.mjs'
 import { finalizeWithdrawal } from 'viem/op-stack'
 import { readContract, writeContract } from 'viem/actions'
@@ -23,9 +40,16 @@ import { parseAbi } from 'viem'
 
 loadEnvFromShell()
 
-const artifactPath = process.argv[2]
+function l1Fees() {
+  return {
+    maxFeePerGas: BigInt(process.env.L1_MAX_FEE_PER_GAS || 1_500_000_000),
+    maxPriorityFeePerGas: BigInt(process.env.L1_MAX_PRIORITY_FEE_PER_GAS || 1_000_000_000),
+  }
+}
+
+const { dryRun, artifactPath } = parseBridgeArgs(process.argv)
 if (!artifactPath) {
-  console.error('usage: node finalize.mjs <withdrawal.json>')
+  console.error('usage: node finalize.mjs <withdrawal.json> [--dry-run]')
   process.exit(1)
 }
 
@@ -34,7 +58,8 @@ const deploymentsPath =
   process.env.DEPLOYMENTS_JSON ||
   path.resolve(here, '../../deployments/deployments.json')
 
-const artifact = readJson(artifactPath)
+let artifact = readJson(artifactPath)
+assertArtifactChainIds(artifact, process.env.L1_CHAIN_ID, process.env.L2_CHAIN_ID)
 if (!artifact.proveTxHash || !artifact.withdrawal) {
   console.error('ERROR: artifact incomplete — run withdraw-prove.sh first')
   process.exit(1)
@@ -51,8 +76,10 @@ if (!artifact.gameProxy) {
     process.exit(1)
   }
   artifact.gameProxy = await resolveGameProxy(publicL1, factory, artifact.gameIndex)
-  writeJson(artifactPath, artifact)
-  console.log('recovered gameProxy from gameAtIndex:', artifact.gameProxy)
+  if (!dryRun) {
+    writeJson(artifactPath, artifact)
+    console.log('recovered gameProxy from gameAtIndex:', artifact.gameProxy)
+  }
 }
 
 const portalAbi = parseAbi([
@@ -77,97 +104,90 @@ console.log(
   finalityDelay.toString(),
 )
 
+const withdrawalHash = artifact.withdrawal.withdrawalHash
 const gameProxy = artifact.gameProxy
-let status = await readContract(publicL1, {
-  address: gameProxy,
-  abi: disputeGameAbi,
-  functionName: 'status',
-})
-// GameStatus: 0=IN_PROGRESS, 1=CHALLENGER_WINS, 2=DEFENDER_WINS
-console.log('game status before resolve:', status)
 
-if (status === 0) {
-  // Chess clock / max duration — warp using the game's on-chain immutable,
-  // not FAULT_GAME_MAX_CLOCK_DURATION from env (deploy overrides may have been ignored).
-  let maxClock
+async function readGameFields() {
+  const status = await readContract(publicL1, {
+    address: gameProxy,
+    abi: disputeGameAbi,
+    functionName: 'status',
+  })
+  let resolvedAt = 0n
+  let createdAt = 0n
+  let maxClock = 0n
+  try {
+    resolvedAt = await readContract(publicL1, {
+      address: gameProxy,
+      abi: disputeGameAbi,
+      functionName: 'resolvedAt',
+    })
+  } catch {
+    resolvedAt = 0n
+  }
+  try {
+    createdAt = await readContract(publicL1, {
+      address: gameProxy,
+      abi: disputeGameAbi,
+      functionName: 'createdAt',
+    })
+  } catch {
+    createdAt = 0n
+  }
   try {
     maxClock = await readContract(publicL1, {
       address: gameProxy,
       abi: disputeGameAbi,
       functionName: 'maxClockDuration',
     })
-  } catch (e) {
-    const fallback = BigInt(process.env.FAULT_GAME_MAX_CLOCK_DURATION || 10)
-    console.log(
-      'maxClockDuration() unavailable — falling back to env FAULT_GAME_MAX_CLOCK_DURATION=',
-      fallback.toString(),
-      '(',
-      e?.shortMessage || e?.message || e,
-      ')',
-    )
-    maxClock = fallback
+  } catch {
+    maxClock = 0n
   }
-  const clockBuffer = Number(process.env.FAULT_GAME_CLOCK_WARP_BUFFER || 30)
-  const clockWarp = Number(maxClock) + clockBuffer
-  console.log(
-    `game IN_PROGRESS — on-chain maxClockDuration=${maxClock.toString()}s; Anvil +${clockWarp}s then resolveClaim/resolve`,
-  )
-  await increaseTime(publicL1, clockWarp)
-  for (let i = 0; i < 2; i++) {
-    await publicL1.request({ method: 'evm_mine', params: [] })
-  }
-  try {
-    const rcHash = await writeContract(walletL1, {
-      address: gameProxy,
-      abi: disputeGameAbi,
-      functionName: 'resolveClaim',
-      args: [0n, 0n],
-      account,
-      maxFeePerGas: 1_500_000_000n,
-      maxPriorityFeePerGas: 1_000_000_000n,
-    })
-    await publicL1.waitForTransactionReceipt({ hash: rcHash })
-    console.log('resolveClaim tx:', rcHash)
-  } catch (e) {
-    console.log('resolveClaim note:', e?.shortMessage || e?.message || e)
-  }
-  try {
-    const rHash = await writeContract(walletL1, {
-      address: gameProxy,
-      abi: disputeGameAbi,
-      functionName: 'resolve',
-      args: [],
-      account,
-      maxFeePerGas: 1_500_000_000n,
-      maxPriorityFeePerGas: 1_000_000_000n,
-    })
-    await publicL1.waitForTransactionReceipt({ hash: rHash })
-    console.log('resolve tx:', rHash)
-  } catch (e) {
-    console.log('resolve note:', e?.shortMessage || e?.message || e)
-  }
-  status = await readContract(publicL1, {
-    address: gameProxy,
-    abi: disputeGameAbi,
-    functionName: 'status',
-  })
-  console.log('game status after resolve:', status)
-  if (status === 0) {
-    console.error(
-      'ERROR: dispute game still IN_PROGRESS after maxClockDuration warp — cannot finalize',
-    )
-    process.exit(1)
-  }
+  return { status, resolvedAt, createdAt, maxClock }
 }
 
-// Warp past proof maturity + dispute-game finality air-gap (+ buffer).
-const warp =
-  Number(proofDelay) + Number(finalityDelay) + Number(process.env.FINALIZE_WARP_BUFFER || 30)
-console.log(`Anvil time-warp +${warp}s for maturity/finality`)
-await increaseTime(publicL1, warp)
-// Mine a few L1 blocks so portal timestamp checks see the new time.
-for (let i = 0; i < 3; i++) {
-  await publicL1.request({ method: 'evm_mine', params: [] })
+async function readPortalFlags() {
+  let finalized = false
+  try {
+    finalized = await readContract(publicL1, {
+      address: portal,
+      abi: portalReadAbi,
+      functionName: 'finalizedWithdrawals',
+      args: [withdrawalHash],
+    })
+  } catch (e) {
+    console.log('finalizedWithdrawals note:', e?.shortMessage || e?.message || e)
+  }
+  return { finalized, proven: Boolean(artifact.proveTxHash) }
+}
+
+async function l1HeadTimestamp() {
+  const block = await publicL1.getBlock()
+  return Number(block.timestamp)
+}
+
+async function snapshot() {
+  const { status, resolvedAt, createdAt, maxClock } = await readGameFields()
+  const { finalized, proven } = await readPortalFlags()
+  const head = await l1HeadTimestamp()
+  const proofTimestamp = await readProofTimestamp(
+    publicL1,
+    portal,
+    withdrawalHash,
+    account.address,
+  )
+  return {
+    finalized,
+    proven,
+    gameStatus: Number(status),
+    resolvedAt: Number(resolvedAt),
+    finalityDelaySeconds: Number(finalityDelay),
+    l1HeadTimestamp: head,
+    createdAt: Number(createdAt),
+    maxClockDuration: Number(maxClock),
+    proofTimestamp: proofTimestamp ?? (artifact.provenAt != null ? Number(artifact.provenAt) : null),
+    proofMaturityDelaySeconds: Number(proofDelay),
+  }
 }
 
 const w = artifact.withdrawal
@@ -181,6 +201,180 @@ const withdrawal = {
   withdrawalHash: w.withdrawalHash,
 }
 
+async function simulatePortalFinalize() {
+  try {
+    await publicL1.simulateContract({
+      address: portal,
+      abi: portalFinalizeAbi,
+      functionName: 'finalizeWithdrawalTransaction',
+      args: [
+        {
+          nonce: withdrawal.nonce,
+          sender: withdrawal.sender,
+          target: withdrawal.target,
+          value: withdrawal.value,
+          gasLimit: withdrawal.gasLimit,
+          data: withdrawal.data,
+        },
+      ],
+      account: account.address,
+    })
+    console.log('portal eth_call: finalizeWithdrawalTransaction would succeed')
+    return true
+  } catch (e) {
+    console.log('portal eth_call: finalizeWithdrawalTransaction revert:', e?.shortMessage || e?.message || e)
+    return false
+  }
+}
+
+if (dryRun) {
+  const snap = await snapshot()
+  const classification = classifyFinalizeReadiness(snap)
+  console.log(
+    'dry-run: no transaction sent; game status=',
+    snap.gameStatus,
+    'resolvedAt=',
+    snap.resolvedAt,
+    'l1Head=',
+    snap.l1HeadTimestamp,
+  )
+  await simulatePortalFinalize()
+  console.log('readiness:', classification.verdict)
+  process.exit(dryRunExitCode(classification.verdict, 'finalizable'))
+}
+
+if (isRealClockL1()) {
+  if (refuseAnvilWarp() !== true) {
+    console.error('ERROR: Sepolia path must refuse Anvil warp')
+    process.exit(1)
+  }
+  const maxWait = realClockMaxWaitMs()
+  console.log(
+    `real-clock mode (L1_CHAIN_ID=11155111): no evm_mine/warp; polling until DEFENDER_WINS and resolvedAt+delay (max ${maxWait}ms)`,
+  )
+  let classification
+  try {
+    classification = await waitUntilRealClockReady({
+      getSnapshot: snapshot,
+      maxWaitMs: maxWait,
+      pollMs: realClockPollMs(),
+    })
+  } catch (e) {
+    console.error('ERROR:', e?.message || e)
+    process.exit(1)
+  }
+  console.log('readiness:', classification.verdict)
+  // Send path: only finalizable. unknown-resolvedAt / waiting / already-finalized all refuse.
+  if (classification.verdict !== 'finalizable') {
+    console.error(
+      `ERROR: refuse finalize — need DEFENDER_WINS + disputeGameFinalityDelaySeconds (got ${classification.verdict})`,
+    )
+    process.exit(1)
+  }
+} else {
+  const gameProxyAnvil = artifact.gameProxy
+  let status = await readContract(publicL1, {
+    address: gameProxyAnvil,
+    abi: disputeGameAbi,
+    functionName: 'status',
+  })
+  // GameStatus: 0=IN_PROGRESS, 1=CHALLENGER_WINS, 2=DEFENDER_WINS
+  console.log('game status before resolve:', status)
+
+  if (status === GAME_IN_PROGRESS) {
+    // Chess clock / max duration — warp using the game's on-chain immutable,
+    // not FAULT_GAME_MAX_CLOCK_DURATION from env (deploy overrides may have been ignored).
+    let maxClock
+    try {
+      maxClock = await readContract(publicL1, {
+        address: gameProxyAnvil,
+        abi: disputeGameAbi,
+        functionName: 'maxClockDuration',
+      })
+    } catch (e) {
+      const fallback = BigInt(process.env.FAULT_GAME_MAX_CLOCK_DURATION || 10)
+      console.log(
+        'maxClockDuration() unavailable — falling back to env FAULT_GAME_MAX_CLOCK_DURATION=',
+        fallback.toString(),
+        '(',
+        e?.shortMessage || e?.message || e,
+        ')',
+      )
+      maxClock = fallback
+    }
+    const clockBuffer = Number(process.env.FAULT_GAME_CLOCK_WARP_BUFFER || 30)
+    const clockWarp = Number(maxClock) + clockBuffer
+    if (refuseAnvilWarp()) {
+      console.error(
+        'ERROR: game IN_PROGRESS and Anvil warp is refused on this L1 — wait for the clock, then re-run',
+      )
+      process.exit(1)
+    }
+    console.log(
+      `game IN_PROGRESS — on-chain maxClockDuration=${maxClock.toString()}s; Anvil +${clockWarp}s then resolveClaim/resolve`,
+    )
+    await increaseTime(publicL1, clockWarp)
+    await mineBlocks(publicL1, 2)
+    try {
+      const rcHash = await writeContract(walletL1, {
+        address: gameProxyAnvil,
+        abi: disputeGameAbi,
+        functionName: 'resolveClaim',
+        args: [0n, 0n],
+        account,
+        ...l1Fees(),
+      })
+      await publicL1.waitForTransactionReceipt({ hash: rcHash })
+      console.log('resolveClaim tx:', rcHash)
+    } catch (e) {
+      console.log('resolveClaim note:', e?.shortMessage || e?.message || e)
+    }
+    try {
+      const rHash = await writeContract(walletL1, {
+        address: gameProxyAnvil,
+        abi: disputeGameAbi,
+        functionName: 'resolve',
+        args: [],
+        account,
+        ...l1Fees(),
+      })
+      await publicL1.waitForTransactionReceipt({ hash: rHash })
+      console.log('resolve tx:', rHash)
+    } catch (e) {
+      console.log('resolve note:', e?.shortMessage || e?.message || e)
+    }
+    status = await readContract(publicL1, {
+      address: gameProxyAnvil,
+      abi: disputeGameAbi,
+      functionName: 'status',
+    })
+    console.log('game status after resolve:', status)
+    if (status === GAME_IN_PROGRESS) {
+      console.error(
+        'ERROR: dispute game still IN_PROGRESS after maxClockDuration warp — cannot finalize',
+      )
+      process.exit(1)
+    }
+  }
+
+  if (status === GAME_CHALLENGER_WINS) {
+    console.error('ERROR: dispute game CHALLENGER_WINS — cannot finalize')
+    process.exit(1)
+  }
+
+  // Warp past proof maturity + dispute-game finality air-gap (+ buffer).
+  // Sepolia / SKIP_ANVIL_WARP=1: wait real portal clocks (D-0116).
+  const warp =
+    Number(proofDelay) + Number(finalityDelay) + Number(process.env.FINALIZE_WARP_BUFFER || 30)
+  if (refuseAnvilWarp()) {
+    console.log('skipping Anvil time-warp (Sepolia or SKIP_ANVIL_WARP=1); using wall-clock delays')
+  } else {
+    console.log(`Anvil time-warp +${warp}s for maturity/finality`)
+    await increaseTime(publicL1, warp)
+    await mineBlocks(publicL1, 3)
+  }
+}
+
 const before = await publicL1.getBalance({ address: artifact.target || withdrawal.target })
 console.log('L1 target balance before:', before.toString())
 
@@ -191,25 +385,21 @@ try {
     portalAddress: portal,
     targetChain: chains.l2,
     withdrawal,
-    maxFeePerGas: 1_500_000_000n,
-    maxPriorityFeePerGas: 1_000_000_000n,
+    ...l1Fees(),
   })
 } catch (e) {
   console.error('finalizeWithdrawal failed:', e?.shortMessage || e?.message || e)
   // Retry once after another warp (mainnet-scale delays if overrides were ignored).
-  if (Number(proofDelay) >= 86_400) {
+  if (Number(proofDelay) >= 86_400 && !refuseAnvilWarp()) {
     console.log('Long delay detected — warping +7d+3.5d buffer and retrying once')
     await increaseTime(publicL1, 604_800 + 302_400 + 120)
-    for (let i = 0; i < 3; i++) {
-      await publicL1.request({ method: 'evm_mine', params: [] })
-    }
+    await mineBlocks(publicL1, 3)
     finalizeHash = await finalizeWithdrawal(walletL1, {
       account,
       portalAddress: portal,
       targetChain: chains.l2,
       withdrawal,
-      maxFeePerGas: 1_500_000_000n,
-      maxPriorityFeePerGas: 1_000_000_000n,
+      ...l1Fees(),
     })
   } else {
     process.exit(1)
@@ -230,6 +420,7 @@ console.log('L1 target balance after:', after.toString())
 
 artifact.finalizeTxHash = finalizeHash
 artifact.finalizedAt = Math.floor(Date.now() / 1000)
+artifact = stampArtifactChainIds(artifact, process.env.L1_CHAIN_ID, process.env.L2_CHAIN_ID)
 writeJson(artifactPath, artifact)
 
 console.log('Hashes:')

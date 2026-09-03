@@ -9574,6 +9574,163 @@ fi
 # end pin-runtime-root
 # =============================================================================
 
+# =============================================================================
+# Sepolia withdrawal prove/finalize wrappers (cwd-independent, no Anvil warp)
+# =============================================================================
+WD_PROVE="$SCRIPT_DIR/withdraw-prove-sepolia.sh"
+WD_FIN="$SCRIPT_DIR/withdraw-finalize-sepolia.sh"
+if [[ -x "$WD_PROVE" && -x "$WD_FIN" ]]; then
+  echo "PASS sepolia withdraw wrappers exist and are executable"
+else
+  echo "FAIL sepolia withdraw wrappers must exist and be executable" >&2
+  fail=1
+fi
+
+if grep -q 'assert_sepolia_rpc_urls' "$WD_PROVE" \
+  && grep -q 'assert_sepolia_rpc_urls' "$WD_FIN" \
+  && ! grep -q 'assert_local_rpc_urls' "$WD_PROVE" \
+  && ! grep -q 'assert_local_rpc_urls' "$WD_FIN"; then
+  echo "PASS sepolia withdraw wrappers use assert_sepolia_rpc_urls"
+else
+  echo "FAIL sepolia withdraw wrappers must call assert_sepolia_rpc_urls, not assert_local_rpc_urls" >&2
+  fail=1
+fi
+
+if grep -q '(cd "$BRIDGE_DIR" && node' "$WD_PROVE" \
+  && grep -q '(cd "$BRIDGE_DIR" && node' "$WD_FIN"; then
+  echo "PASS sepolia withdraw wrappers invoke node from scripts/bridge"
+else
+  echo "FAIL sepolia withdraw wrappers must (cd \"\$BRIDGE_DIR\" && node) so viem resolves" >&2
+  fail=1
+fi
+
+if grep -q -- '--dry-run' "$WD_PROVE" && grep -q -- '--dry-run' "$WD_FIN"; then
+  echo "PASS sepolia withdraw wrappers accept --dry-run"
+else
+  echo "FAIL sepolia withdraw wrappers must accept --dry-run" >&2
+  fail=1
+fi
+
+if grep -q 'PROVE_WAIT_MS:-3900000' "$WD_PROVE"; then
+  echo "PASS withdraw-prove-sepolia.sh defaults PROVE_WAIT_MS to 65 min"
+else
+  echo "FAIL Sepolia prove wrapper must default PROVE_WAIT_MS for hourly games" >&2
+  fail=1
+fi
+
+if grep -q 'ARTIFACT" != /\*' "$WD_PROVE" && grep -q 'ARTIFACT" != /\*' "$WD_FIN"; then
+  echo "PASS sepolia withdraw wrappers make artifact path absolute"
+else
+  echo "FAIL sepolia withdraw wrappers must absolutize ARTIFACT before cd" >&2
+  fail=1
+fi
+
+if grep -q 'isRealClockL1' "$SCRIPT_DIR/bridge/finalize.mjs" \
+  && grep -q 'refusing evm_mine' "$SCRIPT_DIR/bridge/lib.mjs" \
+  && grep -q 'L1_CHAIN_ID === String(SEPOLIA_L1_CHAIN_ID)' "$SCRIPT_DIR/bridge/lib.mjs"; then
+  echo "PASS finalize.mjs/lib.mjs refuse warp on Sepolia L1"
+else
+  echo "FAIL Sepolia path must refuse evm_mine / evm_increaseTime" >&2
+  fail=1
+fi
+
+if grep -q 'proofTimestamp' "$SCRIPT_DIR/bridge/finalize.mjs" \
+  && grep -q 'proofMaturityDelaySeconds' "$SCRIPT_DIR/bridge/finalize.mjs" \
+  && grep -q 'readProofTimestamp' "$SCRIPT_DIR/bridge/finalize.mjs"; then
+  echo "PASS finalize snapshot includes proof maturity"
+else
+  echo "FAIL finalize snapshot must pass proofTimestamp + proofMaturityDelaySeconds" >&2
+  fail=1
+fi
+
+# Anvil wrappers must keep assert_local_rpc_urls (901 behavior unchanged).
+if grep -q 'assert_local_rpc_urls' "$SCRIPT_DIR/withdraw-prove.sh" \
+  && grep -q 'assert_local_rpc_urls' "$SCRIPT_DIR/withdraw-finalize.sh"; then
+  echo "PASS Anvil withdraw wrappers still assert_local_rpc_urls"
+else
+  echo "FAIL Anvil withdraw wrappers must keep assert_local_rpc_urls" >&2
+  fail=1
+fi
+
+WD_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-wd-sepolia-XXXXXX")"
+cleanup_wd_fix() {
+  rm -rf "$WD_FIX"
+}
+# Append to existing EXIT trap without clobbering earlier fixture cleanup.
+trap 'cleanup_wd_fix; cleanup_fixtures 2>/dev/null || true' EXIT
+mkdir -p "$WD_FIX/data"
+cat > "$WD_FIX/.env.sepolia" <<EOF
+DATA_DIR=$WD_FIX/data
+DEPLOY_DIR=$WD_FIX/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_BLOCK_TIME=12
+L2_BLOCK_TIME=2
+L1_RPC_URL=https://example.ethereum-sepolia.example/token
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+EOF
+printf '%s\n' '{
+  "l1ChainId": 900,
+  "l2ChainId": 901,
+  "l2TxHash": "0xabc",
+  "proveTxHash": "0xdef",
+  "withdrawal": { "withdrawalHash": "0x1" }
+}' > "$WD_FIX/art-901.json"
+
+# cwd-independence + 901-on-852 refuse: run the wrapper from / (not the repo).
+# Can go red if SCRIPT_DIR/BASH_SOURCE breaks or the chain-id guard is removed
+# (then we would hit wait_for_rpc against example.invalid instead of this error).
+WD_CWD_OUT=""
+WD_CWD_EC=0
+WD_CWD_OUT="$(
+  cd / && env -u ADMIN_PRIVATE_KEY -u ADMIN_ADDRESS \
+    FORTEL2_ENV="$WD_FIX/.env.sepolia" \
+    "$WD_FIN" --dry-run "$WD_FIX/art-901.json" 2>&1
+)" && WD_CWD_EC=0 || WD_CWD_EC=$?
+if [[ "$WD_CWD_EC" -ne 0 ]] \
+  && echo "$WD_CWD_OUT" | grep -q 'l2ChainId=901' \
+  && echo "$WD_CWD_OUT" | grep -q 'L2_CHAIN_ID=852'; then
+  echo "PASS withdraw-finalize-sepolia.sh from / refuses a 901 artifact on 852"
+else
+  echo "FAIL cwd-independence / 901-on-852 refuse (ec=$WD_CWD_EC)" >&2
+  echo "$WD_CWD_OUT" >&2
+  fail=1
+fi
+
+WD_PROVE_OUT=""
+WD_PROVE_EC=0
+WD_PROVE_OUT="$(
+  cd / && env -u ADMIN_PRIVATE_KEY -u ADMIN_ADDRESS \
+    FORTEL2_ENV="$WD_FIX/.env.sepolia" \
+    "$WD_PROVE" --dry-run "$WD_FIX/art-901.json" 2>&1
+)" && WD_PROVE_EC=0 || WD_PROVE_EC=$?
+if [[ "$WD_PROVE_EC" -ne 0 ]] \
+  && echo "$WD_PROVE_OUT" | grep -q 'l2ChainId=901'; then
+  echo "PASS withdraw-prove-sepolia.sh from / refuses a 901 artifact on 852"
+else
+  echo "FAIL prove wrapper cwd / 901-on-852 refuse (ec=$WD_PROVE_EC)" >&2
+  echo "$WD_PROVE_OUT" >&2
+  fail=1
+fi
+
+# Missing artifact from / must name the absolute path (absolutize + SCRIPT_DIR).
+WD_MISS_OUT=""
+WD_MISS_EC=0
+WD_MISS_OUT="$(
+  cd / && env -u ADMIN_PRIVATE_KEY -u ADMIN_ADDRESS \
+    FORTEL2_ENV="$WD_FIX/.env.sepolia" \
+    "$WD_FIN" --dry-run "$WD_FIX/no-such-artifact.json" 2>&1
+)" && WD_MISS_EC=0 || WD_MISS_EC=$?
+if [[ "$WD_MISS_EC" -ne 0 ]] \
+  && echo "$WD_MISS_OUT" | grep -q "$WD_FIX/no-such-artifact.json"; then
+  echo "PASS withdraw-finalize-sepolia.sh from / reports absolute missing artifact"
+else
+  echo "FAIL missing-artifact from / must keep the absolute path (ec=$WD_MISS_EC)" >&2
+  echo "$WD_MISS_OUT" >&2
+  fail=1
+fi
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

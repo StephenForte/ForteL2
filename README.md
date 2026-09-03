@@ -319,9 +319,14 @@ Full path (three txs): **initiate on L2 → prove on L1 → finalize on L1**.
 ./scripts/withdraw-prove.sh       # wait for dispute game + OptimismPortal.proveWithdrawalTransaction
 ./scripts/withdraw-finalize.sh    # resolve game if needed, wait/warp delays, finalizeWithdrawalTransaction
 ./scripts/verify-portal-delays.sh # inspect portal immutables
+
+# Sepolia L2 852 (remote L1 — Anvil wrappers refuse it). Real clocks; no evm_mine/warp:
+FORTEL2_ENV=.env.sepolia ./scripts/withdraw-prove-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/withdraw-finalize-sepolia.sh
+FORTEL2_ENV=.env.sepolia ./scripts/withdraw-finalize-sepolia.sh --dry-run   # reads + portal eth_call; sends nothing
 ```
 
-Artifacts land in `$DATA_DIR/bridge/last-withdrawal.json` (L2 + prove + finalize hashes). Prove/finalize use a small Node helper under [`scripts/bridge/`](scripts/bridge/) (`viem` op-stack actions; `npm ci` on first run).
+Artifacts land in `$DATA_DIR/bridge/last-withdrawal.json` (L2 + prove + finalize hashes). Prove/finalize use a small Node helper under [`scripts/bridge/`](scripts/bridge/) (`viem` op-stack actions; `npm ci` on first run). Sepolia wrappers `cd` there before `node` so viem resolves from any caller cwd. See that README for `--dry-run` verdicts and `FINALIZE_REAL_CLOCK_MAX_WAIT_MS` (default 2h).
 
 ### Shortened challenge window (local only)
 
