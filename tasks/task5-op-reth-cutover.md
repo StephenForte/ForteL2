@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS. Closeout deposit + smoke-transfer PASS (2026-09-03). Access write / reth withdrawal not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Two launchd cycles on the renamed set. Live `#203` bounce: pause tip **507288**; first new block **507289** parent match; viewer LIVE. Closeout deposit L1 `0x0bacc586…`. Smoke L2 `0xf15d5ac8…`. **STATUS complete is not true** until Access authenticated write and L2→L1 withdrawal on reth are evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS. Closeout deposit + smoke + Access write PASS (2026-09-03). Reth withdrawal not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Two launchd cycles on the renamed set. Live `#203` bounce: pause tip **507288**; first new block **507289** parent match; viewer LIVE. Smoke L2 `0xf15d5ac8…`. Access write L2 `0x9aaf10bf…`. **STATUS complete is not true** until L2→L1 withdrawal on reth is evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -316,7 +316,7 @@ Three sends still keep STATUS incomplete. CORS bounce is closed below.
 | Item | Evidence as of 2026-09-03 08:05 PT |
 |---|---|
 | `smoke-transfer.sh` | **PASS 2026-09-03** — see smoke section. |
-| Access authenticated write | Unauthenticated GET / `eth_chainId` to `https://fortel2-write.ente.ltd` → **HTTP 403**. Authenticated signed tx not run (operator CF Access service-token headers; do not paste). |
+| Access authenticated write | **PASS 2026-09-03** — see Access section. Unauthenticated hostname still HTTP 403. |
 | L2→L1 withdrawal on reth | Not run. Stock `withdraw-*.sh` / `finalize.mjs` are Anvil-local (`assert_local_rpc_urls` + `evm_increaseTime`) — forbidden on Sepolia. |
 | Viewer CORS | **PASS 2026-09-03 ~08:04 PT.** See bounce section. |
 | L1→L2 deposit (closeout) | **PASS 2026-09-03** — see deposit section. |
@@ -357,6 +357,18 @@ Steve `go`. `FORTEL2_ENV=.env.sepolia ./scripts/smoke-transfer.sh` → exit 0. L
 | Receipt | status 1, L2 block **510093** |
 | DEMO_A | 10499993317017894 → 499986613572233 wei (0.01 + gas) |
 | DEMO_B | 10000000000000000 → **20000000000000000** wei (**+1e16**) |
+
+### Closeout — Access authenticated write (2026-09-03) — PASS
+
+Steve ran the write from his Terminal (service token never entered chat or git). Independent loopback re-read on `:9545`:
+
+| Item | Value |
+|---|---|
+| L2 tx | `0x9aaf10bfabddde19adb964629e28886f9d4b35da7c687817c493a61f48970a86` |
+| Receipt | status `0x1`, L2 block **510751** |
+| Value | 10000000000000 wei (0.00001 ETH) DEMO_A → DEMO_B |
+| DEMO_B after | **20010000000000000** wei |
+| Unauthenticated `https://fortel2-write.ente.ltd` | still **HTTP 403** (no chain id) |
 
 ### Closeout — viewer CORS bounce (2026-09-03 08:03–08:05 PT) — PASS
 
@@ -400,7 +412,7 @@ Copied from `tasks/prd-op-reth-migration.md` §10. Unticked rows are unproven or
 - [x] Ordinary L2 transfer (`scripts/smoke-transfer.sh`) 2026-09-03 on live reth. L2 tx `0xf15d5ac8…`, DEMO_B +1e16 wei.
 - [x] L1→L2 deposit (`deposit-eth-sepolia.sh`) 2026-09-02 13:40 PT, L1 tx `0xfcc9f786…`.
 - [ ] L2→L1 initiate/prove/finalize on reth.
-- [ ] Authenticated SettlementOS submit + receipt poll (Access write hostname).
+- [x] Authenticated write via Access hostname (2026-09-03). L2 tx `0x9aaf10bf…` status `0x1`; unauthenticated GET still 403.
 - [x] Pipeline viewer (`serve-viewer.sh`) correct after #203 bounce (LIVE, Sequencer + Aggregate read `:9545`). Block viewer (`blocks/`) not re-served this window (same EL CORS now).
 - [x] Public read gateways still reject writes (`-32601` on both; `eth_chainId` `0x354`). Re-probed 2026-09-03.
 - [ ] Guestbook dApp still reads via loopback `JsonRpcProvider`. **Skip on 852:** `demo-checklist.sh` treats Guestbook as Phase 1 local demo (optional on Sepolia). No 852 deploy artifact under `deployments/sepolia/`. Not a closeout blocker.
