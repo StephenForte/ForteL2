@@ -1,6 +1,6 @@
 # Task 5 evidence — op-reth live Sepolia sequencer cutover
 
-**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS (2026-09-03). Closeout sends not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Deposit PASS. Two launchd cycles on the renamed set. Live `#203` bounce: pause tip **507288** / `0xb391d74d…`; first new block **507289** parent match; `:9545` OPTIONS now `Access-Control-Allow-Origin: *`; viewer LIVE. **STATUS complete is not true** until smoke-transfer, Access authenticated write, and L2→L1 withdrawal on reth are evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
+**STATUS: Phase B cutover held (2026-09-02). Overnight PASS. Viewer CORS bounce PASS. Closeout deposit PASS (2026-09-03). Smoke / Access write / reth withdrawal not done.** Live EL is **op-reth**. First reth block **473032** extends **473031**. Two launchd cycles on the renamed set. Live `#203` bounce: pause tip **507288** / `0xb391d74d…`; first new block **507289** parent match; viewer LIVE. Closeout deposit L1 tx `0x0bacc586…` (+0.01 ETH ADMIN L2). **STATUS complete is not true** until smoke-transfer, Access authenticated write, and L2→L1 withdrawal on reth are evidenced. Phase A remains merged (#192/#193/#195). #201 merged. This file is the one `tasks/` write. L1 provider URLs, JWTs, and keys are never written here.
 
 **Date opened:** 2026-09-01  
 **PRD:** `tasks/prd-op-reth-migration.md` §8 Task 5 / §9 / §10  
@@ -315,10 +315,25 @@ Three sends still keep STATUS incomplete. CORS bounce is closed below.
 
 | Item | Evidence as of 2026-09-03 08:05 PT |
 |---|---|
-| `smoke-transfer.sh` | Not run. DEMO_A L2 too small for the hard-coded `0.01ether` (needs a deposit or fund first). |
+| `smoke-transfer.sh` | Not run. DEMO_A L2 still ~5e14 wei; needs an ADMIN→DEMO_A fund before the hard-coded `0.01ether` smoke. |
 | Access authenticated write | Unauthenticated GET / `eth_chainId` to `https://fortel2-write.ente.ltd` → **HTTP 403**. Authenticated signed tx not run (operator CF Access service-token headers; do not paste). |
 | L2→L1 withdrawal on reth | Not run. Stock `withdraw-*.sh` / `finalize.mjs` are Anvil-local (`assert_local_rpc_urls` + `evm_increaseTime`) — forbidden on Sepolia. |
 | Viewer CORS | **PASS 2026-09-03 ~08:04 PT.** See bounce section. |
+| L1→L2 deposit (closeout) | **PASS 2026-09-03** — see deposit section. |
+
+### Closeout — L1→L2 deposit on reth (2026-09-03) — PASS
+
+Steve `go`. `FORTEL2_ENV=.env.sepolia ./scripts/deposit-eth-sepolia.sh` → exit 0 (~79s). Live EL still op-reth (pid 96834).
+
+| Item | Value |
+|---|---|
+| Amount | 0.01 ETH via `L1StandardBridge.bridgeETH` |
+| Bridge / portal | `0x113aad08047e9a9b1556627a658f87f0ebef85a7` / `0xf8c7da6c009d5d05bb98f8cd8286b9b838a3b54e` |
+| L1 tx | `0x0bacc586cbc5ab246637cb90514f1591b521d30453c0fc5bd60b896c7104ec23` |
+| L1 receipt | status `0x1`, block **11627725**, `to` bridge |
+| ADMIN L2 before | 498986505471363 wei |
+| ADMIN L2 after | 10498986505471363 wei (**+10000000000000000**) |
+| L2 deposit tx | not in recent tip scan; **balance rise is the inclusion proof** |
 
 ### Closeout — viewer CORS bounce (2026-09-03 08:03–08:05 PT) — PASS
 
