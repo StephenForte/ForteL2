@@ -2164,6 +2164,207 @@ fi
 rm -rf "$_C429_FIX"
 unset _C429_FIX _C429_FN _C429_RC _C429_OUT _C429_CALLS _C429_OK_RC _C429_OK_OUT _C429_OK_PID _C429_OK_CALLS
 
+# --- proposer-429-resilience: same init grace retry as the challenger ---
+# Functional: a process that dies inside the grace window is retried; one that
+# dies then survives is accepted; exhausting attempts exits nonzero; invalid
+# PROPOSER_START_* env values are refused. Removing the retry loop or the
+# positive-integer gate must turn these red.
+PROPOSER_START="$SCRIPT_DIR/06-start-proposer-sepolia.sh"
+if grep -q 'PROPOSER_START_GRACE_SEC-15' "$PROPOSER_START" \
+  && grep -q 'PROPOSER_START_ATTEMPTS-3' "$PROPOSER_START" \
+  && ! grep -q 'PROPOSER_START_GRACE_SEC:-15' "$PROPOSER_START" \
+  && ! grep -q 'PROPOSER_START_ATTEMPTS:-3' "$PROPOSER_START" \
+  && grep -q 'start_proposer_with_retry' "$PROPOSER_START" \
+  && awk '
+       /require_min_balance_eth/ { gate = NR }
+       /^start_proposer_with_retry\(\)/ { fn = NR }
+       END { exit !(gate && fn && gate < fn) }
+     ' "$PROPOSER_START" \
+  && [[ "$(grep -c '^  start_proposer_with_retry$' "$PROPOSER_START")" -eq 2 ]] \
+  && grep -q '^apply_proposer_start_retry_defaults$' "$PROPOSER_START" \
+  && grep -q '^validate_proposer_start_retry_env$' "$PROPOSER_START" \
+  && grep -q 'PROPOSER_START_GRACE_SEC=15' "$SCRIPT_DIR/../README.md"; then
+  echo "PASS proposer init-retry knobs wired (stock+custom paths, funding gate before loop, README)"
+else
+  echo "FAIL 06-start-proposer-sepolia.sh must retry init on both paths after require_min_balance_eth and document the knobs" >&2
+  fail=1
+fi
+
+_P429_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-proposer-429.XXXXXX")"
+_P429_FN="${_P429_FIX}/fn.sh"
+awk '
+  /^apply_proposer_start_retry_defaults\(\)/ { keep=1 }
+  /^validate_proposer_start_retry_env\(\)/ { keep=1 }
+  /^proposer_process_alive\(\)/ { keep=1 }
+  /^proposer_clear_dead_pidfile\(\)/ { keep=1 }
+  /^start_proposer_with_retry\(\)/ { keep=1 }
+  keep { print }
+  keep && /^}/ { keep=0; print "" }
+' "$PROPOSER_START" > "$_P429_FN"
+if ! grep -q '^start_proposer_with_retry()' "$_P429_FN" \
+  || ! grep -q '^proposer_process_alive()' "$_P429_FN" \
+  || ! grep -q '^apply_proposer_start_retry_defaults()' "$_P429_FN" \
+  || ! grep -q '^validate_proposer_start_retry_env()' "$_P429_FN"; then
+  echo "FAIL could not extract proposer retry helpers from 06-start-proposer-sepolia.sh" >&2
+  fail=1
+else
+  mkdir -p "$_P429_FIX/pids" "$_P429_FIX/logs"
+
+  # Invalid env: 0 / empty / non-integer must refuse after the same unset-only
+  # defaulting the start script applies. Using ${VAR:-default} would turn an
+  # explicit empty into 15/3 and keep this green — that is the Codex P2 case.
+  _P429_ENV_FAIL=0
+  for _p429_pair in '0:3' ':3' 'abc:3' '15:0' '15:' '15:abc' '-1:3' '15:-2'; do
+    _p429_grace="${_p429_pair%%:*}"
+    _p429_attempts="${_p429_pair##*:}"
+    _P429_ENV_RC=0
+    _P429_ENV_OUT="$(
+      set +e
+      (
+        set -euo pipefail
+        PROPOSER_START_GRACE_SEC="$_p429_grace"
+        PROPOSER_START_ATTEMPTS="$_p429_attempts"
+        # shellcheck disable=SC1090
+        source "$_P429_FN"
+        apply_proposer_start_retry_defaults
+        validate_proposer_start_retry_env
+      ) 2>&1
+    )" || _P429_ENV_RC=$?
+    if [[ "$_P429_ENV_RC" -eq 0 ]] \
+      || ! printf '%s' "$_P429_ENV_OUT" | grep -q 'must be a positive integer'; then
+      echo "FAIL proposer retry env must refuse GRACE=$_p429_grace ATTEMPTS=$_p429_attempts (rc=$_P429_ENV_RC)" >&2
+      echo "$_P429_ENV_OUT" >&2
+      _P429_ENV_FAIL=1
+    fi
+  done
+  _P429_OK_ENV_RC=0
+  (
+    set -euo pipefail
+    unset PROPOSER_START_GRACE_SEC PROPOSER_START_ATTEMPTS
+    # shellcheck disable=SC1090
+    source "$_P429_FN"
+    apply_proposer_start_retry_defaults
+    [[ "$PROPOSER_START_GRACE_SEC" == 15 && "$PROPOSER_START_ATTEMPTS" == 3 ]]
+    validate_proposer_start_retry_env
+  ) >/dev/null 2>&1 || _P429_OK_ENV_RC=$?
+  if [[ "$_P429_ENV_FAIL" -eq 0 && "$_P429_OK_ENV_RC" -eq 0 ]]; then
+    echo "PASS proposer init-retry refuses invalid env values (and accepts unset→15/3)"
+  else
+    echo "FAIL proposer validate_proposer_start_retry_env must refuse invalid knobs and accept unset defaults (ok_rc=$_P429_OK_ENV_RC fail=$_P429_ENV_FAIL)" >&2
+    fail=1
+  fi
+
+  # Exhaustion: stub start_bg succeeds, child dies inside grace (D-0054 class).
+  cat > "$_P429_FIX/stub_lib.sh" <<'EOS'
+start_bg() {
+  local name="$1"; shift
+  local pidfile="$PID_DIR/$name.pid"
+  local logfile="$LOG_DIR/$name.log"
+  : >>"$logfile"
+  bash -c 'exec -a op-proposer-stub sleep 0.2' </dev/null >>"$logfile" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$pidfile"
+  echo "stub start_bg $name pid $pid" >>"$logfile"
+  START_BG_CALLS=$(( ${START_BG_CALLS:-0} + 1 ))
+  export START_BG_CALLS
+  echo "$START_BG_CALLS" >"$PID_DIR/start_bg.calls"
+  return 0
+}
+EOS
+  _P429_RC=0
+  _P429_OUT="$(
+    set +e
+    (
+      set -euo pipefail
+      PID_DIR="$_P429_FIX/pids"
+      LOG_DIR="$_P429_FIX/logs"
+      PROPOSER_START_GRACE_SEC=1
+      PROPOSER_START_ATTEMPTS=3
+      proposer_cmd=(--datadir=/tmp)
+      START_BG_CALLS=0
+      # shellcheck disable=SC1090
+      source "$_P429_FIX/stub_lib.sh"
+      # shellcheck disable=SC1090
+      source "$_P429_FN"
+      start_proposer_with_retry
+    ) 2>&1
+  )" || _P429_RC=$?
+  _P429_CALLS="$(cat "$_P429_FIX/pids/start_bg.calls" 2>/dev/null || echo 0)"
+  if [[ "$_P429_RC" -ne 0 ]] \
+    && [[ "$_P429_CALLS" -eq 3 ]] \
+    && printf '%s' "$_P429_OUT" | grep -q 'failed to stay up after 3 attempts' \
+    && printf '%s' "$_P429_OUT" | grep -q 'died within 1s grace'; then
+    echo "PASS proposer init retry exhausts after grace deaths (nonzero + 3 start_bg calls)"
+  else
+    echo "FAIL proposer start_proposer_with_retry must retry on grace death and exit nonzero after attempts (rc=$_P429_RC calls=$_P429_CALLS)" >&2
+    echo "$_P429_OUT" >&2
+    fail=1
+  fi
+
+  # Retry-then-survive: first child dies inside grace; second stays up.
+  cat > "$_P429_FIX/stub_lib_retry_ok.sh" <<'EOS'
+start_bg() {
+  local name="$1"; shift
+  local pidfile="$PID_DIR/$name.pid"
+  local logfile="$LOG_DIR/$name.log"
+  : >>"$logfile"
+  START_BG_CALLS=$(( ${START_BG_CALLS:-0} + 1 ))
+  echo "$START_BG_CALLS" >"$PID_DIR/start_bg.calls"
+  if [[ "$START_BG_CALLS" -eq 1 ]]; then
+    bash -c 'exec -a op-proposer-stub sleep 0.2' </dev/null >>"$logfile" 2>&1 &
+  else
+    bash -c 'exec -a op-proposer-ok sleep 30' </dev/null >>"$logfile" 2>&1 &
+  fi
+  local pid=$!
+  echo "$pid" >"$pidfile"
+  echo "$pid" >"$PID_DIR/ok.pid"
+  return 0
+}
+EOS
+  rm -f "$_P429_FIX/pids"/* "$_P429_FIX/logs"/*
+  mkdir -p "$_P429_FIX/pids" "$_P429_FIX/logs"
+  _P429_RETRY_RC=0
+  _P429_RETRY_OUT="$(
+    set +e
+    (
+      set -euo pipefail
+      PID_DIR="$_P429_FIX/pids"
+      LOG_DIR="$_P429_FIX/logs"
+      PROPOSER_START_GRACE_SEC=1
+      PROPOSER_START_ATTEMPTS=3
+      proposer_cmd=(--datadir=/tmp)
+      # shellcheck disable=SC1090
+      source "$_P429_FIX/stub_lib_retry_ok.sh"
+      # shellcheck disable=SC1090
+      source "$_P429_FN"
+      start_proposer_with_retry
+    ) 2>&1
+  )" || _P429_RETRY_RC=$?
+  _P429_RETRY_PID="$(cat "$_P429_FIX/pids/ok.pid" 2>/dev/null || true)"
+  if [[ -n "$_P429_RETRY_PID" ]]; then
+    kill "$_P429_RETRY_PID" 2>/dev/null || true
+    wait "$_P429_RETRY_PID" 2>/dev/null || true
+  fi
+  _P429_RETRY_CALLS="$(cat "$_P429_FIX/pids/start_bg.calls" 2>/dev/null || echo 0)"
+  if [[ "$_P429_RETRY_RC" -eq 0 ]] \
+    && [[ "$_P429_RETRY_CALLS" -eq 2 ]] \
+    && printf '%s' "$_P429_RETRY_OUT" | grep -q 'died within 1s grace' \
+    && printf '%s' "$_P429_RETRY_OUT" | grep -q 'survived 1s post-start grace' \
+    && printf '%s' "$_P429_RETRY_OUT" | grep -q 'start attempt 1/3 (grace 1s)' \
+    && printf '%s' "$_P429_RETRY_OUT" | grep -q 'start attempt 2/3 (grace 1s)'; then
+    echo "PASS proposer init retry survives after a grace death (2 start_bg calls)"
+  else
+    echo "FAIL proposer start_proposer_with_retry must retry once then accept a surviving process (rc=$_P429_RETRY_RC calls=$_P429_RETRY_CALLS)" >&2
+    echo "$_P429_RETRY_OUT" >&2
+    fail=1
+  fi
+fi
+rm -rf "$_P429_FIX"
+unset _P429_FIX _P429_FN _P429_RC _P429_OUT _P429_CALLS
+unset _P429_ENV_FAIL _P429_ENV_RC _P429_ENV_OUT _P429_OK_ENV_RC
+unset _P429_RETRY_RC _P429_RETRY_OUT _P429_RETRY_PID _P429_RETRY_CALLS
+unset _p429_pair _p429_grace _p429_attempts
+
 # F7-6 / D-0061: type-8 additional dispute game is a second apply, never the wipe.
 # Assert properties of generated intent and of the prestate gate, not error phrasing.
 DEPLOY_SEPOLIA="$SCRIPT_DIR/02-deploy-contracts-sepolia.sh"
