@@ -2170,8 +2170,10 @@ unset _C429_FIX _C429_FN _C429_RC _C429_OUT _C429_CALLS _C429_OK_RC _C429_OK_OUT
 # PROPOSER_START_* env values are refused. Removing the retry loop or the
 # positive-integer gate must turn these red.
 PROPOSER_START="$SCRIPT_DIR/06-start-proposer-sepolia.sh"
-if grep -q 'PROPOSER_START_GRACE_SEC:-15' "$PROPOSER_START" \
-  && grep -q 'PROPOSER_START_ATTEMPTS:-3' "$PROPOSER_START" \
+if grep -q 'PROPOSER_START_GRACE_SEC-15' "$PROPOSER_START" \
+  && grep -q 'PROPOSER_START_ATTEMPTS-3' "$PROPOSER_START" \
+  && ! grep -q 'PROPOSER_START_GRACE_SEC:-15' "$PROPOSER_START" \
+  && ! grep -q 'PROPOSER_START_ATTEMPTS:-3' "$PROPOSER_START" \
   && grep -q 'start_proposer_with_retry' "$PROPOSER_START" \
   && awk '
        /require_min_balance_eth/ { gate = NR }
@@ -2179,6 +2181,7 @@ if grep -q 'PROPOSER_START_GRACE_SEC:-15' "$PROPOSER_START" \
        END { exit !(gate && fn && gate < fn) }
      ' "$PROPOSER_START" \
   && [[ "$(grep -c '^  start_proposer_with_retry$' "$PROPOSER_START")" -eq 2 ]] \
+  && grep -q '^apply_proposer_start_retry_defaults$' "$PROPOSER_START" \
   && grep -q '^validate_proposer_start_retry_env$' "$PROPOSER_START" \
   && grep -q 'PROPOSER_START_GRACE_SEC=15' "$SCRIPT_DIR/../README.md"; then
   echo "PASS proposer init-retry knobs wired (stock+custom paths, funding gate before loop, README)"
@@ -2190,6 +2193,7 @@ fi
 _P429_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-proposer-429.XXXXXX")"
 _P429_FN="${_P429_FIX}/fn.sh"
 awk '
+  /^apply_proposer_start_retry_defaults\(\)/ { keep=1 }
   /^validate_proposer_start_retry_env\(\)/ { keep=1 }
   /^proposer_process_alive\(\)/ { keep=1 }
   /^proposer_clear_dead_pidfile\(\)/ { keep=1 }
@@ -2199,13 +2203,16 @@ awk '
 ' "$PROPOSER_START" > "$_P429_FN"
 if ! grep -q '^start_proposer_with_retry()' "$_P429_FN" \
   || ! grep -q '^proposer_process_alive()' "$_P429_FN" \
+  || ! grep -q '^apply_proposer_start_retry_defaults()' "$_P429_FN" \
   || ! grep -q '^validate_proposer_start_retry_env()' "$_P429_FN"; then
   echo "FAIL could not extract proposer retry helpers from 06-start-proposer-sepolia.sh" >&2
   fail=1
 else
   mkdir -p "$_P429_FIX/pids" "$_P429_FIX/logs"
 
-  # Invalid env: 0 / empty / non-integer must refuse (red if the regex gate is deleted).
+  # Invalid env: 0 / empty / non-integer must refuse after the same unset-only
+  # defaulting the start script applies. Using ${VAR:-default} would turn an
+  # explicit empty into 15/3 and keep this green — that is the Codex P2 case.
   _P429_ENV_FAIL=0
   for _p429_pair in '0:3' ':3' 'abc:3' '15:0' '15:' '15:abc' '-1:3' '15:-2'; do
     _p429_grace="${_p429_pair%%:*}"
@@ -2219,6 +2226,7 @@ else
         PROPOSER_START_ATTEMPTS="$_p429_attempts"
         # shellcheck disable=SC1090
         source "$_P429_FN"
+        apply_proposer_start_retry_defaults
         validate_proposer_start_retry_env
       ) 2>&1
     )" || _P429_ENV_RC=$?
@@ -2232,16 +2240,17 @@ else
   _P429_OK_ENV_RC=0
   (
     set -euo pipefail
-    PROPOSER_START_GRACE_SEC=15
-    PROPOSER_START_ATTEMPTS=3
+    unset PROPOSER_START_GRACE_SEC PROPOSER_START_ATTEMPTS
     # shellcheck disable=SC1090
     source "$_P429_FN"
+    apply_proposer_start_retry_defaults
+    [[ "$PROPOSER_START_GRACE_SEC" == 15 && "$PROPOSER_START_ATTEMPTS" == 3 ]]
     validate_proposer_start_retry_env
   ) >/dev/null 2>&1 || _P429_OK_ENV_RC=$?
   if [[ "$_P429_ENV_FAIL" -eq 0 && "$_P429_OK_ENV_RC" -eq 0 ]]; then
-    echo "PASS proposer init-retry refuses invalid env values (and accepts 15/3)"
+    echo "PASS proposer init-retry refuses invalid env values (and accepts unset→15/3)"
   else
-    echo "FAIL proposer validate_proposer_start_retry_env must refuse invalid knobs and accept defaults (ok_rc=$_P429_OK_ENV_RC fail=$_P429_ENV_FAIL)" >&2
+    echo "FAIL proposer validate_proposer_start_retry_env must refuse invalid knobs and accept unset defaults (ok_rc=$_P429_OK_ENV_RC fail=$_P429_ENV_FAIL)" >&2
     fail=1
   fi
 

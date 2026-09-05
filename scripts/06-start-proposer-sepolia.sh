@@ -34,8 +34,12 @@ PROPOSER_RESUBMISSION="${SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT:-72s}"
 # a 03:00 wake colliding with resolve-games on the shared QuickNode 50/s cap
 # does not leave a partial stack. Funding (require_min_balance_eth) stays
 # above this loop — permanent refusals must not be retried.
-PROPOSER_START_GRACE_SEC="${PROPOSER_START_GRACE_SEC:-15}"
-PROPOSER_START_ATTEMPTS="${PROPOSER_START_ATTEMPTS:-3}"
+# Unset-only defaults (${VAR-default}, not ${VAR:-default}): an explicit empty
+# PROPOSER_START_* in the env must be refused, not silently replaced with 15/3.
+apply_proposer_start_retry_defaults() {
+  PROPOSER_START_GRACE_SEC="${PROPOSER_START_GRACE_SEC-15}"
+  PROPOSER_START_ATTEMPTS="${PROPOSER_START_ATTEMPTS-3}"
+}
 validate_proposer_start_retry_env() {
   if ! [[ "${PROPOSER_START_GRACE_SEC:-}" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: PROPOSER_START_GRACE_SEC must be a positive integer (got ${PROPOSER_START_GRACE_SEC:-})" >&2
@@ -46,6 +50,7 @@ validate_proposer_start_retry_env() {
     return 1
   fi
 }
+apply_proposer_start_retry_defaults
 validate_proposer_start_retry_env
 
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
