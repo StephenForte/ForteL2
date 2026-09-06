@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — P:0 + **Tasks 1–5 done** (Task 5 cutover 2026-09-02, closed D-0121); Task 6 observation running (≥72 h from 2026-09-02 13:17); Tasks 7–9 unstarted  
+**Status:** In execution — P:0 + **Tasks 1–6 done**; op-reth promoted as the EL of record (D-0122, 2026-09-06); Task 7 next; Tasks 8–9 unstarted  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
@@ -499,7 +499,8 @@ Answer during Task 1 or 2 unless noted.
 - **Done (Task 4, #189, D-0116):** SafeDB post-enable, historical proofs, output-root parity, judged-valid claim, withdrawal initiate+prove from candidate artifacts. Finalize tail = Task 5 gate (D-0116).
 - **Done (Task 5 Phase B, D-0120):** live cutover to op-reth at 473031→473032, two launchd cycles clean on the renamed process set; unsafe-tip behavior now proven by production (reth is the producer).
 - **Done (Task 5 closeout, #200/#203, D-0121):** L2 transfer, authenticated write, reth-era withdrawal initiate→prove→finalize on real clocks, viewer CORS on reth.
-- **Not done:** Task 6 sign-off (observation in progress); Render image (Task 7); friend repo (Task 8); geth removal (Task 9).
+- **Done (Task 6, D-0122):** ~90 h observation, 6 launchd cycles (one partial wake root-caused and fixed by #207, then two clean), replica parity, resources measured; PROMOTE.
+- **Not done:** Render image (Task 7); friend repo (Task 8); geth removal (Task 9).
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The `admin_stopSequencer` / `admin_startSequencer` helper that review asked for is `scripts/sequencer-admin.sh` (Task 5 Phase A, #192) and was used live at cutover (D-0120).
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
