@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — P:0 + **Tasks 1–6 done**; op-reth promoted as the EL of record (D-0122, 2026-09-06); Task 7 next; Tasks 8–9 unstarted  
+**Status:** In execution — P:0 + **Tasks 1–6 done**; op-reth promoted as the EL of record (D-0122, 2026-09-08); Task 7 next; Tasks 8–9 unstarted  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
