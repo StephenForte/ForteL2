@@ -127,6 +127,7 @@ Install Solidity deps once: `cd contracts && forge install foundry-rs/forge-std 
 - Phase 2 scripts (when added) must set/require `FORTEL2_ENV=.env.sepolia` and call `assert_sepolia_rpc_urls` — never `assert_local_rpc_urls` against a remote L1. `L2_RPC_URL` / `L2_NODE_RPC_URL` stay loopback; published public-read URLs live only in `deployments/rail-interface.json` (D-0047).
 - Validate addresses with `is_eth_address` / `require_eth_address`.
 - Keep `set -euo pipefail` and avoid printing private keys.
+- **L1 provider preflight (D-0123).** Before naming ANY L1 RPC provider for a derivation catch-up (replica sync, verifier bootstrap, friend node), run the two capability calls against the candidate URL and paste the results: `eth_getBlockByNumber` for the L1 genesis origin (11545587) and `eth_getBlockReceipts` for a block ≥3 weeks old — both must return data. Then compute cost = remaining L1 blocks × measured per-block price vs the plan cap and put the number in front of the operator. Measured: publicnode prunes old receipts (tip-following only); Alchemy free ≈340 CU per L1 block (30M cap ≈ 88k blocks); Chainstack free refuses old headers; QuickNode ≈40 credits per L1 block and is not to be spent without an explicit operator go. "Free tier" is not a capability claim — say "unverified" until the calls have run. Prefer snapshot bootstrap over re-derivation for read replicas.
 
 ## Docs to update with behavior changes
 
