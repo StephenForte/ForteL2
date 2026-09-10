@@ -1100,6 +1100,15 @@
 
 ---
 
+### D-0124 — **PublicNode works for tip-follow with `--l1.rpckind=standard`; the verifier gains a three-variable opt-in (#210); snapshot 811872 captured (313 MB); the Render restore must also set `L1_RPC_KIND=standard`**
+- **Context:** Task 7 resumes by snapshot bootstrap (fortel2-replica #46, R-0014), not by re-derivation. Its gate is a Mini dry-run of `scripts/start-op-reth-verifier.sh` on a PublicNode L1, which the script refused outright (old line 154), and the PRD/README still said PublicNode is always refused.
+- **Measured 2026-09-10 (PublicNode Sepolia, tip 11,676,013):** `eth_getBlockReceipts` at tip−5 / tip−2000 / tip−50000 → 111 / 179 / 147 receipts; at 11,545,587 (the L1 genesis origin, tip−130k) → `null`. `debug_getRawReceipts` → `-32601 method not available`. So the D-0105 / PRD finding "PublicNode + `standard` looped `got 0 receipts`" was a **from-genesis derive on pruned history**; near the tip `standard` works and `quicknode` never can. Two independent causes, both now written down: **pruning** (old receipts absent) and **rpckind** (`quicknode` selects a method PublicNode does not serve).
+- **Decision:** #210 merged (`072352c`). `FORTEL2_ALLOW_PUBLICNODE_L1=1` + `FORTEL2_RETH_PROFILE=verifier` + an explicit `SEPOLIA_L1_RPC_KIND=standard|basic` passes the gate with a WARN naming tip-follow-only; the default path is byte-for-byte the old refusal; `sequencer_faultproof` is always refused; kind unset or `quicknode`/`alchemy`/anything else fails closed (exit 2). Eight go-red checks in `scripts/test-helpers.sh` (main 553 → 561 PASS). PublicNode is never a default and never the live sequencer's L1.
+- **Snapshot captured 2026-09-10 09:17 PT** (stack slept 09:15, capture 2 s measured, wake verified 09:18: six pids, head advancing): `$DATA_DIR/snapshots/fortel2-852-reth-snapshot-811872.tar.zst`, 313,333,485 bytes, sha256 `830d78f62526551d351c65d310c38c80972bffde7ffc0eb9be2cd546cf9c8027`, l2_head 811872 `0x5af991c9…c8ada`, safe `0x7028d36a…f2488e194`, members `db/` `static_files/` `rocksdb/` only.
+- **Trap for the Render restore (fortel2-replica):** `entrypoint-reth.sh` defaults `L1_RPC_KIND=quicknode` and nothing changes it under `L1_RPC_FORCE=public`; the restore env must set `L1_RPC_KIND=standard` next to `L1_RPC_FORCE=public` or op-node stalls on `debug_getRawReceipts`.
+- **Rule amended:** `AGENTS.md` "L1 provider preflight" now names both causes and requires the URL and `--l1.rpckind` to be set together, and the tip-follow vs catch-up purpose to be stated.
+- **Consequence:** The Mini dry-run is unblocked. It must prove `--full` accepts the archive-captured datadir and that op-node resumes from the snapshot's safe head, **not** L1 origin 11,545,587. Next free decision id is **D-0125**.
+
 ## Template
 
 ```
