@@ -197,6 +197,14 @@ cd contracts && forge test          # Guestbook unit + fuzz tests
 #   export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"   # do not print
 #   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
 #   ./scripts/stop-op-reth-verifier.sh
+# PublicNode L1 is refused by default (D-0105/D-0123). Tip-follow from a restored snapshot is an
+# explicit opt-in (D-0124, #210): the three variables go ON the start command with a PublicNode
+# L1_RPC_URL (not the .env QuickNode URL). Verifier only, never the live sequencer:
+#   unset FORTEL2_ENV
+#   export L1_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+#   FORTEL2_ALLOW_PUBLICNODE_L1=1 SEPOLIA_L1_RPC_KIND=standard \
+#     FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
+#   ./scripts/stop-op-reth-verifier.sh
 #   ./scripts/status.sh   # default procs= geth; sidecar listed only while live EL is geth
 # Task 3 candidate (derive 852 to the live safe head in $DATA_DIR/l2/op-reth with
 # sequencer_faultproof from first start — never reset-sepolia.sh while that dir is

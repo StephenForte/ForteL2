@@ -17,7 +17,7 @@ This is an **execution-client migration**, not a new chain launch and **not** a 
 |---|---|
 | Pair that worked | Live `op-node` v1.19.2 + source-built `op-reth/v2.3.3` reporting `Reth Version: 2.3.0-dev` commit `9384bc53d8c0c77e59cac83fdaaf3b372c6d2216` (upstream reth pin inside that tag) |
 | Engine | `--l2.enginekind=reth` attached; FCU to genesis accepted |
-| L1 | QuickNode + `--l1.rpckind=quicknode`. PublicNode + `standard` is a **known FAIL** (`got 0 receipts but expected N`) |
+| L1 | QuickNode + `--l1.rpckind=quicknode`. PublicNode + `standard` is a **known FAIL** for a from-genesis derive (`got 0 receipts but expected N`; pruned history). Tip-follow from a snapshot with `standard` is an explicit opt-in (D-0124, #210) |
 | Genesis | replica = sidecar = `0xe242b1a3312b509e7df1496847f0bd0b115cb66676b1e973a355296c99e2386d` |
 | Block 5 | replica = sidecar = sequencer-tip = `0xd9fd2a33ebadd2a734924d8f76bac945709ba4a1df352a7d4fd50383dee209e9` |
 | Isolation | Sidecar ports `:19845/:19846/:19851/:19847/:30329`. Live `$DATA_DIR/l2/op-geth` and `:9545/:9546/:9547/:9551` untouched |
@@ -109,7 +109,7 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 **Evidence:** Mini first run (`tasks/spike-op-reth.md`): PublicNode + `--l1.rpckind=standard` looped `got 0 receipts but expected 105`. Head stayed 0. Same binary PASSed after QuickNode + `quicknode`. Phase 1 `.env` Anvil `L1_RPC_URL` clobbers an exported QuickNode URL unless the script snapshots the caller value before sourcing `lib.sh`.
 
-**Consequence:** Every Sepolia verifier/sequencer path in this migration must use a receipts-capable L1 (live default: QuickNode) and `--l1.rpckind=quicknode` (override `SEPOLIA_L1_RPC_KIND` / `SPIKE_L1_RPC_KIND`). PublicNode is refused for derivation. Caller `L1_RPC_URL` must survive `.env` load.
+**Consequence:** Every Sepolia verifier/sequencer path in this migration must use a receipts-capable L1 (live default: QuickNode) and `--l1.rpckind=quicknode` (override `SEPOLIA_L1_RPC_KIND` / `SPIKE_L1_RPC_KIND`). PublicNode is refused for derivation. Caller `L1_RPC_URL` must survive `.env` load. **Amended by D-0124:** the `got 0 receipts` loop was pruned history on a from-genesis derive; near the tip PublicNode serves `eth_getBlockReceipts` (measured) and never `debug_getRawReceipts`. The verifier profile accepts PublicNode for **tip-follow from a restored snapshot only**, via `FORTEL2_ALLOW_PUBLICNODE_L1=1` + explicit `SEPOLIA_L1_RPC_KIND=standard|basic` (#210); default refusal and the sequencer refusal are unchanged.
 
 ### P0 — Sequencer/challenger storage ≠ friend verifier
 
@@ -231,7 +231,7 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 1. `op-reth` + `op-node` verifier-only; committed 852 genesis + `deployments/sepolia/rollup.json`.
 2. Separate datadir, ports, JWT, names, logs. Reserved sequencer ports (`9545 9546 9547 9551`) stay untouched.
-3. Derive from Sepolia. Default L1 is the live QuickNode URL with `--l1.rpckind=quicknode` (`SEPOLIA_L1_RPC_KIND`). Refuse PublicNode (receipts return 0). If a different receipts-capable provider is used, set `SEPOLIA_L1_RPC_KIND` / `SPIKE_L1_RPC_KIND` to **that** provider (`alchemy`, `infura`, `standard`, …). Do not force `quicknode` on a non-QuickNode URL — a mismatched kind breaks derivation (D-0105 Finding 3).
+3. Derive from Sepolia. Default L1 is the live QuickNode URL with `--l1.rpckind=quicknode` (`SEPOLIA_L1_RPC_KIND`). Refuse PublicNode (receipts return 0 on a from-genesis derive; the D-0124 tip-follow opt-in does not apply to this instruction). If a different receipts-capable provider is used, set `SEPOLIA_L1_RPC_KIND` / `SPIKE_L1_RPC_KIND` to **that** provider (`alchemy`, `infura`, `standard`, …). Do not force `quicknode` on a non-QuickNode URL — a mismatched kind breaks derivation (D-0105 Finding 3).
 4. Wait until the verifier’s safe head matches live safe (or a documented lag bound).
 5. Compare ≥20 sampled safe blocks (recent + older checkpoints): number, hash, parent hash, state root, receipts root, tx count.
 6. Compare contract storage, balances, receipts, deposits, withdrawal-related state.
