@@ -152,9 +152,34 @@ if [[ -z "${L1_RPC_URL:-}" ]]; then
 fi
 assert_remote_l1_rpc_url "$L1_RPC_URL" "L1_RPC_URL"
 if l1_is_publicnode "$L1_RPC_URL"; then
-  echo "ERROR: refusing PublicNode L1 — op-node receipt fetch returns 0 (got 0 receipts but expected N)" >&2
-  echo "Export a receipts-capable L1_RPC_URL (QuickNode). Default --l1.rpckind=quicknode." >&2
-  exit 2
+  # Default path is unchanged: PublicNode + unset flag refuses exactly as before.
+  # Escape hatch requires all three: FORTEL2_ALLOW_PUBLICNODE_L1=1, verifier
+  # profile, and an explicit SEPOLIA_L1_RPC_KIND=standard|basic (no silent
+  # default — kind=quicknode calls debug_getRawReceipts, which PublicNode
+  # does not serve, and derivation stalls with "got 0 receipts").
+  if [[ "${FORTEL2_ALLOW_PUBLICNODE_L1:-}" == "1" ]]; then
+    if [[ "${FORTEL2_RETH_PROFILE}" != "verifier" ]]; then
+      echo "ERROR: refusing PublicNode L1 — FORTEL2_ALLOW_PUBLICNODE_L1 applies only to FORTEL2_RETH_PROFILE=verifier (got ${FORTEL2_RETH_PROFILE})" >&2
+      echo "The live/sequencer profile must not run on PublicNode." >&2
+      exit 2
+    fi
+    case "${SEPOLIA_L1_RPC_KIND:-}" in
+      standard|basic)
+        echo "WARN: PublicNode serves eth_getBlockReceipts for recent blocks only." >&2
+        echo "WARN: this is for tip-follow from a restored snapshot, not a from-genesis derive." >&2
+        echo "WARN: expect a stall if op-node needs receipts older than PublicNode retains. SEPOLIA_L1_RPC_KIND=${SEPOLIA_L1_RPC_KIND} (no silent default)." >&2
+        ;;
+      *)
+        echo "ERROR: refusing PublicNode L1 — SEPOLIA_L1_RPC_KIND=${SEPOLIA_L1_RPC_KIND:-<unset>} would make op-node call debug_getRawReceipts, which PublicNode does not serve." >&2
+        echo "Set SEPOLIA_L1_RPC_KIND=standard or basic explicitly (do not rely on the quicknode default)." >&2
+        exit 2
+        ;;
+    esac
+  else
+    echo "ERROR: refusing PublicNode L1 — op-node receipt fetch returns 0 (got 0 receipts but expected N)" >&2
+    echo "Export a receipts-capable L1_RPC_URL (QuickNode). Default --l1.rpckind=quicknode." >&2
+    exit 2
+  fi
 fi
 
 HTTP_PORT="$(reth_http_port)"

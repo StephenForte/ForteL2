@@ -9932,6 +9932,243 @@ else
   fail=1
 fi
 
+# =============================================================================
+# PublicNode L1 escape hatch (verifier tip-follow only).
+# Fixture binaries via HOME/.foundry/bin so they precede BIN_DIR after lib.sh
+# prepends PATH. Stub lsof always reports a listener so a passed gate cannot
+# start_bg. Assert on the L1 gate's own messages — not an early exit.
+# =============================================================================
+PN_L1_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pn-l1.XXXXXX")"
+mkdir -p "$PN_L1_FIX/data/l2/op-reth" "$PN_L1_FIX/.foundry/bin"
+printf '%s\n' '{"config":{"chainId":852}}' > "$PN_L1_FIX/genesis-852.json"
+cat > "$PN_L1_FIX/.foundry/bin/lsof" <<'EOS'
+#!/bin/sh
+# Always report a listener so a passed PublicNode gate stops before start_bg.
+echo "stub-lsof LISTEN"
+exit 0
+EOS
+cat > "$PN_L1_FIX/.foundry/bin/op-reth" <<'EOS'
+#!/bin/sh
+echo "ERROR: fixture op-reth must not exec a real binary" >&2
+exit 99
+EOS
+cat > "$PN_L1_FIX/.foundry/bin/op-node" <<'EOS'
+#!/bin/sh
+echo "ERROR: fixture op-node must not exec a real binary" >&2
+exit 99
+EOS
+chmod +x "$PN_L1_FIX/.foundry/bin/lsof" \
+  "$PN_L1_FIX/.foundry/bin/op-reth" "$PN_L1_FIX/.foundry/bin/op-node"
+PN_L1_URL="https://ethereum-sepolia-rpc.publicnode.com"
+
+# Property 1: default unchanged — flag unset refuses PublicNode (exit 2).
+PN_DEF_OUT=""
+PN_DEF_EC=0
+PN_DEF_OUT="$(
+  env -u FORTEL2_ENV -u FORTEL2_ALLOW_PUBLICNODE_L1 -u SEPOLIA_L1_RPC_KIND \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --genesis "$PN_L1_FIX/genesis-852.json" 2>&1
+)" && PN_DEF_EC=0 || PN_DEF_EC=$?
+if [[ "$PN_DEF_EC" -eq 2 ]] \
+  && echo "$PN_DEF_OUT" | grep -q 'refusing PublicNode' \
+  && echo "$PN_DEF_OUT" | grep -q 'got 0 receipts' \
+  && ! echo "$PN_DEF_OUT" | grep -q 'Starting op-reth'; then
+  echo "PASS start-op-reth-verifier.sh refuses PublicNode L1 when FORTEL2_ALLOW_PUBLICNODE_L1 is unset"
+else
+  echo "FAIL PublicNode L1 must still refuse by default (ec=$PN_DEF_EC)" >&2
+  echo "$PN_DEF_OUT" >&2
+  fail=1
+fi
+
+# Property 2: flag + verifier + kind=standard passes the gate and WARNs.
+PN_OK_OUT=""
+PN_OK_EC=0
+PN_OK_OUT="$(
+  env -u FORTEL2_ENV \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_ALLOW_PUBLICNODE_L1=1 \
+    SEPOLIA_L1_RPC_KIND=standard \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --genesis "$PN_L1_FIX/genesis-852.json" 2>&1
+)" && PN_OK_EC=0 || PN_OK_EC=$?
+if echo "$PN_OK_OUT" | grep -q 'refusing PublicNode'; then
+  echo "FAIL opt-in PublicNode must pass the L1 gate (got refusing; ec=$PN_OK_EC)" >&2
+  echo "$PN_OK_OUT" >&2
+  fail=1
+elif echo "$PN_OK_OUT" | grep -qi 'recent blocks' \
+  && echo "$PN_OK_OUT" | grep -q 'tip-follow' \
+  && echo "$PN_OK_OUT" | grep -q 'from-genesis' \
+  && echo "$PN_OK_OUT" | grep -qi 'stall' \
+  && ! echo "$PN_OK_OUT" | grep -q 'Starting op-reth' \
+  && ! echo "$PN_OK_OUT" | grep -q 'fixture op-reth must not exec'; then
+  echo "PASS start-op-reth-verifier.sh WARNs and passes PublicNode gate with explicit kind=standard"
+else
+  echo "FAIL opt-in PublicNode (kind=standard) must WARN tip-follow-only and not start (ec=$PN_OK_EC)" >&2
+  echo "$PN_OK_OUT" >&2
+  fail=1
+fi
+
+# Property 2 (basic): same hatch with SEPOLIA_L1_RPC_KIND=basic.
+PN_BASIC_OUT=""
+PN_BASIC_EC=0
+PN_BASIC_OUT="$(
+  env -u FORTEL2_ENV \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_ALLOW_PUBLICNODE_L1=1 \
+    SEPOLIA_L1_RPC_KIND=basic \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --genesis "$PN_L1_FIX/genesis-852.json" 2>&1
+)" && PN_BASIC_EC=0 || PN_BASIC_EC=$?
+if echo "$PN_BASIC_OUT" | grep -q 'refusing PublicNode'; then
+  echo "FAIL opt-in PublicNode kind=basic must pass the L1 gate (got refusing; ec=$PN_BASIC_EC)" >&2
+  echo "$PN_BASIC_OUT" >&2
+  fail=1
+elif echo "$PN_BASIC_OUT" | grep -qi 'recent blocks' \
+  && echo "$PN_BASIC_OUT" | grep -q 'tip-follow' \
+  && ! echo "$PN_BASIC_OUT" | grep -q 'Starting op-reth'; then
+  echo "PASS start-op-reth-verifier.sh WARNs and passes PublicNode gate with explicit kind=basic"
+else
+  echo "FAIL opt-in PublicNode (kind=basic) must WARN tip-follow-only (ec=$PN_BASIC_EC)" >&2
+  echo "$PN_BASIC_OUT" >&2
+  fail=1
+fi
+
+# Property 3: flag set but kind unset — fail closed, name SEPOLIA_L1_RPC_KIND.
+PN_KIND_UNSET_OUT=""
+PN_KIND_UNSET_EC=0
+PN_KIND_UNSET_OUT="$(
+  env -u FORTEL2_ENV -u SEPOLIA_L1_RPC_KIND \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_ALLOW_PUBLICNODE_L1=1 \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --genesis "$PN_L1_FIX/genesis-852.json" 2>&1
+)" && PN_KIND_UNSET_EC=0 || PN_KIND_UNSET_EC=$?
+if [[ "$PN_KIND_UNSET_EC" -eq 2 ]] \
+  && echo "$PN_KIND_UNSET_OUT" | grep -q 'SEPOLIA_L1_RPC_KIND' \
+  && echo "$PN_KIND_UNSET_OUT" | grep -q 'debug_getRawReceipts' \
+  && ! echo "$PN_KIND_UNSET_OUT" | grep -q 'Starting op-reth'; then
+  echo "PASS start-op-reth-verifier.sh refuses PublicNode when SEPOLIA_L1_RPC_KIND is unset under the flag"
+else
+  echo "FAIL flag without explicit SEPOLIA_L1_RPC_KIND must refuse and name the kind (ec=$PN_KIND_UNSET_EC)" >&2
+  echo "$PN_KIND_UNSET_OUT" >&2
+  fail=1
+fi
+
+# Property 3: flag + kind=quicknode (the silent default) still refuses.
+PN_QN_OUT=""
+PN_QN_EC=0
+PN_QN_OUT="$(
+  env -u FORTEL2_ENV \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_ALLOW_PUBLICNODE_L1=1 \
+    SEPOLIA_L1_RPC_KIND=quicknode \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --genesis "$PN_L1_FIX/genesis-852.json" 2>&1
+)" && PN_QN_EC=0 || PN_QN_EC=$?
+if [[ "$PN_QN_EC" -eq 2 ]] \
+  && echo "$PN_QN_OUT" | grep -q 'SEPOLIA_L1_RPC_KIND' \
+  && echo "$PN_QN_OUT" | grep -q 'debug_getRawReceipts' \
+  && echo "$PN_QN_OUT" | grep -q 'quicknode' \
+  && ! echo "$PN_QN_OUT" | grep -q 'Starting op-reth'; then
+  echo "PASS start-op-reth-verifier.sh refuses PublicNode when SEPOLIA_L1_RPC_KIND=quicknode under the flag"
+else
+  echo "FAIL flag + kind=quicknode must refuse (debug_getRawReceipts) (ec=$PN_QN_EC)" >&2
+  echo "$PN_QN_OUT" >&2
+  fail=1
+fi
+
+# Property 3: flag + kind=alchemy (anything other than standard|basic).
+PN_ALC_OUT=""
+PN_ALC_EC=0
+PN_ALC_OUT="$(
+  env -u FORTEL2_ENV \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_ALLOW_PUBLICNODE_L1=1 \
+    SEPOLIA_L1_RPC_KIND=alchemy \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --genesis "$PN_L1_FIX/genesis-852.json" 2>&1
+)" && PN_ALC_EC=0 || PN_ALC_EC=$?
+if [[ "$PN_ALC_EC" -eq 2 ]] \
+  && echo "$PN_ALC_OUT" | grep -q 'SEPOLIA_L1_RPC_KIND' \
+  && echo "$PN_ALC_OUT" | grep -q 'debug_getRawReceipts'; then
+  echo "PASS start-op-reth-verifier.sh refuses PublicNode when SEPOLIA_L1_RPC_KIND=alchemy under the flag"
+else
+  echo "FAIL flag + kind=alchemy must refuse naming SEPOLIA_L1_RPC_KIND (ec=$PN_ALC_EC)" >&2
+  echo "$PN_ALC_OUT" >&2
+  fail=1
+fi
+
+# Property 4: flag + sequencer_faultproof (even with kind=standard) still refuses.
+PN_SEQ_OUT=""
+PN_SEQ_EC=0
+PN_SEQ_OUT="$(
+  env -u FORTEL2_ENV \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=sequencer_faultproof \
+    FORTEL2_ALLOW_PUBLICNODE_L1=1 \
+    SEPOLIA_L1_RPC_KIND=standard \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --genesis "$PN_L1_FIX/genesis-852.json" 2>&1
+)" && PN_SEQ_EC=0 || PN_SEQ_EC=$?
+if [[ "$PN_SEQ_EC" -eq 2 ]] \
+  && echo "$PN_SEQ_OUT" | grep -q 'refusing PublicNode' \
+  && echo "$PN_SEQ_OUT" | grep -q 'FORTEL2_RETH_PROFILE' \
+  && echo "$PN_SEQ_OUT" | grep -q 'sequencer_faultproof' \
+  && ! echo "$PN_SEQ_OUT" | grep -q 'tip-follow' \
+  && ! echo "$PN_SEQ_OUT" | grep -q 'Starting op-reth'; then
+  echo "PASS start-op-reth-verifier.sh refuses PublicNode on sequencer_faultproof even with the flag"
+else
+  echo "FAIL sequencer_faultproof must never accept PublicNode (ec=$PN_SEQ_EC)" >&2
+  echo "$PN_SEQ_OUT" >&2
+  fail=1
+fi
+
+# Property 5: --preflight still exits before the L1 gate (PublicNode URL is a no-op).
+PN_PF_OUT=""
+PN_PF_EC=0
+PN_PF_OUT="$(
+  env -u FORTEL2_ENV -u FORTEL2_ALLOW_PUBLICNODE_L1 -u SEPOLIA_L1_RPC_KIND \
+    HOME="$PN_L1_FIX" \
+    DATA_DIR="$PN_L1_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    L1_RPC_URL="$PN_L1_URL" \
+    "$RETH_START" --preflight 2>&1
+)" && PN_PF_EC=0 || PN_PF_EC=$?
+if [[ "$PN_PF_EC" -eq 0 ]] \
+  && echo "$PN_PF_OUT" | grep -q 'preflight ok' \
+  && ! echo "$PN_PF_OUT" | grep -q 'refusing PublicNode' \
+  && ! echo "$PN_PF_OUT" | grep -qi 'recent blocks'; then
+  echo "PASS start-op-reth-verifier.sh --preflight still exits before the PublicNode L1 gate"
+else
+  echo "FAIL --preflight must still exit 0 before the L1 gate (ec=$PN_PF_EC)" >&2
+  echo "$PN_PF_OUT" >&2
+  fail=1
+fi
+
+rm -rf "$PN_L1_FIX"
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
