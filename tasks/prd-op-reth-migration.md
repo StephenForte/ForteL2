@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — Tasks 1–6 done, op-reth promoted (D-0122); **Task 7 Phase A merged, Phase B PAUSED 2026-09-10 at ~68 % sync (D-0123)** — resume needs an operator-approved receipts-complete L1 provider; Tasks 8–9 unstarted  
+**Status:** In execution — Tasks 1–6 done, op-reth promoted (D-0122); **Task 7 Phase A merged; the from-genesis catch-up is abandoned for snapshot bootstrap (D-0124) — Mini dry-run PASSED (D-0125)**. The restore is now gated on the archive-vs-`--full` storage-profile decision (D-0125), which is irreversible on a reth datadir — **not** on an L1 provider; Tasks 8–9 unstarted  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
@@ -500,7 +500,7 @@ Answer during Task 1 or 2 unless noted.
 - **Done (Task 5 Phase B, D-0120):** live cutover to op-reth at 473031→473032, two launchd cycles clean on the renamed process set; unsafe-tip behavior now proven by production (reth is the producer).
 - **Done (Task 5 closeout, #200/#203, D-0121):** L2 transfer, authenticated write, reth-era withdrawal initiate→prove→finalize on real clocks, viewer CORS on reth.
 - **Done (Task 6, D-0122):** ~134 h observation, 8 launchd cycles (one partial wake root-caused and fixed by #207, then three clean scheduled), replica parity, resources measured; PROMOTE.
-- **Task 7 (Render replica):** Phase A done (image/service, fortel2-replica #44/#45); Phase B paused at ~68 % sync on a preserved disk (D-0123) — three free L1 providers failed a from-genesis catch-up (measured); QuickNode declined.
+- **Task 7 (Render replica):** Phase A done (image/service, fortel2-replica #44/#45). The from-genesis catch-up is abandoned (three free L1 providers failed, QuickNode declined — D-0123); the resume path is **snapshot bootstrap** (D-0124, fortel2-replica #46) and the **Mini dry-run PASSED** (D-0125). Current blocker: choose the Render reth **storage profile** — archive vs `--full` — **before** the restore, because `--full` prunes historical receipts/logs (a public-RPC regression) and a reth datadir cannot be un-pruned. Pending a sweep of the replica's historical-RPC consumers.
 - **Not done:** Task 7 Phase B/C; friend repo (Task 8); geth removal (Task 9).
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The `admin_stopSequencer` / `admin_startSequencer` helper that review asked for is `scripts/sequencer-admin.sh` (Task 5 Phase A, #192) and was used live at cutover (D-0120).
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
