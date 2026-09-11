@@ -501,7 +501,7 @@ Answer during Task 1 or 2 unless noted.
 - **Done (Task 5 closeout, #200/#203, D-0121):** L2 transfer, authenticated write, reth-era withdrawal initiate→prove→finalize on real clocks, viewer CORS on reth.
 - **Done (Task 6, D-0122):** ~134 h observation, 8 launchd cycles (one partial wake root-caused and fixed by #207, then three clean scheduled), replica parity, resources measured; PROMOTE.
 - **Task 7 (Render replica):** DONE through Phase C (D-0128, 2026-09-11). Phase A (#44/#45), snapshot bootstrap (D-0124, #46), archive restore (D-0127, #47/#48), Phase B parity/gateway/lag (R-0016, #50), Q5 measured, Phase C = env repoint of `fortel2-replica-rpc` and SettlementOS to `http://fortel2-replica-reth:10000` (rename-swap does not work on Render: hostnames are slugs). Remaining: suspend geth + staging gateway after the 24 h window (2026-09-12), fortel2-replica verdict PR (R-0017), disk grow to ≈25 GB before 2026-10-20, geth removal (Task 9).
-- **Not done:** Task 7 Phase B/C; friend repo (Task 8); geth removal (Task 9).
+- **Not done:** Task 7 follow-ups — suspend the geth pserv + staging gateway after the 24 h rollback window (2026-09-12 ≥17:25Z), grow the reth disk to ≈25 GB before 2026-10-20, fortel2-replica verdict PR (R-0017); friend repo (Task 8); geth removal (Task 9).
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The `admin_stopSequencer` / `admin_startSequencer` helper that review asked for is `scripts/sequencer-admin.sh` (Task 5 Phase A, #192) and was used live at cutover (D-0120).
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
