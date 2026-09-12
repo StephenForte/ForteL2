@@ -23,6 +23,8 @@ Opt-in 852 verifier sidecar (FORTEL2_EL=reth). Not the live sequencer.
 
 Requires FORTEL2_RETH_PROFILE=sequencer_faultproof | verifier (no silent default).
 Datadir: $DATA_DIR/l2/op-reth (or FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth).
+On a host with live op-reth evidence, start and wipe refuse the live slot
+$DATA_DIR/l2/op-reth — set FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth.
 SafeDB (Task 4): auto-enabled on sequencer_faultproof only, path
 FORTEL2_RETH_SAFEDB_PATH (default $DATA_DIR/l2/op-reth-safedb). Sidecar
 op-node only — live op-node / $DATA_DIR/safedb untouched.
@@ -129,6 +131,14 @@ if [[ "$PREFLIGHT" -eq 1 ]]; then
   fi
   exit 0
 fi
+
+# After DATADIR is resolved, before writes / wipe / bind. --preflight
+# exits above so existing config refusals (profile, genesis, geth
+# datadir) still run on a host whose live EL already holds :9545.
+# FORTEL2_EL is not evidence (this script exported FORTEL2_EL=reth
+# above). Wipe is also guarded inside wipe_reth_datadir so reset.sh
+# inherits the same check with no edit there.
+refuse_if_live_reth_datadir "$DATADIR" "start"
 
 require_bin op-reth
 require_bin op-node
