@@ -1018,7 +1018,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 | op-reth-verifier / op-reth-verifier-node (sidecar) | `data/logs/op-reth-verifier.log`, `op-reth-verifier-node.log` | `Starting JSON-RPC` / `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
-Mid-chain rewind on op-reth (PRD §11 Q6, interim): wipe the reth datadir (`FORTEL2_EL=reth ./scripts/reset.sh` or `stop-op-reth-verifier.sh` then `--wipe`) and re-derive from 852 genesis. **Never** `debug_setHead` on a keeper datadir (live op-geth or a candidate you intend to keep).
+Mid-chain rewind on op-reth (PRD §11 Q6, interim): wipe the reth datadir and re-derive from 852 genesis — **only on a host where op-reth is not the live EL**. **On this Mac op-reth has been the live EL since D-0120**, and both wipe entry points (`FORTEL2_EL=reth ./scripts/reset.sh` and `start-op-reth-verifier.sh --wipe`) call `wipe_reth_datadir` (`scripts/lib.sh:1224`), which with no explicit datadir resolves to `$DATA_DIR/l2/op-reth` — the live sequencer's own archive datadir. Under `FORTEL2_ENV=.env.sepolia` that `rm -rf` deletes chain 852's state; recovery is the R-0014 snapshot + re-derive, i.e. hours of downtime. **Until the D-0130 guard lands, run neither on this Mac.** A verifier sidecar here must be pointed at an isolated datadir (`FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth`), and a wipe must name that datadir explicitly. **Never** `debug_setHead` on a keeper datadir (live op-geth or a candidate you intend to keep).
 | op-batcher | `data/logs/op-batcher.log` | `publishing` / `Submit` / `Sent transaction` |
 | op-proposer | `data/logs/op-proposer.log` | `dispute game` / `Proposing` |
 
