@@ -1,6 +1,6 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — Tasks 1–6 done, op-reth promoted (D-0122); **Task 7 DONE through Phase C (D-0128, 2026-09-11): the Render replica `fortel2-replica-reth` runs op-reth in archive mode from snapshot 811872, and the public read hostname + SettlementOS private read now serve it; geth pserv stays up 24 h as rollback, then suspended (deleted only in Task 9)**. Q5 answered (≈170 MB/day disk, RSS peak 724 MB). Tasks 8–9 unstarted  
+**Status:** In execution — Tasks 1–6 done, op-reth promoted (D-0122); **Task 7 CLOSED (D-0129, 2026-09-12): the Render replica `fortel2-replica-reth` runs op-reth in archive mode and serves public read + SettlementOS private read; geth pserv suspended (deleted only in Task 9)**. Open Task 7 residue: disk grow to ≈25 GB before 2026-10-20. Tasks 8–9 unstarted  
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
@@ -500,8 +500,8 @@ Answer during Task 1 or 2 unless noted.
 - **Done (Task 5 Phase B, D-0120):** live cutover to op-reth at 473031→473032, two launchd cycles clean on the renamed process set; unsafe-tip behavior now proven by production (reth is the producer).
 - **Done (Task 5 closeout, #200/#203, D-0121):** L2 transfer, authenticated write, reth-era withdrawal initiate→prove→finalize on real clocks, viewer CORS on reth.
 - **Done (Task 6, D-0122):** ~134 h observation, 8 launchd cycles (one partial wake root-caused and fixed by #207, then three clean scheduled), replica parity, resources measured; PROMOTE.
-- **Task 7 (Render replica):** DONE through Phase C (D-0128, 2026-09-11). Phase A (#44/#45), snapshot bootstrap (D-0124, #46), archive restore (D-0127, #47/#48), Phase B parity/gateway/lag (R-0016, #50), Q5 measured, Phase C = env repoint of `fortel2-replica-rpc` and SettlementOS to `http://fortel2-replica-reth:10000` (rename-swap does not work on Render: hostnames are slugs). Remaining: suspend geth + staging gateway after the 24 h window (2026-09-12), fortel2-replica verdict PR (R-0017), disk grow to ≈25 GB before 2026-10-20, geth removal (Task 9).
-- **Not done:** Task 7 follow-ups — suspend the geth pserv + staging gateway after the 24 h rollback window (2026-09-12 ≥17:25Z), grow the reth disk to ≈25 GB before 2026-10-20, fortel2-replica verdict PR (R-0017); friend repo (Task 8); geth removal (Task 9).
+- **Task 7 (Render replica):** CLOSED (D-0129, 2026-09-12). Phase A (#44/#45), snapshot bootstrap (D-0124, #46), archive restore (D-0127, #47/#48), Phase B (R-0016, #50), Phase C env repoint (D-0128, R-0017 #51), 24 h window clean, geth + staging gateway suspended 2026-09-12 (not deleted). Render hostnames are slugs; rename-swap does not move traffic.
+- **Not done:** Task 7 residue — grow the reth disk to ≈25 GB before 2026-10-20; ForteL2 script fixes queued by D-0125; friend repo (Task 8); geth removal (Task 9).
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The `admin_stopSequencer` / `admin_startSequencer` helper that review asked for is `scripts/sequencer-admin.sh` (Task 5 Phase A, #192) and was used live at cutover (D-0120).
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
