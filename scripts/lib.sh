@@ -1229,9 +1229,113 @@ wipe_reth_datadir() {
   mkdir -p "$datadir"
 }
 
+# Verifier sidecar pid names. Distinct from the live EL (op-reth /
+# op-reth-node / op-node / op-geth) so stop-op-reth-verifier.sh cannot
+# kill chain 852's producer (D-0125). PID_DIR is per-DATA_DIR, not per-role.
+is_reth_sidecar_pid_name() {
+  case "${1:-}" in
+    op-reth-verifier|op-reth-verifier-node) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+reth_sidecar_ps_args() {
+  local pid="$1"
+  ps -www -p "$pid" -o args= 2>/dev/null || ps -p "$pid" -o args= 2>/dev/null || true
+}
+
+# Prints the matching live port and returns 0 if args mention 9545/9546/9547/9551
+# as a whole number (so sidecar :19545 does not match 9545).
+reth_sidecar_args_have_live_port() {
+  local args="$1" p re
+  for p in $FORTEL2_LIVE_EL_PORTS; do
+    re='(^|[^0-9])'"$p"'([^0-9]|$)'
+    if [[ "$args" =~ $re ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Live datadir $DATA_DIR/l2/op-reth as a path token (not op-reth-safedb).
+# Skipped when FORTEL2_RETH_DATADIR is set and points elsewhere.
+reth_sidecar_args_have_live_datadir() {
+  local args="$1"
+  local override="${FORTEL2_RETH_DATADIR:-}"
+  local live="$DATA_DIR/l2/op-reth"
+  local live_c needle rest c tmp
+  live_c="$(fortel2_canon_path "$live")"
+  if [[ -n "$override" ]]; then
+    local override_c
+    override_c="$(fortel2_canon_path "$override")"
+    if [[ "$override_c" != "$live_c" ]]; then
+      return 1
+    fi
+  fi
+  for needle in "$live" "$live_c"; do
+    [[ -n "$needle" ]] || continue
+    tmp="$args"
+    while [[ "$tmp" == *"$needle"* ]]; do
+      rest="${tmp#*"$needle"}"
+      c="${rest:0:1}"
+      if [[ -z "$c" || "$c" == "/" || "$c" == " " || "$c" == $'\t' ]]; then
+        return 0
+      fi
+      tmp="$rest"
+    done
+  done
+  return 1
+}
+
+stop_reth_sidecar_named() {
+  local name="$1"
+  if ! is_reth_sidecar_pid_name "$name"; then
+    echo "ERROR: refusing to signal pidfile name '$name' — not a sidecar name (want op-reth-verifier / op-reth-verifier-node)" >&2
+    exit 1
+  fi
+  local pidfile="$PID_DIR/$name.pid"
+  if [[ ! -f "$pidfile" ]]; then
+    echo "$name not running (no pidfile)"
+    return 0
+  fi
+  local pid
+  pid="$(tr -d '[:space:]' < "$pidfile")"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    echo "$name not running (stale pidfile)"
+    rm -f "$pidfile"
+    return 0
+  fi
+  local args hit
+  args="$(reth_sidecar_ps_args "$pid")"
+  if [[ -z "${args// /}" ]]; then
+    echo "ERROR: refusing to stop $name (pid $pid) — could not read command line" >&2
+    exit 1
+  fi
+  hit="$(reth_sidecar_args_have_live_port "$args" || true)"
+  if [[ -n "$hit" ]]; then
+    echo "ERROR: refusing to stop $name (pid $pid) — command line binds live port $hit" >&2
+    echo "cmdline: $args" >&2
+    exit 1
+  fi
+  if reth_sidecar_args_have_live_datadir "$args"; then
+    echo "ERROR: refusing to stop $name (pid $pid) — command line uses live datadir $DATA_DIR/l2/op-reth" >&2
+    echo "cmdline: $args" >&2
+    exit 1
+  fi
+  stop_bg "$name"
+}
+
 stop_reth_sidecar() {
-  stop_bg op-reth-node
-  stop_bg op-reth
+  local live_name lpid
+  for live_name in op-reth op-reth-node op-node op-geth; do
+    if [[ -f "$PID_DIR/$live_name.pid" ]]; then
+      lpid="$(tr -d '[:space:]' < "$PID_DIR/$live_name.pid")"
+      echo "leaving live $live_name pidfile alone (pid ${lpid:-unknown})"
+    fi
+  done
+  stop_reth_sidecar_named op-reth-verifier-node
+  stop_reth_sidecar_named op-reth-verifier
 }
 
 # Sidecar SafeDB (Task 4). Default $DATA_DIR/l2/op-reth-safedb. Never the live

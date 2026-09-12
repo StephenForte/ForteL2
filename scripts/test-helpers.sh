@@ -7250,17 +7250,132 @@ else
   fail=1
 fi
 
-# Stop/status coverage: start-able names are stoppable by the same name.
-if grep -q 'start_bg op-reth ' "$RETH_START" \
-  && grep -q 'start_bg op-reth-node ' "$RETH_START" \
+# Stop/status coverage: sidecar pid names must not collide with the live EL
+# (D-0125). Trailing space so `start_bg op-reth ` does not match
+# `start_bg op-reth-verifier `; `stop_bg op-reth( |$)` does not match
+# `stop_bg op-reth-verifier`.
+SIDECAR_STOP_SRC="$(awk '
+  /^is_reth_sidecar_pid_name\(\)/ {keep=1}
+  /^reth_sidecar_/ {keep=1}
+  /^stop_reth_sidecar/ {keep=1}
+  keep {print}
+  keep && /^}$/ {keep=0}
+' "$SCRIPT_DIR/lib.sh")"
+if grep -q 'start_bg op-reth-verifier ' "$RETH_START" \
+  && grep -q 'start_bg op-reth-verifier-node ' "$RETH_START" \
+  && ! grep -q 'start_bg op-reth ' "$RETH_START" \
+  && ! grep -q 'start_bg op-reth-node ' "$RETH_START" \
+  && ! grep -E 'stop_bg op-reth( |$)' "$RETH_STOP" \
+  && ! grep -E 'stop_bg op-reth-node( |$)' "$RETH_STOP" \
+  && ! echo "$SIDECAR_STOP_SRC" | grep -E 'stop_bg op-reth( |$)' \
+  && ! echo "$SIDECAR_STOP_SRC" | grep -E 'stop_bg op-reth-node( |$)' \
+  && ! echo "$SIDECAR_STOP_SRC" | grep -Eq 'pkill|killall' \
   && grep -q 'stop_reth_sidecar' "$RETH_STOP" \
   && grep -q 'stop_reth_sidecar' "$SCRIPT_DIR/stop-all.sh" \
   && grep -q 'stop_reth_sidecar' "$SCRIPT_DIR/stop-all-sepolia.sh"; then
-  echo "PASS start_bg op-reth / op-reth-node are stopped via stop_reth_sidecar"
+  echo "PASS sidecar pid names are op-reth-verifier / op-reth-verifier-node (no live-name start_bg/stop_bg)"
 else
-  echo "FAIL sidecar start names must have matching stop coverage" >&2
+  echo "FAIL sidecar start names must be op-reth-verifier / op-reth-verifier-node with matching stop coverage" >&2
   fail=1
 fi
+
+# Functional: temp PID_DIR + dummy processes. Never the live DATA_DIR.
+# Mutation 5b: if stop_reth_sidecar still called stop_bg on the live name, the
+# dummy behind op-reth.pid would die. Mutation 5c: if the live-port refusal
+# were a warn, the dummy whose argv contains :9545 would die.
+SC_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-sidecar-pid.XXXXXX")"
+mkdir -p "$SC_FIX/pids" "$SC_FIX/logs" "$SC_FIX/l2"
+SC_LIVE_PID=""
+SC_SIDE_PID=""
+SC_PORT_PID=""
+cleanup_sc_fix() {
+  [[ -n "${SC_LIVE_PID:-}" ]] && kill "$SC_LIVE_PID" 2>/dev/null || true
+  [[ -n "${SC_SIDE_PID:-}" ]] && kill "$SC_SIDE_PID" 2>/dev/null || true
+  [[ -n "${SC_PORT_PID:-}" ]] && kill "$SC_PORT_PID" 2>/dev/null || true
+  rm -rf "$SC_FIX"
+}
+
+python3 -c 'import time; time.sleep(120)' </dev/null >/dev/null 2>&1 &
+SC_LIVE_PID=$!
+disown "$SC_LIVE_PID" 2>/dev/null || true
+echo "$SC_LIVE_PID" > "$SC_FIX/pids/op-reth.pid"
+sleep 0.2
+SC_B_RC=0
+SC_B_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$SC_FIX"
+    PID_DIR="$SC_FIX/pids"
+    LOG_DIR="$SC_FIX/logs"
+    stop_reth_sidecar
+  ) 2>&1
+)" || SC_B_RC=$?
+if [[ "$SC_B_RC" -eq 0 ]] \
+  && kill -0 "$SC_LIVE_PID" 2>/dev/null \
+  && echo "$SC_B_OUT" | grep -q 'leaving live op-reth pidfile alone'; then
+  echo "PASS stop_reth_sidecar leaves a live op-reth pidfile alone"
+else
+  echo "FAIL stop_reth_sidecar must leave live op-reth pidfile alone (rc=$SC_B_RC alive=$(kill -0 "$SC_LIVE_PID" 2>/dev/null && echo yes || echo no))" >&2
+  echo "$SC_B_OUT" >&2
+  fail=1
+fi
+
+python3 -c 'import time; time.sleep(120)' </dev/null >/dev/null 2>&1 &
+SC_SIDE_PID=$!
+disown "$SC_SIDE_PID" 2>/dev/null || true
+echo "$SC_SIDE_PID" > "$SC_FIX/pids/op-reth-verifier.pid"
+sleep 0.2
+SC_B2_RC=0
+SC_B2_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$SC_FIX"
+    PID_DIR="$SC_FIX/pids"
+    LOG_DIR="$SC_FIX/logs"
+    stop_reth_sidecar
+  ) 2>&1
+)" || SC_B2_RC=$?
+if [[ "$SC_B2_RC" -eq 0 ]] \
+  && ! kill -0 "$SC_SIDE_PID" 2>/dev/null \
+  && kill -0 "$SC_LIVE_PID" 2>/dev/null; then
+  echo "PASS stop_reth_sidecar stops op-reth-verifier and leaves live op-reth"
+else
+  echo "FAIL stop_reth_sidecar must stop the sidecar pid only (rc=$SC_B2_RC side=$(kill -0 "$SC_SIDE_PID" 2>/dev/null && echo alive || echo dead) live=$(kill -0 "$SC_LIVE_PID" 2>/dev/null && echo alive || echo dead))" >&2
+  echo "$SC_B2_OUT" >&2
+  fail=1
+fi
+SC_SIDE_PID=""
+
+python3 -c 'import time; time.sleep(120)' -- --http.port=9545 </dev/null >/dev/null 2>&1 &
+SC_PORT_PID=$!
+disown "$SC_PORT_PID" 2>/dev/null || true
+echo "$SC_PORT_PID" > "$SC_FIX/pids/op-reth-verifier.pid"
+sleep 0.2
+SC_C_RC=0
+SC_C_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$SC_FIX"
+    PID_DIR="$SC_FIX/pids"
+    LOG_DIR="$SC_FIX/logs"
+    stop_reth_sidecar
+  ) 2>&1
+)" || SC_C_RC=$?
+if [[ "$SC_C_RC" -ne 0 ]] \
+  && kill -0 "$SC_PORT_PID" 2>/dev/null \
+  && echo "$SC_C_OUT" | grep -q '9545' \
+  && echo "$SC_C_OUT" | grep -qi 'refus'; then
+  echo "PASS stop_reth_sidecar refuses a sidecar pidfile whose cmdline binds :9545"
+else
+  echo "FAIL stop_reth_sidecar must refuse a live-port cmdline and leave the dummy alive (rc=$SC_C_RC alive=$(kill -0 "$SC_PORT_PID" 2>/dev/null && echo yes || echo no))" >&2
+  echo "$SC_C_OUT" >&2
+  fail=1
+fi
+
+cleanup_sc_fix
+unset SC_LIVE_PID SC_SIDE_PID SC_PORT_PID SC_FIX
+unset SC_B_RC SC_B_OUT SC_B2_RC SC_B2_OUT SC_C_RC SC_C_OUT SIDECAR_STOP_SRC
+unset -f cleanup_sc_fix 2>/dev/null || true
 
 # JWT under verifier datadir, not live jwt.txt.
 if grep -q 'reth_jwt_path' "$RETH_START" \
@@ -8429,6 +8544,24 @@ if [[ "$VRP_BAL_EC" -ne 0 ]] && echo "$VRP_BAL" | grep -q 'field=balance'; then
 else
   echo "FAIL altered balance must go red (ec=$VRP_BAL_EC)" >&2
   echo "$VRP_BAL" >&2
+  fail=1
+fi
+
+# Null receipt: named mismatch, no traceback. Mutation: receipt_fields(None)
+# fed to compare_maps .get used to raise AttributeError / TypeError.
+VRP_TXH="0x$(python3 -c 'print("7e"*32)')"
+VRP_NULL="$("$VRP" --fixture "$VRP_FIX/match.json" --alter-field receipt_null 2>&1)" && VRP_NULL_EC=0 || VRP_NULL_EC=$?
+if [[ "$VRP_NULL_EC" -ne 0 ]] \
+  && echo "$VRP_NULL" | grep -q 'MISMATCH receipt=' \
+  && echo "$VRP_NULL" | grep -q "$VRP_TXH" \
+  && echo "$VRP_NULL" | grep -q 'candidate=null' \
+  && ! echo "$VRP_NULL" | grep -q 'Traceback' \
+  && ! echo "$VRP_NULL" | grep -q 'AttributeError' \
+  && ! echo "$VRP_NULL" | grep -q 'TypeError'; then
+  echo "PASS verify-reth-parity --alter-field receipt_null is a named mismatch (no traceback)"
+else
+  echo "FAIL null receipt must be MISMATCH receipt=<tx> without traceback (ec=$VRP_NULL_EC)" >&2
+  echo "$VRP_NULL" >&2
   fail=1
 fi
 

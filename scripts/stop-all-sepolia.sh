@@ -16,8 +16,9 @@ require_sepolia_env
 for name in l2-rpc-filter op-challenger l1-batch-proxy op-proposer op-batcher op-node op-geth op-reth; do
   stop_bg "$name"
 done
-# Sidecar verifier node (not started by start-all). stop_reth_sidecar is a
-# no-op without pidfiles; live op-reth was already stop_bg'd in the loop.
+# Sidecar verifier (op-reth-verifier / op-reth-verifier-node; not started by
+# start-all). stop_reth_sidecar is a no-op unless those sidecar pidfiles exist;
+# it never signals live op-reth (already stop_bg'd in the loop above).
 stop_reth_sidecar
 echo "Sepolia L2 processes stopped (DATA_DIR=$DATA_DIR)."
 echo "Phase 1 datadir untouched. Restart: FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh"

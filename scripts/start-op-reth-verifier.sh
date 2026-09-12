@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Isolated op-reth + verifier op-node for ForteL2 Sepolia L2 852 (Task 2).
-# Opt-in. Does not replace 04-start-sequencer-sepolia.sh (live op-geth until Task 5).
-# Pid names: op-reth / op-reth-node. Logs: data/logs/op-reth.log, op-reth-node.log.
+# Opt-in. Does not replace 04-start-sequencer-sepolia.sh (live EL is FORTEL2_EL).
+# Pid names: op-reth-verifier / op-reth-verifier-node (never op-reth / op-reth-node /
+# op-node / op-geth). Logs: data/logs/op-reth-verifier.log, op-reth-verifier-node.log.
 # Never binds :9545/:9546/:9547/:9551. Never opens $DATA_DIR/l2/op-geth.
 # Mid-chain rewind: wipe the reth datadir and re-derive — never debug_setHead.
 set -euo pipefail
@@ -241,8 +242,8 @@ if [[ "$L1_ID" != "11155111" ]]; then
   exit 1
 fi
 
-echo "Starting op-reth profile=${FORTEL2_RETH_PROFILE} http :$HTTP_PORT auth :$AUTH_PORT datadir=$DATADIR"
-start_bg op-reth op-reth node \
+echo "Starting op-reth-verifier profile=${FORTEL2_RETH_PROFILE} http :$HTTP_PORT auth :$AUTH_PORT datadir=$DATADIR"
+start_bg op-reth-verifier op-reth node \
   --chain="$GENESIS" \
   --datadir="$DATADIR" \
   --http \
@@ -260,7 +261,7 @@ start_bg op-reth op-reth node \
   "${PROFILE_FLAGS[@]}"
 
 sleep 2
-wait_for_rpc "$EL_HTTP" "op-reth sidecar" 90
+wait_for_rpc "$EL_HTTP" "op-reth-verifier sidecar" 90
 
 # SafeDB is sidecar-only. Never inherit a leaked live OP_NODE_SAFEDB_PATH
 # (that would share or clobber $DATA_DIR/safedb). verifier profile stays off.
@@ -275,8 +276,8 @@ else
   unset OP_NODE_SAFEDB_PATH || true
 fi
 
-echo "Starting op-reth-node --l2.enginekind=reth (rpc :$NODE_PORT) l1.rpckind=${L1_RPC_KIND} l1.rpc-rate-limit=${L1_RPC_RATE_LIMIT}"
-start_bg op-reth-node op-node \
+echo "Starting op-reth-verifier-node --l2.enginekind=reth (rpc :$NODE_PORT) l1.rpckind=${L1_RPC_KIND} l1.rpc-rate-limit=${L1_RPC_RATE_LIMIT}"
+start_bg op-reth-verifier-node op-node \
   --l1="$L1_RPC_URL" \
   --l1.rpckind="${L1_RPC_KIND}" \
   --l1.trustrpc=true \
@@ -296,7 +297,7 @@ start_bg op-reth-node op-node \
   --log.level=info \
   "${SAFEDB_ARGS[@]}"
 
-wait_for_opnode_rpc "$NODE_HTTP" "op-reth-node" 90
+wait_for_opnode_rpc "$NODE_HTTP" "op-reth-verifier-node" 90
 
 GEN0="$(cast block 0 --rpc-url "$EL_HTTP" --json | jq -r '.hash')"
 echo "genesis sidecar=$GEN0 expected=$FORTEL2_L2_GENESIS_HASH_852"
@@ -320,7 +321,7 @@ if [[ "$WAIT_BLOCKS" -gt 0 ]]; then
   done
   head="$(cast block-number --rpc-url "$EL_HTTP")"
   if ! [[ "$head" =~ ^[0-9]+$ ]] || (( head < WAIT_BLOCKS )); then
-    echo "ERROR: sidecar head=$head never reached block $WAIT_BLOCKS (see $LOG_DIR/op-reth-node.log)" >&2
+    echo "ERROR: sidecar head=$head never reached block $WAIT_BLOCKS (see $LOG_DIR/op-reth-verifier-node.log)" >&2
     exit 1
   fi
   echo "sidecar L2 head=$head (>= $WAIT_BLOCKS)"
@@ -331,5 +332,5 @@ if [[ ${#SAFEDB_ARGS[@]} -gt 0 ]]; then
   L1_HEAD="$(cast block-number --rpc-url "$L1_RPC_URL" 2>/dev/null || echo unknown)"
   echo "SafeDB enable L1 head=${L1_HEAD} (sidecar only; pre-enable optimism_safeHeadAtL1Block must fail)"
 fi
-echo "Stop: ./scripts/stop-op-reth-verifier.sh (or stop-all.sh — sidecar names only; live geth stays if on another DATA_DIR)"
-echo "Known-good: op-reth log 'Starting JSON-RPC' / 'RPC'; op-reth-node 'derived' / 'Forkchoice'"
+echo "Stop: ./scripts/stop-op-reth-verifier.sh (sidecar pid names op-reth-verifier / op-reth-verifier-node only; live EL untouched)"
+echo "Known-good: op-reth-verifier log 'Starting JSON-RPC' / 'RPC'; op-reth-verifier-node 'derived' / 'Forkchoice'"
