@@ -34,7 +34,7 @@ Exit 0 only on a full three-way match. Any mismatch names block + field.
   --fixture PATH      offline JSON fixture (no RPC; CI / helper tests)
   --alter-field F     mutate the candidate fixture copy of F before compare
                       (hash|parentHash|stateRoot|receiptsRoot|txCount|
-                       balance|storage|receipt) — must exit nonzero
+                       balance|storage|receipt|receipt_null) — must exit nonzero
   -h, --help
 
 Does not print private keys, JWTs, or L1 provider URLs.
@@ -408,7 +408,7 @@ def receipt_fields(rcpt):
 def alter_fixture(doc, field):
     allowed = {
         "hash", "parentHash", "stateRoot", "receiptsRoot", "txCount",
-        "balance", "storage", "receipt",
+        "balance", "storage", "receipt", "receipt_null",
     }
     if field not in allowed:
         fail(f"unknown --alter-field {field} (want {'|'.join(sorted(allowed))})", 2)
@@ -435,6 +435,10 @@ def alter_fixture(doc, field):
         if not cand.get("receipts"):
             fail("fixture has no receipts to alter")
         cand["receipts"][0]["status"] = "0x0"
+    elif field == "receipt_null":
+        if not cand.get("receipts"):
+            fail("fixture has no receipts to alter")
+        cand["receipts"][0] = None
     return cand
 
 
@@ -447,7 +451,41 @@ def mismatch(kind, ident, field, a, b, c=None):
     sys.exit(1)
 
 
+def receipt_ident(*raws):
+    for raw in raws:
+        if not isinstance(raw, dict):
+            continue
+        h = raw.get("transactionHash") or raw.get("txHash")
+        if h:
+            return norm_hash(h)
+    return None
+
+
+def require_receipts(txh, ca, lv, rp):
+    """Null receipt on any source is a named mismatch (never AttributeError)."""
+    if ca is not None and lv is not None and rp is not None:
+        return
+    ident = txh or "unknown"
+    parts = []
+    for src, val in (("candidate", ca), ("live", lv), ("replica", rp)):
+        parts.append(f"{src}={'null' if val is None else 'ok'}")
+    print(
+        f"MISMATCH receipt={ident} field=receipt {' '.join(parts)}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def compare_maps(kind, ident, ca, lv, rp, fields):
+    if not isinstance(ca, dict) or not isinstance(lv, dict) or not isinstance(rp, dict):
+        if kind == "receipt":
+            require_receipts(
+                ident,
+                ca if isinstance(ca, dict) else None,
+                lv if isinstance(lv, dict) else None,
+                rp if isinstance(rp, dict) else None,
+            )
+        fail(f"missing {kind} {ident}")
     for f in fields:
         a, b, c = ca.get(f), lv.get(f), rp.get(f)
         if a != b or a != c:
@@ -532,15 +570,24 @@ def run_fixture():
     if not any("bridge" in x.lower() for x in labels):
         fail("fixture state checks must include a bridge contract")
 
-    rc_c = [receipt_fields(x) for x in (cand.get("receipts") or [])]
-    rc_l = [receipt_fields(x) for x in (live.get("receipts") or [])]
-    rc_r = [receipt_fields(x) for x in (replica.get("receipts") or [])]
+    raw_c = cand.get("receipts") or []
+    raw_l = live.get("receipts") or []
+    raw_r = replica.get("receipts") or []
+    rc_c = [receipt_fields(x) for x in raw_c]
+    rc_l = [receipt_fields(x) for x in raw_l]
+    rc_r = [receipt_fields(x) for x in raw_r]
     if min(len(rc_c), len(rc_l), len(rc_r)) < 2:
         fail("fixture must include >=2 receipts")
     for i in range(2):
-        compare_maps("receipt", rc_l[i]["txHash"], rc_c[i], rc_l[i], rc_r[i],
+        txh = receipt_ident(
+            raw_l[i] if i < len(raw_l) else None,
+            raw_c[i] if i < len(raw_c) else None,
+            raw_r[i] if i < len(raw_r) else None,
+        )
+        require_receipts(txh, rc_c[i], rc_l[i], rc_r[i])
+        compare_maps("receipt", txh, rc_c[i], rc_l[i], rc_r[i],
                      ["txHash", "status", "logsBloom", "cumulativeGasUsed", "blockNumber"])
-        print(f"  receipt {rc_l[i]['txHash'][:18]}… status={rc_l[i]['status']} MATCH")
+        print(f"  receipt {txh[:18]}… status={rc_l[i]['status']} MATCH")
 
     dep_c = cand.get("deposits") or []
     dep_l = live.get("deposits") or []
@@ -665,6 +712,7 @@ def run_live():
         rc = receipt_fields(get_receipt(CAND, "candidate", txh))
         rl = receipt_fields(get_receipt(LIVE, "live", txh))
         rr = receipt_fields(get_receipt(REPL, "replica", txh))
+        require_receipts(txh, rc, rl, rr)
         compare_maps("receipt", txh, rc, rl, rr,
                      ["txHash", "status", "logsBloom", "cumulativeGasUsed", "blockNumber"])
         print(f"  receipt {txh} status={rl['status']} MATCH")

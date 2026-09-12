@@ -1015,7 +1015,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
 | op-geth (kept until Task 9; not running since 2026-09-02) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
 | op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | `reth 2.3.0-dev (9384bc5) starting` / `Status … latest_block=` |
-| op-reth-node (sidecar) | `data/logs/op-reth-node.log` | `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
+| op-reth-verifier / op-reth-verifier-node (sidecar) | `data/logs/op-reth-verifier.log`, `op-reth-verifier-node.log` | `Starting JSON-RPC` / `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
 Mid-chain rewind on op-reth (PRD §11 Q6, interim): wipe the reth datadir (`FORTEL2_EL=reth ./scripts/reset.sh` or `stop-op-reth-verifier.sh` then `--wipe`) and re-derive from 852 genesis. **Never** `debug_setHead` on a keeper datadir (live op-geth or a candidate you intend to keep).
