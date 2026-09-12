@@ -7288,10 +7288,12 @@ mkdir -p "$SC_FIX/pids" "$SC_FIX/logs" "$SC_FIX/l2"
 SC_LIVE_PID=""
 SC_SIDE_PID=""
 SC_PORT_PID=""
+SC_DD_PID=""
 cleanup_sc_fix() {
   [[ -n "${SC_LIVE_PID:-}" ]] && kill "$SC_LIVE_PID" 2>/dev/null || true
   [[ -n "${SC_SIDE_PID:-}" ]] && kill "$SC_SIDE_PID" 2>/dev/null || true
   [[ -n "${SC_PORT_PID:-}" ]] && kill "$SC_PORT_PID" 2>/dev/null || true
+  [[ -n "${SC_DD_PID:-}" ]] && kill "$SC_DD_PID" 2>/dev/null || true
   rm -rf "$SC_FIX"
 }
 
@@ -7371,10 +7373,40 @@ else
   echo "$SC_C_OUT" >&2
   fail=1
 fi
+kill "$SC_PORT_PID" 2>/dev/null || true
+SC_PORT_PID=""
+
+# Default sidecar datadir is $DATA_DIR/l2/op-reth. Stop must still succeed
+# when argv names that path but does not bind a live port (Codex P1 / Bugbot).
+python3 -c 'import time; time.sleep(120)' -- --datadir="$SC_FIX/l2/op-reth" </dev/null >/dev/null 2>&1 &
+SC_DD_PID=$!
+disown "$SC_DD_PID" 2>/dev/null || true
+echo "$SC_DD_PID" > "$SC_FIX/pids/op-reth-verifier.pid"
+sleep 0.2
+SC_D_RC=0
+SC_D_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$SC_FIX"
+    PID_DIR="$SC_FIX/pids"
+    LOG_DIR="$SC_FIX/logs"
+    stop_reth_sidecar
+  ) 2>&1
+)" || SC_D_RC=$?
+if [[ "$SC_D_RC" -eq 0 ]] \
+  && ! kill -0 "$SC_DD_PID" 2>/dev/null \
+  && ! echo "$SC_D_OUT" | grep -qi 'refus'; then
+  echo "PASS stop_reth_sidecar stops a sidecar whose cmdline uses the default reth datadir"
+else
+  echo "FAIL default-datadir sidecar must remain stoppable (rc=$SC_D_RC alive=$(kill -0 "$SC_DD_PID" 2>/dev/null && echo yes || echo no))" >&2
+  echo "$SC_D_OUT" >&2
+  fail=1
+fi
+SC_DD_PID=""
 
 cleanup_sc_fix
-unset SC_LIVE_PID SC_SIDE_PID SC_PORT_PID SC_FIX
-unset SC_B_RC SC_B_OUT SC_B2_RC SC_B2_OUT SC_C_RC SC_C_OUT SIDECAR_STOP_SRC
+unset SC_LIVE_PID SC_SIDE_PID SC_PORT_PID SC_DD_PID SC_FIX
+unset SC_B_RC SC_B_OUT SC_B2_RC SC_B2_OUT SC_C_RC SC_C_OUT SC_D_RC SC_D_OUT SIDECAR_STOP_SRC
 unset -f cleanup_sc_fix 2>/dev/null || true
 
 # JWT under verifier datadir, not live jwt.txt.

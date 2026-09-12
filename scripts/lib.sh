@@ -1258,36 +1258,6 @@ reth_sidecar_args_have_live_port() {
   return 1
 }
 
-# Live datadir $DATA_DIR/l2/op-reth as a path token (not op-reth-safedb).
-# Skipped when FORTEL2_RETH_DATADIR is set and points elsewhere.
-reth_sidecar_args_have_live_datadir() {
-  local args="$1"
-  local override="${FORTEL2_RETH_DATADIR:-}"
-  local live="$DATA_DIR/l2/op-reth"
-  local live_c needle rest c tmp
-  live_c="$(fortel2_canon_path "$live")"
-  if [[ -n "$override" ]]; then
-    local override_c
-    override_c="$(fortel2_canon_path "$override")"
-    if [[ "$override_c" != "$live_c" ]]; then
-      return 1
-    fi
-  fi
-  for needle in "$live" "$live_c"; do
-    [[ -n "$needle" ]] || continue
-    tmp="$args"
-    while [[ "$tmp" == *"$needle"* ]]; do
-      rest="${tmp#*"$needle"}"
-      c="${rest:0:1}"
-      if [[ -z "$c" || "$c" == "/" || "$c" == " " || "$c" == $'\t' ]]; then
-        return 0
-      fi
-      tmp="$rest"
-    done
-  done
-  return 1
-}
-
 stop_reth_sidecar_named() {
   local name="$1"
   if ! is_reth_sidecar_pid_name "$name"; then
@@ -1318,11 +1288,11 @@ stop_reth_sidecar_named() {
     echo "cmdline: $args" >&2
     exit 1
   fi
-  if reth_sidecar_args_have_live_datadir "$args"; then
-    echo "ERROR: refusing to stop $name (pid $pid) — command line uses live datadir $DATA_DIR/l2/op-reth" >&2
-    echo "cmdline: $args" >&2
-    exit 1
-  fi
+  # Live EL protection is the sidecar pid name plus the live-port check.
+  # Do not refuse $DATA_DIR/l2/op-reth: that is also the documented default
+  # sidecar datadir, and stop-op-reth-verifier.sh does not inherit the
+  # start script's FORTEL2_RETH_DATADIR. A hijacked sidecar pidfile that
+  # actually is the producer still fails closed on :9545/:9546/:9547/:9551.
   stop_bg "$name"
 }
 
