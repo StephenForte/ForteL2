@@ -62,11 +62,15 @@ branch_of() {
 }
 
 is_dirty() {
-  # .env / .env.sepolia / data are gitignored as files-or-dirs in the real repo
-  # for `data/` (trailing slash = directory only). A symlink named data is not
-  # a directory, so it would otherwise show as untracked and block every update.
+  # .env / .env.sepolia / data / bin are gitignored as files-or-dirs in the real
+  # repo for `data/` and `bin/` (trailing slash = directory only). A symlink
+  # named data or bin is not a directory, so it would otherwise show as
+  # untracked and block every update. bin is listed because an operator may
+  # already have created that symlink by hand to silence the LaunchControl
+  # missing-path error — refusing dirty there would block the very deploy that
+  # adopts it (the local git-exclude is only written after this check).
   local leftover
-  leftover="$(git -C "$1" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|deployments/sepolia/\.deployer)$' || true)"
+  leftover="$(git -C "$1" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|bin|deployments/sepolia/\.deployer)$' || true)"
   [[ -n "$leftover" ]]
 }
 
@@ -267,6 +271,12 @@ ensure_data_symlink
 # pinned tracked deployments.json / rollup.json). required=1, mkdir_src=0:
 # a missing dest .deployer must refuse (do not mkdir an empty stand-in).
 ensure_runtime_symlink "deployments/sepolia/.deployer" 1 0
+# bin/ is gitignored, so a fresh clone never has one — but every checked-in
+# plist puts $PINNED/bin on PATH. Without this symlink that PATH entry is a
+# dead directory: harmless for cast (resolved from ~/.foundry/bin) but the
+# pinned tree cannot supply op-* or kona-host to a launchd job. required=0:
+# a dev checkout with no bin/ is not an error, just nothing to link.
+ensure_runtime_symlink "bin" 0 0
 
 echo
 echo "agents now run:"

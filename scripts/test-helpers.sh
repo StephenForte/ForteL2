@@ -8819,6 +8819,29 @@ else
   fail=1
 fi
 
+# bin/ symlink (D-0133 follow-up). Every checked-in plist puts $PINNED/bin on
+# PATH, but bin/ is gitignored so a clone never has one. Mutation: drop the
+# ensure_runtime_symlink "bin" call and the symlink assertion goes red.
+# The pinned tree must also stay clean afterwards — a symlink named bin is not
+# a directory, so .gitignore "bin/" does not cover it (same trap as data/).
+mkdir -p "$PA_FIX/dev/bin"
+printf '#!/bin/sh\nexit 0\n' > "$PA_FIX/dev/bin/fake-op-tool"
+chmod +x "$PA_FIX/dev/bin/fake-op-tool"
+PA_BIN_OUT="$(pa_deploy "$PA_PIN")" && PA_BIN_EC=0 || PA_BIN_EC=$?
+PA_BIN_DIRTY="$(git -C "$PA_PIN" status --porcelain)"
+if [[ "$PA_BIN_EC" -eq 0 ]] \
+  && [[ -L "$PA_PIN/bin" ]] \
+  && [[ "$(readlink "$PA_PIN/bin")" == "$PA_FIX/dev/bin" ]] \
+  && [[ -x "$PA_PIN/bin/fake-op-tool" ]] \
+  && [[ -z "$PA_BIN_DIRTY" ]]; then
+  echo "PASS pin-agents deploy symlinks bin/ and leaves the pinned tree clean"
+else
+  echo "FAIL deploy-agents.sh must symlink bin/ without dirtying the tree (ec=$PA_BIN_EC dirty='$PA_BIN_DIRTY')" >&2
+  echo "$PA_BIN_OUT" >&2
+  fail=1
+fi
+
+
 # Dirty → distinct refusal, nonzero. Go-red-able: drop the dirty check.
 printf 'dirt\n' >> "$PA_PIN/README"
 PA_DIRTY="$(pa_deploy "$PA_PIN")" && PA_DIRTY_EC=0 || PA_DIRTY_EC=$?
@@ -8929,6 +8952,123 @@ ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
 ln -s "$PA_FIX/dev/data" "$PA_AUDIT/data"
 mkdir -p "$PA_AUDIT/deployments/sepolia" "$PA_FIX/dev/deployments/sepolia/.deployer"
 ln -s "$PA_FIX/dev/deployments/sepolia/.deployer" "$PA_AUDIT/deployments/sepolia/.deployer"
+
+# check-launchd reports how far the pinned tree is behind origin/main. INFO,
+# never a FAIL — being behind is the design (D-0113 Finding 2); it is reported
+# because nothing reported it and 52 commits accumulated unnoticed (D-0133).
+#
+# The count must come from the DEV checkout's origin/main, not the pinned
+# clone's: deploy-agents.sh fetches and fast-forwards in one run, so inside the
+# pinned clone origin/main == HEAD and the forgotten-deploy case would always
+# read level (Bugbot on #224). This fixture models exactly that — the pinned
+# clone's own origin/main is deliberately pinned AT its HEAD while the dev
+# checkout has moved on. Mutation: point the rev-list back at $PINNED_TREE and
+# the "behind" half goes red while the "level" half still passes.
+HYG_REAL_ORIGIN="$(git -C "$PA_ROOT" remote get-url origin)"
+HYG_PIN="$PA_FIX/hyg-pin"
+HYG_DEV="$PA_FIX/hyg-dev"
+git init -q -b main "$HYG_PIN"
+pa_git -C "$HYG_PIN" commit -q --allow-empty -m hyg-base
+git -C "$HYG_PIN" remote add origin "$HYG_REAL_ORIGIN"
+HYG_BASE="$(git -C "$HYG_PIN" rev-parse HEAD)"
+git -C "$HYG_PIN" update-ref refs/remotes/origin/main "$HYG_BASE"
+git clone -q "$HYG_PIN" "$HYG_DEV"
+git -C "$HYG_DEV" remote set-url origin "$HYG_REAL_ORIGIN"
+mkdir -p "$HYG_DEV/data" "$HYG_DEV/deployments/sepolia/.deployer" "$HYG_DEV/bin"
+printf 'SEPOLIA=1\n' > "$HYG_DEV/.env.sepolia"
+printf 'LOCAL=1\n' > "$HYG_DEV/.env"
+ln -s "$HYG_DEV/.env.sepolia" "$HYG_PIN/.env.sepolia"
+ln -s "$HYG_DEV/.env" "$HYG_PIN/.env"
+ln -s "$HYG_DEV/data" "$HYG_PIN/data"
+ln -s "$HYG_DEV/bin" "$HYG_PIN/bin"
+mkdir -p "$HYG_PIN/deployments/sepolia"
+ln -s "$HYG_DEV/deployments/sepolia/.deployer" "$HYG_PIN/deployments/sepolia/.deployer"
+mkdir -p "$HYG_PIN/.git/info"
+printf '.env.sepolia\n.env\ndata\nbin\ndeployments/sepolia/.deployer\n' >> "$HYG_PIN/.git/info/exclude"
+hyg_cl() {
+  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
+    CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
+    CHECK_LAUNCHD_PINNED_TREE="$HYG_PIN" \
+    CHECK_LAUNCHD_DEV_DIR="$HYG_DEV" \
+    CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
+    "$PA_CL" 2>&1 || true
+}
+git -C "$HYG_DEV" update-ref refs/remotes/origin/main "$HYG_BASE"
+HYG_LEVEL_OUT="$(hyg_cl)"
+# Dev moves ahead; the pinned clone never fetches (its origin/main stays at HEAD).
+pa_git -C "$HYG_DEV" commit -q --allow-empty -m hyg-ahead
+git -C "$HYG_DEV" update-ref refs/remotes/origin/main "$(git -C "$HYG_DEV" rev-parse HEAD)"
+HYG_PIN_SELF="$(git -C "$HYG_PIN" rev-list --count HEAD..origin/main 2>/dev/null || echo "err")"
+HYG_BEHIND_OUT="$(hyg_cl)"
+if echo "$HYG_LEVEL_OUT" | grep -q 'pinned tree is level with origin/main' \
+  && echo "$HYG_BEHIND_OUT" | grep -q 'pinned tree is 1 commit(s) behind origin/main' \
+  && echo "$HYG_BEHIND_OUT" | grep -q 'deploy-agents.sh' \
+  && [[ "$HYG_PIN_SELF" == "0" ]] \
+  && ! echo "$HYG_BEHIND_OUT" | grep -q 'FAIL.*behind'; then
+  echo "PASS check-launchd counts pinned-tree lag via the dev checkout, not the stale pinned ref"
+else
+  echo "FAIL check-launchd must report level vs behind from the dev checkout (pin-self=$HYG_PIN_SELF)" >&2
+  echo "--- level ---" >&2; echo "$HYG_LEVEL_OUT" >&2
+  echo "--- behind ---" >&2; echo "$HYG_BEHIND_OUT" >&2
+  fail=1
+fi
+
+# bin/ must stay AUDITED after being added to the dirty filter (Codex on #224):
+# filtering it from the dirty check without validating it here would let a
+# dangling or retargeted link pass silently while every plist puts $PINNED/bin
+# on PATH. Four states, each go-red-able by deleting the matching branch.
+HYG_BIN_OK="$(hyg_cl)"
+rm "$HYG_PIN/bin"
+ln -s "$HYG_DEV/not-bin" "$HYG_PIN/bin"
+HYG_BIN_WRONG="$(hyg_cl)"
+rm "$HYG_PIN/bin"
+# Dangling means the CORRECT target is gone — a wrong target is a different
+# branch and is checked first, so the fixture must keep the expected path.
+ln -s "$HYG_DEV/bin" "$HYG_PIN/bin"
+mv "$HYG_DEV/bin" "$HYG_DEV/bin.hidden"
+HYG_BIN_DANGLING="$(hyg_cl)"
+mv "$HYG_DEV/bin.hidden" "$HYG_DEV/bin"
+rm "$HYG_PIN/bin"
+HYG_BIN_ABSENT="$(hyg_cl)"
+mkdir -p "$HYG_PIN/real-bin-probe"
+rmdir "$HYG_PIN/real-bin-probe"
+mkdir "$HYG_PIN/bin"
+HYG_BIN_NOTLINK="$(hyg_cl)"
+rmdir "$HYG_PIN/bin"
+ln -s "$HYG_DEV/bin" "$HYG_PIN/bin"
+if ! echo "$HYG_BIN_OK" | grep -q 'pinned tree bin' \
+  && echo "$HYG_BIN_WRONG" | grep -q 'FAIL  pinned tree bin symlink points at' \
+  && echo "$HYG_BIN_DANGLING" | grep -q 'FAIL  pinned tree bin symlink is dangling' \
+  && echo "$HYG_BIN_NOTLINK" | grep -q 'FAIL  pinned tree bin exists but is not a symlink' \
+  && echo "$HYG_BIN_ABSENT" | grep -q 'INFO  pinned tree has no bin symlink' \
+  && ! echo "$HYG_BIN_ABSENT" | grep -q 'FAIL  pinned tree bin'; then
+  echo "PASS check-launchd audits the bin symlink (ok / wrong target / dangling / not a link / absent)"
+else
+  echo "FAIL check-launchd must audit bin after filtering it from the dirty check" >&2
+  echo "--- wrong ---" >&2; echo "$HYG_BIN_WRONG" | grep -i bin >&2
+  echo "--- dangling ---" >&2; echo "$HYG_BIN_DANGLING" | grep -i bin >&2
+  echo "--- notlink ---" >&2; echo "$HYG_BIN_NOTLINK" | grep -i bin >&2
+  echo "--- absent ---" >&2; echo "$HYG_BIN_ABSENT" | grep -i bin >&2
+  fail=1
+fi
+
+# A pre-existing bin symlink must not make deploy refuse dirty (Bugbot #224).
+# An operator may have created it by hand to silence LaunchControl; the local
+# git-exclude is written only after the dirty check, so is_dirty must tolerate
+# it. Mutation: drop `bin` from the is_dirty filter and this goes red.
+PA_PREBIN="$PA_FIX/prebin"
+git clone -q "$PA_FIX/origin.git" "$PA_PREBIN" >/dev/null 2>&1
+ln -s "$PA_FIX/dev/bin" "$PA_PREBIN/bin"
+PA_PREBIN_OUT="$(pa_deploy "$PA_PREBIN")" && PA_PREBIN_EC=0 || PA_PREBIN_EC=$?
+if [[ "$PA_PREBIN_EC" -eq 0 ]] \
+  && ! echo "$PA_PREBIN_OUT" | grep -q 'pinned tree is dirty' \
+  && [[ -L "$PA_PREBIN/bin" ]]; then
+  echo "PASS pin-agents deploy adopts a hand-made bin symlink instead of refusing dirty"
+else
+  echo "FAIL a pre-existing bin symlink must not refuse dirty (ec=$PA_PREBIN_EC)" >&2
+  echo "$PA_PREBIN_OUT" >&2
+  fail=1
+fi
 
 PA_CL_OLD="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
 if echo "$PA_CL_OLD" | grep -q 'FAIL  com.steve.fortel2-sleep' \

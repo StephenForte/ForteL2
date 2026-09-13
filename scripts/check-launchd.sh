@@ -250,11 +250,35 @@ check_pinned_tree() {
   fi
 
   local leftover
-  leftover="$(git -C "$PINNED_TREE" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|deployments/sepolia/\.deployer)$' || true)"
+  leftover="$(git -C "$PINNED_TREE" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|bin|deployments/sepolia/\.deployer)$' || true)"
   if [[ -n "$leftover" ]]; then
     echo "FAIL  pinned tree is dirty"
     FAILS=$((FAILS + 1))
     return
+  fi
+
+  # Commits behind origin/main. INFO, never a FAIL: the pinned tree moves only
+  # when the operator runs deploy-agents.sh (D-0113 Finding 2), so being behind
+  # is the design, not drift. It is reported because nothing else reports it —
+  # 52 commits accumulated unnoticed before 2026-09-13 (D-0133 follow-up).
+  #
+  # Counted against the DEV checkout's origin/main, not the pinned clone's.
+  # deploy-agents.sh fetches and fast-forwards in the same run, so inside the
+  # pinned clone origin/main == HEAD immediately afterwards and nothing moves
+  # it until the next deploy — the forgotten-deploy case this exists to surface
+  # would always read level (Bugbot on #224). The dev checkout is fetched by
+  # ordinary work, so its origin/main is the live reference. Still no fetch
+  # here: this script does no network.
+  local pinned_head behind
+  pinned_head="$(git -C "$PINNED_TREE" rev-parse HEAD 2>/dev/null || echo "")"
+  behind="$(git -C "$DEV_DIR" rev-list --count "${pinned_head}..origin/main" 2>/dev/null || echo "")"
+  if [[ -z "$behind" ]]; then
+    echo "INFO  pinned tree: cannot count commits behind (dev checkout ${DEV_DIR} has no origin/main, or does not have commit ${pinned_head:0:7})"
+  elif [[ "$behind" -eq 0 ]]; then
+    echo "OK    pinned tree is level with origin/main (per ${DEV_DIR}, as of its last fetch)"
+  else
+    echo "INFO  pinned tree is ${behind} commit(s) behind origin/main (per ${DEV_DIR}, as of its last fetch)"
+    echo "      deploy with: ./scripts/deploy-agents.sh"
   fi
 
   # .env.sepolia / .deployer are gitignored — porcelain cannot see a missing
@@ -281,6 +305,36 @@ check_pinned_tree() {
       return
     fi
   done
+
+  # bin/ is audited separately because it is OPTIONAL: deploy-agents.sh skips
+  # it when the dev checkout has no bin/ (required=0). It cannot simply join
+  # the loop above, but it must not go unaudited either — it was added to the
+  # dirty filter, and filtering it there without checking it here would let a
+  # dangling or retargeted link pass silently while every plist still puts
+  # $PINNED/bin on PATH (Codex on #224).
+  local bin_link="$PINNED_TREE/bin"
+  local bin_expected="$DEV_DIR/bin"
+  if [[ -L "$bin_link" ]]; then
+    local bin_target
+    bin_target="$(readlink "$bin_link")"
+    if [[ "$bin_target" != "$bin_expected" ]]; then
+      echo "FAIL  pinned tree bin symlink points at ${bin_target} (expected ${bin_expected})"
+      FAILS=$((FAILS + 1))
+      return
+    fi
+    if [[ ! -e "$bin_link" ]]; then
+      echo "FAIL  pinned tree bin symlink is dangling (target ${bin_target} does not exist)"
+      FAILS=$((FAILS + 1))
+      return
+    fi
+  elif [[ -e "$bin_link" ]]; then
+    echo "FAIL  pinned tree bin exists but is not a symlink — it shadows ${bin_expected} and deploy-agents.sh will not maintain it"
+    FAILS=$((FAILS + 1))
+    return
+  elif [[ -d "$bin_expected" ]]; then
+    echo "INFO  pinned tree has no bin symlink while ${bin_expected} exists — plists put \$PINNED/bin on PATH"
+    echo "      deploy with: ./scripts/deploy-agents.sh"
+  fi
 
   local env_link="$PINNED_TREE/.env.sepolia"
   if grep -E '^[[:space:]]*(export[[:space:]]+)?FORTEL2_ROOT=' "$env_link" >/dev/null 2>&1; then
