@@ -317,16 +317,14 @@ def decide_game(game, now, finality_delay, weth_delay, respected_game_type, init
     finalized = status in (1, 2) and resolved_at > 0 and now >= resolved_at + finality_delay
     clock_expired = max_clock > 0 and now >= created_at + max_clock
 
-    if claim_len != 1:
-        return {
-            "index": idx,
-            "selected": False,
-            "disposition": "skip",
-            "reason": "multi_claim",
-            "actions": [],
-            "ready_at": None,
-        }
-
+    # Finished-state classification MUST precede the multi_claim skip.
+    # Game 69 (D-0083 CHALLENGER_WINS demonstration) is respected type 8
+    # with claimDataLen=2, so the old order returned multi_claim — which
+    # is not watermark-terminal — and pinned low_water at 69 forever.
+    # status==1 is already terminal (challenger_wins); status==2 with
+    # nothing left to claim is already terminal (zero_credit). A live
+    # IN_PROGRESS multi-claim game still returns multi_claim below and
+    # still pins, which is correct: the agent cannot resolve it.
     if status == 1:
         return {
             "index": idx,
@@ -343,6 +341,16 @@ def decide_game(game, now, finality_delay, weth_delay, respected_game_type, init
             "selected": False,
             "disposition": "skip",
             "reason": "zero_credit",
+            "actions": [],
+            "ready_at": None,
+        }
+
+    if claim_len != 1:
+        return {
+            "index": idx,
+            "selected": False,
+            "disposition": "skip",
+            "reason": "multi_claim",
             "actions": [],
             "ready_at": None,
         }
@@ -443,6 +451,12 @@ def decide_game(game, now, finality_delay, weth_delay, respected_game_type, init
 # snapshot's respected type: leftover games of a previous type must
 # not pin low_water at the first of them (Bugbot on #182). missing_type
 # stays non-terminal so a fetch/parse glitch is retried next hour.
+# Finished CHALLENGER_WINS / drained DEFENDER_WINS games are classified
+# as challenger_wins / zero_credit *before* the multi_claim skip, so a
+# resolved multi-claim game (game 69) advances. multi_claim itself stays
+# out of this set: an IN_PROGRESS contested game reports the same
+# claim_len!=1 path and must keep pinning until it reaches a finished
+# state. Do not add multi_claim here.
 WATERMARK_TERMINAL_REASONS = frozenset(
     ("zero_credit", "challenger_wins", "not_respected_type")
 )

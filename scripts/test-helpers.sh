@@ -4093,6 +4093,217 @@ else
   fail=1
 fi
 
+# Game 69 (D-0083): respected type 8, status=1 CHALLENGER_WINS, claimDataLen=2,
+# resolvedSubgames(0)=true, proposer credit 0. The old order classified it as
+# multi_claim (non-terminal) and pinned low_water. Finished-state checks now
+# run first so it becomes challenger_wins (already terminal). Do NOT add
+# multi_claim to WATERMARK_TERMINAL_REASONS — an IN_PROGRESS contested game
+# reports the same claim_len!=1 skip and must keep pinning.
+python3 - "$RG_FIXTURE_DIR" <<'PY'
+import json, os, sys
+
+out = sys.argv[1]
+
+def addr(i):
+    return "0x%040x" % (i + 1)
+
+def game69(idx):
+    return {
+        "index": idx,
+        "game_type": 8,
+        "address": addr(idx),
+        "created_at": 980000,
+        "max_clock_duration": 7200,
+        "status": 1,
+        "resolved_at": 990000,
+        "credit_wei": "0",
+        "claim_data_len": 2,
+        "resolved_subgame": True,
+        "weth_amount_wei": "0",
+        "weth_unlock_ts": 0,
+    }
+
+def drained(idx):
+    return {
+        "index": idx,
+        "game_type": 8,
+        "address": addr(idx),
+        "created_at": 980000,
+        "max_clock_duration": 7200,
+        "status": 2,
+        "resolved_at": 990000,
+        "credit_wei": "0",
+        "claim_data_len": 1,
+        "weth_amount_wei": "0",
+        "weth_unlock_ts": 0,
+    }
+
+def pending(idx):
+    return {
+        "index": idx,
+        "game_type": 8,
+        "address": addr(idx),
+        "created_at": 999000,
+        "max_clock_duration": 7200,
+        "status": 0,
+        "resolved_at": 0,
+        "credit_wei": "0",
+        "claim_data_len": 1,
+        "weth_amount_wei": "0",
+        "weth_unlock_ts": 0,
+    }
+
+def live_multi(idx):
+    g = game69(idx)
+    g["status"] = 0
+    g["resolved_at"] = 0
+    g["resolved_subgame"] = False
+    g["created_at"] = 990000
+    return g
+
+def snap(games, path, game_count=None):
+    doc = {
+        "now": 1000000,
+        "mode": "dry-run",
+        "finality_delay": 1800,
+        "weth_delay": 3600,
+        "init_bond_wei": "80000000000000000",
+        "respected_game_type": 8,
+        "game_count": game_count if game_count is not None else len(games),
+        "games": games,
+    }
+    with open(os.path.join(out, path), "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+        f.write("\n")
+
+# N=20: index 0 is game 69's real shape, 1-16 drained, 17-19 still need a look.
+snap([game69(0)] + [drained(i) for i in range(1, 17)] + [pending(i) for i in range(17, 20)],
+     "wm-g69.json", 20)
+# Inverse: lowest game is live multi_claim (status=0, claim_len=2), then drained.
+snap([live_multi(0)] + [drained(i) for i in range(1, 5)], "wm-live-multi.json", 5)
+# missing_type at 0 must not advance even if the rest are drained.
+missing = drained(0)
+del missing["game_type"]
+snap([missing] + [drained(i) for i in range(1, 4)], "wm-missing-type.json", 4)
+# not_respected_type at 0 must still advance (#182 guard).
+stale = drained(0)
+stale["game_type"] = 1
+wait = drained(1)
+wait["resolved_at"] = 999900
+wait["credit_wei"] = "80000000000000000"
+snap([stale, wait], "wm-stale-type.json", 2)
+PY
+
+rg_g69_analyze() {
+  local snap="$1"
+  local mark="$2"
+  shift 2
+  env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_PATH" \
+    RESOLVE_GAMES_SNAPSHOT="$snap" \
+    RESOLVE_GAMES_WATERMARK="$mark" \
+    "$RESOLVE_GAMES" --analyze-only "$@"
+}
+
+# Property 1: game-69 shape + drained prefix → low_water advances to the
+# first game that still needs a look (17), not staying at 0.
+WM_G69="$RG_FIXTURE_DIR/wm-g69-mark.json"
+RG_G69_OUT="$(rg_g69_analyze "$RG_FIXTURE_DIR/wm-g69.json" "$WM_G69" 2>&1)" && RG_G69_EC=0 || RG_G69_EC=$?
+WM_G69_MARK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["low_water"])' "$WM_G69" 2>/dev/null || echo missing)"
+if [[ "$RG_G69_EC" -eq 0 ]] \
+  && echo "$RG_G69_OUT" | grep -q 'game 0 SKIP challenger_wins' \
+  && ! echo "$RG_G69_OUT" | grep -q 'game 0 SKIP multi_claim' \
+  && echo "$RG_G69_OUT" | grep -q 'game 17 SKIP clock_unexpired' \
+  && echo "$RG_G69_OUT" | grep -q '^watermark_next=17$' \
+  && [[ "$WM_G69_MARK" == "17" ]]; then
+  echo "PASS resolve-games finished multi-claim (game 69 shape) does not pin the watermark"
+else
+  echo "FAIL game-69 shape must advance low_water to 17 (ec=$RG_G69_EC mark=$WM_G69_MARK)" >&2
+  echo "$RG_G69_OUT" >&2
+  fail=1
+fi
+
+# Property 2: IN_PROGRESS multi_claim must still pin, even though it reports
+# the same claim_len!=1 skip that game 69 used to. Blanket-terminal of the
+# reason string would make this advance.
+WM_LIVE="$RG_FIXTURE_DIR/wm-live-multi-mark.json"
+RG_LIVE_OUT="$(rg_g69_analyze "$RG_FIXTURE_DIR/wm-live-multi.json" "$WM_LIVE" 2>&1)" && RG_LIVE_EC=0 || RG_LIVE_EC=$?
+WM_LIVE_MARK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["low_water"])' "$WM_LIVE" 2>/dev/null || echo missing)"
+if [[ "$RG_LIVE_EC" -eq 0 ]] \
+  && echo "$RG_LIVE_OUT" | grep -q 'game 0 SKIP multi_claim' \
+  && echo "$RG_LIVE_OUT" | grep -q '^watermark_next=0$' \
+  && [[ "$WM_LIVE_MARK" == "0" ]]; then
+  echo "PASS resolve-games in-progress multi-claim still pins the watermark"
+else
+  echo "FAIL live multi_claim must not advance low_water (ec=$RG_LIVE_EC mark=$WM_LIVE_MARK)" >&2
+  echo "$RG_LIVE_OUT" >&2
+  fail=1
+fi
+
+# Property 3: missing_type stays non-terminal (fetch/parse glitch retried).
+WM_MISS="$RG_FIXTURE_DIR/wm-missing-type-mark.json"
+RG_MISS_OUT="$(rg_g69_analyze "$RG_FIXTURE_DIR/wm-missing-type.json" "$WM_MISS" 2>&1)" && RG_MISS_EC=0 || RG_MISS_EC=$?
+WM_MISS_MARK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["low_water"])' "$WM_MISS" 2>/dev/null || echo missing)"
+if [[ "$RG_MISS_EC" -eq 0 ]] \
+  && echo "$RG_MISS_OUT" | grep -q 'game 0 SKIP missing_type' \
+  && echo "$RG_MISS_OUT" | grep -q '^watermark_next=0$' \
+  && [[ "$WM_MISS_MARK" == "0" ]]; then
+  echo "PASS resolve-games missing_type still does not advance the watermark"
+else
+  echo "FAIL missing_type must not advance low_water (ec=$RG_MISS_EC mark=$WM_MISS_MARK)" >&2
+  echo "$RG_MISS_OUT" >&2
+  fail=1
+fi
+
+# Property 4: not_respected_type still advances (#182 guard, restated).
+WM_STALE="$RG_FIXTURE_DIR/wm-stale-type-mark.json"
+RG_STALE_OUT="$(rg_g69_analyze "$RG_FIXTURE_DIR/wm-stale-type.json" "$WM_STALE" 2>&1)" && RG_STALE_EC=0 || RG_STALE_EC=$?
+WM_STALE_MARK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["low_water"])' "$WM_STALE" 2>/dev/null || echo missing)"
+if [[ "$RG_STALE_EC" -eq 0 ]] \
+  && echo "$RG_STALE_OUT" | grep -q 'game 0 SKIP not_respected_type' \
+  && echo "$RG_STALE_OUT" | grep -q 'game 1 WAIT finality' \
+  && echo "$RG_STALE_OUT" | grep -q '^watermark_next=1$' \
+  && [[ "$WM_STALE_MARK" == "1" ]]; then
+  echo "PASS resolve-games not_respected_type still advances the watermark"
+else
+  echo "FAIL type-1 prefix must stay watermark-terminal (ec=$RG_STALE_EC mark=$WM_STALE_MARK)" >&2
+  echo "$RG_STALE_OUT" >&2
+  fail=1
+fi
+
+# Property 5: --full-scan ignores the persisted mark from property 1.
+RG_G69_FULL_OUT="$(rg_g69_analyze "$RG_FIXTURE_DIR/wm-g69.json" "$WM_G69" --full-scan 2>&1)" && RG_G69_FULL_EC=0 || RG_G69_FULL_EC=$?
+if [[ "$RG_G69_FULL_EC" -eq 0 ]] \
+  && echo "$RG_G69_FULL_OUT" | grep -q '^scan_from=0$' \
+  && echo "$RG_G69_FULL_OUT" | grep -q '^games_examined=20$' \
+  && echo "$RG_G69_FULL_OUT" | grep -q '^watermark_status=full_scan$' \
+  && echo "$RG_G69_FULL_OUT" | grep -q 'game 0 SKIP challenger_wins'; then
+  echo "PASS resolve-games --full-scan still starts at 0 after a drained prefix"
+else
+  echo "FAIL --full-scan must examine all 20 games (ec=$RG_G69_FULL_EC)" >&2
+  echo "$RG_G69_FULL_OUT" >&2
+  fail=1
+fi
+
+# Property 6: after the mark advances past the finished prefix, the next
+# run considers only the non-terminal tail (3), not N (20). A later
+# refactor that restores a full scan while other tests stay green fails here.
+WM_G69_WARM="$RG_FIXTURE_DIR/wm-g69-warm.json"
+printf '%s\n' '{"low_water":17,"challenger_wins":[0]}' >"$WM_G69_WARM"
+RG_G69_WARM_OUT="$(rg_g69_analyze "$RG_FIXTURE_DIR/wm-g69.json" "$WM_G69_WARM" 2>&1)" && RG_G69_WARM_EC=0 || RG_G69_WARM_EC=$?
+RG_G69_WARM_PLAN="$(printf '%s\n' "$RG_G69_WARM_OUT" | awk -F= '/^PLAN_JSON=/{print substr($0,11)}')"
+RG_G69_WARM_N="$(printf '%s' "$RG_G69_WARM_PLAN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["games_examined"])')"
+if [[ "$RG_G69_WARM_EC" -eq 0 ]] \
+  && echo "$RG_G69_WARM_OUT" | grep -q '^scan_from=17$' \
+  && echo "$RG_G69_WARM_OUT" | grep -q '^games_examined=3$' \
+  && [[ "$RG_G69_WARM_N" == "3" ]] \
+  && ! echo "$RG_G69_WARM_OUT" | grep -q 'game 0 '; then
+  echo "PASS resolve-games games_examined is the non-terminal tail after a finished multi-claim prefix"
+else
+  echo "FAIL warm scan must examine 3 tail games, not 20 (ec=$RG_G69_WARM_EC n=$RG_G69_WARM_N)" >&2
+  echo "$RG_G69_WARM_OUT" >&2
+  fail=1
+fi
+
 cleanup_rg_fixtures
 trap - EXIT
 
