@@ -10344,7 +10344,7 @@ rm -rf "$PN_L1_FIX"
 WG_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-wipe-guard.XXXXXX")"
 WG_FIX_CANON="$(cd "$WG_FIX" && pwd -P)"
 mkdir -p "$WG_FIX/pids" "$WG_FIX/logs" "$WG_FIX/l2/op-reth" "$WG_FIX/l2/spike-op-reth" \
-  "$WG_FIX/bin-empty" "$WG_FIX/bin-9545"
+  "$WG_FIX/bin-empty" "$WG_FIX/bin-9545" "$WG_FIX/bin-geth-9545"
 WG_LIVE_PID=""
 WG_GETH_PID=""
 cleanup_wg_fix() {
@@ -10360,14 +10360,24 @@ exit 1
 EOS
 # Port evidence without opening a live socket. Output must name 9545 as a
 # whole number so live_el_port_listener's regex matches (a stub that only
-# exits 0 is not evidence — see the PublicNode lsof stub).
+# exits 0 is not evidence — see the PublicNode lsof stub). COMMAND is
+# op-reth so a geth-live listener on the same port is not this case.
 cat > "$WG_FIX/bin-9545/lsof" <<'EOS'
 #!/bin/sh
 echo "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME"
 echo "op-reth 1 test 8u IPv4 0 0t0 TCP 127.0.0.1:9545 (LISTEN)"
 exit 0
 EOS
-chmod +x "$WG_FIX/bin-empty/lsof" "$WG_FIX/bin-9545/lsof"
+# Codex P2: geth-live host binds :9545 as op-geth and :9547 as op-node.
+# Neither is live-op-reth evidence.
+cat > "$WG_FIX/bin-geth-9545/lsof" <<'EOS'
+#!/bin/sh
+echo "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME"
+echo "op-geth 1 test 8u IPv4 0 0t0 TCP 127.0.0.1:9545 (LISTEN)"
+echo "op-node 2 test 8u IPv4 0 0t0 TCP 127.0.0.1:9547 (LISTEN)"
+exit 0
+EOS
+chmod +x "$WG_FIX/bin-empty/lsof" "$WG_FIX/bin-9545/lsof" "$WG_FIX/bin-geth-9545/lsof"
 
 echo sentinel-live > "$WG_FIX/l2/op-reth/SENTINEL"
 echo sentinel-spike > "$WG_FIX/l2/spike-op-reth/SENTINEL"
@@ -10528,10 +10538,34 @@ if [[ "$WG6_RC" -ne 0 ]] \
   && echo "$WG6_OUT" | grep -F -q "$WG_FIX_CANON/l2/op-reth" \
   && echo "$WG6_OUT" | grep -q '9545' \
   && [[ -f "$WG_FIX/l2/op-reth/SENTINEL" ]]; then
-  echo "PASS wipe_reth_datadir refuses live-slot datadir when lsof reports a listener on 9545"
+  echo "PASS wipe_reth_datadir refuses live-slot datadir when lsof reports an op-reth listener on 9545"
 else
-  echo "FAIL lsof listener on 9545 must refuse wipe and keep SENTINEL (rc=$WG6_RC)" >&2
+  echo "FAIL lsof op-reth listener on 9545 must refuse wipe and keep SENTINEL (rc=$WG6_RC)" >&2
   echo "$WG6_OUT" >&2
+  fail=1
+fi
+
+# 6b. geth-live port evidence (#217 / Codex P2): op-geth on :9545 and
+# op-node on :9547, no op-reth pidfile -> wipe succeeds.
+WG6B_RC=0
+WG6B_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-geth-9545:$PATH"
+    wipe_reth_datadir
+  ) 2>&1
+)" || WG6B_RC=$?
+if [[ "$WG6B_RC" -eq 0 ]] \
+  && [[ ! -f "$WG_FIX/l2/op-reth/SENTINEL" ]] \
+  && [[ -d "$WG_FIX/l2/op-reth" ]] \
+  && ! echo "$WG6B_OUT" | grep -qi 'refus'; then
+  echo "PASS wipe_reth_datadir wipes live-slot datadir when lsof reports op-geth/:9545 and op-node/:9547"
+else
+  echo "FAIL op-geth/op-node listeners must not refuse wiping op-reth (rc=$WG6B_RC)" >&2
+  echo "$WG6B_OUT" >&2
   fail=1
 fi
 
@@ -10564,7 +10598,7 @@ fi
 
 cleanup_wg_fix
 unset WG_LIVE_PID WG_GETH_PID WG_FIX WG_FIX_CANON
-unset WG1_RC WG1_OUT WG2_RC WG2_OUT WG3_RC WG3_OUT WG4_RC WG4_OUT WG5_RC WG5_OUT WG6_RC WG6_OUT
+unset WG1_RC WG1_OUT WG2_RC WG2_OUT WG3_RC WG3_OUT WG4_RC WG4_OUT WG5_RC WG5_OUT WG6_RC WG6_OUT WG6B_RC WG6B_OUT
 unset WG7_RESET_CALL WG7_GUARD_BEFORE_RM
 unset -f cleanup_wg_fix 2>/dev/null || true
 

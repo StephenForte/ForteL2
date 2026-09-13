@@ -1229,10 +1229,12 @@ require_reth_verifier_ports() {
 #   - $PID_DIR/op-reth.pid or $PID_DIR/op-reth-node.pid exists AND the
 #     pid in it is alive (kill -0). Same pidfiles stop_reth_sidecar
 #     reads and prints "leaving live <name> pidfile alone".
-#   - or a LISTENER on FORTEL2_LIVE_EL_PORTS (9545 9546 9547 9551).
-#     Any listener on those is by definition not the sidecar:
-#     refuse_live_port_for_reth fails closed if a sidecar is ever
-#     configured onto one.
+#   - or an op-reth LISTENER on FORTEL2_LIVE_EL_PORTS (9545 9546 9547 9551).
+#     Sidecar cannot bind those (refuse_live_port_for_reth fails closed),
+#     so an op-reth row there is the live EL, not the sidecar. COMMAND
+#     must be op-reth: a geth-live host binds the same ports with
+#     op-geth, and op-node listens on :9547 on both ELs. Neither owns
+#     $DATA_DIR/l2/op-reth (same distinction as #217 pidfiles).
 # A live op-geth.pid or op-node.pid must NOT count — op-geth does
 # not own $DATA_DIR/l2/op-reth.
 #
@@ -1263,19 +1265,27 @@ live_op_reth_pidfile_alive() {
 }
 
 live_el_port_listener() {
-  local p out re
+  local p out re line cmd
   if ! command -v lsof >/dev/null 2>&1; then
     return 1
   fi
   for p in $FORTEL2_LIVE_EL_PORTS; do
     out="$(lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null || true)"
     re='(^|[^0-9])'"$p"'([^0-9]|$)'
-    # Require the port as a whole number in the output so a stub that
-    # always exits 0 without naming 9545/9546/9547/9551 is not evidence.
-    if [[ -n "$out" && "$out" =~ $re ]]; then
-      printf '%s' "$p"
-      return 0
-    fi
+    # Port as a whole number so a stub that only exits 0 is not evidence.
+    # COMMAND (field 1) must be op-reth — op-geth on :9545 is the geth-live
+    # EL and must not refuse the sidecar's default datadir.
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      [[ "$line" =~ $re ]] || continue
+      cmd="${line%% *}"
+      case "$cmd" in
+        op-reth|op-reth*)
+          printf '%s' "$p"
+          return 0
+          ;;
+      esac
+    done <<< "$out"
   done
   return 1
 }
