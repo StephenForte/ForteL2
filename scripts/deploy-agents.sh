@@ -267,6 +267,12 @@ ensure_data_symlink
 # pinned tracked deployments.json / rollup.json). required=1, mkdir_src=0:
 # a missing dest .deployer must refuse (do not mkdir an empty stand-in).
 ensure_runtime_symlink "deployments/sepolia/.deployer" 1 0
+# bin/ is gitignored, so a fresh clone never has one — but every checked-in
+# plist puts $PINNED/bin on PATH. Without this symlink that PATH entry is a
+# dead directory: harmless for cast (resolved from ~/.foundry/bin) but the
+# pinned tree cannot supply op-* or kona-host to a launchd job. required=0:
+# a dev checkout with no bin/ is not an error, just nothing to link.
+ensure_runtime_symlink "bin" 0 0
 
 echo
 echo "agents now run:"

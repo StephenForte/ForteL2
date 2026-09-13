@@ -8819,6 +8819,29 @@ else
   fail=1
 fi
 
+# bin/ symlink (D-0133 follow-up). Every checked-in plist puts $PINNED/bin on
+# PATH, but bin/ is gitignored so a clone never has one. Mutation: drop the
+# ensure_runtime_symlink "bin" call and the symlink assertion goes red.
+# The pinned tree must also stay clean afterwards — a symlink named bin is not
+# a directory, so .gitignore "bin/" does not cover it (same trap as data/).
+mkdir -p "$PA_FIX/dev/bin"
+printf '#!/bin/sh\nexit 0\n' > "$PA_FIX/dev/bin/fake-op-tool"
+chmod +x "$PA_FIX/dev/bin/fake-op-tool"
+PA_BIN_OUT="$(pa_deploy "$PA_PIN")" && PA_BIN_EC=0 || PA_BIN_EC=$?
+PA_BIN_DIRTY="$(git -C "$PA_PIN" status --porcelain)"
+if [[ "$PA_BIN_EC" -eq 0 ]] \
+  && [[ -L "$PA_PIN/bin" ]] \
+  && [[ "$(readlink "$PA_PIN/bin")" == "$PA_FIX/dev/bin" ]] \
+  && [[ -x "$PA_PIN/bin/fake-op-tool" ]] \
+  && [[ -z "$PA_BIN_DIRTY" ]]; then
+  echo "PASS pin-agents deploy symlinks bin/ and leaves the pinned tree clean"
+else
+  echo "FAIL deploy-agents.sh must symlink bin/ without dirtying the tree (ec=$PA_BIN_EC dirty='$PA_BIN_DIRTY')" >&2
+  echo "$PA_BIN_OUT" >&2
+  fail=1
+fi
+
+
 # Dirty → distinct refusal, nonzero. Go-red-able: drop the dirty check.
 printf 'dirt\n' >> "$PA_PIN/README"
 PA_DIRTY="$(pa_deploy "$PA_PIN")" && PA_DIRTY_EC=0 || PA_DIRTY_EC=$?
@@ -8929,6 +8952,31 @@ ln -s "$PA_FIX/dev/.env.sepolia" "$PA_AUDIT/.env.sepolia"
 ln -s "$PA_FIX/dev/data" "$PA_AUDIT/data"
 mkdir -p "$PA_AUDIT/deployments/sepolia" "$PA_FIX/dev/deployments/sepolia/.deployer"
 ln -s "$PA_FIX/dev/deployments/sepolia/.deployer" "$PA_AUDIT/deployments/sepolia/.deployer"
+
+# check-launchd reports how far the pinned tree is behind origin/main. INFO,
+# never a FAIL — being behind is the design (D-0113 Finding 2); it is reported
+# because nothing reported it before and 52 commits accumulated unnoticed
+# (D-0133). No network: refs/remotes/origin/main is set by hand.
+# Mutation: drop the rev-list block in check_pinned_tree and both halves go red.
+git -C "$PA_AUDIT" update-ref refs/remotes/origin/main "$(git -C "$PA_AUDIT" rev-parse HEAD)"
+PA_LEVEL_OUT="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
+PA_AUDIT_HEAD="$(git -C "$PA_AUDIT" rev-parse HEAD)"
+pa_git -C "$PA_AUDIT" commit -q --allow-empty -m behind-probe
+git -C "$PA_AUDIT" update-ref refs/remotes/origin/main "$(git -C "$PA_AUDIT" rev-parse HEAD)"
+git -C "$PA_AUDIT" reset -q --hard "$PA_AUDIT_HEAD"
+PA_BEHIND_OUT="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
+git -C "$PA_AUDIT" update-ref refs/remotes/origin/main "$PA_AUDIT_HEAD"
+if echo "$PA_LEVEL_OUT" | grep -q 'pinned tree is level with origin/main' \
+  && echo "$PA_BEHIND_OUT" | grep -q 'pinned tree is 1 commit(s) behind origin/main' \
+  && echo "$PA_BEHIND_OUT" | grep -q 'deploy-agents.sh' \
+  && ! echo "$PA_BEHIND_OUT" | grep -q 'FAIL  pinned tree'; then
+  echo "PASS check-launchd reports pinned-tree commits behind origin/main as INFO"
+else
+  echo "FAIL check-launchd must report level vs behind without failing the run" >&2
+  echo "--- level ---" >&2; echo "$PA_LEVEL_OUT" >&2
+  echo "--- behind ---" >&2; echo "$PA_BEHIND_OUT" >&2
+  fail=1
+fi
 
 PA_CL_OLD="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
 if echo "$PA_CL_OLD" | grep -q 'FAIL  com.steve.fortel2-sleep' \

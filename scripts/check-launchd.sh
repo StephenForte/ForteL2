@@ -250,11 +250,27 @@ check_pinned_tree() {
   fi
 
   local leftover
-  leftover="$(git -C "$PINNED_TREE" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|deployments/sepolia/\.deployer)$' || true)"
+  leftover="$(git -C "$PINNED_TREE" status --porcelain | grep -v -E '^\?\? (\.env|\.env\.sepolia|data|bin|deployments/sepolia/\.deployer)$' || true)"
   if [[ -n "$leftover" ]]; then
     echo "FAIL  pinned tree is dirty"
     FAILS=$((FAILS + 1))
     return
+  fi
+
+  # Commits behind origin/main. INFO, never a FAIL: the pinned tree moves only
+  # when the operator runs deploy-agents.sh (D-0113 Finding 2), so being behind
+  # is the design, not drift. It is reported because nothing else reports it —
+  # 52 commits accumulated unnoticed before 2026-09-13 (D-0133 follow-up).
+  # Counted against the local origin/main ref; no fetch (no network here).
+  local behind
+  behind="$(git -C "$PINNED_TREE" rev-list --count HEAD..origin/main 2>/dev/null || echo "")"
+  if [[ -z "$behind" ]]; then
+    echo "INFO  pinned tree: cannot count commits behind (no origin/main ref locally)"
+  elif [[ "$behind" -eq 0 ]]; then
+    echo "OK    pinned tree is level with origin/main (as of the last fetch)"
+  else
+    echo "INFO  pinned tree is ${behind} commit(s) behind origin/main (as of the last fetch)"
+    echo "      deploy with: ./scripts/deploy-agents.sh"
   fi
 
   # .env.sepolia / .deployer are gitignored — porcelain cannot see a missing
