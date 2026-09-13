@@ -37,7 +37,7 @@ BATCHER_CONFS="${SEPOLIA_BATCHER_NUM_CONFIRMATIONS:-2}"
 # Credit-budget defaults (QuickNode): longer channels + slower polls cut fee-oracle spam.
 # Fee tip/blob RPCs fire on craft + fee-bump (no dedicated estimate interval) — gated by
 # rebroadcast/receipt. Override via .env.sepolia when demoing a faster cadence.
-BATCHER_POLL="${SEPOLIA_BATCHER_POLL_INTERVAL:-12s}"
+BATCHER_POLL="${SEPOLIA_BATCHER_POLL_INTERVAL:-60s}"
 BATCHER_CHANNEL_DURATION="${SEPOLIA_BATCHER_MAX_CHANNEL_DURATION:-30}"
 BATCHER_RECEIPT_QUERY="${SEPOLIA_BATCHER_TXMGR_RECEIPT_QUERY_INTERVAL:-36s}"
 BATCHER_REBROADCAST="${SEPOLIA_BATCHER_TXMGR_REBROADCAST_INTERVAL:-36s}"

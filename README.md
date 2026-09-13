@@ -810,12 +810,12 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 
 | Knob | Default | Env override |
 |---|---|---|
-| Batcher poll | `12s` | `SEPOLIA_BATCHER_POLL_INTERVAL` |
+| Batcher poll | `60s` | `SEPOLIA_BATCHER_POLL_INTERVAL` |
 | Batcher batch type | `span` (`--batch-type=1`) | `BATCHER_BATCH_TYPE` (`span`/`1` or `singular`/`0`) |
 | Batcher max channel duration | `30` L1 blocks (~6 min) | `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION` |
 | Batcher txmgr receipt / rebroadcast | `36s` | `SEPOLIA_BATCHER_TXMGR_*_INTERVAL` |
-| Proposer interval | `1h` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`) |
-| Proposer poll | `12s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
+| Proposer interval | `8h` | `SEPOLIA_PROPOSER_INTERVAL` (ignores legacy `PROPOSER_INTERVAL=12s`); D-0133 supersedes D-0074’s `1h` |
+| Proposer poll | `120s` | `SEPOLIA_PROPOSER_POLL_INTERVAL` |
 | Proposer txmgr receipt / rebroadcast / resubmission | `36s` / `36s` / `72s` | `SEPOLIA_PROPOSER_TXMGR_*` / `SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT` |
 | Mac op-node L1 HTTP poll / rate limit | `12s` / `20` rps | `SEPOLIA_L1_HTTP_POLL_INTERVAL` / `SEPOLIA_L1_RPC_RATE_LIMIT` |
 | Mac op-node L1 RPC kind | `quicknode` | `SEPOLIA_L1_RPC_KIND` (rollback: `standard`) |
