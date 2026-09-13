@@ -10334,6 +10334,329 @@ fi
 
 rm -rf "$PN_L1_FIX"
 
+# =============================================================================
+# Live-datadir wipe/start guard. Fixture DATA_DIR + dummy pid; never the
+# live sequencer datadir. Mutation: each test fails if the guard is
+# removed or weakened. lsof stubs isolate host :9545 (this Mac's live EL)
+# so Property D (wipe/start of the default slot with no fixture evidence)
+# can still pass here.
+# =============================================================================
+WG_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-wipe-guard.XXXXXX")"
+WG_FIX_CANON="$(cd "$WG_FIX" && pwd -P)"
+mkdir -p "$WG_FIX/pids" "$WG_FIX/logs" "$WG_FIX/l2/op-reth" "$WG_FIX/l2/spike-op-reth" \
+  "$WG_FIX/bin-empty" "$WG_FIX/bin-9545" "$WG_FIX/bin-geth-9545"
+WG_LIVE_PID=""
+WG_GETH_PID=""
+cleanup_wg_fix() {
+  [[ -n "${WG_LIVE_PID:-}" ]] && kill "$WG_LIVE_PID" 2>/dev/null || true
+  [[ -n "${WG_GETH_PID:-}" ]] && kill "$WG_GETH_PID" 2>/dev/null || true
+  rm -rf "$WG_FIX"
+}
+
+# Empty lsof: no listener. Isolates pidfile-only evidence from the host's :9545.
+cat > "$WG_FIX/bin-empty/lsof" <<'EOS'
+#!/bin/sh
+exit 1
+EOS
+# Port evidence without opening a live socket. Output must name 9545 as a
+# whole number so live_el_port_listener's regex matches (a stub that only
+# exits 0 is not evidence — see the PublicNode lsof stub). COMMAND is
+# op-reth so a geth-live listener on the same port is not this case.
+cat > "$WG_FIX/bin-9545/lsof" <<'EOS'
+#!/bin/sh
+echo "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME"
+echo "op-reth 1 test 8u IPv4 0 0t0 TCP 127.0.0.1:9545 (LISTEN)"
+exit 0
+EOS
+# Codex P2: geth-live host binds :9545 as op-geth and :9547 as op-node.
+# Neither is live-op-reth evidence.
+cat > "$WG_FIX/bin-geth-9545/lsof" <<'EOS'
+#!/bin/sh
+echo "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME"
+echo "op-geth 1 test 8u IPv4 0 0t0 TCP 127.0.0.1:9545 (LISTEN)"
+echo "op-node 2 test 8u IPv4 0 0t0 TCP 127.0.0.1:9547 (LISTEN)"
+exit 0
+EOS
+chmod +x "$WG_FIX/bin-empty/lsof" "$WG_FIX/bin-9545/lsof" "$WG_FIX/bin-geth-9545/lsof"
+
+echo sentinel-live > "$WG_FIX/l2/op-reth/SENTINEL"
+echo sentinel-spike > "$WG_FIX/l2/spike-op-reth/SENTINEL"
+
+python3 -c 'import time; time.sleep(120)' </dev/null >/dev/null 2>&1 &
+WG_LIVE_PID=$!
+disown "$WG_LIVE_PID" 2>/dev/null || true
+echo "$WG_LIVE_PID" > "$WG_FIX/pids/op-reth.pid"
+sleep 0.2
+
+# 1. Live pidfile + live-slot datadir -> refuse; sentinel survives (no rm -rf).
+WG1_RC=0
+WG1_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-empty:$PATH"
+    wipe_reth_datadir
+  ) 2>&1
+)" || WG1_RC=$?
+if [[ "$WG1_RC" -ne 0 ]] \
+  && echo "$WG1_OUT" | grep -qi 'refus' \
+  && echo "$WG1_OUT" | grep -F -q "$WG_FIX_CANON/l2/op-reth" \
+  && echo "$WG1_OUT" | grep -q 'op-reth' \
+  && echo "$WG1_OUT" | grep -q 'spike-op-reth' \
+  && [[ -f "$WG_FIX/l2/op-reth/SENTINEL" ]]; then
+  echo "PASS wipe_reth_datadir refuses live-slot datadir with live op-reth pidfile (sentinel intact)"
+else
+  echo "FAIL live pidfile + live-slot must refuse wipe and keep SENTINEL (rc=$WG1_RC)" >&2
+  echo "$WG1_OUT" >&2
+  fail=1
+fi
+
+# 2. Live pidfile + spike-op-reth datadir -> wipe succeeds (Property D over-reach).
+WG2_RC=0
+WG2_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-empty:$PATH"
+    wipe_reth_datadir "$WG_FIX/l2/spike-op-reth"
+  ) 2>&1
+)" || WG2_RC=$?
+if [[ "$WG2_RC" -eq 0 ]] \
+  && [[ ! -f "$WG_FIX/l2/spike-op-reth/SENTINEL" ]] \
+  && [[ -d "$WG_FIX/l2/spike-op-reth" ]] \
+  && ! echo "$WG2_OUT" | grep -qi 'refus'; then
+  echo "PASS wipe_reth_datadir wipes spike-op-reth even when a live op-reth pidfile exists"
+else
+  echo "FAIL spike-op-reth wipe must succeed with live pidfile present (rc=$WG2_RC)" >&2
+  echo "$WG2_OUT" >&2
+  fail=1
+fi
+echo sentinel-spike > "$WG_FIX/l2/spike-op-reth/SENTINEL"
+
+# 3. No live evidence + live-slot datadir -> wipe succeeds (Property D).
+rm -f "$WG_FIX/pids/op-reth.pid"
+kill "$WG_LIVE_PID" 2>/dev/null || true
+WG_LIVE_PID=""
+WG3_RC=0
+WG3_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-empty:$PATH"
+    wipe_reth_datadir
+  ) 2>&1
+)" || WG3_RC=$?
+if [[ "$WG3_RC" -eq 0 ]] \
+  && [[ ! -f "$WG_FIX/l2/op-reth/SENTINEL" ]] \
+  && [[ -d "$WG_FIX/l2/op-reth" ]] \
+  && ! echo "$WG3_OUT" | grep -qi 'refus'; then
+  echo "PASS wipe_reth_datadir wipes live-slot datadir when there is no live-op-reth evidence"
+else
+  echo "FAIL live-slot wipe with no live evidence must succeed (rc=$WG3_RC)" >&2
+  echo "$WG3_OUT" >&2
+  fail=1
+fi
+echo sentinel-live > "$WG_FIX/l2/op-reth/SENTINEL"
+
+# 4. Stale live pidfile (pidfile present, pid not alive) -> wipe succeeds.
+echo "1" > "$WG_FIX/pids/op-reth.pid"
+WG4_RC=0
+WG4_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-empty:$PATH"
+    wipe_reth_datadir
+  ) 2>&1
+)" || WG4_RC=$?
+if [[ "$WG4_RC" -eq 0 ]] \
+  && [[ ! -f "$WG_FIX/l2/op-reth/SENTINEL" ]] \
+  && ! echo "$WG4_OUT" | grep -qi 'refus'; then
+  echo "PASS wipe_reth_datadir wipes live-slot datadir when the op-reth pidfile is stale"
+else
+  echo "FAIL stale op-reth pidfile must not refuse wipe (rc=$WG4_RC)" >&2
+  echo "$WG4_OUT" >&2
+  fail=1
+fi
+echo sentinel-live > "$WG_FIX/l2/op-reth/SENTINEL"
+rm -f "$WG_FIX/pids/op-reth.pid"
+
+# 5. Live op-geth pidfile only (#217 regression) -> wipe succeeds.
+python3 -c 'import time; time.sleep(120)' </dev/null >/dev/null 2>&1 &
+WG_GETH_PID=$!
+disown "$WG_GETH_PID" 2>/dev/null || true
+echo "$WG_GETH_PID" > "$WG_FIX/pids/op-geth.pid"
+sleep 0.2
+WG5_RC=0
+WG5_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-empty:$PATH"
+    wipe_reth_datadir
+  ) 2>&1
+)" || WG5_RC=$?
+if [[ "$WG5_RC" -eq 0 ]] \
+  && [[ ! -f "$WG_FIX/l2/op-reth/SENTINEL" ]] \
+  && kill -0 "$WG_GETH_PID" 2>/dev/null \
+  && ! echo "$WG5_OUT" | grep -qi 'refus'; then
+  echo "PASS wipe_reth_datadir wipes live-slot datadir when only op-geth pidfile is live"
+else
+  echo "FAIL live op-geth pidfile must not block wiping op-reth (rc=$WG5_RC)" >&2
+  echo "$WG5_OUT" >&2
+  fail=1
+fi
+kill "$WG_GETH_PID" 2>/dev/null || true
+WG_GETH_PID=""
+rm -f "$WG_FIX/pids/op-geth.pid"
+echo sentinel-live > "$WG_FIX/l2/op-reth/SENTINEL"
+
+# 6. Port evidence: lsof stub reports :9545, no pidfile -> refuse.
+WG6_RC=0
+WG6_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-9545:$PATH"
+    wipe_reth_datadir
+  ) 2>&1
+)" || WG6_RC=$?
+if [[ "$WG6_RC" -ne 0 ]] \
+  && echo "$WG6_OUT" | grep -qi 'refus' \
+  && echo "$WG6_OUT" | grep -F -q "$WG_FIX_CANON/l2/op-reth" \
+  && echo "$WG6_OUT" | grep -q '9545' \
+  && [[ -f "$WG_FIX/l2/op-reth/SENTINEL" ]]; then
+  echo "PASS wipe_reth_datadir refuses live-slot datadir when lsof reports an op-reth listener on 9545"
+else
+  echo "FAIL lsof op-reth listener on 9545 must refuse wipe and keep SENTINEL (rc=$WG6_RC)" >&2
+  echo "$WG6_OUT" >&2
+  fail=1
+fi
+
+# 6b. geth-live port evidence (#217 / Codex P2): op-geth on :9545 and
+# op-node on :9547, no op-reth pidfile -> wipe succeeds.
+WG6B_RC=0
+WG6B_OUT="$(
+  (
+    set -euo pipefail
+    DATA_DIR="$WG_FIX"
+    PID_DIR="$WG_FIX/pids"
+    LOG_DIR="$WG_FIX/logs"
+    PATH="$WG_FIX/bin-geth-9545:$PATH"
+    wipe_reth_datadir
+  ) 2>&1
+)" || WG6B_RC=$?
+if [[ "$WG6B_RC" -eq 0 ]] \
+  && [[ ! -f "$WG_FIX/l2/op-reth/SENTINEL" ]] \
+  && [[ -d "$WG_FIX/l2/op-reth" ]] \
+  && ! echo "$WG6B_OUT" | grep -qi 'refus'; then
+  echo "PASS wipe_reth_datadir wipes live-slot datadir when lsof reports op-geth/:9545 and op-node/:9547"
+else
+  echo "FAIL op-geth/op-node listeners must not refuse wiping op-reth (rc=$WG6B_RC)" >&2
+  echo "$WG6B_OUT" >&2
+  fail=1
+fi
+
+# 7. Property B: reset.sh calls wipe_reth_datadir with no argument; the
+# guard lives in the callee before rm -rf. Invoking reset.sh under a
+# fixture is not safely possible (it would stop_reth_sidecar then take
+# the FORTEL2_EL=reth branch against whatever DATA_DIR lib.sh loaded).
+WG7_RESET_CALL=0
+WG7_GUARD_BEFORE_RM=0
+if grep -E -q '^[[:space:]]*wipe_reth_datadir[[:space:]]*$' "$SCRIPT_DIR/reset.sh"; then
+  WG7_RESET_CALL=1
+fi
+if awk '
+  $0 ~ /^wipe_reth_datadir\(\)/ { in_fn=1 }
+  in_fn && /refuse_if_live_reth_datadir/ { g=1 }
+  in_fn && /rm -rf "\$datadir"/ {
+    if (!g) { exit 1 }
+    saw_rm=1
+  }
+  in_fn && $0 ~ /^}/ { exit !(g && saw_rm) }
+' "$SCRIPT_DIR/lib.sh"; then
+  WG7_GUARD_BEFORE_RM=1
+fi
+if [[ "$WG7_RESET_CALL" -eq 1 && "$WG7_GUARD_BEFORE_RM" -eq 1 ]]; then
+  echo "PASS reset.sh calls wipe_reth_datadir with no argument; guard runs before rm -rf"
+else
+  echo "FAIL Property B: reset.sh must inherit wipe_reth_datadir guard before rm (call=$WG7_RESET_CALL guard=$WG7_GUARD_BEFORE_RM)" >&2
+  fail=1
+fi
+
+cleanup_wg_fix
+unset WG_LIVE_PID WG_GETH_PID WG_FIX WG_FIX_CANON
+unset WG1_RC WG1_OUT WG2_RC WG2_OUT WG3_RC WG3_OUT WG4_RC WG4_OUT WG5_RC WG5_OUT WG6_RC WG6_OUT WG6B_RC WG6B_OUT
+unset WG7_RESET_CALL WG7_GUARD_BEFORE_RM
+unset -f cleanup_wg_fix 2>/dev/null || true
+
+# 8. Property C: start-op-reth-verifier.sh refuses to start on the live
+# slot with live pidfile evidence. Fixture DATA_DIR; stub binaries via
+# HOME/.foundry/bin so lib.sh PATH prepend cannot reach a real op-reth.
+# Empty lsof so this Mac's :9545 is not the evidence under test.
+WG8_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-start-guard.XXXXXX")"
+WG8_FIX_CANON="$(cd "$WG8_FIX" && pwd -P)"
+mkdir -p "$WG8_FIX/data/l2/op-reth" "$WG8_FIX/data/pids" "$WG8_FIX/.foundry/bin"
+cat > "$WG8_FIX/.foundry/bin/lsof" <<'EOS'
+#!/bin/sh
+exit 1
+EOS
+cat > "$WG8_FIX/.foundry/bin/op-reth" <<'EOS'
+#!/bin/sh
+echo "ERROR: fixture op-reth must not exec a real binary" >&2
+exit 99
+EOS
+cat > "$WG8_FIX/.foundry/bin/op-node" <<'EOS'
+#!/bin/sh
+echo "ERROR: fixture op-node must not exec a real binary" >&2
+exit 99
+EOS
+chmod +x "$WG8_FIX/.foundry/bin/lsof" \
+  "$WG8_FIX/.foundry/bin/op-reth" "$WG8_FIX/.foundry/bin/op-node"
+python3 -c 'import time; time.sleep(120)' </dev/null >/dev/null 2>&1 &
+WG8_PID=$!
+disown "$WG8_PID" 2>/dev/null || true
+echo "$WG8_PID" > "$WG8_FIX/data/pids/op-reth.pid"
+sleep 0.2
+WG8_RC=0
+WG8_OUT="$(
+  env -u FORTEL2_ENV -u L1_RPC_URL -u FORTEL2_RETH_DATADIR \
+    HOME="$WG8_FIX" \
+    DATA_DIR="$WG8_FIX/data" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=verifier \
+    "$RETH_START" 2>&1
+)" && WG8_RC=0 || WG8_RC=$?
+if [[ "$WG8_RC" -ne 0 ]] \
+  && echo "$WG8_OUT" | grep -qi 'refus' \
+  && echo "$WG8_OUT" | grep -q 'refusing to start' \
+  && echo "$WG8_OUT" | grep -q 'spike-op-reth' \
+  && echo "$WG8_OUT" | grep -F -q "$WG8_FIX_CANON/data/l2/op-reth" \
+  && kill -0 "$WG8_PID" 2>/dev/null \
+  && ! echo "$WG8_OUT" | grep -q 'Starting op-reth' \
+  && ! echo "$WG8_OUT" | grep -q 'fixture op-reth must not exec'; then
+  echo "PASS start-op-reth-verifier.sh refuses to start on the live slot with live op-reth pidfile"
+else
+  echo "FAIL sidecar start must refuse live-slot datadir with live pidfile (rc=$WG8_RC)" >&2
+  echo "$WG8_OUT" >&2
+  fail=1
+fi
+kill "$WG8_PID" 2>/dev/null || true
+rm -rf "$WG8_FIX"
+unset WG8_PID WG8_FIX WG8_FIX_CANON WG8_RC WG8_OUT
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1

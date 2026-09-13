@@ -1220,10 +1220,124 @@ require_reth_verifier_ports() {
   refuse_live_port_for_reth FORTEL2_RETH_P2P_PORT "$p2p"
 }
 
+# Live-op-reth evidence. FORTEL2_EL is NOT a live-EL signal:
+# start-op-reth-verifier.sh exports FORTEL2_EL=reth unconditionally for
+# the sidecar, before any datadir handling, so ORing it in would
+# refuse the default sidecar datadir even on a geth-live host.
+#
+# Evidence is the live PROCESS, op-reth-specific:
+#   - $PID_DIR/op-reth.pid or $PID_DIR/op-reth-node.pid exists AND the
+#     pid in it is alive (kill -0). Same pidfiles stop_reth_sidecar
+#     reads and prints "leaving live <name> pidfile alone".
+#   - or an op-reth LISTENER on FORTEL2_LIVE_EL_PORTS (9545 9546 9547 9551).
+#     Sidecar cannot bind those (refuse_live_port_for_reth fails closed),
+#     so an op-reth row there is the live EL, not the sidecar. COMMAND
+#     must be op-reth: a geth-live host binds the same ports with
+#     op-geth, and op-node listens on :9547 on both ELs. Neither owns
+#     $DATA_DIR/l2/op-reth (same distinction as #217 pidfiles).
+# A live op-geth.pid or op-node.pid must NOT count — op-geth does
+# not own $DATA_DIR/l2/op-reth.
+#
+# lsof may be absent in CI. Degrade to pidfile evidence rather than
+# failing the wipe. The guard fires only when the resolved datadir is
+# the live slot ($DATA_DIR/l2/op-reth, canonical). Host :9545 is still
+# global, so Property D tests stub lsof; a fixture that injects no
+# evidence and hides lsof is unaffected.
+#
+# Path compare uses fortel2_canon_path on both sides: raw
+# [[ "$a" == "$b" ]] loses to symlinks, a trailing slash, or a
+# relative DATA_DIR, and the failure is silent (wipe proceeds).
+
+live_op_reth_pidfile_alive() {
+  local name pidfile pid
+  for name in op-reth op-reth-node; do
+    pidfile="$PID_DIR/$name.pid"
+    if [[ ! -f "$pidfile" ]]; then
+      continue
+    fi
+    pid="$(tr -d '[:space:]' < "$pidfile")"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      printf '%s %s\n' "$name" "$pid"
+      return 0
+    fi
+  done
+  return 1
+}
+
+live_el_port_listener() {
+  local p out re line cmd
+  if ! command -v lsof >/dev/null 2>&1; then
+    return 1
+  fi
+  for p in $FORTEL2_LIVE_EL_PORTS; do
+    out="$(lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null || true)"
+    re='(^|[^0-9])'"$p"'([^0-9]|$)'
+    # Port as a whole number so a stub that only exits 0 is not evidence.
+    # COMMAND (field 1) must be op-reth — op-geth on :9545 is the geth-live
+    # EL and must not refuse the sidecar's default datadir.
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      [[ "$line" =~ $re ]] || continue
+      cmd="${line%% *}"
+      case "$cmd" in
+        op-reth|op-reth*)
+          printf '%s' "$p"
+          return 0
+          ;;
+      esac
+    done <<< "$out"
+  done
+  return 1
+}
+
+describe_live_op_reth_evidence() {
+  local hit name pid port
+  hit="$(live_op_reth_pidfile_alive)" || true
+  if [[ -n "$hit" ]]; then
+    name="${hit%% *}"
+    pid="${hit#* }"
+    echo "live $name pidfile $PID_DIR/$name.pid pid $pid is alive"
+    return 0
+  fi
+  port="$(live_el_port_listener)" || true
+  if [[ -n "${port:-}" ]]; then
+    echo "listener on live EL port $port"
+    return 0
+  fi
+  return 1
+}
+
+# Refuse wipe/start of $DATA_DIR/l2/op-reth when live-op-reth evidence
+# is present. Lives in the destructive primitive so every caller
+# (start-op-reth-verifier.sh --wipe AND FORTEL2_EL=reth reset.sh)
+# inherits it. No override: a planned rewind of the live datadir is
+# an operator decision, not an env-var escape hatch.
+refuse_if_live_reth_datadir() {
+  local datadir="${1:-}"
+  local verb="${2:-wipe}"
+  local got live_slot reason
+  if [[ -z "$datadir" ]]; then
+    echo "ERROR: refuse_if_live_reth_datadir requires a datadir" >&2
+    exit 1
+  fi
+  got="$(fortel2_canon_path "$datadir")"
+  live_slot="$(fortel2_canon_path "$DATA_DIR/l2/op-reth")"
+  if [[ "$got" != "$live_slot" ]]; then
+    return 0
+  fi
+  reason="$(describe_live_op_reth_evidence)" || return 0
+  echo "ERROR: refusing to ${verb} live op-reth datadir $got — $reason" >&2
+  echo "Set FORTEL2_RETH_DATADIR=\$DATA_DIR/l2/spike-op-reth for a sidecar on a reth-live host." >&2
+  exit 1
+}
+
 # Wipe only an allowed reth datadir. Never $DATA_DIR/l2/op-geth.
+# Guard the rm -rf here (not in a caller): reset.sh calls this with no
+# argument and would otherwise delete chain 852's archive.
 wipe_reth_datadir() {
   local datadir
   datadir="$(require_reth_datadir "${1:-}")"
+  refuse_if_live_reth_datadir "$datadir" "wipe"
   echo "Wiping reth datadir $datadir (op-geth untouched)"
   rm -rf "$datadir"
   mkdir -p "$datadir"
