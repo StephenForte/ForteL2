@@ -8955,26 +8955,79 @@ ln -s "$PA_FIX/dev/deployments/sepolia/.deployer" "$PA_AUDIT/deployments/sepolia
 
 # check-launchd reports how far the pinned tree is behind origin/main. INFO,
 # never a FAIL — being behind is the design (D-0113 Finding 2); it is reported
-# because nothing reported it before and 52 commits accumulated unnoticed
-# (D-0133). No network: refs/remotes/origin/main is set by hand.
-# Mutation: drop the rev-list block in check_pinned_tree and both halves go red.
-git -C "$PA_AUDIT" update-ref refs/remotes/origin/main "$(git -C "$PA_AUDIT" rev-parse HEAD)"
-PA_LEVEL_OUT="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
-PA_AUDIT_HEAD="$(git -C "$PA_AUDIT" rev-parse HEAD)"
-pa_git -C "$PA_AUDIT" commit -q --allow-empty -m behind-probe
-git -C "$PA_AUDIT" update-ref refs/remotes/origin/main "$(git -C "$PA_AUDIT" rev-parse HEAD)"
-git -C "$PA_AUDIT" reset -q --hard "$PA_AUDIT_HEAD"
-PA_BEHIND_OUT="$(pa_cl "$PA_HOST" "$PA_AUDIT")"
-git -C "$PA_AUDIT" update-ref refs/remotes/origin/main "$PA_AUDIT_HEAD"
-if echo "$PA_LEVEL_OUT" | grep -q 'pinned tree is level with origin/main' \
-  && echo "$PA_BEHIND_OUT" | grep -q 'pinned tree is 1 commit(s) behind origin/main' \
-  && echo "$PA_BEHIND_OUT" | grep -q 'deploy-agents.sh' \
-  && ! echo "$PA_BEHIND_OUT" | grep -q 'FAIL  pinned tree'; then
-  echo "PASS check-launchd reports pinned-tree commits behind origin/main as INFO"
+# because nothing reported it and 52 commits accumulated unnoticed (D-0133).
+#
+# The count must come from the DEV checkout's origin/main, not the pinned
+# clone's: deploy-agents.sh fetches and fast-forwards in one run, so inside the
+# pinned clone origin/main == HEAD and the forgotten-deploy case would always
+# read level (Bugbot on #224). This fixture models exactly that — the pinned
+# clone's own origin/main is deliberately pinned AT its HEAD while the dev
+# checkout has moved on. Mutation: point the rev-list back at $PINNED_TREE and
+# the "behind" half goes red while the "level" half still passes.
+HYG_REAL_ORIGIN="$(git -C "$PA_ROOT" remote get-url origin)"
+HYG_PIN="$PA_FIX/hyg-pin"
+HYG_DEV="$PA_FIX/hyg-dev"
+git init -q -b main "$HYG_PIN"
+pa_git -C "$HYG_PIN" commit -q --allow-empty -m hyg-base
+git -C "$HYG_PIN" remote add origin "$HYG_REAL_ORIGIN"
+HYG_BASE="$(git -C "$HYG_PIN" rev-parse HEAD)"
+git -C "$HYG_PIN" update-ref refs/remotes/origin/main "$HYG_BASE"
+git clone -q "$HYG_PIN" "$HYG_DEV"
+git -C "$HYG_DEV" remote set-url origin "$HYG_REAL_ORIGIN"
+mkdir -p "$HYG_DEV/data" "$HYG_DEV/deployments/sepolia/.deployer" "$HYG_DEV/bin"
+printf 'SEPOLIA=1\n' > "$HYG_DEV/.env.sepolia"
+printf 'LOCAL=1\n' > "$HYG_DEV/.env"
+ln -s "$HYG_DEV/.env.sepolia" "$HYG_PIN/.env.sepolia"
+ln -s "$HYG_DEV/.env" "$HYG_PIN/.env"
+ln -s "$HYG_DEV/data" "$HYG_PIN/data"
+ln -s "$HYG_DEV/bin" "$HYG_PIN/bin"
+mkdir -p "$HYG_PIN/deployments/sepolia"
+ln -s "$HYG_DEV/deployments/sepolia/.deployer" "$HYG_PIN/deployments/sepolia/.deployer"
+mkdir -p "$HYG_PIN/.git/info"
+printf '.env.sepolia\n.env\ndata\nbin\ndeployments/sepolia/.deployer\n' >> "$HYG_PIN/.git/info/exclude"
+hyg_cl() {
+  env -u FORTEL2_ENV FORTEL2_ROOT="$PA_ROOT" \
+    CHECK_LAUNCHD_AGENTS_DIR="$PA_HOST" \
+    CHECK_LAUNCHD_PINNED_TREE="$HYG_PIN" \
+    CHECK_LAUNCHD_DEV_DIR="$HYG_DEV" \
+    CHECK_LAUNCHD_CLOUDFLARED_PLIST="$PA_FIX/no-such-cloudflared.plist" \
+    "$PA_CL" 2>&1 || true
+}
+git -C "$HYG_DEV" update-ref refs/remotes/origin/main "$HYG_BASE"
+HYG_LEVEL_OUT="$(hyg_cl)"
+# Dev moves ahead; the pinned clone never fetches (its origin/main stays at HEAD).
+pa_git -C "$HYG_DEV" commit -q --allow-empty -m hyg-ahead
+git -C "$HYG_DEV" update-ref refs/remotes/origin/main "$(git -C "$HYG_DEV" rev-parse HEAD)"
+HYG_PIN_SELF="$(git -C "$HYG_PIN" rev-list --count HEAD..origin/main 2>/dev/null || echo "err")"
+HYG_BEHIND_OUT="$(hyg_cl)"
+if echo "$HYG_LEVEL_OUT" | grep -q 'pinned tree is level with origin/main' \
+  && echo "$HYG_BEHIND_OUT" | grep -q 'pinned tree is 1 commit(s) behind origin/main' \
+  && echo "$HYG_BEHIND_OUT" | grep -q 'deploy-agents.sh' \
+  && [[ "$HYG_PIN_SELF" == "0" ]] \
+  && ! echo "$HYG_BEHIND_OUT" | grep -q 'FAIL.*behind'; then
+  echo "PASS check-launchd counts pinned-tree lag via the dev checkout, not the stale pinned ref"
 else
-  echo "FAIL check-launchd must report level vs behind without failing the run" >&2
-  echo "--- level ---" >&2; echo "$PA_LEVEL_OUT" >&2
-  echo "--- behind ---" >&2; echo "$PA_BEHIND_OUT" >&2
+  echo "FAIL check-launchd must report level vs behind from the dev checkout (pin-self=$HYG_PIN_SELF)" >&2
+  echo "--- level ---" >&2; echo "$HYG_LEVEL_OUT" >&2
+  echo "--- behind ---" >&2; echo "$HYG_BEHIND_OUT" >&2
+  fail=1
+fi
+
+# A pre-existing bin symlink must not make deploy refuse dirty (Bugbot #224).
+# An operator may have created it by hand to silence LaunchControl; the local
+# git-exclude is written only after the dirty check, so is_dirty must tolerate
+# it. Mutation: drop `bin` from the is_dirty filter and this goes red.
+PA_PREBIN="$PA_FIX/prebin"
+git clone -q "$PA_FIX/origin.git" "$PA_PREBIN" >/dev/null 2>&1
+ln -s "$PA_FIX/dev/bin" "$PA_PREBIN/bin"
+PA_PREBIN_OUT="$(pa_deploy "$PA_PREBIN")" && PA_PREBIN_EC=0 || PA_PREBIN_EC=$?
+if [[ "$PA_PREBIN_EC" -eq 0 ]] \
+  && ! echo "$PA_PREBIN_OUT" | grep -q 'pinned tree is dirty' \
+  && [[ -L "$PA_PREBIN/bin" ]]; then
+  echo "PASS pin-agents deploy adopts a hand-made bin symlink instead of refusing dirty"
+else
+  echo "FAIL a pre-existing bin symlink must not refuse dirty (ec=$PA_PREBIN_EC)" >&2
+  echo "$PA_PREBIN_OUT" >&2
   fail=1
 fi
 

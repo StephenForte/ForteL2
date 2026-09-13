@@ -261,15 +261,23 @@ check_pinned_tree() {
   # when the operator runs deploy-agents.sh (D-0113 Finding 2), so being behind
   # is the design, not drift. It is reported because nothing else reports it —
   # 52 commits accumulated unnoticed before 2026-09-13 (D-0133 follow-up).
-  # Counted against the local origin/main ref; no fetch (no network here).
-  local behind
-  behind="$(git -C "$PINNED_TREE" rev-list --count HEAD..origin/main 2>/dev/null || echo "")"
+  #
+  # Counted against the DEV checkout's origin/main, not the pinned clone's.
+  # deploy-agents.sh fetches and fast-forwards in the same run, so inside the
+  # pinned clone origin/main == HEAD immediately afterwards and nothing moves
+  # it until the next deploy — the forgotten-deploy case this exists to surface
+  # would always read level (Bugbot on #224). The dev checkout is fetched by
+  # ordinary work, so its origin/main is the live reference. Still no fetch
+  # here: this script does no network.
+  local pinned_head behind
+  pinned_head="$(git -C "$PINNED_TREE" rev-parse HEAD 2>/dev/null || echo "")"
+  behind="$(git -C "$DEV_DIR" rev-list --count "${pinned_head}..origin/main" 2>/dev/null || echo "")"
   if [[ -z "$behind" ]]; then
-    echo "INFO  pinned tree: cannot count commits behind (no origin/main ref locally)"
+    echo "INFO  pinned tree: cannot count commits behind (dev checkout ${DEV_DIR} has no origin/main, or does not have commit ${pinned_head:0:7})"
   elif [[ "$behind" -eq 0 ]]; then
-    echo "OK    pinned tree is level with origin/main (as of the last fetch)"
+    echo "OK    pinned tree is level with origin/main (per ${DEV_DIR}, as of its last fetch)"
   else
-    echo "INFO  pinned tree is ${behind} commit(s) behind origin/main (as of the last fetch)"
+    echo "INFO  pinned tree is ${behind} commit(s) behind origin/main (per ${DEV_DIR}, as of its last fetch)"
     echo "      deploy with: ./scripts/deploy-agents.sh"
   fi
 
