@@ -9013,6 +9013,45 @@ else
   fail=1
 fi
 
+# bin/ must stay AUDITED after being added to the dirty filter (Codex on #224):
+# filtering it from the dirty check without validating it here would let a
+# dangling or retargeted link pass silently while every plist puts $PINNED/bin
+# on PATH. Four states, each go-red-able by deleting the matching branch.
+HYG_BIN_OK="$(hyg_cl)"
+rm "$HYG_PIN/bin"
+ln -s "$HYG_DEV/not-bin" "$HYG_PIN/bin"
+HYG_BIN_WRONG="$(hyg_cl)"
+rm "$HYG_PIN/bin"
+# Dangling means the CORRECT target is gone — a wrong target is a different
+# branch and is checked first, so the fixture must keep the expected path.
+ln -s "$HYG_DEV/bin" "$HYG_PIN/bin"
+mv "$HYG_DEV/bin" "$HYG_DEV/bin.hidden"
+HYG_BIN_DANGLING="$(hyg_cl)"
+mv "$HYG_DEV/bin.hidden" "$HYG_DEV/bin"
+rm "$HYG_PIN/bin"
+HYG_BIN_ABSENT="$(hyg_cl)"
+mkdir -p "$HYG_PIN/real-bin-probe"
+rmdir "$HYG_PIN/real-bin-probe"
+mkdir "$HYG_PIN/bin"
+HYG_BIN_NOTLINK="$(hyg_cl)"
+rmdir "$HYG_PIN/bin"
+ln -s "$HYG_DEV/bin" "$HYG_PIN/bin"
+if ! echo "$HYG_BIN_OK" | grep -q 'pinned tree bin' \
+  && echo "$HYG_BIN_WRONG" | grep -q 'FAIL  pinned tree bin symlink points at' \
+  && echo "$HYG_BIN_DANGLING" | grep -q 'FAIL  pinned tree bin symlink is dangling' \
+  && echo "$HYG_BIN_NOTLINK" | grep -q 'FAIL  pinned tree bin exists but is not a symlink' \
+  && echo "$HYG_BIN_ABSENT" | grep -q 'INFO  pinned tree has no bin symlink' \
+  && ! echo "$HYG_BIN_ABSENT" | grep -q 'FAIL  pinned tree bin'; then
+  echo "PASS check-launchd audits the bin symlink (ok / wrong target / dangling / not a link / absent)"
+else
+  echo "FAIL check-launchd must audit bin after filtering it from the dirty check" >&2
+  echo "--- wrong ---" >&2; echo "$HYG_BIN_WRONG" | grep -i bin >&2
+  echo "--- dangling ---" >&2; echo "$HYG_BIN_DANGLING" | grep -i bin >&2
+  echo "--- notlink ---" >&2; echo "$HYG_BIN_NOTLINK" | grep -i bin >&2
+  echo "--- absent ---" >&2; echo "$HYG_BIN_ABSENT" | grep -i bin >&2
+  fail=1
+fi
+
 # A pre-existing bin symlink must not make deploy refuse dirty (Bugbot #224).
 # An operator may have created it by hand to silence LaunchControl; the local
 # git-exclude is written only after the dirty check, so is_dirty must tolerate

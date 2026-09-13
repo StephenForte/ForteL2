@@ -306,6 +306,36 @@ check_pinned_tree() {
     fi
   done
 
+  # bin/ is audited separately because it is OPTIONAL: deploy-agents.sh skips
+  # it when the dev checkout has no bin/ (required=0). It cannot simply join
+  # the loop above, but it must not go unaudited either — it was added to the
+  # dirty filter, and filtering it there without checking it here would let a
+  # dangling or retargeted link pass silently while every plist still puts
+  # $PINNED/bin on PATH (Codex on #224).
+  local bin_link="$PINNED_TREE/bin"
+  local bin_expected="$DEV_DIR/bin"
+  if [[ -L "$bin_link" ]]; then
+    local bin_target
+    bin_target="$(readlink "$bin_link")"
+    if [[ "$bin_target" != "$bin_expected" ]]; then
+      echo "FAIL  pinned tree bin symlink points at ${bin_target} (expected ${bin_expected})"
+      FAILS=$((FAILS + 1))
+      return
+    fi
+    if [[ ! -e "$bin_link" ]]; then
+      echo "FAIL  pinned tree bin symlink is dangling (target ${bin_target} does not exist)"
+      FAILS=$((FAILS + 1))
+      return
+    fi
+  elif [[ -e "$bin_link" ]]; then
+    echo "FAIL  pinned tree bin exists but is not a symlink — it shadows ${bin_expected} and deploy-agents.sh will not maintain it"
+    FAILS=$((FAILS + 1))
+    return
+  elif [[ -d "$bin_expected" ]]; then
+    echo "INFO  pinned tree has no bin symlink while ${bin_expected} exists — plists put \$PINNED/bin on PATH"
+    echo "      deploy with: ./scripts/deploy-agents.sh"
+  fi
+
   local env_link="$PINNED_TREE/.env.sepolia"
   if grep -E '^[[:space:]]*(export[[:space:]]+)?FORTEL2_ROOT=' "$env_link" >/dev/null 2>&1; then
     echo "INFO  pinned tree env still sets FORTEL2_ROOT (lib.sh ignores it with a warning; you may delete the line)"
