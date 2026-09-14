@@ -327,6 +327,8 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 ### Task 8 — P1: Thin `fortel2-node` friend repo
 
+> **Superseded in part (2026-09-14, fortel2-replica R-0018).** The separate-repo extraction was rejected: both repos are already public, so a third hides nothing and only adds a third copy of `genesis.json` / `rollup.json` to drift. `docker compose up -d` in `fortel2-replica` already *is* the thin friend node, and `tasks/prd-l2-learning-chain.md:499` settled in August that friends use "stock `fortel2-replica` compose either way" — this section predates that and was never reconciled with it. Task 8 is hardening that path. Landed so far: loopback-only host publishes, matched L1 provider pair, published artifact hashes, healthy-vs-stalled guidance (fortel2-replica #53), and this runbook. **Still open:** `docker-compose.yml` defaults `L1_RPC_KIND` to `quicknode` for a friend who writes their own `.env`; the objective and success criteria below have not been rewritten against the single-repo shape.
+
 **Objective:** Friends deploy without seeing operator RPC infrastructure.
 
 **Instructions:** Extract proven `op-node` + `op-reth --full`; commit 852 genesis/rollup with hashes in README; require friend L1 execution (+ beacon if required); recommend a receipts-capable L1 (document PublicNode failure); auto JWT, never an operator JWT; loopback default on Compose; no gateways/Access/SOS/QuickNode router/operator IDs; Render Blueprint only with a measured disk/plan (no free-tier claim without a measured deploy); parity command vs a user-supplied reference RPC without trusting it for derivation; then update `replica/FRIENDS.md` to the new repo and op-reth.
@@ -458,7 +460,7 @@ Learning oracles. Do not silently break them at Task 5, and do not treat them as
 
 ### Stray surfaces — replica / friends / rail (Task 7–8)
 
-- [ ] `replica/FRIENDS.md` still says op-geth until Task 8; then points at `fortel2-node`.
+- [x] `replica/FRIENDS.md` describes `op-reth --full` + op-node, loopback-by-default ports, and clone verification against the published artifact hashes (2026-09-14). It continues to point at `fortel2-replica`: the `fortel2-node` extraction was **rejected** — see fortel2-replica R-0018.
 - [ ] `scripts/pack-replica-artifacts.sh` — artifacts unchanged (no new genesis).
 - [ ] `fortel2-replica` image pin / Dockerfile (sibling repo; Task 7).
 - [ ] `deployments/rail-interface.json` notes that mention op-geth bind (URLs stay; wording).
@@ -513,7 +515,7 @@ Answer during Task 1 or 2 unless noted.
 - Live Sepolia sequencer L1 kind: `scripts/04-start-sequencer-sepolia.sh` (`SEPOLIA_L1_RPC_KIND:-quicknode`)
 - Roadmap: `tasks/prd-l2-learning-chain.md`
 - Phase 7 (do not wipe from here): `tasks/prd-phase-7-fault-proofs.md`
-- Friend runbook (stays op-geth until Task 8): `replica/FRIENDS.md`
+- Friend runbook (op-reth since 2026-09-14): `replica/FRIENDS.md`
 - ForteL2: <https://github.com/StephenForte/ForteL2>
 - Operated replica: <https://github.com/StephenForte/fortel2-replica>
 - OP node selection: <https://docs.optimism.io/use-cases/choose-your-node-stack>
