@@ -4,7 +4,7 @@ Hand this file to a friend (or a VPS you rent for them). They run a **stock veri
 
 Runtime lives in a separate repo: **https://github.com/StephenForte/fortel2-replica**  
 Full laptop/VPS walkthrough there: [`RUNNING.md`](https://github.com/StephenForte/fortel2-replica/blob/main/RUNNING.md)  
-Artifact hashes to verify your clone: [`README.md` § Chain identity](https://github.com/StephenForte/fortel2-replica/blob/main/README.md#chain-identity)
+Verify your clone (fails closed): [`config/SHA256SUMS`](https://github.com/StephenForte/fortel2-replica/blob/main/config/SHA256SUMS) — digests also listed in [`README.md` § Chain identity](https://github.com/StephenForte/fortel2-replica/blob/main/README.md#chain-identity)
 
 Recruiting two geographically distributed operators is **operator-owned**. This file is the onboarding artifact; it does not itself stand up those nodes.
 
@@ -32,8 +32,9 @@ git clone https://github.com/StephenForte/fortel2-replica.git
 cd fortel2-replica
 
 # Verify you have the chain the operator runs, BEFORE starting.
-# Compare against README § Chain identity in that repo; sha256sum on Linux.
-shasum -a 256 config/genesis.json config/rollup.json
+# This exits non-zero on mismatch - do not continue unless both say OK.
+cd config && shasum -a 256 -c SHA256SUMS && cd ..   # macOS
+# cd config && sha256sum -c SHA256SUMS && cd ..     # Linux
 
 cp .env.example .env
 # .env ships a public Sepolia URL for smoke tests. Replace L1_RPC_URL
@@ -65,7 +66,7 @@ curl -s http://127.0.0.1:9547 -H 'content-type: application/json' \
 | `eth_chainId` | `0x354` (852) — but a **stalled** node answers this identically. It is not a health check |
 | Still catching up | `docker compose logs -f op-node` repeats `Advancing bq origin` while `current_l1` climbs. `safe_l2` / `unsafe_l2` stay `0` until derivation reaches the L1 blocks holding batches. Normal, and slow from genesis |
 | Caught up | Your `eth_blockNumber` tracks `https://fortel2-replica-rpc.onrender.com` — both sit ~3 min behind the sequencer |
-| Stalled | `current_l1` stops climbing, or reaches `head_l1` while `safe_l2` stays `0` for hours, or your head freezes while the public endpoint moves. Usual causes: PublicNode returning 0 receipts (D-0105), or genesis/rollup that do not match the published hashes |
+| Stalled | `current_l1` stops climbing, or reaches `head_l1` while `safe_l2` stays `0` for hours, or your head freezes while the public endpoint moves. Usual causes: PublicNode returning 0 receipts (D-0105), or a genesis/rollup mismatch the `SHA256SUMS` check would have caught |
 | `safe_l2` | Eventually advances; may trail the sequencer by ~3 minutes (L1 batches, not P2P tip-follow) |
 | Nightly window | The **sequencer** sleeps **23:45–03:00** `America/Los_Angeles`. Your replica keeps serving the tip it already derived; new L2 progress pauses until new L1 batches land after wake |
 | Writes | You cannot (and must not) accept `eth_sendRawTransaction` as a public writer |
