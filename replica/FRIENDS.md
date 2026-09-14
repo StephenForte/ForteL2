@@ -33,8 +33,8 @@ cd fortel2-replica
 
 # Verify you have the chain the operator runs, BEFORE starting.
 # This exits non-zero on mismatch - do not continue unless both say OK.
-cd config && shasum -a 256 -c SHA256SUMS && cd ..   # macOS
-# cd config && sha256sum -c SHA256SUMS && cd ..     # Linux
+( cd config && shasum -a 256 -c SHA256SUMS )   # macOS
+# ( cd config && sha256sum -c SHA256SUMS )     # Linux
 
 cp .env.example .env
 # .env ships a public Sepolia URL for smoke tests. Replace L1_RPC_URL
