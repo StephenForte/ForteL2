@@ -5,7 +5,7 @@
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
 **Parent roadmap:** `tasks/prd-l2-learning-chain.md` (parallel EL track; not a phase number)  
-**Repositories:** `StephenForte/ForteL2`, `StephenForte/fortel2-replica`, proposed `StephenForte/fortel2-node`
+**Repositories:** `StephenForte/ForteL2`, `StephenForte/fortel2-replica`. A third `fortel2-node` was proposed and **rejected** (2026-09-14, fortel2-replica R-0018) — both repos are already public, so a third hides nothing and only adds a third copy of `genesis.json` / `rollup.json` to drift.
 
 This is an **execution-client migration**, not a new chain launch and **not** a Phase 7 wipe. It must not require an L1 contract redeploy, a new L2 genesis, a chain-ID change, or `karst_time`. Do **not** treat this document as authorization to cut over the sequencer, swap the Render replica image, or publish a friend node.
 
@@ -39,7 +39,7 @@ Safe order:
 4. Prove challenger / SafeDB / withdrawal-proof / proposer output-root needs against the candidate archive profile (Task 4).
 5. Cut the Mac sequencer from op-geth to op-reth during a controlled write pause. Retain the op-geth datadir as the rollback asset (Task 5). **Operator-owned. Do not start unless asked.**
 6. Observe (Task 6), then migrate the Render replica on a **new** service/disk (Task 7).
-7. Extract the proven minimal verifier into `fortel2-node` for friends (Task 8). Remove op-geth compatibility after the rollback window (Task 9).
+7. Harden the proven minimal verifier **in `fortel2-replica`** for friends (Task 8) — not a new repo (R-0018). Remove op-geth compatibility after the rollback window (Task 9).
 
 The op-geth and op-reth databases are **not** interchangeable. op-reth uses a new datadir and reconstructs canonical L2 from the committed 852 genesis and Sepolia data.
 
@@ -139,7 +139,7 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 **Evidence:** Gateways, SettlementOS routing, Access, provider schedule, Render IDs, disk recovery.
 
-**Consequence:** Extract `fortel2-node` only after the op-reth verifier config is proven (Task 8).
+**Consequence:** Harden the friend path in `fortel2-replica` only after the op-reth verifier config is proven (Task 8). The `fortel2-node` extraction this originally called for was rejected (R-0018).
 
 ## 7. Migration invariants
 
@@ -325,17 +325,23 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 **Dependencies:** Task 6.
 
-### Task 8 — P1: Thin `fortel2-node` friend repo
+### Task 8 — P1: Harden the friend node path in `fortel2-replica`
 
-**Objective:** Friends deploy without seeing operator RPC infrastructure.
+> **Scope corrected (2026-09-14, fortel2-replica R-0018).** The separate-repo extraction was rejected: both repos are already public, so a third hides nothing and only adds a third copy of `genesis.json` / `rollup.json` to drift. `docker compose up -d` in `fortel2-replica` already *is* the thin friend node, and `tasks/prd-l2-learning-chain.md:499` settled in August that friends use "stock `fortel2-replica` compose either way" — this section predates that and was never reconciled with it. Task 8 is hardening that path. Landed so far: loopback-only host publishes, matched L1 provider pair, published artifact hashes, healthy-vs-stalled guidance (fortel2-replica #53), and this runbook. The objective, instructions and success criteria below are rewritten against the single-repo shape.
 
-**Instructions:** Extract proven `op-node` + `op-reth --full`; commit 852 genesis/rollup with hashes in README; require friend L1 execution (+ beacon if required); recommend a receipts-capable L1 (document PublicNode failure); auto JWT, never an operator JWT; loopback default on Compose; no gateways/Access/SOS/QuickNode router/operator IDs; Render Blueprint only with a measured disk/plan (no free-tier claim without a measured deploy); parity command vs a user-supplied reference RPC without trusting it for derivation; then update `replica/FRIENDS.md` to the new repo and op-reth.
+**Objective:** A friend can stand up a verifier for chain 852 from the published artifacts alone, without operator secrets, without exposing an unauthenticated RPC, and without being able to mistake a stalled node for a healthy one. (The original objective — "deploy without *seeing* operator RPC infrastructure" — does not survive contact with the facts: both repos are public, so nothing is hidden from anyone. What matters is that the friend path cannot be run *wrongly*, not what they can read.)
+
+**Instructions:** Harden `fortel2-replica`'s default compose path — do **not** create a new repository.
+
+- **Done (fortel2-replica #53, #55, R-0018):** loopback-only host publishes with the opt-in documented rather than knob-ified; `L1_RPC_KIND` matched to the shipped `L1_RPC_URL`; 852 genesis/rollup digests published in README §Chain identity and made **fail-closed** via `config/SHA256SUMS`; healthy-vs-stalled guidance so `Up` is not mistaken for working; auto-generated JWT, never an operator JWT. `replica/FRIENDS.md` updated to op-reth (ForteL2 #227).
+- **Open:** `docker-compose.yml` still resolves `${L1_RPC_KIND:-quicknode}`, so a friend who writes their own `.env` without that key gets the mismatch back — the documented `cp .env.example .env` path is correct.
+- **Not started:** a parity command against a user-supplied reference RPC that is not trusted for derivation; a Render Blueprint for friends, which needs a measured disk/plan before any free-tier claim.
 
 **Out of scope:** Challenger, public RPC commitment, sequencer, batcher, proposer, rewards, staking.
 
-**Success:** Clone + L1 endpoints + disk; exactly one op-node and one op-reth; no operator secret; safe hash matches operator/Render; README has no operator-only Render/SOS runbook.
+**Success:** A clean clone plus an L1 endpoint and disk yields exactly one op-node and one op-reth, holding no operator secret, whose `safe_l2` hash matches the operator at the same number. Verification of the published artifacts fails closed. The operator-only Render/SOS material stays clearly marked as such — it is not hidden, since the repo is public, but it must not read as friend instructions.
 
-**Verification:** Clean-room deploy. Missing L1, bad genesis hash, or absent disk fails closed (not a fake healthy).
+**Verification:** Clean-room deploy. Missing L1, bad genesis hash, or absent disk fails closed (not a fake healthy). The bad-genesis half is covered by `config/SHA256SUMS` (fortel2-replica #55); the clean-room deploy itself has **not** been run — no host in the loop has docker.
 
 **Dependencies:** Tasks 1–7.
 
@@ -458,7 +464,7 @@ Learning oracles. Do not silently break them at Task 5, and do not treat them as
 
 ### Stray surfaces — replica / friends / rail (Task 7–8)
 
-- [ ] `replica/FRIENDS.md` still says op-geth until Task 8; then points at `fortel2-node`.
+- [x] `replica/FRIENDS.md` describes `op-reth --full` + op-node, loopback-by-default ports, and clone verification against the published artifact hashes (2026-09-14). It continues to point at `fortel2-replica`: the `fortel2-node` extraction was **rejected** — see fortel2-replica R-0018.
 - [ ] `scripts/pack-replica-artifacts.sh` — artifacts unchanged (no new genesis).
 - [ ] `fortel2-replica` image pin / Dockerfile (sibling repo; Task 7).
 - [ ] `deployments/rail-interface.json` notes that mention op-geth bind (URLs stay; wording).
@@ -476,7 +482,7 @@ Learning oracles. Do not silently break them at Task 5, and do not treat them as
 
 - [ ] `ForteL2` owns sequencing, fault proofs, canonical artifacts.
 - [ ] `fortel2-replica` owns operated Render RPC.
-- [ ] `fortel2-node` is only the friend verifier.
+- [x] The friend verifier is `fortel2-replica`'s default `docker compose` path, not a third repo (R-0018).
 - [ ] One source of truth for published config + hash check.
 
 ## 11. Open questions
@@ -513,7 +519,7 @@ Answer during Task 1 or 2 unless noted.
 - Live Sepolia sequencer L1 kind: `scripts/04-start-sequencer-sepolia.sh` (`SEPOLIA_L1_RPC_KIND:-quicknode`)
 - Roadmap: `tasks/prd-l2-learning-chain.md`
 - Phase 7 (do not wipe from here): `tasks/prd-phase-7-fault-proofs.md`
-- Friend runbook (stays op-geth until Task 8): `replica/FRIENDS.md`
+- Friend runbook (op-reth since 2026-09-14): `replica/FRIENDS.md`
 - ForteL2: <https://github.com/StephenForte/ForteL2>
 - Operated replica: <https://github.com/StephenForte/fortel2-replica>
 - OP node selection: <https://docs.optimism.io/use-cases/choose-your-node-stack>
