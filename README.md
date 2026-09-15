@@ -826,11 +826,11 @@ Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not re
 | Challenger game window | binary `672h` (unset) | `SEPOLIA_CHALLENGER_GAME_WINDOW` — do not shrink; bond-claim buffer |
 | **Render** op-node poll / rate limit | `24s` / `5` rps | `L1_HTTP_POLL_INTERVAL` / `L1_RPC_RATE_LIMIT` in fortel2-replica |
 | **Render** daytime/night schedule | `L1_RPC_SCHEDULE=business` → QuickNode **09:00–17:00** `America/Los_Angeles`, publicnode overnight (in-container router) | Override with `L1_RPC_FORCE=public\|metered` or `L1_USE_PUBLIC_RPC=1` |
-| **Render** pin public always | `L1_USE_PUBLIC_RPC=1` or `L1_RPC_FORCE=public` | Keep QuickNode in `L1_RPC_URL` for later |
+| **Render** pin public always | ~~`L1_USE_PUBLIC_RPC=1` / `L1_RPC_FORCE=public`~~ — **not for `fortel2-replica-reth` (D-0136)** | Measured 0.35 L1 blk/min vs Sepolia's ~5: the replica cannot recover from a restart on public. Keep `L1_RPC_FORCE=metered` and QuickNode in `L1_RPC_URL`. |
 
 For a short fast demo: set `SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=2`, `SEPOLIA_BATCHER_POLL_INTERVAL=2s`, `SEPOLIA_PROPOSER_INTERVAL=12s` then restart. Prefer stopping the stack when idle over burning credits overnight.
 
-**Render L1 RPC schedule (observe):** keep the Render-only QuickNode URL in `L1_RPC_URL`, set `L1_RPC_SCHEDULE=business` + `TZ=America/Los_Angeles`. The replica’s JSON-RPC router switches upstream automatically at 09:00 / 17:00 Pacific — no redeploy. Emergency pin: `L1_RPC_FORCE=public` (or Suspend).
+**Render L1 RPC schedule (observe):** keep the Render-only QuickNode URL in `L1_RPC_URL`, set `L1_RPC_SCHEDULE=business` + `TZ=America/Los_Angeles`. The replica’s JSON-RPC router switches upstream automatically at 09:00 / 17:00 Pacific — no redeploy. **Superseded for `fortel2-replica-reth` by D-0136:** the overnight publicnode leg (and `L1_RPC_FORCE=public` as an “emergency pin”) cannot hold this replica at the tip — measured 0.35 L1 blocks/min against Sepolia's ~5/min, so a restart on that leg is unrecoverable. This service runs `L1_RPC_FORCE=metered`. If you must shed cost, **Suspend** rather than pinning public.
 
 **Sleep / wake (recommended overnight):**
 
