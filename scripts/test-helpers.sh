@@ -4772,6 +4772,8 @@ aw_run() {
     ALERT_WATCH_CURL="$AW_SHIM/curl" \
     ALERT_WATCH_OSASCRIPT="$AW_SHIM/osascript" \
     ALERT_WATCH_LAUNCHCTL="$AW_SHIM/launchctl" \
+    ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
+    ALERT_WATCH_REPLICA_HEAD_AGE=0 \
     ALERT_EMAIL_TO="$AW_TO" \
     "$@"
 }
@@ -6558,6 +6560,8 @@ stk_run() {
     ALERT_WATCH_CURL="$STK_FIX/shim/curl" \
     ALERT_WATCH_OSASCRIPT="$STK_FIX/shim/osascript" \
     ALERT_WATCH_LAUNCHCTL="$STK_FIX/shim/launchctl" \
+    ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
+    ALERT_WATCH_REPLICA_HEAD_AGE=0 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
 }
@@ -6638,6 +6642,8 @@ STK_NATIVE_OUT="$(
     ALERT_WATCH_CURL="$STK_FIX/shim/curl" \
     ALERT_WATCH_OSASCRIPT="$STK_FIX/shim/osascript" \
     ALERT_WATCH_LAUNCHCTL="$STK_FIX/shim/launchctl" \
+    ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
+    ALERT_WATCH_REPLICA_HEAD_AGE=0 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
     "$SCRIPT_DIR/alert-watch.sh" 2>&1
@@ -7840,6 +7846,8 @@ cfw_run() {
     ALERT_WATCH_CURL="$CFW_FIX/shim/curl" \
     ALERT_WATCH_OSASCRIPT="$CFW_FIX/shim/osascript" \
     ALERT_WATCH_LAUNCHCTL="$CFW_FIX/shim/launchctl" \
+    ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
+    ALERT_WATCH_REPLICA_HEAD_AGE=0 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
 }
@@ -11007,6 +11015,393 @@ fi
 kill "$WG8_PID" 2>/dev/null || true
 rm -rf "$WG8_FIX"
 unset WG8_PID WG8_FIX WG8_FIX_CANON WG8_RC WG8_OUT
+
+# =============================================================================
+# alert-watch replica liveness (D-0135) — offline canned heads; never the
+# live gateway. Appended so existing aw_run / stk_run / cfw_run stay intact.
+# =============================================================================
+RP_AW="$SCRIPT_DIR/alert-watch.sh"
+RP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-replica-watch.XXXXXX")"
+cleanup_rp() { rm -rf "$RP_FIX"; }
+trap cleanup_rp EXIT
+mkdir -p "$RP_FIX/shim" "$RP_FIX/mock" "$RP_FIX/data" "$RP_FIX/bin" "$RP_FIX/deploy"
+cat > "$RP_FIX/env" <<EOF
+FORTEL2_ROOT=$RP_FIX
+DATA_DIR=$RP_FIX/data
+BIN_DIR=$RP_FIX/bin
+DEPLOY_DIR=$RP_FIX/deploy
+EOF
+cat > "$RP_FIX/shim/curl" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+n=0
+[ -f "$dir/curl.calls" ] && n=$(cat "$dir/curl.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/curl.calls"
+printf 'ARG:%s\n' "$@" >> "$dir/curl.argv"
+cat > "$dir/curl.stdin"
+out=""
+writeout=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then out="$a"; fi
+  if [ "$prev" = "-w" ] || [ "$prev" = "--write-out" ]; then writeout="$a"; fi
+  prev="$a"
+done
+[ -n "$out" ] && printf '%s\n' '{"id":"mock-resend"}' > "$out"
+[ -n "$writeout" ] && printf '%s' "${ALERT_WATCH_CURL_HTTP:-200}"
+exit 0
+EOS
+cat > "$RP_FIX/shim/osascript" <<'EOS'
+#!/bin/sh
+dir="${ALERT_WATCH_MOCK_DIR:-}"
+[ -n "$dir" ] || exit 99
+n=0
+[ -f "$dir/osascript.calls" ] && n=$(cat "$dir/osascript.calls")
+n=$((n + 1))
+printf '%s\n' "$n" > "$dir/osascript.calls"
+printf 'ARG:%s\n' "$@" >> "$dir/osascript.argv"
+exit 0
+EOS
+cat > "$RP_FIX/shim/launchctl" <<'EOS'
+#!/bin/sh
+printf 'gui/501/com.steve.fortel2-resolve-games = {\n\tstate = not running\n\tlast exit code = 0\n}\n'
+exit 0
+EOS
+chmod +x "$RP_FIX/shim/curl" "$RP_FIX/shim/osascript" "$RP_FIX/shim/launchctl"
+rp_reset() {
+  rm -f "$RP_FIX/mock"/curl.argv "$RP_FIX/mock"/curl.calls \
+    "$RP_FIX/mock"/osascript.argv "$RP_FIX/mock"/osascript.calls \
+    "$RP_FIX/state.json"
+  : > "$RP_FIX/resolve.out.log"
+  : > "$RP_FIX/resolve.err.log"
+  printf '%s\n' '{"verdict":"OK","reason":"balance at or above the funding policy minimum"}' \
+    > "$RP_FIX/funding-health.json"
+}
+rp_run() {
+  env -u RESEND_API_TOKEN \
+    PATH="$RP_FIX/shim:$PATH" \
+    FORTEL2_ENV="$RP_FIX/env" \
+    ALERT_WATCH_MOCK_DIR="$RP_FIX/mock" \
+    ALERT_WATCH_FUNDING_JSON="$RP_FIX/funding-health.json" \
+    ALERT_WATCH_STATE="$RP_FIX/state.json" \
+    ALERT_WATCH_RESOLVE_OUT="$RP_FIX/resolve.out.log" \
+    ALERT_WATCH_RESOLVE_ERR="$RP_FIX/resolve.err.log" \
+    ALERT_WATCH_CURL="$RP_FIX/shim/curl" \
+    ALERT_WATCH_OSASCRIPT="$RP_FIX/shim/osascript" \
+    ALERT_WATCH_LAUNCHCTL="$RP_FIX/shim/launchctl" \
+    ALERT_WATCH_REPLICA_HEAD_NUMBER="${ALERT_WATCH_REPLICA_HEAD_NUMBER:-982723}" \
+    ALERT_WATCH_REPLICA_HEAD_AGE="${ALERT_WATCH_REPLICA_HEAD_AGE:-0}" \
+    ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
+    "$@"
+}
+rp_seed_last_ok() {
+  python3 - "$RP_FIX/state.json" "$1" "$2" "${3:-982723}" <<'PY'
+import json, os, sys, time
+path, ago, age_then, number = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])
+now = time.time()
+doc = {}
+if os.path.exists(path):
+    try:
+        with open(path) as fh:
+            doc = json.load(fh)
+        if not isinstance(doc, dict):
+            doc = {}
+    except (OSError, ValueError, TypeError):
+        doc = {}
+observed_at = now - ago
+doc["replica_last_ok"] = {
+    "observed_at": observed_at,
+    "head_ts": observed_at - age_then,
+    "head_number": number,
+}
+tmp = path + ".tmp"
+with open(tmp, "w") as fh:
+    json.dump(doc, fh)
+    fh.write("\n")
+os.replace(tmp, path)
+PY
+}
+
+# Source-level: three condition ids, public-read URL, urllib not ALERT_WATCH_CURL,
+# no Mac-sleep skip, no metered provider.
+RP_REPLICA_BLK="$(awk '/# --- public replica/,/# --- cooldown/' "$RP_AW")"
+if grep -q 'replica-losing-ground' "$RP_AW" \
+  && grep -q 'replica-head-stale' "$RP_AW" \
+  && grep -q 'replica-unreachable' "$RP_AW" \
+  && grep -q 'ALERT_WATCH_REPLICA_HEAD_NUMBER' "$RP_AW" \
+  && grep -q 'ALERT_WATCH_REPLICA_HEAD_AGE' "$RP_AW" \
+  && grep -q 'ALERT_WATCH_REPLICA_UNREACHABLE' "$RP_AW" \
+  && grep -q 'ALERT_WATCH_REPLICA_THROW' "$RP_AW" \
+  && echo "$RP_REPLICA_BLK" | grep -q 'https://fortel2-replica-rpc.onrender.com' \
+  && echo "$RP_REPLICA_BLK" | grep -q 'urllib.request' \
+  && echo "$RP_REPLICA_BLK" | grep -q 'eth_getBlockByNumber' \
+  && ! echo "$RP_REPLICA_BLK" | grep -qiE 'quicknode\.com|quiknode' \
+  && ! echo "$RP_REPLICA_BLK" | grep -q 'slept' \
+  && ! echo "$RP_REPLICA_BLK" | grep -q 'ALERT_WATCH_CURL:-curl' \
+  && ! grep -qE "sed -n '2,[0-9]+p'" "$RP_AW"; then
+  echo "PASS alert-watch replica conditions use the public-read gateway, urllib, and no sleep grace"
+else
+  echo "FAIL replica probe must be urllib against fortel2-replica-rpc.onrender.com, never QuickNode, never slept-skip" >&2
+  fail=1
+fi
+
+_hr_help_rc=0
+_hr_help_out="$(FORTEL2_ENV="$RP_FIX/env" "$RP_AW" --help 2>&1)" || _hr_help_rc=$?
+if [[ "$_hr_help_rc" == "0" ]] \
+  && printf '%s' "$_hr_help_out" | grep -q 'ALERT_WATCH_REPLICA_HEAD_NUMBER' \
+  && printf '%s' "$_hr_help_out" | grep -q 'ALERT_WATCH_REPLICA_THROW' \
+  && printf '%s' "$_hr_help_out" | grep -q 'replica-losing-ground' \
+  && ! printf '%s' "$_hr_help_out" | grep -q 'set -euo pipefail'; then
+  echo "PASS alert-watch.sh --help prints replica condition ids and ALERT_WATCH_REPLICA_* hooks"
+else
+  echo "FAIL --help must include replica-losing-ground and ALERT_WATCH_REPLICA_HEAD_NUMBER (ec=$_hr_help_rc)" >&2
+  printf '%s\n' "$_hr_help_out" >&2
+  fail=1
+fi
+unset _hr_help_out _hr_help_rc
+
+# Fresh head (age ≈ 0 at eval) is quiet.
+rp_reset
+RP_OUT="$(rp_run RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ ! -f "$RP_FIX/mock/curl.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]] \
+  && ! grep -qi 'onrender.com' "$RP_FIX/mock/curl.argv" 2>/dev/null; then
+  echo "PASS alert-watch replica fresh head is quiet"
+else
+  echo "FAIL a fresh canned head must not alert or hit the live gateway (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# First successful probe stores state and does not fire trend (no prior).
+rp_reset
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=180 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-losing-ground is quiet on the first successful probe"
+else
+  echo "FAIL the first successful replica probe must not fire losing-ground (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# 2026-09-15 decay: age growing ~3600 s per hourly run → fire on the second sample.
+rp_reset
+rp_seed_last_ok 3600 180 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_NUMBER=982723 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=3780 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$RP_OUT" == *"replica-losing-ground"* ]] \
+  && grep -qi 'losing ground' "$RP_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch replica-losing-ground fires on the second consecutive observation"
+else
+  echo "FAIL hourly freeze (~3600 s age growth) must fire replica-losing-ground (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Converging catch-up: 12000 s → 90 s must stay quiet (the 2026-09-15 morning recover).
+rp_reset
+rp_seed_last_ok 3600 12000 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=90 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-losing-ground stays quiet on a converging catch-up"
+else
+  echo "FAIL a converging catch-up (12000s → 90s) must not fire losing-ground (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Healthy follower oscillating around ~180 s.
+rp_reset
+rp_seed_last_ok 3600 175 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=185 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-losing-ground stays quiet on healthy ~180s jitter"
+else
+  echo "FAIL healthy ~180s jitter (175→185) must not fire losing-ground (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Noise floor is exclusive: delta == 120 is quiet; 121 fires.
+rp_reset
+rp_seed_last_ok 3600 180 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=300 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-losing-ground stays quiet at the noise floor"
+else
+  echo "FAIL delta == 120 s (the noise floor) must stay quiet (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+rp_reset
+rp_seed_last_ok 3600 180 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=301 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$RP_OUT" == *"replica-losing-ground"* ]]; then
+  echo "PASS alert-watch replica-losing-ground fires just past the noise floor"
+else
+  echo "FAIL delta == 121 s must fire replica-losing-ground (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Backstop: no prior state, age past 10800 s (exclusive).
+rp_reset
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=10801 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$RP_OUT" == *"replica-head-stale"* ]]; then
+  echo "PASS alert-watch replica-head-stale fires with no prior state"
+else
+  echo "FAIL a 10801 s head with no prior sample must fire replica-head-stale (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+rp_reset
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=10800 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-head-stale is quiet at the exact threshold"
+else
+  echo "FAIL age == 10800 s must stay quiet (exclusive backstop) (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Unreachable once quiet; twice fires; success resets; failed probe keeps last_ok.
+rp_reset
+rp_seed_last_ok 3600 180 982723
+RP_PREV_TS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replica_last_ok"]["head_ts"])' "$RP_FIX/state.json")"
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+RP_KEEP_TS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replica_last_ok"]["head_ts"])' "$RP_FIX/state.json")"
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]] \
+  && [[ "$RP_KEEP_TS" == "$RP_PREV_TS" ]]; then
+  echo "PASS alert-watch replica-unreachable is quiet on one failed probe"
+else
+  echo "FAIL one failed replica probe must be quiet and must not overwrite last_ok (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+rp_reset
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+RP_OUT2="$(rp_run ALERT_WATCH_REPLICA_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 ]] \
+  && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$RP_OUT2" == *"replica-unreachable"* ]]; then
+  echo "PASS alert-watch replica-unreachable fires on two consecutive failures"
+else
+  echo "FAIL two consecutive failed replica probes must fire replica-unreachable (ec=$RP_EC/$RP_EC2)" >&2
+  echo "$RP_OUT" >&2
+  echo "$RP_OUT2" >&2
+  fail=1
+fi
+rp_reset
+rp_run ALERT_WATCH_REPLICA_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" >/dev/null 2>&1 || true
+rp_run ALERT_WATCH_REPLICA_HEAD_AGE=0 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" >/dev/null 2>&1 || true
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/curl.calls \
+  "$RP_FIX/mock"/osascript.argv "$RP_FIX/mock"/curl.argv
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-unreachable streak resets after a success"
+else
+  echo "FAIL a success must reset the unreachable streak so one later fail stays quiet (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Probe throw must not prevent funding-fail (or the evaluator) from running.
+rp_reset
+printf '%s\n' '{"verdict":"FAIL","reason":"batcher below policy for 24.0 h with no top-up"}' \
+  > "$RP_FIX/funding-health.json"
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_THROW=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ "$RP_OUT" == *"condition funding-fail"* ]] \
+  && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && ! printf '%s' "$RP_OUT" | grep -qi 'traceback'; then
+  echo "PASS alert-watch replica probe throw still evaluates funding-fail"
+else
+  echo "FAIL a replica probe throw must not prevent funding-fail from alerting (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Cooldown: condition stays active, second send suppressed.
+rp_reset
+rp_seed_last_ok 3600 180 982723
+rp_run ALERT_WATCH_REPLICA_HEAD_AGE=3780 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" >/dev/null 2>&1 || true
+RP_C1="$(cat "$RP_FIX/mock/curl.calls" 2>/dev/null || echo 0)"
+rp_seed_last_ok 3600 180 982723
+rp_run ALERT_WATCH_REPLICA_HEAD_AGE=3780 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" >/dev/null 2>&1 || true
+RP_C2="$(cat "$RP_FIX/mock/curl.calls" 2>/dev/null || echo 0)"
+if [[ "$RP_C1" -eq 1 && "$RP_C2" -eq 1 ]]; then
+  echo "PASS alert-watch replica-losing-ground cooldown suppresses a second send"
+else
+  echo "FAIL replica-losing-ground must send once inside ALERT_REALERT_HOURS (c1=$RP_C1 c2=$RP_C2)" >&2
+  fail=1
+fi
+
+# No Mac-sleep grace: last_check old enough for slept==true still fires the backstop.
+rp_reset
+python3 - "$RP_FIX/state.json" <<'PY'
+import json, sys, time
+now = time.time()
+with open(sys.argv[1], "w") as fh:
+    json.dump({"last_check_ts": now - 4 * 3600}, fh)
+    fh.write("\n")
+PY
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=10801 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ "$RP_OUT" == *"replica-head-stale"* ]]; then
+  echo "PASS alert-watch replica-head-stale still fires after a Mac-sleep gap"
+else
+  echo "FAIL replica conditions must not take Mac-sleep grace (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+cleanup_rp
+trap - EXIT
+unset RP_AW RP_FIX RP_OUT RP_EC RP_OUT2 RP_EC2 RP_C1 RP_C2 RP_REPLICA_BLK
+unset RP_PREV_TS RP_KEEP_TS
+unset -f rp_reset rp_run rp_seed_last_ok cleanup_rp 2>/dev/null || true
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2

@@ -27,6 +27,25 @@
 #                         no-tunnel host, never an alert. Err-log "Failed to
 #                         read token file" may enrich the body; daemon state is
 #                         the trigger (D-0107 F5).
+#   replica-losing-ground public replica head age grew across consecutive
+#                         successful probes by more than REPLICA_TREND_NOISE_SECS
+#                         (default 120). One sample cannot compute a trend; the
+#                         first successful probe only stores state. A following
+#                         node jitters by seconds; an hourly freeze grows ~3600 s.
+#                         Comparison is exclusive (delta > floor). No Mac-sleep
+#                         grace — the replica is on Render (D-0135).
+#   replica-head-stale    a single successful probe shows head age >
+#                         REPLICA_HEAD_STALE_SECS (default 10800, exclusive, same
+#                         operator as health-stale). Backstop when trend has no
+#                         prior sample (first run, wiped state, watcher down).
+#   replica-unreachable   two consecutive failed probes of the public-read
+#                         gateway (timeout / HTTP / garbage JSON / missing
+#                         timestamp). One failure is quiet; a later success
+#                         resets the streak. Failed probes do not overwrite the
+#                         last successful head sample. urllib timeout 15 s —
+#                         never ALERT_WATCH_CURL (that shim is Resend). One
+#                         eth_getBlockByNumber(latest); URL is the published
+#                         public-read gateway, never QuickNode / Access / loopback.
 #
 # Verdicts OK / WARN / INSUFFICIENT never alert (WARN is inside funding-watch's
 # documented tolerance; alerting on it is the cry-wolf class #146 removed).
@@ -48,6 +67,8 @@
 # event on wake, and this watcher may race it. Unloaded / nonzero-exit still
 # alert on that first run; those are not sleep artefacts. cloudflared-failing
 # never takes that grace (the tunnel daemon is KeepAlive, not calendar).
+# replica-losing-ground / replica-head-stale / replica-unreachable never take
+# that grace either — Render does not sleep at 23:45.
 #
 # Usage: alert-watch.sh [--test]
 #   --test     synthetic alert, tagged TEST, both channels (post-install shakeout)
@@ -57,6 +78,8 @@
 #   ALERT_EMAIL_FROM      default onboarding@resend.dev (account-owner inbox only)
 #   ALERT_EMAIL_TO        recipient (required for email)
 #   ALERT_REALERT_HOURS   default 6
+#   REPLICA_HEAD_STALE_SECS    default 10800 (comment in .env.sepolia.example)
+#   REPLICA_TREND_NOISE_SECS   default 120
 #
 # Test-only overrides (names never appear in env files, so they survive lib.sh
 # `set -a` sourcing):
@@ -70,6 +93,18 @@
 #   ALERT_WATCH_CLOUDFLARED_PLIST  ALERT_WATCH_CLOUDFLARED_ERR
 #     A launchctl shim without CLOUDFLARED_PLIST does not observe the host's
 #     real tunnel plist (existing shims print resolve-games not-running/0).
+#   ALERT_WATCH_REPLICA_HEAD_NUMBER  canned block number (skips the network)
+#   ALERT_WATCH_REPLICA_HEAD_TS     unix timestamp of that head
+#   ALERT_WATCH_REPLICA_HEAD_AGE    seconds; timestamp = now - age at eval time
+#     Prefer HEAD_AGE for "fresh" (age ≈ 0 each run). A fixed HEAD_TS is a
+#     frozen head: two evaluations ~1 s apart would look like losing ground
+#     if the noise floor were "any increase".
+#   ALERT_WATCH_REPLICA_UNREACHABLE=1  inject a failed probe (no network)
+#   ALERT_WATCH_REPLICA_THROW=1        raise inside the probe; other conditions
+#                                      must still evaluate
+#   When any replica hook is set, or ALERT_WATCH_CURL is set (Resend test
+#   shim), the probe never opens a socket. Production launchd does not set
+#   those keys and uses urllib against the hardcoded public-read gateway.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -230,6 +265,8 @@ python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
   "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" <<'PY'
 import json, os, shutil, sys, time, subprocess
+import urllib.error
+import urllib.request
 
 funding_json, state_file, resolve_out, resolve_err = sys.argv[1:5]
 health_stale = int(sys.argv[5])
@@ -574,6 +611,177 @@ if cf_plist and os.path.exists(cf_plist):
             "ForteL2 cloudflared tunnel failing",
             "cloudflared system daemon is unhealthy: %s%s"
             % (cf_why, cf_token_hint(cf_err)))
+
+# --- public replica liveness (Render; no Mac-sleep grace) ---
+# Head-timestamp age and its trend only. Do not compare to the sequencer.
+# One eth_getBlockByNumber(latest). Never QuickNode, Access, or loopback.
+REPLICA_RPC_URL = "https://fortel2-replica-rpc.onrender.com"
+REPLICA_RPC_TIMEOUT = 15
+
+def _env_int(name, default):
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+def _rpc_int(raw):
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    s = str(raw).strip()
+    if s == "":
+        return None
+    try:
+        if s.startswith("0x") or s.startswith("0X"):
+            return int(s, 16)
+        return int(s)
+    except (TypeError, ValueError):
+        return None
+
+replica_stale_secs = _env_int(
+    "ALERT_WATCH_REPLICA_STALE_SECS",
+    _env_int("REPLICA_HEAD_STALE_SECS", 10800),
+)
+replica_noise_secs = _env_int(
+    "ALERT_WATCH_REPLICA_NOISE_SECS",
+    _env_int("REPLICA_TREND_NOISE_SECS", 120),
+)
+
+def probe_replica_head():
+    """Return {number, timestamp} or None on a failed probe. THROW raises."""
+    if (os.environ.get("ALERT_WATCH_REPLICA_THROW") or "") == "1":
+        raise RuntimeError("ALERT_WATCH_REPLICA_THROW")
+    if (os.environ.get("ALERT_WATCH_REPLICA_UNREACHABLE") or "") == "1":
+        return None
+    num_raw = os.environ.get("ALERT_WATCH_REPLICA_HEAD_NUMBER")
+    ts_raw = os.environ.get("ALERT_WATCH_REPLICA_HEAD_TS")
+    age_raw = os.environ.get("ALERT_WATCH_REPLICA_HEAD_AGE")
+    canned = (
+        num_raw not in (None, "")
+        or ts_raw not in (None, "")
+        or age_raw not in (None, "")
+    )
+    # Resend test shim on PATH/ALERT_WATCH_CURL returns {"id":"mock-resend"}
+    # for every URL. Never live-curl the gateway from an evaluation fixture.
+    test_offline = bool(os.environ.get("ALERT_WATCH_CURL"))
+    if canned or test_offline:
+        if age_raw not in (None, ""):
+            try:
+                ts = now - float(age_raw)
+            except (TypeError, ValueError):
+                return None
+        elif ts_raw in (None, "", "now"):
+            ts = now
+        else:
+            try:
+                ts = float(ts_raw)
+            except (TypeError, ValueError):
+                return None
+        number = _rpc_int(num_raw)
+        if number is None:
+            number = 1
+        return {"number": number, "timestamp": ts}
+
+    payload = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getBlockByNumber",
+        "params": ["latest", False],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        REPLICA_RPC_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=REPLICA_RPC_TIMEOUT) as resp:
+            raw = resp.read()
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    result = doc.get("result")
+    if not isinstance(result, dict):
+        return None
+    ts = _rpc_int(result.get("timestamp"))
+    if ts is None:
+        return None
+    number = _rpc_int(result.get("number"))
+    if number is None:
+        number = 0
+    return {"number": number, "timestamp": float(ts)}
+
+def replica_fail(why):
+    # Do not overwrite replica_last_ok — trend depends on the last success.
+    streak = int(state.get("replica_unreachable_streak") or 0) + 1
+    state["replica_unreachable_streak"] = streak
+    if streak >= 2:
+        add("replica-unreachable",
+            "ForteL2 public replica unreachable",
+            "public replica JSON-RPC failed %d consecutive watcher runs (%s). "
+            "gateway %s. last successful head sample is unchanged."
+            % (streak, why, REPLICA_RPC_URL))
+
+def replica_ok(sample):
+    state["replica_unreachable_streak"] = 0
+    head_ts = float(sample["timestamp"])
+    number = sample.get("number")
+    age = now - head_ts
+    prev = state.get("replica_last_ok")
+    prev_obs = prev_ts = None
+    if isinstance(prev, dict):
+        try:
+            prev_obs = float(prev.get("observed_at"))
+            prev_ts = float(prev.get("head_ts"))
+        except (TypeError, ValueError):
+            prev_obs = prev_ts = None
+    if prev_obs is not None and prev_ts is not None:
+        prev_age = prev_obs - prev_ts
+        delta = age - prev_age
+        # Exclusive: jitter of exactly the floor is not losing ground.
+        if delta > replica_noise_secs:
+            add("replica-losing-ground",
+                "ForteL2 public replica losing ground",
+                "public replica head age grew by %.0f s across consecutive "
+                "successful probes (noise floor %d s, exclusive). "
+                "current age %.0f s (head %s); previous age %.0f s. "
+                "gateway %s. Render does not sleep."
+                % (delta, replica_noise_secs, age, number, prev_age,
+                   REPLICA_RPC_URL))
+    if age > replica_stale_secs:
+        add("replica-head-stale",
+            "ForteL2 public replica head stale",
+            "public replica head is %.0f s old (threshold %d s, exclusive). "
+            "head %s. gateway %s. backstop when trend has no prior sample."
+            % (age, replica_stale_secs, number, REPLICA_RPC_URL))
+    state["replica_last_ok"] = {
+        "observed_at": now,
+        "head_ts": head_ts,
+        "head_number": number,
+    }
+
+try:
+    replica_sample = probe_replica_head()
+    if replica_sample is None:
+        replica_fail("timeout, HTTP failure, or garbage JSON")
+    else:
+        replica_ok(replica_sample)
+except Exception as exc:
+    replica_fail("probe error: %s" % type(exc).__name__)
 
 # --- cooldown filter (per condition × channel) ---
 cd = state.get("cooldown")
