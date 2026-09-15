@@ -1,9 +1,10 @@
 # Phase 3b — Friend-operated verifier runbook
 
-Hand this file to a friend (or a VPS you rent for them). They run a **stock verifier** for ForteL2 chain **852**. They do **not** run the sequencer, batcher, proposer, or hold operator keys.
+Hand this file to a friend (or a VPS you rent for them, or **their own Render account**). They run a **stock verifier** for ForteL2 chain **852**. They do **not** run the sequencer, batcher, proposer, or hold operator keys.
 
 Runtime lives in a separate repo: **https://github.com/StephenForte/fortel2-replica**  
 Full laptop/VPS walkthrough there: [`RUNNING.md`](https://github.com/StephenForte/fortel2-replica/blob/main/RUNNING.md)  
+On **your own Render account** instead: [`RUNNING.md` § On Render](https://github.com/StephenForte/fortel2-replica/blob/main/RUNNING.md) — a Private Service of yours, not the operator's replica. Service type, plan, and disk size live in that section; do not copy numbers from this file.  
 Verify your clone (fails closed): [`config/SHA256SUMS`](https://github.com/StephenForte/fortel2-replica/blob/main/config/SHA256SUMS) — digests also listed in [`README.md` § Chain identity](https://github.com/StephenForte/fortel2-replica/blob/main/README.md#chain-identity)
 
 Recruiting two geographically distributed operators is **operator-owned**. This file is the onboarding artifact; it does not itself stand up those nodes.
@@ -16,7 +17,7 @@ Recruiting two geographically distributed operators is **operator-owned**. This 
 | Derivation from **Ethereum Sepolia L1** | Anything that needs a ForteL2 private key |
 | A local RPC bound to **loopback by default** | A public unauthenticated JSON-RPC (unless you deliberately opt in) |
 
-Docker is **fine on your machine**. The “no containers” rule is only for the operator Mac mini.
+Docker is **fine on your machine**. The “no containers” rule is only for the operator Mac mini. A friend who already has a Render account uses that repo's `RUNNING.md` § *On Render* instead of compose on a laptop.
 
 ## Requirements
 
@@ -59,6 +60,9 @@ curl -s http://127.0.0.1:9547 -H 'content-type: application/json' \
 
 `current_l1` should climb toward `head_l1`. `safe_l2` staying `0` until derivation catches posted batches is normal.
 
+## On Render instead
+
+If you already have a Render account, skip compose on a laptop and follow [`RUNNING.md` § On Render](https://github.com/StephenForte/fortel2-replica/blob/main/RUNNING.md) in the replica repo. That is **your** Private Service, not the operator's replica — do not copy the operator's public hostname, gateway, archive flag, snapshot restore, or L1 schedule. Service type, plan, and disk size are documented only there (they will drift if restated here). You check it from Dashboard Shell, not by curling a public URL. Health looks the same as the table below once origin is advancing.
 ## What “healthy” looks like
 
 | Check | Expect |
@@ -75,7 +79,7 @@ Send the operator, once sync looks live:
 
 - Your **region / city** (enough to show geographic spread; no home address required)
 - `safe_l2.number` + `safe_l2.hash` at a chosen block
-- How you run it (laptop Docker vs VPS)
+- How you run it (laptop Docker, VPS, or your own Render account)
 
 The operator compares that hash to the Mac sequencer at the same number. Matching hashes = you are on the same chain.
 
@@ -109,6 +113,6 @@ Wiping only your node while the Mac/Render still run the old genesis (or the rev
 Recruiting is out of band. Close Phase 3b only when all of these are true:
 
 - [ ] Two friends (or friend-owned VPS) in **different regions**
-- [ ] Each followed this runbook (or `RUNNING.md`) without operator keys
+- [ ] Each followed this runbook (or `RUNNING.md`, including § *On Render* if that is how they run it) without operator keys
 - [ ] Each reported a `safe_l2` hash that matched the Mac sequencer
 - [ ] Both are on the notify list for the redeploy gate (README Network reset **announce** step)
