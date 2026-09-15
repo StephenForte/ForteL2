@@ -1,13 +1,14 @@
 # PRD: ForteL2 op-geth → op-reth migration (and thin friend node)
 
-**Status:** In execution — Tasks 1–6 done, op-reth promoted (D-0122); **Task 7 CLOSED (D-0129, 2026-09-12): the Render replica `fortel2-replica-reth` runs op-reth in archive mode and serves public read + SettlementOS private read; geth pserv suspended (deleted only in Task 9)**. Open Task 7 residue: disk grow to ≈25 GB before 2026-10-20. Tasks 8–9 unstarted  
+**Status:** Tasks 1–9 executed. Chain 852 sequences on op-reth since 2026-09-02 (promoted D-0122). **Task 7 CLOSED (D-0129, 2026-09-12):** Render replica `fortel2-replica-reth` is op-reth archive and serves public read + SettlementOS private read. **Task 9 executed 2026-09-14 (fortel2-replica R-0019, #56/#57):** geth EL files deleted from that repo; operator deleted the geth pserv `fortel2-replica` (`srv-d9fsgi3rjlhs73ceh6tg`, 50 GB disk `dsk-d9g1mmsm0tmc73degtrg`) and staging gateway `fortel2-replica-reth-rpc` (`srv-dagr42tbedkc73c5mp80`) that had been suspended since 2026-09-12. Re-verified after: public read `reth/v2.3.0-9384bc5`, tip 982723, SettlementOS `/api/networks` 200. **There is no geth rollback resource** — files return from git; the Render disk does not; recovery is a new disk and a full resync. **Task 9's friend-sync gate was skipped, not met:** Instructions required at least one friend clean sync; none has happened; two candidates expected the week of 2026-09-21; the operator chose to proceed. **R-0017 disk follow-up CLOSED:** reth disk resized 10 → 50 GB the same day (Render offers fixed sizes; 25 is not one). Learning oracles (`derivation-check.sh`, `sequencer-stub-demo.sh`) still start isolated `op-geth` — keep-on-geth vs follow-up is an operator decision, not a silent live-path leftover.
+
 **Date:** 2026-08-29  
 **Owner:** ForteL2 operator  
 **Spike evidence:** `tasks/spike-op-reth.md` (Mini `--blocks 5` PASS 2026-08-29)  
 **Parent roadmap:** `tasks/prd-l2-learning-chain.md` (parallel EL track; not a phase number)  
 **Repositories:** `StephenForte/ForteL2`, `StephenForte/fortel2-replica`. A third `fortel2-node` was proposed and **rejected** (2026-09-14, fortel2-replica R-0018) — both repos are already public, so a third hides nothing and only adds a third copy of `genesis.json` / `rollup.json` to drift.
 
-This is an **execution-client migration**, not a new chain launch and **not** a Phase 7 wipe. It must not require an L1 contract redeploy, a new L2 genesis, a chain-ID change, or `karst_time`. Do **not** treat this document as authorization to cut over the sequencer, swap the Render replica image, or publish a friend node.
+This is an **execution-client migration**, not a new chain launch and **not** a Phase 7 wipe. It must not require an L1 contract redeploy, a new L2 genesis, a chain-ID change, or `karst_time`. The original holds (do not cut over the sequencer, swap the Render replica image, or publish a friend node) applied until the matching task was explicitly asked for. Cutover (Task 5), Render swap (Task 7), friend-path hardening (Task 8), and Task 9 deletes have since been executed.
 
 ## 0. Spike evidence (P:0 — done)
 
@@ -43,17 +44,17 @@ Safe order:
 
 The op-geth and op-reth databases are **not** interchangeable. op-reth uses a new datadir and reconstructs canonical L2 from the committed 852 genesis and Sepolia data.
 
-**Karst is a separate decision.** Superchain Karst is active; ForteL2 `deployments/sepolia/rollup.json` has forks through `jovian_time: 0` and **no `karst_time`**. That is why op-geth still sequences today. This PRD does **not** set `karst_time`. EL swap first; Karst only if a later, explicit task asks.
+**Karst is a separate decision.** Superchain Karst is active; ForteL2 `deployments/sepolia/rollup.json` has forks through `jovian_time: 0` and **no `karst_time`**. op-geth sequenced until 2026-09-02 for that reason; **op-reth** does now. This PRD does **not** set `karst_time`. EL swap first; Karst only if a later, explicit task asks.
 
 ## 2. Background
 
-ForteL2 today:
+ForteL2 after Task 9 (2026-09-14):
 
-- `op-geth v1.101702.2` execution client (live sequencer + `fortel2-replica`).
-- `op-node v1.19.2` rollup client (`--l2.enginekind=geth` on the live path).
-- Archive op-geth datadir on the Mac sequencer.
-- Working `cannon-kona` challenger path (Phase 7 demonstration complete; no wipe from this PRD).
-- Friend runbook `replica/FRIENDS.md` still points at the op-geth replica image. Do not publish a **new** friend node on op-geth once this migration is in motion (Task 8 is the replacement). Existing Phase 3 replica stays until Task 7.
+- `op-reth/v2.3.3` (`Reth Version: 2.3.0-dev` `9384bc53`) is the live sequencer EL (`FORTEL2_EL=reth` since 2026-09-02) and the Render replica EL (`fortel2-replica-reth`, archive).
+- `op-node v1.19.2` rollup client (`--l2.enginekind=reth` on the live path).
+- **No geth rollback resource.** fortel2-replica deleted the geth image/entrypoint and the operator deleted the Render geth pserv + 50 GB disk. Files return from git; that disk does not. A leftover Mac `$DATA_DIR/l2/op-geth` directory, if still on disk, is leftover files — not a supported recovery.
+- Working `cannon-kona` challenger path (Phase 7 demonstration complete; no wipe from this PRD). `op-challenger` is intentionally STOPPED since 2026-09-13 (D-0132).
+- Friend runbook `replica/FRIENDS.md` points at `fortel2-replica` compose (`op-reth --full`) and routes Render friends to that repo's `RUNNING.md` § *On Render* (fortel2-replica #58). Do not publish a **new** friend node on op-geth.
 
 OP Labs treats op-reth as the primary supported EL. op-geth EOS was 2026-05-31 for Karst-era public networks. ForteL2 is a custom chain, so EOS is **upgrade debt**, not an immediate halt. New friend distributions must not be built on op-geth.
 
@@ -101,7 +102,9 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 ### P0 — Maintained runtime still depends on op-geth
 
-**Evidence:** `scripts/04-start-sequencer.sh` and `04-start-sequencer-sepolia.sh` start `op-geth`; pins in `.env.example`; `fortel2-replica` still ships op-geth.
+**Evidence (at PRD write):** `scripts/04-start-sequencer.sh` and `04-start-sequencer-sepolia.sh` start `op-geth`; pins in `.env.example`; `fortel2-replica` still ships op-geth.
+
+**Closed on the live/Render path (Task 9, 2026-09-14):** the sequencer has been op-reth since 2026-09-02; fortel2-replica no longer ships a geth image; the Render geth disk is deleted. Local 901 still defaults `FORTEL2_EL=geth`. Learning oracles still start isolated op-geth (operator decision, not a live-path leftover).
 
 **Consequence:** Publishing another op-geth friend image creates upgrade debt. Do not recruit onto a new op-geth distribution after this PRD is accepted.
 
@@ -145,7 +148,7 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 1. L1 chain ID `11155111`; L2 chain ID `852`.
 2. Existing `genesis.json`, `rollup.json`, L1 addresses, and `rail-interface.json` addresses unchanged. No `karst_time`.
-3. op-geth datadir retained read-only for rollback until Task 9 sign-off.
+3. The rollback window **ended at Task 9 (2026-09-14)**. There is no geth rollback resource: fortel2-replica files return from git; the Render geth disk was deleted and cannot be reattached. Recovery is a new disk and a full resync. Do not read a leftover Mac `$DATA_DIR/l2/op-geth` as a rollback asset.
 4. op-reth datadir is a different explicit path (`$DATA_DIR/l2/op-reth` or `$DATA_DIR/l2/spike-op-reth` for throwaway). Never `$DATA_DIR/l2/op-geth`.
 5. No operator key, JWT, provider token, or Cloudflare credential committed or printed.
 6. op-node and EL remain a 1:1 pair over a shared JWT Engine API.
@@ -334,8 +337,9 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 **Instructions:** Harden `fortel2-replica`'s default compose path — do **not** create a new repository.
 
 - **Done (fortel2-replica #53, #55, R-0018):** loopback-only host publishes with the opt-in documented rather than knob-ified; `L1_RPC_KIND` matched to the shipped `L1_RPC_URL`; 852 genesis/rollup digests published in README §Chain identity and made **fail-closed** via `config/SHA256SUMS`; healthy-vs-stalled guidance so `Up` is not mistaken for working; auto-generated JWT, never an operator JWT. `replica/FRIENDS.md` updated to op-reth (ForteL2 #227).
-- **Open:** `docker-compose.yml` still resolves `${L1_RPC_KIND:-quicknode}`, so a friend who writes their own `.env` without that key gets the mismatch back — the documented `cp .env.example .env` path is correct.
-- **Not started:** a parity command against a user-supplied reference RPC that is not trusted for derivation; a Render Blueprint for friends, which needs a measured disk/plan before any free-tier claim.
+- **Done (fortel2-replica #56):** compose `${L1_RPC_KIND:-quicknode}` aligned with `.env.example` `standard` and tested so a friend who writes their own `.env` without that key no longer gets the mismatch back.
+- **Done (fortel2-replica #58 / R-0020):** friend Render path in `RUNNING.md` § *On Render* (the friend's **own** Private Service, not a Blueprint and not the operator replica) plus `./scripts/check-friend-parity.sh` against an untrusted reference. Numbers (plan, disk) live only in that repo — do not copy them here. `replica/FRIENDS.md` routes to that section.
+- **Still unrun:** the clean-room deploy itself — no host in the loop has docker. Two friend candidates expected the week of 2026-09-21; none has synced.
 
 **Out of scope:** Challenger, public RPC commitment, sequencer, batcher, proposer, rewards, staking.
 
@@ -347,13 +351,28 @@ Proven floor (may be the Task 1 pin, or a later coordinated pair may supersede i
 
 ### Task 9 — P2: Remove op-geth after the rollback window
 
-**Objective:** op-reth is the only supported EL in actively maintained code.
+**Status: executed 2026-09-14 (fortel2-replica R-0019, #56/#57, then operator dashboard deletes). The friend-sync gate was skipped, not satisfied.**
 
-**Instructions:** End the window only after Mac + Render observation and at least one friend clean sync; walk the §10 stray-surface list and remove geth startup options from every **active** path; keep dated records; archive or separately-approved delete of geth datadirs; CI/search guard against new `op-geth` pins or `enginekind=geth` on the live selector. Learning oracles (`derivation-check.sh`, `sequencer-stub-demo.sh`) need an explicit keep-on-geth exception or a follow-up task — do not leave them as silent live-path leftovers.
+**Objective:** op-reth is the only supported EL in actively maintained replica/Render paths.
 
-**Dependencies:** Tasks 5–8 and expiry of the declared window.
+**What ran (repo + Render, 2026-09-14):**
+
+- fortel2-replica #56 deleted `Dockerfile`, `entrypoint.sh`, `healthcheck.sh`, and the geth service/disk blocks from `render.yaml`, and replaced the R-0013 interlock with four broader guards (`test_no_op_geth_image_pin_in_active_paths`, `test_no_service_points_at_retired_root_dockerfile`, `test_retired_geth_files_are_absent`, `test_render_yaml_service_set`).
+- The operator then deleted both suspended Render services by hand: geth pserv `fortel2-replica` (`srv-d9fsgi3rjlhs73ceh6tg`) with its 50 GB disk (`dsk-d9g1mmsm0tmc73degtrg`), and staging gateway `fortel2-replica-reth-rpc` (`srv-dagr42tbedkc73c5mp80`).
+- Re-verified after: public read `https://fortel2-replica-rpc.onrender.com` answers `web3_clientVersion = reth/v2.3.0-9384bc5`, tip 982723; SettlementOS `/api/networks` 200.
+- The reth disk was resized 10 → 50 GB the same day. **The R-0017 disk follow-up (grow to ≈25 GB before 2026-10-20) is CLOSED** — Render offers fixed sizes and 25 is not one.
+
+**Deviation — do not read “executed” as “gate met”.** Task 9 Instructions required ending the window only after Mac + Render observation **and at least one friend clean sync**. No friend has synced. Two candidates are expected the week of 2026-09-21. The operator chose to proceed.
+
+**Rollback is gone, and it is asymmetric.** Deleted files are recoverable from git (fortel2-replica `3ffd56f`). The Render service and its 50 GB disk are not: if a later friend sync exposes a reth-path problem, recovery means a new disk and a full resync from genesis or a snapshot, not reattaching what was there. `scripts/rollback-to-geth-sepolia.sh` is a leftover Mac procedure; it is **not** a supported live path and cannot restore the deleted Render disk.
+
+**Learning oracles — not settled here.** `scripts/derivation-check.sh` still `require_bin op-geth` and starts `$DATA_DIR/l2/derivation-op-geth` / `derivation-anchor-op-geth`. `scripts/sequencer-stub-demo.sh` still `require_bin op-geth` and starts `$DATA_DIR/l2/sequencer-stub-op-geth`. They are isolated learning artifacts, not the live sequencer. Keep-on-geth exception vs a follow-up to retarget them is an operator decision.
+
+**Dependencies:** Tasks 5–8 and expiry of the declared window. The friend-sync half of that dependency was waived by the operator.
 
 ## 9. Cutover rollback triggers
+
+**Historical (Task 5 / early Task 6 window). Not executable after Task 9 (2026-09-14).** The Render geth pserv and its 50 GB disk were deleted. Files return from git; that disk does not. Do not run this procedure expecting a geth rollback resource to exist.
 
 Rollback the Mac sequencer to preserved op-geth if any of these occur in Task 5 or early Task 6:
 
@@ -381,109 +400,111 @@ Do not delete or mutate either datadir during rollback.
 
 This section is the **closed list** for “did we forget a file.” The Phase 7 failure class was launchd sleep/wake still assuming the old process set. An EL swap that updates only `04-start-sequencer-sepolia.sh` will fail the same way. Search active files for `op-geth`, `enginekind=geth`, and the pid name `op-geth` before calling Task 5 or Task 9 done.
 
+Walked at Task 9 closeout (2026-09-14). Tick = verified in repo or by a prior closed decision. Items that remain open are named, not silently checked.
+
 ### Chain continuity
 
-- [ ] L1 11155111, L2 852.
-- [ ] Genesis, rollup, L1 contracts unchanged. No `karst_time`.
-- [ ] Sampled safe/finalized hashes and state roots match across candidate verifier, sequencer, Render replica, and friend node.
-- [ ] First post-cutover block extends the recorded parent.
-- [ ] No unsafe/unbatched tx discarded at cutover.
-- [ ] Cutover used `admin_stopSequencer` before `unsafe == safe`.
-- [ ] If rollback ran after op-reth blocks were on L1: geth came up **verifier-only**, caught canonical safe, then `admin_startSequencer`.
+- [x] L1 11155111, L2 852. (unchanged; no `karst_time`)
+- [x] Genesis, rollup, L1 contracts unchanged. No `karst_time`.
+- [x] Sampled safe/finalized hashes and state roots match across candidate verifier, sequencer, and Render replica (Tasks 3, 6, 7). **Friend node: not yet** — no friend has clean-synced; that was Task 9's skipped gate.
+- [x] First post-cutover block extends the recorded parent. (D-0120: 473031→473032)
+- [x] No unsafe/unbatched tx discarded at cutover. (D-0120)
+- [x] Cutover used `admin_stopSequencer` before `unsafe == safe`. (D-0120)
+- [x] Rollback after op-reth-on-L1 **did not run.** After Task 9 it cannot: there is no geth rollback resource.
 
 ### Core services
 
-- [ ] Sequencer produces before and after restart.
-- [ ] Batcher posts new channel data to Sepolia.
-- [ ] Proposer posts the expected output root / game type.
-- [ ] Challenger judges valid games without attacking them.
-- [ ] SafeDB queries succeed.
-- [ ] Historical proof / withdrawal requirements satisfied.
+- [x] Sequencer produces before and after restart. (Task 6)
+- [x] Batcher posts new channel data to Sepolia.
+- [x] Proposer posts the expected output root / game type.
+- [x] Challenger judges valid games without attacking them. (Task 4 / D-0082–D-0083; challenger STOPPED since 2026-09-13, D-0132 — not a Task 9 reopen)
+- [x] SafeDB queries succeed. (Task 4)
+- [x] Historical proof / withdrawal requirements satisfied. (Task 4 / D-0121)
 
 ### End-to-end
 
-- [ ] Ordinary L2 transfer (`scripts/smoke-transfer.sh`).
-- [ ] L1→L2 deposit (`deposit-eth-sepolia.sh`).
-- [ ] L2→L1 initiate/prove/finalize.
-- [ ] Authenticated SettlementOS submit + receipt poll.
-- [ ] Pipeline viewer (`serve-viewer.sh`) and block viewer (`blocks/`) correct.
-- [ ] Public read gateways still reject writes.
-- [ ] Guestbook dApp still reads via loopback `JsonRpcProvider`.
+- [x] Ordinary L2 transfer (`scripts/smoke-transfer.sh`). (D-0121)
+- [x] L1→L2 deposit (`deposit-eth-sepolia.sh`).
+- [x] L2→L1 initiate/prove/finalize. (D-0121)
+- [x] Authenticated SettlementOS submit + receipt poll. (D-0121)
+- [x] Pipeline viewer (`serve-viewer.sh`) and block viewer (`blocks/`) correct. (D-0121 CORS on reth)
+- [x] Public read gateways still reject writes. (re-verified 2026-09-14 after Task 9 deletes)
+- [x] Guestbook dApp still reads via loopback `JsonRpcProvider`.
 
 ### Security
 
-- [ ] No role key, provider token, Cloudflare secret, or JWT committed or logged.
-- [ ] EL and op-node admin RPC loopback/private.
-- [ ] Friend nodes receive no operator key.
-- [ ] New Render and friend services use independent JWTs (and preferably independent L1 credentials).
-- [ ] Write filter still proxies loopback EL (`rpc-method-filter.py` → `:9545`); cloudflared still dials `:9555`, never the raw EL.
+- [x] No role key, provider token, Cloudflare secret, or JWT committed or logged.
+- [x] EL and op-node admin RPC loopback/private.
+- [x] Friend nodes receive no operator key.
+- [x] New Render and friend services use independent JWTs (and preferably independent L1 credentials). Friend Render path is the friend's own Private Service (fortel2-replica #58).
+- [x] Write filter still proxies loopback EL (`rpc-method-filter.py` → `:9545`); cloudflared still dials `:9555`, never the raw EL.
 
 ### Operations — launchd / sleep / wake (P7 miss)
 
 These jobs do not name `op-geth` in the plists; they call scripts that do. A pid-name change that misses one of them is a silent overnight fail.
 
-- [ ] `FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep` stops the new EL (and the rest of the Sepolia set).
-- [ ] `dev-sleep.sh wake` starts it again (funds preflight + orphan cleanup still work).
-- [ ] `launchd/com.steve.fortel2-sleep.plist` → `run_dev_sleep.sh` still matches repo (`check-launchd.sh`).
-- [ ] `launchd/com.steve.fortel2-wake.plist` → `run_dev_wake.sh` — **two scheduled 03:00 wakes** after Task 5.
-- [ ] `launchd/com.steve.fortel2-health.plist` → `refresh_health.sh` writes `data/pipeline-health.json`.
-- [ ] `launchd/com.steve.fortel2-alerts.plist` → `alert-watch.sh` expected-stack list includes the **new** EL pid (today: `op-geth`). A leftover `op-geth` expect after a rename is a false `stack-missing`.
-- [ ] `launchd/com.steve.fortel2-resolve-games.plist` still recovers bonds through the sleep window.
-- [ ] `scripts/check-launchd.sh` is green after the pid/script change.
-- [ ] No leftover crontab double-start (`launchd/README.md`).
+- [x] `FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep` stops the new EL (and the rest of the Sepolia set). (Task 6)
+- [x] `dev-sleep.sh wake` starts it again (funds preflight + orphan cleanup still work). (Task 6)
+- [x] `launchd/com.steve.fortel2-sleep.plist` → `run_dev_sleep.sh` still matches repo (`check-launchd.sh`).
+- [x] `launchd/com.steve.fortel2-wake.plist` → `run_dev_wake.sh` — **two scheduled 03:00 wakes** after Task 5. (D-0120 / D-0122)
+- [x] `launchd/com.steve.fortel2-health.plist` → `refresh_health.sh` writes `data/pipeline-health.json`.
+- [x] `launchd/com.steve.fortel2-alerts.plist` → `alert-watch.sh` expected-stack list includes the **new** EL pid (`op-reth` when `FORTEL2_EL=reth`; selector-driven, not a leftover `op-geth` expect).
+- [x] `launchd/com.steve.fortel2-resolve-games.plist` still recovers bonds through the sleep window.
+- [x] `scripts/check-launchd.sh` is green after the pid/script change.
+- [x] No leftover crontab double-start (`launchd/README.md`).
 
 ### Stray surfaces — Mac start/stop/status (must match pid + enginekind)
 
-- [ ] `scripts/03-init-l2.sh` — 852 genesis only; op-reth init path; refuse 901 / `$DATA_DIR/l2/op-geth` when selector is reth.
-- [ ] `scripts/04-start-sequencer.sh` (local 901) — selector, datadir, `--l2.enginekind`.
-- [ ] `scripts/04-start-sequencer-sepolia.sh` — `require_bin`, `$DATA_DIR/l2/op-reth`, `--l2.enginekind=reth`, `--l1.rpckind` from `SEPOLIA_L1_RPC_KIND` (not hardcoded).
-- [ ] `scripts/start-all.sh` / `start-all-sepolia.sh` — still start EL + node + filter + batcher + proposer (+ optional challenger/proxy).
-- [ ] `scripts/stop-all.sh` / `stop-all-sepolia.sh` — `stop_bg` name matches `start_bg` name.
-- [ ] `scripts/status.sh` — `procs=(…)` includes the new EL.
-- [ ] `scripts/reset.sh` / `reset-sepolia.sh` — wipe the **reth** datadir when that is the live EL; never wipe the preserved geth rollback dir by default.
-- [ ] `scripts/07-start-rpc-filter-sepolia.sh` — `wait_for_rpc` label/upstream still the live EL HTTP port.
-- [ ] Log path: `data/logs/op-reth.log` (or documented alias). README “known-good log lines” updated.
+- [x] `scripts/03-init-l2.sh` — 852 genesis only; op-reth init path; refuse 901 / `$DATA_DIR/l2/op-geth` when selector is reth.
+- [x] `scripts/04-start-sequencer.sh` (local 901) — selector, datadir, `--l2.enginekind`. Local 901 still defaults geth (no 901 reth path).
+- [x] `scripts/04-start-sequencer-sepolia.sh` — `require_bin`, `$DATA_DIR/l2/op-reth`, `--l2.enginekind=reth`, `--l1.rpckind` from `SEPOLIA_L1_RPC_KIND` (not hardcoded).
+- [x] `scripts/start-all.sh` / `start-all-sepolia.sh` — still start EL + node + filter + batcher + proposer (+ optional challenger/proxy).
+- [x] `scripts/stop-all.sh` / `stop-all-sepolia.sh` — `stop_bg` name matches `start_bg` name.
+- [x] `scripts/status.sh` — `procs=(…)` includes the new EL (selector-driven).
+- [x] `scripts/reset.sh` / `reset-sepolia.sh` — wipe the **reth** datadir when that is the live EL; do not treat a leftover geth dir as a rollback asset (there is no rollback resource after Task 9).
+- [x] `scripts/07-start-rpc-filter-sepolia.sh` — `wait_for_rpc` label/upstream still the live EL HTTP port.
+- [x] Log path: `data/logs/op-reth.log`. README “known-good log lines” names op-reth as live EL; op-geth log row is leftover-not-running, not a rollback keep.
 
 ### Stray surfaces — monitors, checklists, helpers
 
-- [ ] `scripts/alert-watch.sh` expected list (`op-geth` today).
-- [ ] `scripts/demo-checklist.sh` process arrays (local + Sepolia).
-- [ ] `scripts/demo-live.sh` talk-track / health if it names the EL.
-- [ ] `scripts/test-helpers.sh` — `STK_CORE`, start/stop symbol lists, any `STOP=… op-geth` greps. Dual-client tests until Task 9, then geth-only live path must go red.
-- [ ] `.env.example` pin comment (`op-geth v1.101702.2`).
-- [ ] `AGENTS.md` / `README.md` process tables, architecture diagram (`Geth["op-geth :9545"]`), sequencer-restart paragraph.
-- [ ] `.cursor/rules/fortel2.mdc` if it still says the live EL is only op-geth after Task 9.
+- [x] `scripts/alert-watch.sh` expected list is selector-driven (`op-reth` when `FORTEL2_EL=reth`).
+- [x] `scripts/demo-checklist.sh` process arrays (local + Sepolia).
+- [x] `scripts/demo-live.sh` talk-track / health if it names the EL.
+- [ ] `scripts/test-helpers.sh` — `STK_CORE`, start/stop symbol lists, any `STOP=… op-geth` greps. Dual-client tests remain (local 901 still defaults geth). **Not done in this closeout:** making a geth-only live Sepolia path go red. Out of scope for the docs task; report, do not weaken the suite.
+- [x] `.env.example` pin comment still records `op-geth v1.101702.2` as the local-901 / learning-oracle pin (not a live Sepolia EL claim). Unchanged in this closeout (scripts/env out of scope).
+- [x] `AGENTS.md` / `README.md` process tables, architecture diagram, sequencer-restart paragraph — updated in the Task 9 closeout so they do not imply a geth rollback or that Task 9 is outstanding.
+- [x] `.cursor/rules/fortel2.mdc` does **not** say the live EL is only op-geth. It forbids binding the EL off loopback and names the migration PRD. Left as-is (not in this task's freely-changeable set).
 
 ### Stray surfaces — keep-on-geth unless a follow-up says otherwise
 
 Learning oracles. Do not silently break them at Task 5, and do not treat them as the live sequencer.
 
-- [ ] `scripts/derivation-check.sh` + `$DATA_DIR/l2/derivation-op-geth` / `derivation-anchor-op-geth`.
-- [ ] `scripts/sequencer-stub-demo.sh` + `$DATA_DIR/l2/sequencer-stub-op-geth`.
-- [ ] Document the exception in the Task 9 closeout, or file a follow-up to retarget them.
+- [x] `scripts/derivation-check.sh` + `$DATA_DIR/l2/derivation-op-geth` / `derivation-anchor-op-geth` — still `require_bin op-geth` and start those isolated datadirs. Inspected; not changed.
+- [x] `scripts/sequencer-stub-demo.sh` + `$DATA_DIR/l2/sequencer-stub-op-geth` — still `require_bin op-geth`. Inspected; not changed.
+- [ ] Document the exception in the Task 9 closeout, or file a follow-up to retarget them. **Raised, not settled:** this closeout records that they still start isolated geth. Keep-on-geth vs follow-up is an operator decision (see Task 9 and DECISIONS NEEDED).
 
 ### Stray surfaces — replica / friends / rail (Task 7–8)
 
-- [x] `replica/FRIENDS.md` describes `op-reth --full` + op-node, loopback-by-default ports, and clone verification against the published artifact hashes (2026-09-14). It continues to point at `fortel2-replica`: the `fortel2-node` extraction was **rejected** — see fortel2-replica R-0018.
-- [ ] `scripts/pack-replica-artifacts.sh` — artifacts unchanged (no new genesis).
-- [ ] `fortel2-replica` image pin / Dockerfile (sibling repo; Task 7).
-- [ ] `deployments/rail-interface.json` notes that mention op-geth bind (URLs stay; wording).
-- [ ] `config/cloudflared-write.yml.example` still forbids pointing at raw EL admin ports.
+- [x] `replica/FRIENDS.md` describes `op-reth --full` + op-node, loopback-by-default ports, and clone verification against the published artifact hashes (2026-09-14). Routes friends with a Render account to fortel2-replica `RUNNING.md` § *On Render* (fortel2-replica #58) without duplicating plan/disk numbers. Continues to point at `fortel2-replica`: the `fortel2-node` extraction was **rejected** — see fortel2-replica R-0018.
+- [x] `scripts/pack-replica-artifacts.sh` — artifacts unchanged (no new genesis).
+- [x] `fortel2-replica` geth `Dockerfile` retired (Task 9 / R-0019, #56). Live image is `Dockerfile.reth`.
+- [ ] `deployments/rail-interface.json` notes that mention op-geth bind (URLs stay; wording). **Not edited** — `deployments/` is out of scope for this docs task. Notes still say “op-geth itself never leaves 127.0.0.1” (loopback policy, still true of the EL) and still name `http://fortel2-replica:10000` for SOS in-Render (the deleted geth slug; live is `fortel2-replica-reth`). Report, do not change.
+- [x] `config/cloudflared-write.yml.example` still forbids pointing at raw EL admin ports (`:9545` / `:9546` / `:9551` / `:9547`).
 
 ### Operations (other)
 
-- [ ] Mac: controlled `stop-all-sepolia` / `start-all-sepolia` restart on the new datadir.
-- [ ] Render: restart on the **new** disk (Task 7).
-- [ ] Resource use within declared limits.
-- [ ] Rollback rehearsed or mechanically validated (verifier-first) before removing geth support.
-- [ ] `./scripts/status.sh` and logs say the live EL name.
+- [x] Mac: controlled `stop-all-sepolia` / `start-all-sepolia` restart on the new datadir. (Task 6)
+- [x] Render: restart on the **new** disk (Task 7). Disk later resized 10 → 50 GB (R-0019); follow-up closed.
+- [x] Resource use within declared limits. (D-0122 / D-0128 Q5)
+- [x] Rollback was **not** rehearsed as a live restore after Task 9, because the resource was removed. Verifier-first procedure remains in git as history (§9); it is not a supported recovery.
+- [x] `./scripts/status.sh` and logs say the live EL name (`op-reth` when `FORTEL2_EL=reth`).
 
 ### Repository boundaries
 
-- [ ] `ForteL2` owns sequencing, fault proofs, canonical artifacts.
-- [ ] `fortel2-replica` owns operated Render RPC.
-- [x] The friend verifier is `fortel2-replica`'s default `docker compose` path, not a third repo (R-0018).
-- [ ] One source of truth for published config + hash check.
+- [x] `ForteL2` owns sequencing, fault proofs, canonical artifacts.
+- [x] `fortel2-replica` owns operated Render RPC.
+- [x] The friend verifier is `fortel2-replica`'s default `docker compose` path, not a third repo (R-0018). Friend Render is the same repo's `RUNNING.md` § *On Render* (#58), not a Blueprint.
+- [x] One source of truth for published config + hash check. (`config/SHA256SUMS` in fortel2-replica)
 
 ## 11. Open questions
 
@@ -495,7 +516,7 @@ Answer during Task 1 or 2 unless noted.
 | 2 | Does 852 hardfork config need adjustment for that pin (without changing genesis)? | **No change needed for first-N.** Rollup has no `karst_time`; Task 1 research: Jovian minimums far older, no getPayloadV5 required. **Reconfirmed at safe-head (Task 3, D-0114):** full 20-block three-way parity genesis→394470. |
 | 3 | Which historical-proof flags/retention does `cannon-kona` + shortened withdrawal window need? | **Closed (Task 4, #189, D-0116):** `--proofs-history` with `op-reth proofs init --proofs-history.skip-backfill` before FIRST start of the datadir (store fills forward; no retroactive backfill). Judge + withdrawal-prove + deep `eth_getProof` all ran against this profile. |
 | 4 | Does Render public RPC need archive, or is `--full` enough? | **Answered — needs archive-class retention (D-0126).** The consumer sweep: SettlementExplorer requires historical `eth_getLogs`/receipts/`getTransactionByHash` from the replica (it is the explorer's only reachable endpoint in prod); SettlementOS needs only latest-block balance reads. `--full` prunes receipts (D-0125) and breaks the explorer, so the reth replica must retain receipts+tx-lookup+logs across history (full archive, or a state-pruned/receipt-retaining config). `entrypoint-reth.sh` gained `RETH_ARCHIVE=1` (fortel2-replica #47) and, because a prior `--full` boot persists prune segments in `reth.toml`, the archive path also deletes that file (#48 / R-0015); the Render replica is archive as of D-0127. |
-| 5 | Disk/RAM of a clean 852 op-reth sync on Render under current RPC load? | **Answered (D-0128).** Archive datadir 1.2 GB at ~857k blocks, growing ≈170 MB/day (rocksdb is the biggest mover); 10 GB disk ≈7 weeks of headroom → grow to ≈25 GB before 2026-10-20. RSS peak 724 MB / avg 451 MB of 2 GiB, CPU 5-min peak 9.8 %. Plan stays Standard. |
+| 5 | Disk/RAM of a clean 852 op-reth sync on Render under current RPC load? | **Answered (D-0128).** Archive datadir 1.2 GB at ~857k blocks, growing ≈170 MB/day (rocksdb is the biggest mover); RSS peak 724 MB / avg 451 MB of 2 GiB, CPU 5-min peak 9.8 %. Plan stays Standard. **Disk follow-up CLOSED (R-0019, 2026-09-14):** operator resized `fortel2-replica-reth-data` 10 → **50 GB** (same disk id, resized not replaced). R-0017 asked for ≈25 GB before 2026-10-20; Render offers fixed sizes and 25 is not one, so 50 is the next step up. Do not re-open a 2026-10-20 grow task. |
 | 6 | Mid-chain rewind without `debug_setHead` on a keeper? | **Settled (Task 2, D-0110):** wipe the reth datadir + re-derive from 852 genesis; `debug_setHead` never. Task 3 may revisit only with evidence. |
 | 7 | Beacon requirement for friends if `--l1.beacon.ignore=true` stays operator-only? | **Open.** Live Sepolia and the spike ignore beacon (calldata DA). Task 8 must not require a beacon unless a later pin does. |
 
@@ -506,8 +527,10 @@ Answer during Task 1 or 2 unless noted.
 - **Done (Task 5 Phase B, D-0120):** live cutover to op-reth at 473031→473032, two launchd cycles clean on the renamed process set; unsafe-tip behavior now proven by production (reth is the producer).
 - **Done (Task 5 closeout, #200/#203, D-0121):** L2 transfer, authenticated write, reth-era withdrawal initiate→prove→finalize on real clocks, viewer CORS on reth.
 - **Done (Task 6, D-0122):** ~134 h observation, 8 launchd cycles (one partial wake root-caused and fixed by #207, then three clean scheduled), replica parity, resources measured; PROMOTE.
-- **Task 7 (Render replica):** CLOSED (D-0129, 2026-09-12). Phase A (#44/#45), snapshot bootstrap (D-0124, #46), archive restore (D-0127, #47/#48), Phase B (R-0016, #50), Phase C env repoint (D-0128, R-0017 #51), 24 h window clean, geth + staging gateway suspended 2026-09-12 (not deleted). Render hostnames are slugs; rename-swap does not move traffic.
-- **Not done:** Task 7 residue — grow the reth disk to ≈25 GB before 2026-10-20; friend repo (Task 8); geth removal (Task 9). Sidecar `--wipe` / `reset.sh` live-datadir guard landed: `wipe_reth_datadir` refuses `$DATA_DIR/l2/op-reth` when live op-reth evidence is present; `start-op-reth-verifier.sh` refuses to start on that slot under the same evidence. A sidecar on a reth-live host must set `FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth`.
+- **Task 7 (Render replica):** CLOSED (D-0129, 2026-09-12). Phase A (#44/#45), snapshot bootstrap (D-0124, #46), archive restore (D-0127, #47/#48), Phase B (R-0016, #50), Phase C env repoint (D-0128, R-0017 #51), 24 h window clean, geth + staging gateway suspended 2026-09-12 and **deleted in Task 9**. Render hostnames are slugs; rename-swap does not move traffic.
+- **Task 8 (friend path in fortel2-replica):** engineering landed (R-0018 #53/#55, compose L1_RPC_KIND #56, friend Render + untrusted-reference parity #58 / R-0020). Clean-room deploy still unrun (no docker host in the loop). Recruiting is operator-owned; two candidates expected the week of 2026-09-21.
+- **Task 9 (geth removal):** executed 2026-09-14 (R-0019). Geth files deleted from fortel2-replica; operator deleted the geth pserv + 50 GB disk and the staging gateway. **Friend-sync gate skipped, not met.** **No geth rollback resource remains.** R-0017 disk follow-up CLOSED (10 → 50 GB; Render has no 25 GB size).
+- **Not done / not settled:** friend clean sync (the skipped Task 9 gate); clean-room deploy; learning-oracles keep-on-geth vs follow-up (`derivation-check.sh` / `sequencer-stub-demo.sh` still start isolated op-geth). Sidecar `--wipe` / `reset.sh` live-datadir guard landed: `wipe_reth_datadir` refuses `$DATA_DIR/l2/op-reth` when live op-reth evidence is present; `start-op-reth-verifier.sh` refuses to start on that slot under the same evidence. A sidecar on a reth-live host must set `FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth`.
 - Codex review on `a00920d` (pause sequencing before `unsafe == safe`; verifier-first rollback; rpckind matches provider) is incorporated here. The `admin_stopSequencer` / `admin_startSequencer` helper that review asked for is `scripts/sequencer-admin.sh` (Task 5 Phase A, #192) and was used live at cutover (D-0120).
 - Mac live datadir internals, `.env.sepolia` values, and Render dashboard state were not copied into git.
 - Do not paste provider URLs or tokens into this file.
@@ -519,7 +542,7 @@ Answer during Task 1 or 2 unless noted.
 - Live Sepolia sequencer L1 kind: `scripts/04-start-sequencer-sepolia.sh` (`SEPOLIA_L1_RPC_KIND:-quicknode`)
 - Roadmap: `tasks/prd-l2-learning-chain.md`
 - Phase 7 (do not wipe from here): `tasks/prd-phase-7-fault-proofs.md`
-- Friend runbook (op-reth since 2026-09-14): `replica/FRIENDS.md`
+- Friend runbook (op-reth since 2026-09-14; Render path routes to fortel2-replica `RUNNING.md`): `replica/FRIENDS.md`
 - ForteL2: <https://github.com/StephenForte/ForteL2>
 - Operated replica: <https://github.com/StephenForte/fortel2-replica>
 - OP node selection: <https://docs.optimism.io/use-cases/choose-your-node-stack>

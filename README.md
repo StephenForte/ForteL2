@@ -12,7 +12,7 @@ Base-style rollups don't have PoS validators. The roles here are:
 
 | Component | Role | Implementation |
 |---|---|---|
-| **Sequencer** | Orders transactions, builds L2 blocks | op-node + **op-reth** (sequencer mode; live since 2026-09-02, `FORTEL2_EL=reth`; op-geth datadir kept on disk until Task 9; no longer a rollback obligation, D-0122) |
+| **Sequencer** | Orders transactions, builds L2 blocks | op-node + **op-reth** (sequencer mode; live since 2026-09-02, `FORTEL2_EL=reth`). There is no geth rollback: Task 9 (2026-09-14) deleted the Render geth pserv and its disk (fortel2-replica R-0019). |
 | **Batcher** | Compresses L2 tx data, posts it to L1 | op-batcher → custom rebuild (Phase 4) |
 | **Proposer** | Posts L2 state output roots to L1 | op-proposer → custom rebuild (Phase 5) |
 | **Replica / verifier** | Derives the L2 independently from L1 data | stock op-node + EL (verifier mode); remote on Render, then friend-operated |
@@ -35,8 +35,8 @@ Everything runs as **native arm64 binaries** on a single Apple Silicon Mac mini 
 | **2c** | L2 against Sepolia L1 (short batcher/proposer run + deposit dry-run) | ✅ Done |
 | **2d** | Dedicated L1 RPC via **QuickNode** (env swap; no redeploy) | ✅ Done |
 | **3** | **Replica node on Render** — stock verifier, L1-derived sync ([fortel2-replica](https://github.com/StephenForte/fortel2-replica)) | ✅ Done |
-| **EL** | **op-geth → op-reth** (parallel; not a phase number) | **Tasks 1–6 done — cutover 2026-09-02, promoted 2026-09-08 (D-0122)** (block 473032, [D-0120](tasks/decisions.md)); [`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); promoted ([D-0122](tasks/decisions.md), 2026-09-08); Task 7 Render replica: **DONE — public read + SOS private read serve op-reth since 2026-09-11 (D-0128)**; geth pserv suspended 2026-09-12 (D-0129), removed in Task 9 |
-| **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned — runbook [`replica/FRIENDS.md`](replica/FRIENDS.md); recruiting is operator-owned |
+| **EL** | **op-geth → op-reth** (parallel; not a phase number) | **Tasks 1–9 executed.** Cutover 2026-09-02, promoted 2026-09-08 (D-0122) (block 473032, [D-0120](tasks/decisions.md)); [`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); Task 7 Render replica: **DONE — public read + SOS private read serve op-reth since 2026-09-11 (D-0128)**; **Task 9 executed 2026-09-14 (fortel2-replica R-0019):** geth pserv + 50 GB disk and staging gateway deleted; public read re-verified `reth/v2.3.0-9384bc5` tip 982723. **Friend-sync gate skipped, not met.** **No geth rollback resource.** **R-0017 disk follow-up CLOSED** (reth disk 10 → 50 GB; Render has no 25 GB size). |
+| **3b** | **Friend-operated verifier nodes**: geographically distributed operators, onboarded on Sepolia first | Planned — runbook [`replica/FRIENDS.md`](replica/FRIENDS.md) (laptop/VPS compose, or your own Render account via fortel2-replica `RUNNING.md`); recruiting is operator-owned |
 | **4** | **Reimplement the batcher** from scratch; swap out op-batcher | ✅ Done — [`tasks/prd-phase-4-batcher.md`](tasks/prd-phase-4-batcher.md) + [`batcher/`](batcher/); `USE_CUSTOM_BATCHER=1` opt-in |
 | **5** | **Reimplement the proposer** from scratch; swap out op-proposer | ✅ Done — [`tasks/prd-phase-5-proposer.md`](tasks/prd-phase-5-proposer.md) + [`proposer/`](proposer/); `USE_CUSTOM_PROPOSER=1` opt-in |
 | **6** | **Derivation / minimal sequencer** + simple Blockchair-style **block viewer** (latest blocks → block detail); Blockscout stays much later | ✅ Done (2026-08-04) — [`tasks/prd-phase-6-derivation.md`](tasks/prd-phase-6-derivation.md) + [`derivation/`](derivation/) + [`blocks/`](blocks/) |
@@ -134,7 +134,7 @@ flowchart LR
     DGF[DisputeGameFactory]
   end
   subgraph Seq["Sequencer"]
-    Geth["op-reth :9545 (op-geth until 2026-09-02)"]
+    Geth["op-reth :9545"]
     Node["op-node :9547"]
     Node -->|engine API + JWT| Geth
   end
@@ -152,8 +152,8 @@ flowchart LR
 
 ## Roles (who does what)
 
-- **op-reth** — L2 execution client (EVM, state, tx pool), live since 2026-09-02 via `FORTEL2_EL=reth` (D-0120). Engine API on `:9551`. The op-geth datadir stays on disk until Task 9 (promoted D-0122; `scripts/rollback-to-geth-sepolia.sh` remains the verifier-first procedure if ever needed).
-- **op-node** — consensus / derivation / sequencing. With `--sequencer.enabled` it builds L2 blocks and drives the EL. `--l2.enginekind` follows the selector (`reth` live; `geth` on rollback).
+- **op-reth** — L2 execution client (EVM, state, tx pool), live since 2026-09-02 via `FORTEL2_EL=reth` (D-0120). Engine API on `:9551`. Task 9 (2026-09-14, fortel2-replica R-0019) deleted the Render geth pserv and its 50 GB disk. **There is no geth rollback.** `scripts/rollback-to-geth-sepolia.sh` is leftover history; it cannot restore that disk. Recovery is a new disk and a full resync. A leftover Mac `$DATA_DIR/l2/op-geth` directory, if still present, is leftover files — not a supported recovery.
+- **op-node** — consensus / derivation / sequencing. With `--sequencer.enabled` it builds L2 blocks and drives the EL. `--l2.enginekind=reth` on the live path. Local chain 901 still defaults `FORTEL2_EL=geth`; that is not a Sepolia rollback.
 - **op-batcher** — compresses L2 tx data into frames and posts them to L1 (here: calldata to the batch inbox).
 - **op-proposer** — posts L2 output roots to L1 via DisputeGameFactory so withdrawals can later be proven (Phase 1b).
 
@@ -186,13 +186,14 @@ export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
 ./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.2 (da197e45) + op-reth reported 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
-# Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL (default geth).
-# Task 5 Phase A is selector-gated: merging does not flip the producer. Phase B
-# (operator window) sets FORTEL2_EL=reth in .env.sepolia. Rollback = flip back.
+# Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL=reth (since 2026-09-02).
+# Local 901 still defaults geth (no 901 reth path). Task 5 already ran; there is no
+# geth rollback (Task 9 deleted the Render disk).
 # Stock 05-start-batcher-sepolia.sh passes --throttle.unsafe-da-bytes-lower-threshold=0
-# only when FORTEL2_EL=reth (op-reth has no miner_setMaxDASize). Geth keeps the
-# default. Do not leave OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0 in
-# .env.sepolia — that env survives rollback and silently drops geth backpressure.
+# only when FORTEL2_EL=reth (op-reth has no miner_setMaxDASize). FORTEL2_EL=geth
+# keeps the default in the start script (local 901 / leftover selector — not a rollback).
+# Do not leave OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0 in
+# .env.sepolia — stock op-batcher reads that env on every start.
 #   unset FORTEL2_ENV
 #   export L1_RPC_URL="$(grep '^L1_RPC_URL=' .env.sepolia | cut -d= -f2-)"   # do not print
 #   FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier ./scripts/start-op-reth-verifier.sh --wait-blocks 5
@@ -725,7 +726,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 | `deposit-eth-sepolia.sh` | L1→L2 via Sepolia `deployments.json` |
 | `reset-sepolia.sh` | Wipes `data-sepolia` only |
 
-**Stock batcher throttle (`FORTEL2_EL`):** `05-start-batcher-sepolia.sh` passes `--throttle.unsafe-da-bytes-lower-threshold=0` only when `FORTEL2_EL=reth`. op-reth has no `miner_setMaxDASize`; without that flag the stock batcher exits on attach. `FORTEL2_EL=geth` keeps the stock default (unsafe-DA backpressure on). Rollback is flip `FORTEL2_EL` back — do **not** leave `OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0` in `.env.sepolia`. Stock op-batcher reads that env on every start, so a leftover `=0` would keep throttle off after rollback. The start script unsets it and uses the CLI flag only for reth.
+**Stock batcher throttle (`FORTEL2_EL`):** `05-start-batcher-sepolia.sh` passes `--throttle.unsafe-da-bytes-lower-threshold=0` only when `FORTEL2_EL=reth`. op-reth has no `miner_setMaxDASize`; without that flag the stock batcher exits on attach. `FORTEL2_EL=geth` keeps the stock default (unsafe-DA backpressure on) — that selector is the local-901 / leftover path, **not** a Sepolia or Render rollback. Do **not** leave `OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0` in `.env.sepolia`. Stock op-batcher reads that env on every start. The start script unsets it and uses the CLI flag only for reth.
 
 ### Write RPC filter (T5-D1 — eth/net/web3 allowlist)
 
@@ -880,9 +881,9 @@ FORTEL2_ENV=.env.sepolia ./scripts/alert-watch.sh --test
 
 ## Phase 3 — Render L2 replica (US-030 / US-031) ✅
 
-Stock **verifier** on Render: `op-geth` + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1**. Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032**). Native Mac L1 is **Phase 3a** (after 4–6).
+Stock **verifier** on Render: **op-reth** + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1** (live since Task 7, 2026-09-11; geth replica deleted in Task 9, 2026-09-14). Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032**). Native Mac L1 is **Phase 3a** (after 4–6).
 
-**Status:** Operator-verified after a fresh Phase 2b cutover (2026-07-22): Mac and Render share matching L2 block hashes (e.g. block 20). Package: [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica). Use **≥2GB** RAM on Render (Starter 512MB OOMs). Prefer **Private Service**; compare tips via Render Shell `geth attach` if you lack a public URL.
+**Status:** Operator-verified after a fresh Phase 2b cutover (2026-07-22): Mac and Render share matching L2 block hashes (e.g. block 20). Package: [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica). Use **≥2GB** RAM on Render (Starter 512MB OOMs). Prefer **Private Service**. Friends with a Render account: that repo's [`RUNNING.md` § On Render](https://github.com/StephenForte/fortel2-replica/blob/main/RUNNING.md) — do not copy operator archive/snapshot/gateway setup. Public read is `https://fortel2-replica-rpc.onrender.com`.
 
 **Keep Mac + Render aligned:** the both-sides wipe (Mac `data-sepolia` **and** Render `/data`, after `pack-replica-artifacts` + pushing new genesis/rollup) is **not routine maintenance** — it is triggered **only by a redeploy**. A redeploy produces new L1 contracts, a new genesis, and a new `rollup.json`; the old replica state is then a different chain that can never catch up. With the deployment **pinned through Phase 6**, replica operators (Phase 3b friends) should **not** expect a coordinated wipe before Phase 7. The failure mode to avoid is wiping only one side **around a redeploy** — both nodes would then follow different chains under the same chain ID. See **Network reset procedure** below. A single node with a corrupted/stuck datadir can still be reset alone without coordination, as long as the deployment is unchanged: `reset-sepolia.sh` preserves `$DEPLOY_DIR` by default (only `WIPE_SEPOLIA_DEPLOY=1` clears it), so that node resyncs the same genesis/`rollup.json` — it does not fork.
 
@@ -909,7 +910,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/sepolia-fund-check.sh
 | Docker / compose / Blueprint | [fortel2-replica](https://github.com/StephenForte/fortel2-replica) only — not in this monorepo |
 | Pack genesis/rollup (operator bridge) | `scripts/pack-replica-artifacts.sh` → `replica/config/` (gitignored staging) |
 | Sync check | `scripts/replica-sync-check.sh` (needs reachable replica RPC) or Shell hash compare |
-| Replica image pin | op-reth migration **Task 7** will pin the fortel2-replica image by **immutable digest**. No image swap in this task; sibling repo untouched. |
+| Replica image pin | Live Render EL is `Dockerfile.reth` by digest in fortel2-replica. Geth `./Dockerfile` retired Task 9 (R-0019). |
 
 This repo keeps only the **pack + sync-check bridge**. Runtime Docker lives in fortel2-replica — see `replica/README.md`.
 
@@ -917,7 +918,7 @@ See [fortel2-replica README](https://github.com/StephenForte/fortel2-replica#rea
 
 ### Phase 3b — Friend-operated verifiers
 
-You give friends [fortel2-replica](https://github.com/StephenForte/fortel2-replica), not this monorepo and not `.env.sepolia`. They derive chain **852** from Sepolia L1 with Docker Compose. No role keys. Matching `safe_l2` hashes vs the Mac sequencer is the acceptance check. Close the phase only when **two** nodes in **different regions** are on the redeploy-gate notify list (US-034).
+You give friends [fortel2-replica](https://github.com/StephenForte/fortel2-replica), not this monorepo and not `.env.sepolia`. They derive chain **852** from Sepolia L1 with Docker Compose **or their own Render Private Service** (see that repo's `RUNNING.md` § *On Render* — numbers live there). No role keys. Matching `safe_l2` hashes vs the Mac sequencer is the acceptance check. Close the phase only when **two** nodes in **different regions** are on the redeploy-gate notify list (US-034).
 
 ```text
 replica/FRIENDS.md          ← hand this to a friend
@@ -1013,22 +1014,22 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 | Component | Log file | Known-good line |
 |---|---|---|
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
-| op-geth (kept until Task 9; not running since 2026-09-02) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
+| op-geth (not running since 2026-09-02; Render geth deleted 2026-09-14; not a rollback path) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
 | op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | `reth 2.3.0-dev (9384bc5) starting` / `Status … latest_block=` |
 | op-reth-verifier / op-reth-verifier-node (sidecar) | `data/logs/op-reth-verifier.log`, `op-reth-verifier-node.log` | `Starting JSON-RPC` / `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
-Mid-chain rewind on op-reth (PRD §11 Q6, interim): wipe the reth datadir and re-derive from 852 genesis. **On this Mac op-reth has been the live EL since D-0120.** `wipe_reth_datadir` refuses (before `rm -rf`) when the resolved path is the live slot `$DATA_DIR/l2/op-reth` (canonical) **and** live-op-reth evidence is present: an alive `$PID_DIR/op-reth.pid` / `op-reth-node.pid`, or a listener on `:9545`/`:9546`/`:9547`/`:9551`. Both entry points inherit that guard (`FORTEL2_EL=reth ./scripts/reset.sh` and `start-op-reth-verifier.sh --wipe`). `start-op-reth-verifier.sh` also refuses to **start** on that slot under the same evidence. A verifier sidecar on a reth-live host must set `FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth`. **Never** `debug_setHead` on a keeper datadir (live op-geth or a candidate you intend to keep).
+Mid-chain rewind on op-reth (PRD §11 Q6, interim): wipe the reth datadir and re-derive from 852 genesis. **On this Mac op-reth has been the live EL since D-0120.** `wipe_reth_datadir` refuses (before `rm -rf`) when the resolved path is the live slot `$DATA_DIR/l2/op-reth` (canonical) **and** live-op-reth evidence is present: an alive `$PID_DIR/op-reth.pid` / `op-reth-node.pid`, or a listener on `:9545`/`:9546`/`:9547`/`:9551`. Both entry points inherit that guard (`FORTEL2_EL=reth ./scripts/reset.sh` and `start-op-reth-verifier.sh --wipe`). `start-op-reth-verifier.sh` also refuses to **start** on that slot under the same evidence. A verifier sidecar on a reth-live host must set `FORTEL2_RETH_DATADIR=$DATA_DIR/l2/spike-op-reth`. **Never** `debug_setHead` on a keeper datadir (the live op-reth, or any candidate you intend to keep).
 | op-batcher | `data/logs/op-batcher.log` | `publishing` / `Submit` / `Sent transaction` |
 | op-proposer | `data/logs/op-proposer.log` | `dispute game` / `Proposing` |
 
 ## Sequencer restart
 
-`./scripts/stop-all.sh` then `./scripts/start-all.sh` (without `reset.sh`) resumes from the existing op-geth datadir — no re-genesis. Deploy artifacts are reused.
+`./scripts/stop-all.sh` then `./scripts/start-all.sh` (without `reset.sh`) resumes from the existing EL datadir (local 901: op-geth; Sepolia 852: op-reth) — no re-genesis. Deploy artifacts are reused.
 
 ## Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
-Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Phases **0–6 done** (Sepolia + Render replica + custom batcher/proposer/derivation + block viewer). **3a** native Mac L1 stays deferred. Next learning work: Phase **7** fault proofs ([`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md)) via the redeploy gate, Phase **3b** friend replicas ([`replica/FRIENDS.md`](replica/FRIENDS.md)), or the parallel **op-reth migration** ([`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); Tasks 1–6 done — chain 852 sequences on op-reth since 2026-09-02, promoted 2026-09-08 (D-0122); Task 7 Render replica cut over to op-reth 2026-09-11 (D-0128); then Tasks 8–9). Product track: expand/execute [`tasks/prd-mainnet-pilot.md`](tasks/prd-mainnet-pilot.md). Do **not** start Phase 2b+ until all of these are true:
+Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Phases **0–6 done** (Sepolia + Render replica + custom batcher/proposer/derivation + block viewer). **3a** native Mac L1 stays deferred. Next learning work: Phase **7** fault proofs ([`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md)) via the redeploy gate, Phase **3b** friend replicas ([`replica/FRIENDS.md`](replica/FRIENDS.md); Render path in fortel2-replica `RUNNING.md`), or leftover op-reth follow-ups ([`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); Tasks 1–9 executed — chain 852 sequences on op-reth since 2026-09-02; Task 9 friend-sync gate skipped; no geth rollback). Product track: expand/execute [`tasks/prd-mainnet-pilot.md`](tasks/prd-mainnet-pilot.md). Do **not** start Phase 2b+ until all of these are true:
 
 - [x] **Fresh keys / Foundry tripwire:** scripts that broadcast call `refuse_foundry_defaults_unless_local_l2` and fail closed when `L2_CHAIN_ID != 901` if a Foundry/Anvil default private key is still configured. Before Sepolia: generate **new** keys (never fund or reuse the `.env.example` mnemonic accounts on a public net).
 - [x] **Separate deploy tree (documented):** Phase 2 must **not** reuse the Phase 1 `.env` + `deployments/.deployer/` tree. Use `.env.sepolia` and `deployments/sepolia/.deployer/`. Replaced artifacts: L1 contracts, L2 genesis/`rollup.json`, RPC URLs, chain IDs (`L2=852`), funded accounts, JWT/engine secrets. Do not copy Phase 1 `deployments.json` to Sepolia.
