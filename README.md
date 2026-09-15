@@ -725,6 +725,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 | `07-start-rpc-filter-sepolia.sh` | Start the eth/net/web3 allowlist proxy alone (upstream must already be up) |
 | `deposit-eth-sepolia.sh` | L1→L2 via Sepolia `deployments.json` |
 | `reset-sepolia.sh` | Wipes `data-sepolia` only |
+| `l1-provider-preflight.sh` | D-0123 L1 provider gate: chain id, genesis header, historical receipts, header integrity, rpckind pairing, cost arithmetic. URL from env or prompt, never argv. |
 
 **Stock batcher throttle (`FORTEL2_EL`):** `05-start-batcher-sepolia.sh` passes `--throttle.unsafe-da-bytes-lower-threshold=0` only when `FORTEL2_EL=reth`. op-reth has no `miner_setMaxDASize`; without that flag the stock batcher exits on attach. `FORTEL2_EL=geth` keeps the stock default (unsafe-DA backpressure on) — that selector is the local-901 / leftover path, **not** a Sepolia or Render rollback. Do **not** leave `OP_BATCHER_THROTTLE_UNSAFE_DA_BYTES_LOWER_THRESHOLD=0` in `.env.sepolia`. Stock op-batcher reads that env on every start. The start script unsets it and uses the CLI flag only for reth.
 
@@ -803,6 +804,12 @@ FORTEL2_ENV=.env.sepolia ./scripts/sepolia-rpc-check.sh
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
 FORTEL2_ENV=.env.sepolia ./scripts/status.sh
+```
+
+Before naming any L1 provider for a derivation catch-up, run the D-0123 gate and paste its output. The URL comes from `L1_PREFLIGHT_RPC_URL` / `L1_RPC_URL` / a prompt — never argv (`ps` exposes it):
+
+```bash
+./scripts/l1-provider-preflight.sh --l1.rpckind=quicknode --from-l1=<current L1 origin>
 ```
 
 Optional later: `L1_BEACON_URL` if you leave calldata DA / beacon-ignore (not required for 2d).
