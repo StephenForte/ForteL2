@@ -11663,6 +11663,448 @@ unset RP_AW RP_FIX RP_OUT RP_EC RP_OUT2 RP_EC2 RP_OUT3 RP_EC3 RP_C1 RP_C2 RP_REP
 unset RP_PREV_TS RP_KEEP_TS RP_DRIP_PID RP_DRIP_PORT RP_T0 RP_T1 RP_ELAPSED RP_STREAK RP_OK_TS
 unset -f rp_reset rp_run rp_seed_last_ok rp_live_run rp_start_server rp_stop_server cleanup_rp 2>/dev/null || true
 
+# --- l1-provider-preflight.sh (D-0123 gate; offline fixture server) ------------
+# Token in the URL path must never appear in script stdout/stderr. Ports 9545-9551
+# are live EL/node; bind high and kill in a trap so a failing case cannot linger.
+PF_SCRIPT="$ROOT/scripts/l1-provider-preflight.sh"
+PF_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pf.XXXXXX")"
+PF_TOKEN='pf_test_token_DO_NOT_LEAK'
+PF_GENESIS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["genesis"]["l1"]["number"])' "$ROOT/deployments/sepolia/rollup.json")"
+PF_HEAD=12000000
+PF_SRV_PID=""
+PF_PORT=""
+
+cleanup_pf() {
+  if [ -n "${PF_SRV_PID:-}" ]; then
+    kill "$PF_SRV_PID" 2>/dev/null || true
+    wait "$PF_SRV_PID" 2>/dev/null || true
+    PF_SRV_PID=""
+  fi
+  rm -rf "$PF_FIX"
+}
+trap cleanup_pf EXIT
+
+cat > "$PF_FIX/server.py" <<'PY'
+import json, os, socket, sys, time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+mode = sys.argv[1]
+head = int(sys.argv[2])
+portfile = sys.argv[3]
+stopfile = sys.argv[4]
+
+def parse_int(value):
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.startswith("0x") or text.startswith("0X"):
+        return int(text, 16)
+    return int(text, 10)
+
+def send_raw(handler, status, body, drip=False):
+    payload = body if isinstance(body, bytes) else body.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    if drip:
+        for i in range(len(payload)):
+            handler.wfile.write(payload[i:i+1])
+            handler.wfile.flush()
+            time.sleep(1.0)
+        return
+    handler.wfile.write(payload)
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or "0")
+        raw = self.rfile.read(length) if length else b""
+        try:
+            doc = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            send_raw(self, 400, b"not-json")
+            return
+        method = doc.get("method")
+        params = doc.get("params") or []
+        if mode == "drip":
+            body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": "0xaa36a7"})
+            send_raw(self, 200, body, drip=True)
+            return
+        if mode == "nonjson":
+            send_raw(self, 200, b"this is not json")
+            return
+        if method == "eth_chainId":
+            cid = "0x1" if mode == "chainid" else "0xaa36a7"
+            send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": cid}))
+            return
+        if method == "eth_blockNumber":
+            send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": hex(head)}))
+            return
+        if method == "eth_getBlockByNumber":
+            req = params[0] if params else "latest"
+            if req in ("latest", "earliest"):
+                n = head
+            else:
+                n = parse_int(req)
+            if mode == "genesis_null" and n != head:
+                send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": None}))
+                return
+            returned = (n - 1) if mode == "integrity" else n
+            send_raw(self, 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "number": hex(returned),
+                    "hash": "0x" + ("ab" * 32),
+                    "parentHash": "0x" + ("cd" * 32),
+                    "timestamp": "0x1",
+                },
+            }))
+            return
+        if method == "eth_getBlockReceipts":
+            if mode == "receipts_null":
+                send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": None}))
+                return
+            if mode == "receipts_empty":
+                send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": []}))
+                return
+            if mode == "receipts_huge":
+                recs = [{
+                    "transactionHash": "0x" + ("ab" * 32),
+                    "status": "0x1",
+                    "extra": "x" * 200,
+                } for _ in range(500)]
+                send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": recs}))
+                return
+            send_raw(self, 200, json.dumps({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": [{"transactionHash": "0x" + ("11" * 32), "status": "0x1"}],
+            }))
+            return
+        if method == "debug_getRawReceipts":
+            if mode == "rpckind":
+                send_raw(self, 200, json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {"code": -32601, "message": "the method debug_getRawReceipts does not exist/is not available"},
+                }))
+                return
+            send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": ["0x01"]}))
+            return
+        send_raw(self, 200, json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {"code": -32601, "message": "method not found"},
+        }))
+
+class S(HTTPServer):
+    allow_reuse_address = True
+    timeout = 0.5
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", 0))
+host, port = sock.getsockname()
+if 9545 <= port <= 9551:
+    sock.close()
+    sys.exit(2)
+sock.close()
+httpd = S(("127.0.0.1", port), H)
+with open(portfile, "w") as fh:
+    fh.write("%d\n" % port)
+while not os.path.exists(stopfile):
+    httpd.handle_request()
+httpd.server_close()
+PY
+
+pf_stop() {
+  if [ -n "${PF_SRV_PID:-}" ]; then
+    [ -n "${PF_FIX:-}" ] && : > "$PF_FIX/stop" 2>/dev/null || true
+    kill "$PF_SRV_PID" 2>/dev/null || true
+    wait "$PF_SRV_PID" 2>/dev/null || true
+    PF_SRV_PID=""
+  fi
+  rm -f "$PF_FIX/port" "$PF_FIX/stop"
+  PF_PORT=""
+}
+
+pf_start() {
+  local mode="$1"
+  pf_stop
+  rm -f "$PF_FIX/port" "$PF_FIX/stop"
+  python3 "$PF_FIX/server.py" "$mode" "$PF_HEAD" "$PF_FIX/port" "$PF_FIX/stop" \
+    >"$PF_FIX/server.log" 2>&1 &
+  PF_SRV_PID=$!
+  local i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -s "$PF_FIX/port" ]; then
+      PF_PORT="$(tr -d '[:space:]' < "$PF_FIX/port")"
+      if [ "$PF_PORT" -ge 9545 ] && [ "$PF_PORT" -le 9551 ]; then
+        echo "FAIL preflight fixture bound EL port $PF_PORT" >&2
+        pf_stop
+        return 1
+      fi
+      return 0
+    fi
+    if ! kill -0 "$PF_SRV_PID" 2>/dev/null; then
+      echo "FAIL preflight fixture server exited" >&2
+      cat "$PF_FIX/server.log" >&2 || true
+      PF_SRV_PID=""
+      return 1
+    fi
+    sleep 0.05
+    i=$((i + 1))
+  done
+  echo "FAIL preflight fixture did not print a port" >&2
+  return 1
+}
+
+pf_run() {
+  local kind="$1"
+  shift
+  env \
+    L1_PREFLIGHT_RPC_URL="http://127.0.0.1:${PF_PORT}/${PF_TOKEN}" \
+    L1_PREFLIGHT_CALL_TIMEOUT="${L1_PREFLIGHT_CALL_TIMEOUT:-2}" \
+    L1_PREFLIGHT_TOTAL_TIMEOUT="${L1_PREFLIGHT_TOTAL_TIMEOUT:-8}" \
+    L1_PREFLIGHT_SAMPLES="${L1_PREFLIGHT_SAMPLES:-5}" \
+    "$PF_SCRIPT" --l1.rpckind="$kind" "$@"
+}
+
+pf_assert_token_absent() {
+  local blob="$1"
+  if printf '%s' "$blob" | grep -Fq "$PF_TOKEN"; then
+    echo "FAIL preflight leaked URL token into output" >&2
+    printf '%s\n' "$blob" >&2
+    return 1
+  fi
+  return 0
+}
+
+# argv URL is refused and the token must not be printed.
+PF_OUT="$( "$PF_SCRIPT" --l1.rpckind=standard "http://127.0.0.1:59999/${PF_TOKEN}" 2>&1 )" && PF_EC=0 || PF_EC=$?
+if [[ "$PF_EC" -eq 1 ]] && pf_assert_token_absent "$PF_OUT"; then
+  echo "PASS l1-provider-preflight refuses a URL on argv without printing the token"
+else
+  echo "FAIL argv URL must exit 1 and never print the token (ec=$PF_EC)" >&2
+  echo "$PF_OUT" >&2
+  fail=1
+fi
+
+# Connection refused → exit 2, token absent.
+PF_CLOSED="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+PF_PORT="$PF_CLOSED"
+PF_OUT="$(pf_run standard --remaining-blocks=1075 2>&1)" && PF_EC=0 || PF_EC=$?
+if [[ "$PF_EC" -eq 2 ]] && pf_assert_token_absent "$PF_OUT" \
+  && [[ "$PF_OUT" == *"<redacted>"* ]]; then
+  echo "PASS l1-provider-preflight connection refused → exit 2 and redacts the token"
+else
+  echo "FAIL connection refused must be exit 2 with redacted token (ec=$PF_EC)" >&2
+  echo "$PF_OUT" >&2
+  fail=1
+fi
+
+if pf_start nonjson; then
+  PF_OUT="$(pf_run standard 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 2 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight non-JSON body → exit 2"
+  else
+    echo "FAIL non-JSON body must be exit 2 (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start chainid; then
+  PF_OUT="$(pf_run standard 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 3 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight chain id 1 → exit 3"
+  else
+    echo "FAIL chain id 1 must be exit 3 (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start genesis_null; then
+  PF_OUT="$(pf_run standard 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 4 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight missing genesis header → exit 4"
+  else
+    echo "FAIL genesis null must be exit 4 (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start receipts_null; then
+  PF_OUT="$(pf_run standard 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 5 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight receipts null → exit 5"
+  else
+    echo "FAIL receipts null must be exit 5 (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start receipts_empty; then
+  PF_OUT="$(pf_run standard 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 5 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight receipts empty array → exit 5"
+  else
+    echo "FAIL receipts [] must be exit 5 (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+# Header integrity is the PublicNode 11703708 class. Strongest test: N-1 vs N,
+# and the message must name both numbers. Token still absent.
+if pf_start integrity; then
+  PF_OUT="$(pf_run standard 2>&1)" && PF_EC=0 || PF_EC=$?
+  PF_RET=$((PF_GENESIS - 1))
+  if [[ "$PF_EC" -eq 6 ]] \
+    && pf_assert_token_absent "$PF_OUT" \
+    && printf '%s' "$PF_OUT" | grep -q "requested ${PF_GENESIS}" \
+    && printf '%s' "$PF_OUT" | grep -q "returned ${PF_RET}"; then
+    echo "PASS l1-provider-preflight header integrity N-1 → exit 6 names both numbers"
+  else
+    echo "FAIL integrity must exit 6 and name requested $PF_GENESIS and returned $PF_RET (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start rpckind; then
+  PF_OUT="$(pf_run quicknode 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 7 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight rpckind=quicknode + -32601 → exit 7"
+  else
+    echo "FAIL quicknode/-32601 must be exit 7 (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start pass; then
+  PF_OUT="$(pf_run quiknode 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 7 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight unknown rpckind=quiknode → exit 7"
+  else
+    echo "FAIL typo kind quiknode must be exit 7 (unverified), not PASS (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start pass; then
+  PF_OUT="$(pf_run standard --remaining-blocks=1075 --provider=quicknode 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 0 ]] && pf_assert_token_absent "$PF_OUT" \
+    && [[ "$PF_OUT" == *"<redacted>"* ]] \
+    && [[ "$PF_OUT" != *"$PF_TOKEN"* ]] \
+    && printf '%s' "$PF_OUT" | grep -q '43000 credits' \
+    && printf '%s' "$PF_OUT" | grep -q '\$0.0185'; then
+    echo "PASS l1-provider-preflight all checks + QuickNode cost arithmetic"
+  else
+    echo "FAIL happy path must exit 0, redact token, and print 43000 credits / \$0.0185 (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+  PF_OUT2="$(pf_run standard --remaining-blocks=1075 2>&1)" && PF_EC2=0 || PF_EC2=$?
+  if [[ "$PF_EC2" -eq 0 ]] && pf_assert_token_absent "$PF_OUT2" \
+    && printf '%s' "$PF_OUT2" | grep -q 'unpriced — unverified'; then
+    echo "PASS l1-provider-preflight unknown provider cost is unpriced — unverified"
+  else
+    echo "FAIL unknown host must print unpriced — unverified (ec=$PF_EC2)" >&2
+    echo "$PF_OUT2" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+# Trickling body must die at the SIGALRM deadline, not at byte-count × interval.
+if pf_start drip; then
+  PF_T0="$(python3 -c 'import time; print(time.time())')"
+  PF_OUT="$(L1_PREFLIGHT_CALL_TIMEOUT=2 L1_PREFLIGHT_TOTAL_TIMEOUT=5 pf_run standard 2>&1)" && PF_EC=0 || PF_EC=$?
+  PF_T1="$(python3 -c 'import time; print(time.time())')"
+  PF_ELAPSED="$(python3 -c 'import sys; print(float(sys.argv[2]) - float(sys.argv[1]))' "$PF_T0" "$PF_T1")"
+  if [[ "$PF_EC" -eq 2 ]] && pf_assert_token_absent "$PF_OUT" \
+    && python3 -c 'import sys; raise SystemExit(0 if 1.0 <= float(sys.argv[1]) < 8.0 else 1)' "$PF_ELAPSED"; then
+    echo "PASS l1-provider-preflight drip response dies at the total deadline"
+  else
+    echo "FAIL a slow-drip preflight must finish near the deadline, not hang (ec=$PF_EC elapsed=$PF_ELAPSED)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+# Bugbot: 64 KiB truncated eth_getBlockReceipts on a real Sepolia block. A ~100 KiB
+# receipts array must pass under the 1 MiB cap; the same payload must fail when the
+# cap is 4 KiB (overflow is unreachable, not a false receipts pass).
+if pf_start receipts_huge; then
+  PF_OUT="$(pf_run standard --remaining-blocks=10 --provider=quicknode 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 0 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight receipts payload >64KiB still passes under 1MiB cap"
+  else
+    echo "FAIL a >64KiB receipts array must pass with the 1MiB body cap (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+  PF_OUT2="$(L1_PREFLIGHT_BODY_CAP=4096 pf_run standard 2>&1)" && PF_EC2=0 || PF_EC2=$?
+  if [[ "$PF_EC2" -eq 2 ]] && pf_assert_token_absent "$PF_OUT2"; then
+    echo "PASS l1-provider-preflight body over the cap is unreachable (exit 2)"
+  else
+    echo "FAIL over-cap receipts must be exit 2, not a truncated pass (ec=$PF_EC2)" >&2
+    echo "$PF_OUT2" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+cleanup_pf
+trap - EXIT
+unset PF_SCRIPT PF_FIX PF_TOKEN PF_GENESIS PF_HEAD PF_SRV_PID PF_PORT
+unset PF_OUT PF_EC PF_OUT2 PF_EC2 PF_CLOSED PF_RET PF_T0 PF_T1 PF_ELAPSED
+unset -f cleanup_pf pf_stop pf_start pf_run pf_assert_token_absent 2>/dev/null || true
+
 if (( fail )); then
   echo "script helper tests FAILED" >&2
   exit 1
