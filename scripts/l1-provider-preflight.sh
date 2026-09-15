@@ -18,7 +18,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_SAMPLES=25
 DEFAULT_CALL_TIMEOUT=15
 DEFAULT_TOTAL_TIMEOUT=60
-BODY_CAP=65536
+# 1 MiB: alert-watch's 64 KiB fits one header; this script must ingest
+# eth_getBlockReceipts (D-0135: 162 receipts at 11703708 already exceeds 64 KiB).
+# SIGALRM still bounds a trickle; the cap bounds memory. Read cap+1 to detect overflow.
+BODY_CAP=1048576
 SEPOLIA_CHAIN_ID=11155111
 # Three weeks of 12 s L1 slots: 21 * 24 * 3600 / 12 = 151200.
 RECEIPTS_LOOKBACK_BLOCKS=151200
@@ -236,7 +239,7 @@ COST_PROVIDER_OPT = (os.environ.get("L1_PREFLIGHT_COST_PROVIDER") or "").strip()
 SAMPLES = int(os.environ.get("L1_PREFLIGHT_SAMPLES") or "25")
 CALL_TIMEOUT = float(os.environ.get("L1_PREFLIGHT_CALL_TIMEOUT") or "15")
 TOTAL_TIMEOUT = float(os.environ.get("L1_PREFLIGHT_TOTAL_TIMEOUT") or "60")
-BODY_CAP = int(os.environ.get("L1_PREFLIGHT_BODY_CAP") or "65536")
+BODY_CAP = int(os.environ.get("L1_PREFLIGHT_BODY_CAP") or "1048576")
 LOOKBACK = int(os.environ.get("L1_PREFLIGHT_RECEIPTS_LOOKBACK") or "151200")
 SEPOLIA_CHAIN_ID = int(os.environ.get("L1_PREFLIGHT_SEPOLIA_CHAIN_ID") or "11155111")
 REMAINING_IN = (os.environ.get("L1_PREFLIGHT_REMAINING") or "").strip()
@@ -470,12 +473,12 @@ def rpc(method, params):
     try:
         try:
             with urllib.request.urlopen(req, timeout=budget) as resp:
-                raw = resp.read(BODY_CAP)
+                raw = resp.read(BODY_CAP + 1)
         except TimeoutError:
             raise PreflightError(EC_UNREACHABLE, "FAIL reachability: call deadline (%.1fs) exceeded" % budget)
         except urllib.error.HTTPError as exc:
             try:
-                raw = exc.read(BODY_CAP)
+                raw = exc.read(BODY_CAP + 1)
             except Exception:
                 raw = b""
             if not raw:
@@ -485,6 +488,8 @@ def rpc(method, params):
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, prev)
+    if len(raw) > BODY_CAP:
+        raise PreflightError(EC_UNREACHABLE, "FAIL reachability: response exceeded body cap (%d bytes)" % BODY_CAP)
     CALLS[0] += 1
     try:
         doc = json.loads(raw.decode("utf-8"))

@@ -11774,6 +11774,14 @@ class H(BaseHTTPRequestHandler):
             if mode == "receipts_empty":
                 send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": []}))
                 return
+            if mode == "receipts_huge":
+                recs = [{
+                    "transactionHash": "0x" + ("ab" * 32),
+                    "status": "0x1",
+                    "extra": "x" * 200,
+                } for _ in range(500)]
+                send_raw(self, 200, json.dumps({"jsonrpc": "2.0", "id": 1, "result": recs}))
+                return
             send_raw(self, 200, json.dumps({
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -12045,6 +12053,31 @@ if pf_start drip; then
   else
     echo "FAIL a slow-drip preflight must finish near the deadline, not hang (ec=$PF_EC elapsed=$PF_ELAPSED)" >&2
     echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+# Bugbot: 64 KiB truncated eth_getBlockReceipts on a real Sepolia block. A ~100 KiB
+# receipts array must pass under the 1 MiB cap; the same payload must fail when the
+# cap is 4 KiB (overflow is unreachable, not a false receipts pass).
+if pf_start receipts_huge; then
+  PF_OUT="$(pf_run standard --remaining-blocks=10 --provider=quicknode 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 0 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight receipts payload >64KiB still passes under 1MiB cap"
+  else
+    echo "FAIL a >64KiB receipts array must pass with the 1MiB body cap (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+  PF_OUT2="$(L1_PREFLIGHT_BODY_CAP=4096 pf_run standard 2>&1)" && PF_EC2=0 || PF_EC2=$?
+  if [[ "$PF_EC2" -eq 2 ]] && pf_assert_token_absent "$PF_OUT2"; then
+    echo "PASS l1-provider-preflight body over the cap is unreachable (exit 2)"
+  else
+    echo "FAIL over-cap receipts must be exit 2, not a truncated pass (ec=$PF_EC2)" >&2
+    echo "$PF_OUT2" >&2
     fail=1
   fi
 else
