@@ -682,9 +682,22 @@ def main():
         failures.append(exc.code)
 
     # --- rpckind pairing (D-0124 cause 2) ---
+    # op-node --l1.rpckind valid options (D-0105 Finding 3 / binary help):
+    # alchemy, quicknode, infura, parity, nethermind, debug_geth, erigon, basic, any, standard
+    known_kinds = (
+        "alchemy", "quicknode", "infura", "parity", "nethermind",
+        "debug_geth", "erigon", "basic", "any", "standard",
+    )
     kind_l = RPC_KIND.lower()
     try:
-        if kind_l == "quicknode":
+        if kind_l not in known_kinds:
+            emit(
+                "CHECK rpckind pairing      FAIL kind=%s is not a known --l1.rpckind "
+                "(unverified; valid: %s)" % (RPC_KIND, ", ".join(known_kinds)),
+                sys.stderr,
+            )
+            failures.append(EC_RPCKIND)
+        elif kind_l == "quicknode":
             result, err = rpc_result("debug_getRawReceipts", [hex_qty(receipts_block)])
             code = error_code(err) if err is not None else None
             if err is not None or result is None:

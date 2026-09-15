@@ -12015,6 +12015,20 @@ fi
 pf_stop
 
 if pf_start pass; then
+  PF_OUT="$(pf_run quiknode 2>&1)" && PF_EC=0 || PF_EC=$?
+  if [[ "$PF_EC" -eq 7 ]] && pf_assert_token_absent "$PF_OUT"; then
+    echo "PASS l1-provider-preflight unknown rpckind=quiknode → exit 7"
+  else
+    echo "FAIL typo kind quiknode must be exit 7 (unverified), not PASS (ec=$PF_EC)" >&2
+    echo "$PF_OUT" >&2
+    fail=1
+  fi
+else
+  fail=1
+fi
+pf_stop
+
+if pf_start pass; then
   PF_OUT="$(pf_run standard --remaining-blocks=1075 --provider=quicknode 2>&1)" && PF_EC=0 || PF_EC=$?
   if [[ "$PF_EC" -eq 0 ]] && pf_assert_token_absent "$PF_OUT" \
     && [[ "$PF_OUT" == *"<redacted>"* ]] \
