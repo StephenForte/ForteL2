@@ -1217,12 +1217,40 @@
 ### D-0137 — **The D-0123 gate is now executable (#232) AND can finally reach the endpoint it exists for: the Render replica's L1 URL is mirrored to `L1_RPC_URL_RENDER` in the untracked `.env.sepolia`. Verified PASS against the real endpoint 2026-09-15**
 - **Context:** D-0136 Consequence (2) left this open. The gate was skipped on 2026-09-14 and again on 2026-09-15 for the same structural reason both times — the endpoint feeding the Render replica uses the **L2_Render** QuickNode token, which lived **only** in the fortel2-replica Render dashboard. A preflight run from the Mac exercised **L2_mini**, a different endpoint on the same plan: provider-level evidence, never endpoint-level. The cost of that blindness is measured, not hypothetical: the value actually stored in Render turned out to be a **free Chainstack endpoint** that 403s the L1 genesis check, and nobody learned this until op-node exited mid-recovery and Render rolled back (D-0135).
 - **Landed:** `scripts/l1-provider-preflight.sh` (#232, `840094f`) makes the gate one command — chain id, genesis header, ≥3-week-old receipts, **header integrity** (the PublicNode 11703708 class, which the original two calls could not see), rpckind pairing (D-0124 cause 2), and cost arithmetic against AGENTS.md's measured per-block prices. It refuses a URL on argv (`ps -ww -o command=` exposes it — that is how the reviewer read the live QuickNode URL off a running op-node), prints `scheme://host/<redacted>` only, and bounds itself with a per-call and a process deadline.
-- **Operator action, 2026-09-15 (this entry's substance):** the Render endpoint URL was copied into the **untracked, gitignored** `.env.sepolia` as **`L1_RPC_URL_RENDER`**, appended by a prompt-read command so the value never reached the screen, the shell history, or argv. The key is documented **commented** in `.env.sepolia.example` (D-0065: an empty `KEY=` must not override a default). Nothing at runtime reads it: `scripts/lib.sh` consumes the exact name `L1_RPC_URL` only, with no glob over `L1_RPC_URL*`, so adding it cannot alter derivation, funding, or any start path. **The operator ran the preflight against the real Render endpoint and it returned PASS.** That is the first time the endpoint feeding the public replica has been verified by the gate rather than assumed.
+- **Operator action, 2026-09-15 (this entry's substance):** the Render endpoint URL was copied into the **untracked, gitignored** `.env.sepolia` as **`L1_RPC_URL_RENDER`**, appended by a prompt-read command so the value never reached the screen, the shell history, or argv. The key is documented **commented** in `.env.sepolia.example` (D-0065: an empty `KEY=` must not override a default). Nothing at runtime reads it: `scripts/lib.sh` consumes the exact name `L1_RPC_URL` only, with no glob over `L1_RPC_URL*`, so adding it cannot alter derivation, funding, or any start path. **The operator ran the preflight against the real Render endpoint and reported PASS; the reviewer re-ran it and captured the output, because AGENTS.md requires the results pasted, not asserted.** Run 2026-09-15, redacted exactly as the script prints it:
+
+```
+=== ForteL2 L1 provider preflight (D-0123) ===
+endpoint:     https://virulent-wild-dawn.ethereum-sepolia.quiknode.pro/<redacted>
+purpose:      catch-up
+l1.rpckind:   quicknode
+genesis L1:   11545587  (from deployments/sepolia/.deployer/rollup.json)
+samples:      25 header heights (genesis, head, evenly spaced interiors)
+deadlines:    per-call 15.0s, total 60.0s, body cap 1048576
+
+CHECK reachability+chainId  PASS chain_id=11155111
+head:         11713088
+CHECK genesis header       PASS block=11545587
+CHECK historical receipts  PASS block=11561888 n=143 (head 11713088 − 151200 = 3 weeks of 12s slots)
+CHECK header integrity     PASS samples=25 (requested number == returned number)
+CHECK rpckind pairing      PASS kind=quicknode + debug_getRawReceipts compatible
+
+COST (catch-up arithmetic — AGENTS.md D-0123 measured facts)
+  remaining:    3850 L1 blocks
+  provider:     quicknode
+  per-block:    ≈40 credits
+  total:        154000 credits
+  dollars:      $0.0662  (QuickNode PAYG $0.43/M)
+json-rpc calls: 29 (budget ≤29)
+RESULT PASS
+```
+
+That is the first time the endpoint feeding the public replica has been verified by the gate rather than assumed. **One fact the output settles that no document previously proved:** the host is `virulent-wild-dawn…`, whereas the Mac sequencer derives on `red-dimensional-dream…`. The two really are separate QuickNode endpoints, as `.env.sepolia.example` has always instructed — until this run that separation was documented intent, not evidence. The 3850 figure in the cost block is the D-0135 catch-up size, reused here only so the arithmetic is comparable to that incident; it is not a standing value (see Decision).
 - **Decision:** before naming any L1 provider for a derivation catch-up, **run the script and paste its output** — including for the Render replica, which is now reachable:
 
-      (cd /Users/steveforte/fortel2-agents && L1_PREFLIGHT_RPC_URL="$(grep '^L1_RPC_URL_RENDER=' /Users/steveforte/ForteL2/.env.sepolia | cut -d= -f2-)" ./scripts/l1-provider-preflight.sh --l1.rpckind=quicknode --remaining-blocks=3850)
+      (cd /Users/steveforte/fortel2-agents && L1_PREFLIGHT_RPC_URL="$(grep '^L1_RPC_URL_RENDER=' /Users/steveforte/ForteL2/.env.sepolia | cut -d= -f2-)" ./scripts/l1-provider-preflight.sh --l1.rpckind=quicknode --from-l1=<the replica's CURRENT L1 origin>)
 
-  Exit 0 is the gate. "Free tier" remains not a capability claim, and an inference from a sibling endpoint on the same plan is not a preflight — that inference is exactly what this entry closes.
+  **Do not paste a remembered block count.** `--from-l1=N` makes the script compute `remaining = head − N` at run time; a hardcoded `--remaining-blocks=3850` is the D-0135 gap and silently prices the wrong catch-up, understating the spend an operator is being asked to approve. Get the current origin from the replica's Render logs — the `Advancing bq origin … :<number>` line — or from `optimism_syncStatus` `current_l1` if you are in the service's Shell. If you genuinely only want a capability check and not a cost estimate, run it with neither flag and ignore the COST block rather than inventing a number for it. Exit 0 is the gate. "Free tier" remains not a capability claim, and an inference from a sibling endpoint on the same plan is not a preflight — that inference is exactly what this entry closes.
 - **Consequence:** four things. **(1) ROTATION NOW TOUCHES TWO PLACES.** The L2_Render token lives in the Render dashboard *and* in `.env.sepolia`. Rotate it in QuickNode and you must update both, or the preflight tests a dead URL and reports a healthy provider as broken — a false negative on a gate, which is worse than no gate. This is the standing cost of closing the blindness and it is accepted deliberately. **(2) The secret's blast radius grew by one file** — an untracked, gitignored file that already holds QuickNode URLs and role private keys, so no new category, but one more copy to destroy if the Mac is ever decommissioned. **(3) The gate is no longer an excuse.** Both 2026-09-14 skips were defensible on access grounds; a future skip is not, and a decision record that says "preflight skipped" should now be read as a process failure rather than a limitation. **(4) Header integrity is sampled, not exhaustive** (#232: 25 heights). It catches a provider wrong *systematically*; a single poisoned height like 11703708 remains a lottery, and derivation itself is what finds those. Do not read a PASS as "every block in the range is good." Next free decision id is **D-0138**.
 
 ## Template
