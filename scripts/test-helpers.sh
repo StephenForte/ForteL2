@@ -11022,7 +11022,14 @@ unset WG8_PID WG8_FIX WG8_FIX_CANON WG8_RC WG8_OUT
 # =============================================================================
 RP_AW="$SCRIPT_DIR/alert-watch.sh"
 RP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-replica-watch.XXXXXX")"
-cleanup_rp() { rm -rf "$RP_FIX"; }
+cleanup_rp() {
+  if [ -n "${RP_DRIP_PID:-}" ]; then
+    kill "$RP_DRIP_PID" 2>/dev/null || true
+    wait "$RP_DRIP_PID" 2>/dev/null || true
+    RP_DRIP_PID=""
+  fi
+  rm -rf "$RP_FIX"
+}
 trap cleanup_rp EXIT
 mkdir -p "$RP_FIX/shim" "$RP_FIX/mock" "$RP_FIX/data" "$RP_FIX/bin" "$RP_FIX/deploy"
 cat > "$RP_FIX/env" <<EOF
@@ -11456,11 +11463,205 @@ else
   fail=1
 fi
 
+# Live urllib path: total deadline + 64 KiB body cap. Must not set
+# ALERT_WATCH_CURL or HEAD_* — those short-circuit to a canned head.
+if grep -q 'signal.setitimer(signal.ITIMER_REAL, REPLICA_RPC_TIMEOUT)' "$RP_AW" \
+  && grep -q 'signal.setitimer(signal.ITIMER_REAL, 0)' "$RP_AW" \
+  && grep -q 'resp.read(65536)' "$RP_AW"; then
+  echo "PASS alert-watch replica probe has a SIGALRM total deadline and 64 KiB body cap"
+else
+  echo "FAIL replica probe must setitimer before urlopen, reset it in finally, and cap read(65536)" >&2
+  fail=1
+fi
+
+cat > "$RP_FIX/drip-server.py" <<'PY'
+import json, socket, sys, time
+mode = sys.argv[1]
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", 0))
+host, port = sock.getsockname()
+if 9545 <= port <= 9551:
+    sock.close()
+    sys.exit(2)
+sock.listen(1)
+sys.stdout.write("%d\n" % port)
+sys.stdout.flush()
+conn, _ = sock.accept()
+try:
+    conn.recv(4096)
+    if mode == "drip":
+        body = b'{"jsonrpc":"2.0","id":1,"result":{"number":"0x1","timestamp":"0x1"}}'
+        headers = (
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+            "Content-Length: %d\r\nConnection: close\r\n\r\n" % len(body)
+        ).encode("ascii")
+        conn.sendall(headers)
+        for i in range(len(body)):
+            conn.sendall(body[i:i+1])
+            time.sleep(1.0)
+    elif mode == "huge":
+        extra = "A" * 70000
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "number": "0xf",
+                "timestamp": hex(int(time.time())),
+                "extra": extra,
+            },
+        }).encode("ascii")
+        headers = (
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+            "Content-Length: %d\r\nConnection: close\r\n\r\n" % len(payload)
+        ).encode("ascii")
+        conn.sendall(headers + payload)
+    else:
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"number": "0x1", "timestamp": hex(int(time.time()))},
+        }).encode("ascii")
+        headers = (
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+            "Content-Length: %d\r\nConnection: close\r\n\r\n" % len(payload)
+        ).encode("ascii")
+        conn.sendall(headers + payload)
+finally:
+    try:
+        conn.close()
+    except OSError:
+        pass
+    sock.close()
+PY
+
+rp_live_run() {
+  # No ALERT_WATCH_CURL, no HEAD_* — live urllib against the local server.
+  env -u RESEND_API_TOKEN \
+    -u ALERT_WATCH_CURL \
+    -u ALERT_WATCH_REPLICA_HEAD_NUMBER \
+    -u ALERT_WATCH_REPLICA_HEAD_AGE \
+    -u ALERT_WATCH_REPLICA_HEAD_TS \
+    -u ALERT_WATCH_REPLICA_UNREACHABLE \
+    -u ALERT_WATCH_REPLICA_THROW \
+    PATH="$RP_FIX/shim:$PATH" \
+    FORTEL2_ENV="$RP_FIX/env" \
+    ALERT_WATCH_MOCK_DIR="$RP_FIX/mock" \
+    ALERT_WATCH_FUNDING_JSON="$RP_FIX/funding-health.json" \
+    ALERT_WATCH_STATE="$RP_FIX/state.json" \
+    ALERT_WATCH_RESOLVE_OUT="$RP_FIX/resolve.out.log" \
+    ALERT_WATCH_RESOLVE_ERR="$RP_FIX/resolve.err.log" \
+    ALERT_WATCH_OSASCRIPT="$RP_FIX/shim/osascript" \
+    ALERT_WATCH_LAUNCHCTL="$RP_FIX/shim/launchctl" \
+    ALERT_WATCH_REPLICA_RPC_URL="http://127.0.0.1:${RP_DRIP_PORT}" \
+    ALERT_WATCH_REPLICA_TIMEOUT="${ALERT_WATCH_REPLICA_TIMEOUT:-2}" \
+    ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
+    "$@"
+}
+
+rp_start_server() {
+  local mode="$1"
+  python3 "$RP_FIX/drip-server.py" "$mode" > "$RP_FIX/drip.port" &
+  RP_DRIP_PID=$!
+  local i=0
+  while [ "$i" -lt 50 ]; do
+    if [ -s "$RP_FIX/drip.port" ]; then
+      RP_DRIP_PORT="$(tr -d '[:space:]' < "$RP_FIX/drip.port")"
+      return 0
+    fi
+    sleep 0.05
+    i=$((i + 1))
+  done
+  echo "FAIL drip server did not print a port" >&2
+  return 1
+}
+rp_stop_server() {
+  if [ -n "${RP_DRIP_PID:-}" ]; then
+    kill "$RP_DRIP_PID" 2>/dev/null || true
+    wait "$RP_DRIP_PID" 2>/dev/null || true
+    RP_DRIP_PID=""
+  fi
+  rm -f "$RP_FIX/drip.port"
+}
+
+# A slow-drip body must hit the total deadline, not run toward byte-count x interval.
+rp_reset
+rp_seed_last_ok 3600 180 982723
+RP_PREV_TS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replica_last_ok"]["head_ts"])' "$RP_FIX/state.json")"
+RP_DRIP_PID=""
+trap 'rp_stop_server; cleanup_rp' EXIT
+if ! rp_start_server drip; then
+  fail=1
+else
+  RP_T0="$(python3 -c 'import time; print(time.time())')"
+  RP_OUT="$(rp_live_run RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+  RP_T1="$(python3 -c 'import time; print(time.time())')"
+  RP_ELAPSED="$(python3 -c 'import sys; print(float(sys.argv[2]) - float(sys.argv[1]))' "$RP_T0" "$RP_T1")"
+  RP_KEEP_TS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replica_last_ok"]["head_ts"])' "$RP_FIX/state.json")"
+  RP_STREAK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("replica_unreachable_streak", 0))' "$RP_FIX/state.json")"
+  if [[ "$RP_EC" -eq 0 ]] \
+    && python3 -c 'import sys; raise SystemExit(0 if 1.0 <= float(sys.argv[1]) < 8.0 else 1)' "$RP_ELAPSED" \
+    && [[ "$RP_KEEP_TS" == "$RP_PREV_TS" ]] \
+    && [[ "$RP_STREAK" == "1" ]] \
+    && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+    && [[ "$RP_OUT" == *"no alert"* ]]; then
+    echo "PASS alert-watch replica drip response dies at the total deadline"
+  else
+    echo "FAIL a slow-drip replica response must finish near REPLICA_RPC_TIMEOUT, not near byte-count x drip (ec=$RP_EC elapsed=$RP_ELAPSED streak=$RP_STREAK)" >&2
+    echo "$RP_OUT" >&2
+    fail=1
+  fi
+fi
+rp_stop_server
+
+# Body cap: a >64 KiB JSON-RPC result must not parse as a successful head.
+rp_reset
+rp_seed_last_ok 3600 180 982723
+RP_PREV_TS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replica_last_ok"]["head_ts"])' "$RP_FIX/state.json")"
+if ! rp_start_server huge; then
+  fail=1
+else
+  RP_OUT="$(rp_live_run RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+  RP_KEEP_TS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replica_last_ok"]["head_ts"])' "$RP_FIX/state.json")"
+  RP_STREAK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("replica_unreachable_streak", 0))' "$RP_FIX/state.json")"
+  if [[ "$RP_EC" -eq 0 ]] \
+    && [[ "$RP_KEEP_TS" == "$RP_PREV_TS" ]] \
+    && [[ "$RP_STREAK" == "1" ]] \
+    && [[ "$RP_OUT" == *"no alert"* ]]; then
+    echo "PASS alert-watch replica probe caps the response body at 64 KiB"
+  else
+    echo "FAIL replica probe must treat a >64 KiB body as a failed probe (ec=$RP_EC streak=$RP_STREAK)" >&2
+    echo "$RP_OUT" >&2
+    fail=1
+  fi
+fi
+rp_stop_server
+
+# Fast complete response still succeeds (timer reset does not abort the rest).
+rp_reset
+if ! rp_start_server fast; then
+  fail=1
+else
+  RP_OUT="$(rp_live_run RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+  RP_OK_TS="$(python3 -c 'import json,sys; print("head_ts" in json.load(open(sys.argv[1])).get("replica_last_ok", {}))' "$RP_FIX/state.json")"
+  if [[ "$RP_EC" -eq 0 ]] \
+    && [[ "$RP_OK_TS" == "True" ]] \
+    && [[ "$RP_OUT" == *"no alert"* ]]; then
+    echo "PASS alert-watch replica probe succeeds on a fast complete response"
+  else
+    echo "FAIL a fast local replica response must succeed and not leak the deadline (ec=$RP_EC)" >&2
+    echo "$RP_OUT" >&2
+    fail=1
+  fi
+fi
+rp_stop_server
+trap cleanup_rp EXIT
+
 cleanup_rp
 trap - EXIT
 unset RP_AW RP_FIX RP_OUT RP_EC RP_OUT2 RP_EC2 RP_OUT3 RP_EC3 RP_C1 RP_C2 RP_REPLICA_BLK
-unset RP_PREV_TS RP_KEEP_TS
-unset -f rp_reset rp_run rp_seed_last_ok cleanup_rp 2>/dev/null || true
+unset RP_PREV_TS RP_KEEP_TS RP_DRIP_PID RP_DRIP_PORT RP_T0 RP_T1 RP_ELAPSED RP_STREAK RP_OK_TS
+unset -f rp_reset rp_run rp_seed_last_ok rp_live_run rp_start_server rp_stop_server cleanup_rp 2>/dev/null || true
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2

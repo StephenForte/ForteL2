@@ -43,7 +43,8 @@
 #                         gateway (timeout / HTTP / garbage JSON / missing
 #                         timestamp). One failure is quiet; a later success
 #                         resets the streak. Failed probes do not overwrite the
-#                         last successful head sample. urllib timeout 15 s —
+#                         last successful head sample. urllib socket timeout
+#                         AND a SIGALRM total deadline of 15 s, body cap 65536 —
 #                         never ALERT_WATCH_CURL (that shim is Resend). One
 #                         eth_getBlockByNumber(latest); URL is the published
 #                         public-read gateway, never QuickNode / Access / loopback.
@@ -103,9 +104,12 @@
 #   ALERT_WATCH_REPLICA_UNREACHABLE=1  inject a failed probe (no network)
 #   ALERT_WATCH_REPLICA_THROW=1        raise inside the probe; other conditions
 #                                      must still evaluate
-#   When any replica hook is set, or ALERT_WATCH_CURL is set (Resend test
-#   shim), the probe never opens a socket. Production launchd does not set
-#   those keys and uses urllib against the hardcoded public-read gateway.
+#   ALERT_WATCH_REPLICA_RPC_URL        test-only live URL (does not skip urllib)
+#   ALERT_WATCH_REPLICA_TIMEOUT        test-only total deadline seconds
+#   When HEAD_*/UNREACHABLE/THROW is set, or ALERT_WATCH_CURL is set (Resend
+#   shim), the probe never opens a socket. RPC_URL/TIMEOUT do not short-circuit.
+#   Production launchd does not set those keys and uses urllib against the
+#   hardcoded public-read gateway.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -265,7 +269,7 @@ python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$HEALTH_STALE_SECS" "$RESOLVE_STALE_SECS" "$SLEEP_GRACE_SECS" \
   "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
   "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" <<'PY'
-import json, os, shutil, sys, time, subprocess
+import json, os, shutil, sys, time, subprocess, signal
 import urllib.error
 import urllib.request
 
@@ -616,8 +620,8 @@ if cf_plist and os.path.exists(cf_plist):
 # --- public replica liveness (Render; no Mac-sleep grace) ---
 # Head-timestamp age and its trend only. Do not compare to the sequencer.
 # One eth_getBlockByNumber(latest). Never QuickNode, Access, or loopback.
-REPLICA_RPC_URL = "https://fortel2-replica-rpc.onrender.com"
-REPLICA_RPC_TIMEOUT = 15
+_replica_url_override = (os.environ.get("ALERT_WATCH_REPLICA_RPC_URL") or "").strip()
+REPLICA_RPC_URL = _replica_url_override or "https://fortel2-replica-rpc.onrender.com"
 
 def _env_int(name, default):
     raw = os.environ.get(name)
@@ -653,6 +657,7 @@ replica_noise_secs = _env_int(
     "ALERT_WATCH_REPLICA_NOISE_SECS",
     _env_int("REPLICA_TREND_NOISE_SECS", 120),
 )
+REPLICA_RPC_TIMEOUT = _env_int("ALERT_WATCH_REPLICA_TIMEOUT", 15)
 
 def probe_replica_head():
     """Return {number, timestamp} or None on a failed probe. THROW raises."""
@@ -704,11 +709,18 @@ def probe_replica_head():
         },
         method="POST",
     )
+    def _replica_deadline(signum, frame):
+        raise TimeoutError("replica probe total deadline")
+    prev_handler = signal.signal(signal.SIGALRM, _replica_deadline)
+    signal.setitimer(signal.ITIMER_REAL, REPLICA_RPC_TIMEOUT)
     try:
         with urllib.request.urlopen(req, timeout=REPLICA_RPC_TIMEOUT) as resp:
-            raw = resp.read()
+            raw = resp.read(65536)
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
         return None
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev_handler)
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (ValueError, TypeError, UnicodeDecodeError):
