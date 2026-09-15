@@ -11191,17 +11191,32 @@ else
   fail=1
 fi
 
-# 2026-09-15 decay: age growing ~3600 s per hourly run → fire on the second sample.
+# 2026-09-15 decay: ~3600 s growth per hourly run. One grown delta is a
+# redeploy replay (quiet); two consecutive bad deltas fire. 200 → 3800 → 7400
+# fires at 7400.
 rp_reset
-rp_seed_last_ok 3600 180 982723
+rp_seed_last_ok 3600 200 982723
 RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_NUMBER=982723 \
-  ALERT_WATCH_REPLICA_HEAD_AGE=3780 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=3800 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -ne 0 ]] \
+  || [[ -f "$RP_FIX/mock/osascript.calls" ]] \
+  || [[ "$RP_OUT" == *"replica-losing-ground"* ]]; then
+  echo "FAIL hourly freeze first grown delta (200→3800) must stay quiet (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+rp_seed_last_ok 3600 3800 982723
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
+  "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_NUMBER=982723 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=7400 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
 if [[ "$RP_EC" -eq 0 ]] \
   && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
   && [[ "$RP_OUT" == *"replica-losing-ground"* ]] \
   && grep -qi 'losing ground' "$RP_FIX/mock/osascript.argv"; then
-  echo "PASS alert-watch replica-losing-ground fires on the second consecutive observation"
+  echo "PASS alert-watch replica-losing-ground fires on two consecutive bad deltas"
 else
   echo "FAIL hourly freeze (~3600 s age growth) must fire replica-losing-ground (ec=$RP_EC)" >&2
   echo "$RP_OUT" >&2
@@ -11238,7 +11253,8 @@ else
   fail=1
 fi
 
-# Noise floor is exclusive: delta == 120 is quiet; 121 fires.
+# Noise floor is exclusive: delta == 120 is quiet; 121 fires only after two
+# consecutive such deltas (180 → 301 → 422).
 rp_reset
 rp_seed_last_ok 3600 180 982723
 RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=300 \
@@ -11255,6 +11271,18 @@ fi
 rp_reset
 rp_seed_last_ok 3600 180 982723
 RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=301 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+if [[ "$RP_EC" -ne 0 ]] \
+  || [[ -f "$RP_FIX/mock/osascript.calls" ]] \
+  || [[ "$RP_OUT" == *"replica-losing-ground"* ]]; then
+  echo "FAIL delta == 121 s first grown delta must stay quiet (ec=$RP_EC)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+rp_seed_last_ok 3600 301 982723
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
+  "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=422 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
 if [[ "$RP_EC" -eq 0 ]] \
   && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
@@ -11360,20 +11388,51 @@ else
   fail=1
 fi
 
-# Cooldown: condition stays active, second send suppressed.
+# Cooldown: two consecutive bad deltas send once; a third while cooled does not re-send.
 rp_reset
-rp_seed_last_ok 3600 180 982723
-rp_run ALERT_WATCH_REPLICA_HEAD_AGE=3780 \
+rp_seed_last_ok 3600 200 982723
+rp_run ALERT_WATCH_REPLICA_HEAD_AGE=3800 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" >/dev/null 2>&1 || true
+rp_seed_last_ok 3600 3800 982723
+rp_run ALERT_WATCH_REPLICA_HEAD_AGE=7400 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" >/dev/null 2>&1 || true
 RP_C1="$(cat "$RP_FIX/mock/curl.calls" 2>/dev/null || echo 0)"
-rp_seed_last_ok 3600 180 982723
-rp_run ALERT_WATCH_REPLICA_HEAD_AGE=3780 \
+rp_seed_last_ok 3600 7400 982723
+# Stay under the 10800 s backstop so the third run is still only losing-ground.
+rp_run ALERT_WATCH_REPLICA_HEAD_AGE=9000 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" >/dev/null 2>&1 || true
 RP_C2="$(cat "$RP_FIX/mock/curl.calls" 2>/dev/null || echo 0)"
 if [[ "$RP_C1" -eq 1 && "$RP_C2" -eq 1 ]]; then
   echo "PASS alert-watch replica-losing-ground cooldown suppresses a second send"
 else
   echo "FAIL replica-losing-ground must send once inside ALERT_REALERT_HOURS (c1=$RP_C1 c2=$RP_C2)" >&2
+  fail=1
+fi
+
+# Redeploy transient: healthy → one grown age → recovered must stay quiet.
+# 180 → 900 is the 2026-09-14/15 false page; 120 after is the collapse.
+# A later independent spike (120 → 900) must also stay quiet — that is what
+# goes red if replica_losing_streak is not reset on a good delta.
+rp_reset
+rp_seed_last_ok 3600 180 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=900 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+RP_OUT2="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=120 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
+rp_seed_last_ok 3600 120 982723
+RP_OUT3="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=900 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC3=0 || RP_EC3=$?
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 && "$RP_EC3" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]] \
+  && [[ "$RP_OUT2" == *"no alert"* ]] \
+  && [[ "$RP_OUT3" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-losing-ground stays quiet on a transient spike"
+else
+  echo "FAIL a transient spike (healthy → grown → recovered) must stay quiet (ec=$RP_EC/$RP_EC2/$RP_EC3)" >&2
+  echo "$RP_OUT" >&2
+  echo "$RP_OUT2" >&2
+  echo "$RP_OUT3" >&2
   fail=1
 fi
 
@@ -11399,7 +11458,7 @@ fi
 
 cleanup_rp
 trap - EXIT
-unset RP_AW RP_FIX RP_OUT RP_EC RP_OUT2 RP_EC2 RP_C1 RP_C2 RP_REPLICA_BLK
+unset RP_AW RP_FIX RP_OUT RP_EC RP_OUT2 RP_EC2 RP_OUT3 RP_EC3 RP_C1 RP_C2 RP_REPLICA_BLK
 unset RP_PREV_TS RP_KEEP_TS
 unset -f rp_reset rp_run rp_seed_last_ok cleanup_rp 2>/dev/null || true
 

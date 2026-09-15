@@ -27,13 +27,14 @@
 #                         no-tunnel host, never an alert. Err-log "Failed to
 #                         read token file" may enrich the body; daemon state is
 #                         the trigger (D-0107 F5).
-#   replica-losing-ground public replica head age grew across consecutive
-#                         successful probes by more than REPLICA_TREND_NOISE_SECS
-#                         (default 120). One sample cannot compute a trend; the
-#                         first successful probe only stores state. A following
-#                         node jitters by seconds; an hourly freeze grows ~3600 s.
-#                         Comparison is exclusive (delta > floor). No Mac-sleep
-#                         grace — the replica is on Render (D-0135).
+#   replica-losing-ground public replica head age grew by more than
+#                         REPLICA_TREND_NOISE_SECS (default 120, exclusive) on
+#                         two consecutive successful probes. One grown delta is
+#                         quiet (redeploy replay: age up for one run, then
+#                         collapses). A later delta at or below the floor
+#                         resets replica_losing_streak. A following node
+#                         jitters by seconds; an hourly freeze grows ~3600 s.
+#                         No Mac-sleep grace — the replica is on Render (D-0135).
 #   replica-head-stale    a single successful probe shows head age >
 #                         REPLICA_HEAD_STALE_SECS (default 10800, exclusive, same
 #                         operator as health-stale). Backstop when trend has no
@@ -749,19 +750,29 @@ def replica_ok(sample):
             prev_ts = float(prev.get("head_ts"))
         except (TypeError, ValueError):
             prev_obs = prev_ts = None
+    lg_streak = int(state.get("replica_losing_streak") or 0)
     if prev_obs is not None and prev_ts is not None:
         prev_age = prev_obs - prev_ts
         delta = age - prev_age
         # Exclusive: jitter of exactly the floor is not losing ground.
+        # One grown delta is a redeploy replay, not an outage; two consecutive
+        # such deltas are. A recovery (delta <= floor) resets the streak.
         if delta > replica_noise_secs:
+            lg_streak = lg_streak + 1
+        else:
+            lg_streak = 0
+        state["replica_losing_streak"] = lg_streak
+        if lg_streak >= 2:
             add("replica-losing-ground",
                 "ForteL2 public replica losing ground",
-                "public replica head age grew by %.0f s across consecutive "
+                "public replica head age grew by %.0f s on %d consecutive "
                 "successful probes (noise floor %d s, exclusive). "
                 "current age %.0f s (head %s); previous age %.0f s. "
                 "gateway %s. Render does not sleep."
-                % (delta, replica_noise_secs, age, number, prev_age,
+                % (delta, lg_streak, replica_noise_secs, age, number, prev_age,
                    REPLICA_RPC_URL))
+    else:
+        state["replica_losing_streak"] = 0
     if age > replica_stale_secs:
         add("replica-head-stale",
             "ForteL2 public replica head stale",
