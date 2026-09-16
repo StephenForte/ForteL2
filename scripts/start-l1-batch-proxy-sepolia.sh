@@ -42,6 +42,10 @@ wait_for_rpc "$L1_RPC_URL" "L1 Sepolia (batch-proxy upstream)"
 export L1_BATCH_PROXY_LISTEN="127.0.0.1:${PROXY_PORT}"
 # L1_RPC_URL is read by the proxy from the environment — never argv.
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 start_bg l1-batch-proxy python3 "$PROXY_PY"
 
 wait_for_rpc "$PROXY_URL" "L1 batch proxy"

@@ -94,6 +94,10 @@ start_optional_sepolia_fault_proofs() {
 
 trap sepolia_start_cleanup ERR
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"
 sleep 3
 # T5-D1: narrow write-facing door (eth/net/web3 allowlist). Full live EL stays on L2_RPC_URL.

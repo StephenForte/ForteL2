@@ -40,6 +40,10 @@ wait_for_rpc "$L2_RPC_URL" "L2 $(fortel2_live_el_pid) (filter upstream)"
 export L2_RPC_FILTER_LISTEN="127.0.0.1:${WRITE_PORT}"
 export L2_RPC_FILTER_UPSTREAM="$L2_RPC_URL"
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 start_bg l2-rpc-filter python3 "$FILTER_PY"
 
 # Filter speaks JSON-RPC; cast block-number is enough to confirm the door is open.

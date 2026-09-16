@@ -22,6 +22,10 @@ ROLLUP="$DEPLOY_DIR/rollup.json"
 
 wait_for_rpc "$L1_RPC_URL" "L1 Anvil"
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 start_bg op-geth op-geth \
   --datadir="$DATADIR" \
   --http \

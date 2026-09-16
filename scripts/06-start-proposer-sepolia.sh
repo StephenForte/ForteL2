@@ -133,6 +133,10 @@ start_proposer_with_retry() {
   return 1
 }
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 if [[ "${USE_CUSTOM_PROPOSER:-0}" == "1" ]]; then
   if [[ "${CONFIRM_CUSTOM_PROPOSER_SEPOLIA:-}" != "1" ]]; then
     echo "ERROR: Sepolia custom proposer is opt-in only." >&2

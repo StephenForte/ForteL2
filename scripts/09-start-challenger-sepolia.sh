@@ -612,6 +612,10 @@ if [[ -n "$PRESTATES_URL" ]]; then
   echo "  prestates-url=$(redact_rpc_url "$PRESTATES_URL")"
 fi
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 start_challenger_with_retry
 
 echo "Sepolia challenger started (pid file $PID_DIR/op-challenger.pid). Signs as CHALLENGER, never PROPOSER."
