@@ -141,7 +141,7 @@ LOGHYG_WRAP="$LOGHYG_FIX/wrap"
 mkdir -p "$LOGHYG_WRAP/scripts"
 cp "$SCRIPT_DIR/../run_dev_wake.sh" "$SCRIPT_DIR/../run_dev_sleep.sh" "$SCRIPT_DIR/../refresh_health.sh" "$LOGHYG_WRAP/"
 cat > "$LOGHYG_WRAP/scripts/dev-sleep.sh" <<'STUBSLEEP'
-#!/bin/zsh
+#!/bin/sh
 echo "child $1 stdout"
 echo "child $1 stderr" >&2
 exit 0
@@ -149,25 +149,44 @@ STUBSLEEP
 chmod +x "$LOGHYG_WRAP/scripts/dev-sleep.sh"
 printf '%s\n' 'print("snapshot-ok")' 'open("data/pipeline-health.json.tmp","w").write("{}\n")' > "$LOGHYG_WRAP/scripts/pipeline-snapshot.py"
 cat > "$LOGHYG_WRAP/scripts/gas-runway.sh" <<'STUBGAS'
-#!/bin/zsh
+#!/bin/sh
 echo gas-ok
 exit 0
 STUBGAS
 cat > "$LOGHYG_WRAP/scripts/funding-watch.sh" <<'STUBFUND'
-#!/bin/zsh
+#!/bin/sh
 echo funding-ok
 exit 0
 STUBFUND
 chmod +x "$LOGHYG_WRAP/scripts/gas-runway.sh" "$LOGHYG_WRAP/scripts/funding-watch.sh"
+
+# Wrappers keep #!/bin/zsh (launchd: fdautil exec /bin/zsh). Bodies are also
+# valid bash so GitHub Ubuntu (no zsh) can syntax-check and run the fixtures.
+loghyg_wrap_interp() {
+  if command -v zsh >/dev/null 2>&1; then
+    zsh "$@"
+  else
+    bash "$@"
+  fi
+}
 LOGHYG_ZSH_OK=1
 for LOGHYG_W in run_dev_wake.sh run_dev_sleep.sh refresh_health.sh; do
-  if ! zsh -n "$SCRIPT_DIR/../$LOGHYG_W"; then
-    echo "FAIL zsh -n $LOGHYG_W" >&2
+  if ! bash -n "$SCRIPT_DIR/../$LOGHYG_W"; then
+    echo "FAIL bash -n $LOGHYG_W (wrappers must stay bash-valid for CI)" >&2
     LOGHYG_ZSH_OK=0
+  elif command -v zsh >/dev/null 2>&1; then
+    if ! zsh -n "$SCRIPT_DIR/../$LOGHYG_W"; then
+      echo "FAIL zsh -n $LOGHYG_W" >&2
+      LOGHYG_ZSH_OK=0
+    fi
   fi
 done
 if [[ "$LOGHYG_ZSH_OK" -eq 1 ]]; then
-  echo "PASS zsh -n on wake/sleep/health wrappers"
+  if command -v zsh >/dev/null 2>&1; then
+    echo "PASS zsh -n on wake/sleep/health wrappers"
+  else
+    echo "PASS zsh -n on wake/sleep/health wrappers (bash -n; zsh not on PATH)"
+  fi
 else
   fail=1
 fi
@@ -183,10 +202,10 @@ loghyg_all_lines_stamped() {
   return 0
 }
 
-LOGHYG_WAKE_OUT="$("$LOGHYG_WRAP/run_dev_wake.sh" 2>&1)" && LOGHYG_WAKE_EC=0 || LOGHYG_WAKE_EC=$?
-LOGHYG_SLEEP_OUT="$("$LOGHYG_WRAP/run_dev_sleep.sh" 2>&1)" && LOGHYG_SLEEP_EC=0 || LOGHYG_SLEEP_EC=$?
+LOGHYG_WAKE_OUT="$(loghyg_wrap_interp "$LOGHYG_WRAP/run_dev_wake.sh" 2>&1)" && LOGHYG_WAKE_EC=0 || LOGHYG_WAKE_EC=$?
+LOGHYG_SLEEP_OUT="$(loghyg_wrap_interp "$LOGHYG_WRAP/run_dev_sleep.sh" 2>&1)" && LOGHYG_SLEEP_EC=0 || LOGHYG_SLEEP_EC=$?
 mkdir -p "$LOGHYG_WRAP/data"
-LOGHYG_HEALTH_OUT="$(cd "$LOGHYG_WRAP" && ./refresh_health.sh 2>&1)" && LOGHYG_HEALTH_EC=0 || LOGHYG_HEALTH_EC=$?
+LOGHYG_HEALTH_OUT="$(cd "$LOGHYG_WRAP" && loghyg_wrap_interp ./refresh_health.sh 2>&1)" && LOGHYG_HEALTH_EC=0 || LOGHYG_HEALTH_EC=$?
 echo "loghyg sample wake: $(printf '%s\n' "$LOGHYG_WAKE_OUT" | head -1)"
 echo "loghyg sample sleep: $(printf '%s\n' "$LOGHYG_SLEEP_OUT" | head -1)"
 echo "loghyg sample health: $(printf '%s\n' "$LOGHYG_HEALTH_OUT" | head -1)"
@@ -200,6 +219,27 @@ if [[ "$LOGHYG_WAKE_EC" -eq 0 && "$LOGHYG_SLEEP_EC" -eq 0 && "$LOGHYG_HEALTH_EC"
 else
   echo "FAIL wrappers must timestamp stdout and stderr (wake_ec=$LOGHYG_WAKE_EC sleep_ec=$LOGHYG_SLEEP_EC health_ec=$LOGHYG_HEALTH_EC)" >&2
   printf '%s\n' "$LOGHYG_WAKE_OUT" "$LOGHYG_SLEEP_OUT" "$LOGHYG_HEALTH_OUT" >&2
+  fail=1
+fi
+
+# Child status must survive the timestamp pipe (03:00 wake: a swallowed
+# non-zero would look like a successful start). Regression for capturing
+# PIPESTATUS/pipestatus as the first statement after the pipe.
+LOGHYG_FAILWRAP="$LOGHYG_FIX/failwrap"
+mkdir -p "$LOGHYG_FAILWRAP/scripts"
+cp "$SCRIPT_DIR/../run_dev_wake.sh" "$LOGHYG_FAILWRAP/"
+cat > "$LOGHYG_FAILWRAP/scripts/dev-sleep.sh" <<'STUBFAIL'
+#!/bin/sh
+echo "child fail stdout"
+echo "child fail stderr" >&2
+exit 3
+STUBFAIL
+chmod +x "$LOGHYG_FAILWRAP/scripts/dev-sleep.sh"
+loghyg_wrap_interp "$LOGHYG_FAILWRAP/run_dev_wake.sh" >/dev/null 2>&1 && LOGHYG_FAIL_EC=0 || LOGHYG_FAIL_EC=$?
+if [[ "$LOGHYG_FAIL_EC" -eq 3 ]]; then
+  echo "PASS launchd wrapper preserves child non-zero exit through the timestamp pipe"
+else
+  echo "FAIL wrapper must exit with child status (got $LOGHYG_FAIL_EC, want 3)" >&2
   fail=1
 fi
 
@@ -300,16 +340,26 @@ print(len(left))
 OWNEDPY
 }
 
+loghyg_snap_left() {
+  local tmp="$1"
+  python3 - "$tmp" <<'SNAPPY'
+import os, sys
+tmp = sys.argv[1]
+print(sum(1 for name in os.listdir(tmp) if name.startswith("fortel2-resolve-games.")))
+SNAPPY
+}
+
 LOGHYG_STMP="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-loghyg-stmp.XXXXXX")"
 register_tmp "$LOGHYG_STMP"
 LOGHYG_OTHER="$(mktemp "${LOGHYG_STMP}/fortel2-resolve-one.XXXXXX")"
 echo planted-other > "$LOGHYG_OTHER"
 LOGHYG_SOUT="$(loghyg_rg_run "$LOGHYG_RG_FIX/success" "${LOGHYG_STMP}/")" && LOGHYG_SEC=0 || LOGHYG_SEC=$?
 LOGHYG_SLEFT="$(loghyg_owned_left "$LOGHYG_STMP" "$LOGHYG_OTHER")"
-if [[ "$LOGHYG_SEC" -eq 0 && "$LOGHYG_SLEFT" -eq 0 && -f "$LOGHYG_OTHER" ]]; then
+LOGHYG_SSNAP="$(loghyg_snap_left "$LOGHYG_STMP")"
+if [[ "$LOGHYG_SEC" -eq 0 && "$LOGHYG_SLEFT" -eq 0 && "$LOGHYG_SSNAP" -eq 0 && -f "$LOGHYG_OTHER" ]]; then
   echo "PASS resolver removes its temp on success; other invocation's file survives"
 else
-  echo "FAIL resolver success must unlink its own temp only (ec=$LOGHYG_SEC left=$LOGHYG_SLEFT other=$([[ -f $LOGHYG_OTHER ]] && echo yes || echo no))" >&2
+  echo "FAIL resolver success must unlink its own temp only (ec=$LOGHYG_SEC left=$LOGHYG_SLEFT snap=$LOGHYG_SSNAP other=$([[ -f $LOGHYG_OTHER ]] && echo yes || echo no))" >&2
   printf '%s\n' "$LOGHYG_SOUT" >&2
   fail=1
 fi
@@ -320,10 +370,11 @@ LOGHYG_FOTHER="$(mktemp "${LOGHYG_FTMP}/fortel2-resolve-one.XXXXXX")"
 echo planted-fail > "$LOGHYG_FOTHER"
 LOGHYG_FOUT="$(loghyg_rg_run "$LOGHYG_RG_FIX/fail" "${LOGHYG_FTMP}/")" && LOGHYG_FEC=0 || LOGHYG_FEC=$?
 LOGHYG_FLEFT="$(loghyg_owned_left "$LOGHYG_FTMP" "$LOGHYG_FOTHER")"
-if [[ "$LOGHYG_FEC" -ne 0 && "$LOGHYG_FLEFT" -eq 0 && -f "$LOGHYG_FOTHER" ]]; then
+LOGHYG_FSNAP="$(loghyg_snap_left "$LOGHYG_FTMP")"
+if [[ "$LOGHYG_FEC" -ne 0 && "$LOGHYG_FLEFT" -eq 0 && "$LOGHYG_FSNAP" -eq 0 && -f "$LOGHYG_FOTHER" ]]; then
   echo "PASS resolver removes its temp on failure; other invocation's file survives"
 else
-  echo "FAIL resolver failure must unlink its own temp only (ec=$LOGHYG_FEC left=$LOGHYG_FLEFT)" >&2
+  echo "FAIL resolver failure must unlink its own temp only (ec=$LOGHYG_FEC left=$LOGHYG_FLEFT snap=$LOGHYG_FSNAP)" >&2
   printf '%s\n' "$LOGHYG_FOUT" >&2
   fail=1
 fi
@@ -378,9 +429,10 @@ left = [
     if n.startswith("fortel2-resolve-one.")
     and os.path.realpath(os.path.join(tmp, n)) != os.path.realpath(other)
 ]
-print("owned_before=%d left=%d other=%d ec=%s" % (
-    len(owned), len(left), int(os.path.isfile(other)), p.returncode))
-sys.exit(0 if owned and len(left) == 0 and os.path.isfile(other) else 1)
+snap_left = [n for n in os.listdir(tmp) if n.startswith("fortel2-resolve-games.")]
+print("owned_before=%d left=%d other=%d snap=%d ec=%s" % (
+    len(owned), len(left), int(os.path.isfile(other)), len(snap_left), p.returncode))
+sys.exit(0 if owned and len(left) == 0 and len(snap_left) == 0 and os.path.isfile(other) else 1)
 INTRPY
 )" && LOGHYG_IEC=0 || LOGHYG_IEC=$?
 if [[ "$LOGHYG_IEC" -eq 0 ]]; then
@@ -494,13 +546,13 @@ if printf '%s\n' "$LOGHYG_MUTDRV_OUT" | grep -q '^FAIL '; then
 fi
 LOGHYG_MUT_WRAP="$LOGHYG_WRAP/run_dev_wake.mut.sh"
 cat > "$LOGHYG_MUT_WRAP" <<'MUT4'
-#!/bin/zsh
+#!/bin/sh
 cd "$(dirname "$0")" || exit 1
 export FORTEL2_ENV="${FORTEL2_ENV:-.env.sepolia}"
 exec ./scripts/dev-sleep.sh wake
 MUT4
 chmod +x "$LOGHYG_MUT_WRAP"
-LOGHYG_MW_OUT="$("$LOGHYG_MUT_WRAP" 2>&1)" || true
+LOGHYG_MW_OUT="$(loghyg_wrap_interp "$LOGHYG_MUT_WRAP" 2>&1)" || true
 if loghyg_all_lines_stamped "$LOGHYG_MW_OUT"; then
   echo "FAIL mutation stripping wrapper timestamps must go red" >&2
   printf '%s\n' "$LOGHYG_MW_OUT" >&2
@@ -513,10 +565,11 @@ cleanup_loghyg
 unset LOGHYG_FIX LOGHYG_UNDER LOGHYG_OVER LOGHYG_KEEP LOGHYG_I LOGHYG_STARTS LOGHYG_S LOGHYG_START_OK
 unset LOGHYG_TS_RE LOGHYG_WRAP LOGHYG_ZSH_OK LOGHYG_W LOGHYG_WAKE_OUT LOGHYG_SLEEP_OUT LOGHYG_HEALTH_OUT
 unset LOGHYG_WAKE_EC LOGHYG_SLEEP_EC LOGHYG_HEALTH_EC
+unset LOGHYG_FAILWRAP LOGHYG_FAIL_EC
 unset LOGHYG_RG LOGHYG_RG_PY_DIR LOGHYG_RG_PATH LOGHYG_RG_FIX
-unset LOGHYG_STMP LOGHYG_OTHER LOGHYG_SOUT LOGHYG_SEC LOGHYG_SLEFT
-unset LOGHYG_FTMP LOGHYG_FOTHER LOGHYG_FOUT LOGHYG_FEC LOGHYG_FLEFT
+unset LOGHYG_STMP LOGHYG_OTHER LOGHYG_SOUT LOGHYG_SEC LOGHYG_SLEFT LOGHYG_SSNAP
+unset LOGHYG_FTMP LOGHYG_FOTHER LOGHYG_FOUT LOGHYG_FEC LOGHYG_FLEFT LOGHYG_FSNAP
 unset LOGHYG_ITMP LOGHYG_IOTHER LOGHYG_IJSON LOGHYG_IEC
 unset LOGHYG_MUT LOGHYG_MUT_RG LOGHYG_MTMP LOGHYG_MOTHER LOGHYG_MLEFT
 unset LOGHYG_MUT_GLOB LOGHYG_GTMP LOGHYG_GOTHER LOGHYG_MUT_WRAP LOGHYG_MW_OUT
-unset -f cleanup_loghyg loghyg_live_reclaim loghyg_all_lines_stamped loghyg_rg_run loghyg_owned_left 2>/dev/null || true
+unset -f cleanup_loghyg loghyg_live_reclaim loghyg_all_lines_stamped loghyg_rg_run loghyg_owned_left loghyg_snap_left loghyg_wrap_interp 2>/dev/null || true

@@ -3,9 +3,10 @@
 # Runs pipeline-snapshot.py locally (where L2 RPCs on 127.0.0.1 are reachable)
 # and writes data/pipeline-health.json atomically. Read-only: never starts/stops the chain.
 # Every line launchd captures must be datable without launchctl (D-0138).
+# Launchd invokes this with /bin/zsh; body stays valid bash for CI (no zsh).
 cd "$(dirname "$0")" || exit 1
 timestamp_lines() {
-  while IFS= read -r line || [[ -n "$line" ]]; do
+  while IFS= read -r line || [ -n "$line" ]; do
     printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$line"
   done
 }
@@ -44,4 +45,8 @@ if [ ! -f data/pipeline-health.json ]; then
 fi
 exit "$snap_rc"
 } 2>&1 | timestamp_lines
-exit "${pipestatus[1]}"
+# FIRST statement after the pipe: assignment RHS expands pipestatus before any
+# command clobbers it. bash PIPESTATUS is 0-indexed; zsh pipestatus is 1-indexed.
+# Do not insert a command (including `[`) between the pipe and this line.
+_wrap_rc="${PIPESTATUS[0]-${pipestatus[1]-0}}"
+exit "${_wrap_rc}"

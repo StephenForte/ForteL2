@@ -1171,7 +1171,6 @@ PY
 # Temp file for decide/confirm JSON. Owned path only — never rm by glob
 # (a concurrent hourly/manual run has its own fortel2-resolve-one.*).
 RESOLVE_GAMES_GAME_FILE=""
-_RG_PREV_EXIT_CMD=""
 _RG_GAME_FILE_TRAP_INSTALLED=0
 cleanup_resolve_game_file() {
   if [[ -n "${RESOLVE_GAMES_GAME_FILE:-}" ]]; then
@@ -1179,17 +1178,18 @@ cleanup_resolve_game_file() {
     RESOLVE_GAMES_GAME_FILE=""
   fi
 }
+# Compose with cleanup_snap by name — do not parse `trap -p` (a pipeline
+# runs trap -p in a subshell and drops the parent EXIT on macOS bash 3.2).
 _rg_on_exit() {
   cleanup_resolve_game_file
-  if [[ -n "${_RG_PREV_EXIT_CMD:-}" ]]; then
-    eval "$_RG_PREV_EXIT_CMD"
+  if declare -F cleanup_snap >/dev/null 2>&1; then
+    cleanup_snap
   fi
 }
 _rg_install_game_file_trap() {
   if [[ "$_RG_GAME_FILE_TRAP_INSTALLED" -eq 1 ]]; then
     return 0
   fi
-  _RG_PREV_EXIT_CMD="$(trap -p EXIT 2>/dev/null | sed -n "s/^trap -- '\(.*\)' EXIT$/\1/p")"
   trap '_rg_on_exit' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
