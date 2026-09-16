@@ -593,11 +593,11 @@ def _exex_last_panic(text):
     return last
 
 def _exex_quote(snippet):
-    # Keep the END of ctx. Looking 1500 bytes backward from the panic
-    # marker is correct (reth prints the crash before "Critical task
-    # `exex` panicked"); truncating the start of that window was not —
-    # the first 240 chars were padding, so an unclassified alert quoted
-    # noise and sent the operator back into a 1.6 GB log.
+    # Keep the END of the panic-local snippet. Classification still looks
+    # 1500 bytes backward (reth prints the crash before "Critical task
+    # `exex` panicked"); the quote must not start at that look-back, and
+    # must not be the last 240 of a window that extends 500 bytes past
+    # the marker (shutdown lines would displace the panic).
     one = re.sub(r"\s+", " ", snippet).strip()
     if len(one) > 240:
         one = "…" + one[-240:]
@@ -610,7 +610,8 @@ def _exex_body_from_region(region):
     lo = max(0, idx - 1500)
     hi = min(len(region), idx + 500)
     ctx = region[lo:hi]
-    quote = _exex_quote(ctx)
+    panic_at = idx - lo
+    quote = _exex_quote(ctx[max(0, panic_at - 200): min(len(ctx), panic_at + 80)])
     # Opposite remedies (D-0114 F3 vs D-0138). Classify from the LAST panic
     # in the recency window, never from an earlier line in the same tail.
     if "Parent hash mismatch" in ctx:

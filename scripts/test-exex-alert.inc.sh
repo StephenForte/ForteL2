@@ -95,19 +95,20 @@ exex_mark() {
 exex_write_log() {
   printf '%s\n' "$1" > "$EXEX_FIX/logs/op-reth.log"
 }
-# Prefix enough noise that first-240 truncation of ctx cannot contain the
-# panic. ctx looks 1500 bytes backward from the marker; 40 status lines
-# put the panic at the end of that window (reviewer's D-0138 measurement).
+# Prefix enough noise that first-240 of the 1500-byte look-back is padding,
+# and suffix enough that last-240 of idx+500 lookahead is shutdown fill.
+# The quote is taken around the marker, so the panic must still appear.
 exex_write_noisy_log() {
   python3 - "$EXEX_FIX/logs/op-reth.log" "$EXEX_START" "$1" <<'PY'
 import sys
 path, start, panic = sys.argv[1], sys.argv[2], sys.argv[3]
-noise = (
+before = (
     "INFO Block added to canonical chain number=999 hash=0xabc "
     "gas_used=54.62Kgas\n"
 ) * 40
+after = ("ERROR shutting down due to error peer=0xdeadbeef\n") * 20
 with open(path, "w") as fh:
-    fh.write(start + "\n" + noise + panic + "\n")
+    fh.write(start + "\n" + before + panic + "\n" + after)
 PY
 }
 exex_matched_quote() {
@@ -264,7 +265,7 @@ EXEX_OUT="$(exex_run ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4t
 EXEX_BODY="$(cat "$EXEX_FIX/mock/osascript.argv" 2>/dev/null || true)"
 EXEX_QUOTE="$(printf '%s' "$EXEX_BODY" | exex_matched_quote)"
 if [[ "$EXEX_EC" -eq 0 ]] \
-  && printf '%s' "$EXEX_QUOTE" | grep -q 'at block 1045407' \
+  && printf '%s' "$EXEX_QUOTE" | grep -q 'expected 0x21da8fae' \
   && printf '%s' "$EXEX_QUOTE" | grep -q 'Critical task `exex` panicked'; then
   echo "PASS alert-watch ExEx matched quote contains the parent-hash panic"
   echo "QUOTE parent-hash: $EXEX_QUOTE"
