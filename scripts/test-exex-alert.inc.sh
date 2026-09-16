@@ -71,6 +71,10 @@ ERROR Critical task `exex` panicked
 ERROR shutting down due to error'
 EXEX_PANIC_INIT='2026-08-31T15:46:28Z ERROR Critical task `exex` panicked:
   `ExEx proofs-history crashed: Proofs storage not initialized`'
+EXEX_PANIC_OTHER='thread '"'"'tokio-rt'"'"' panicked at crates/node/builder/src/launch/exex.rs:130:41:
+ExEx proofs-history crashed: I/O error opening proofs store
+ERROR Critical task `exex` panicked
+ERROR shutting down due to error'
 
 exex_reset() {
   rm -f "$EXEX_FIX/mock"/curl.argv "$EXEX_FIX/mock"/curl.calls \
@@ -90,6 +94,29 @@ exex_mark() {
 }
 exex_write_log() {
   printf '%s\n' "$1" > "$EXEX_FIX/logs/op-reth.log"
+}
+# Prefix enough noise that first-240 truncation of ctx cannot contain the
+# panic. ctx looks 1500 bytes backward from the marker; 40 status lines
+# put the panic at the end of that window (reviewer's D-0138 measurement).
+exex_write_noisy_log() {
+  python3 - "$EXEX_FIX/logs/op-reth.log" "$EXEX_START" "$1" <<'PY'
+import sys
+path, start, panic = sys.argv[1], sys.argv[2], sys.argv[3]
+noise = (
+    "INFO Block added to canonical chain number=999 hash=0xabc "
+    "gas_used=54.62Kgas\n"
+) * 40
+with open(path, "w") as fh:
+    fh.write(start + "\n" + noise + panic + "\n")
+PY
+}
+exex_matched_quote() {
+  python3 -c '
+import re, sys
+text = sys.stdin.read()
+m = re.search(r"Matched: (.*?)(?:\. Remedy:|\. Do not guess)", text, re.S)
+sys.stdout.write(m.group(1) if m else "")
+'
 }
 exex_run() {
   env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL \
@@ -223,6 +250,69 @@ if [[ "$EXEX_EC" -eq 0 ]] \
 else
   echo "FAIL a fresh Proofs storage not initialized with op-reth down must enrich stack-down as init (ec=$EXEX_EC)" >&2
   echo "$EXEX_OUT" >&2
+  echo "$EXEX_BODY" >&2
+  fail=1
+fi
+
+# Quote must contain the panic, not the 1500-byte look-back padding.
+# Dedicated noisy fixtures: first-240 truncation of ctx is noise.
+exex_reset
+exex_mark $EXEX_CORE
+exex_write_noisy_log "$EXEX_PANIC_DIV"
+EXEX_OUT="$(exex_run ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$EXEX_AW" 2>&1)" && EXEX_EC=0 || EXEX_EC=$?
+EXEX_BODY="$(cat "$EXEX_FIX/mock/osascript.argv" 2>/dev/null || true)"
+EXEX_QUOTE="$(printf '%s' "$EXEX_BODY" | exex_matched_quote)"
+if [[ "$EXEX_EC" -eq 0 ]] \
+  && printf '%s' "$EXEX_QUOTE" | grep -q 'at block 1045407' \
+  && printf '%s' "$EXEX_QUOTE" | grep -q 'Critical task `exex` panicked'; then
+  echo "PASS alert-watch ExEx matched quote contains the parent-hash panic"
+  echo "QUOTE parent-hash: $EXEX_QUOTE"
+else
+  echo "FAIL parent-hash Matched quote must contain the panic text, not look-back padding (ec=$EXEX_EC)" >&2
+  echo "QUOTE=$EXEX_QUOTE" >&2
+  echo "$EXEX_BODY" >&2
+  fail=1
+fi
+
+exex_reset
+rm -f "$EXEX_FIX/pids"/*.pid
+exex_write_noisy_log "$EXEX_PANIC_INIT"
+EXEX_OUT="$(exex_run ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$EXEX_AW" 2>&1)" && EXEX_EC=0 || EXEX_EC=$?
+EXEX_BODY="$(cat "$EXEX_FIX/mock/osascript.argv" 2>/dev/null || true)"
+EXEX_QUOTE="$(printf '%s' "$EXEX_BODY" | exex_matched_quote)"
+if [[ "$EXEX_EC" -eq 0 ]] \
+  && printf '%s' "$EXEX_QUOTE" | grep -q 'Proofs storage not initialized' \
+  && printf '%s' "$EXEX_QUOTE" | grep -q 'Critical task `exex` panicked'; then
+  echo "PASS alert-watch ExEx matched quote contains the uninitialized panic"
+  echo "QUOTE uninitialized: $EXEX_QUOTE"
+else
+  echo "FAIL uninitialized Matched quote must contain the panic text, not look-back padding (ec=$EXEX_EC)" >&2
+  echo "QUOTE=$EXEX_QUOTE" >&2
+  echo "$EXEX_BODY" >&2
+  fail=1
+fi
+
+exex_reset
+rm -f "$EXEX_FIX/pids"/*.pid
+exex_write_noisy_log "$EXEX_PANIC_OTHER"
+EXEX_OUT="$(exex_run ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$EXEX_AW" 2>&1)" && EXEX_EC=0 || EXEX_EC=$?
+EXEX_BODY="$(cat "$EXEX_FIX/mock/osascript.argv" 2>/dev/null || true)"
+EXEX_QUOTE="$(printf '%s' "$EXEX_BODY" | exex_matched_quote)"
+if [[ "$EXEX_EC" -eq 0 ]] \
+  && [[ "$EXEX_OUT" == *"condition stack-down"* ]] \
+  && printf '%s' "$EXEX_BODY" | grep -q 'unclassified' \
+  && printf '%s' "$EXEX_QUOTE" | grep -q 'I/O error opening proofs store' \
+  && printf '%s' "$EXEX_QUOTE" | grep -q 'Critical task `exex` panicked' \
+  && ! printf '%s' "$EXEX_BODY" | grep -q 'divergent' \
+  && ! printf '%s' "$EXEX_BODY" | grep -q 'not initialized'; then
+  echo "PASS alert-watch ExEx matched quote contains the unclassified panic"
+  echo "QUOTE unclassified: $EXEX_QUOTE"
+else
+  echo "FAIL unclassified Matched quote must contain the panic text, not look-back padding (ec=$EXEX_EC)" >&2
+  echo "QUOTE=$EXEX_QUOTE" >&2
   echo "$EXEX_BODY" >&2
   fail=1
 fi
@@ -458,7 +548,8 @@ else
 fi
 
 cleanup_exex
-unset EXEX_AW EXEX_FIX EXEX_START EXEX_PANIC_DIV EXEX_PANIC_INIT EXEX_CORE
-unset EXEX_OUT EXEX_EC EXEX_BODY EXEX_C1 EXEX_C2 EXEX_SRC_OK EXEX_UNREAD
+unset EXEX_AW EXEX_FIX EXEX_START EXEX_PANIC_DIV EXEX_PANIC_INIT EXEX_PANIC_OTHER EXEX_CORE
+unset EXEX_OUT EXEX_EC EXEX_BODY EXEX_QUOTE EXEX_C1 EXEX_C2 EXEX_SRC_OK EXEX_UNREAD
 unset _exex_help_out _exex_help_rc
-unset -f cleanup_exex exex_reset exex_mark exex_write_log exex_run 2>/dev/null || true
+unset -f cleanup_exex exex_reset exex_mark exex_write_log exex_write_noisy_log \
+  exex_matched_quote exex_run 2>/dev/null || true

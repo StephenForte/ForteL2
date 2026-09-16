@@ -593,9 +593,14 @@ def _exex_last_panic(text):
     return last
 
 def _exex_quote(snippet):
-    one = " ".join(snippet.split())
+    # Keep the END of ctx. Looking 1500 bytes backward from the panic
+    # marker is correct (reth prints the crash before "Critical task
+    # `exex` panicked"); truncating the start of that window was not —
+    # the first 240 chars were padding, so an unclassified alert quoted
+    # noise and sent the operator back into a 1.6 GB log.
+    one = re.sub(r"\s+", " ", snippet).strip()
     if len(one) > 240:
-        one = one[:237] + "..."
+        one = "…" + one[-240:]
     return one
 
 def _exex_body_from_region(region):
