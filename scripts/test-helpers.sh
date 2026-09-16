@@ -28,6 +28,53 @@ assert_false() {
   fi
 }
 
+# Accumulating EXIT cleanup. Bash `trap … EXIT` REPLACES the handler; it does
+# not append. Every fixture cleanup in this file must go through register_cleanup
+# and/or register_tmp. Do not add `trap foo EXIT` or `trap - EXIT` later — either
+# one drops the list.
+#
+# Future appenders (new fixture block above the final fail check):
+#   FOO_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-foo.XXXXXX")"
+#   cleanup_foo() { rm -rf "$FOO_FIX"; }
+#   register_cleanup cleanup_foo
+#   register_tmp "$FOO_FIX"
+# Explicit cleanup_foo at end of the block is fine (idempotent). Never trap.
+_TEST_HELPER_CLEANUPS=()
+_TEST_HELPER_RM_PATHS=()
+register_cleanup() {
+  _TEST_HELPER_CLEANUPS+=("$1")
+}
+register_tmp() {
+  _TEST_HELPER_RM_PATHS+=("$1")
+}
+_test_helpers_run_cleanups() {
+  local i fn p
+  i=${#_TEST_HELPER_CLEANUPS[@]}
+  # while-not-for: bash `for ((i--;))` with `set -e` aborts when the last
+  # decrement yields 0.
+  while [ "$i" -gt 0 ]; do
+    i=$((i - 1))
+    fn="${_TEST_HELPER_CLEANUPS[i]}"
+    if declare -F "$fn" >/dev/null 2>&1; then
+      "$fn" || true
+    fi
+  done
+  i=${#_TEST_HELPER_RM_PATHS[@]}
+  while [ "$i" -gt 0 ]; do
+    i=$((i - 1))
+    p="${_TEST_HELPER_RM_PATHS[i]}"
+    if [ -n "$p" ] && [ "$p" != / ]; then
+      rm -rf -- "$p"
+    fi
+  done
+}
+trap _test_helpers_run_cleanups EXIT
+# INT/TERM → exit so the EXIT trap still drains. SIGINT to the bash pid
+# alone can leave a child running and delay EXIT; process-group INT is
+# the Ctrl-C equivalent (verified in this task's interrupt measurement).
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # Wei-safe unsigned compare (deposit poll must require increase, not inequality).
 assert_true "uint_gt larger" uint_gt "1000000000000000001" "1000000000000000000"
 assert_false "uint_gt equal" uint_gt "42" "42"
@@ -222,6 +269,7 @@ _stop_mock_jsonrpc() {
 }
 
 MOCK_RPC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-mock-rpc.XXXXXX")"
+register_tmp "$MOCK_RPC_DIR"
 MOCK_PORT_FILE="$MOCK_RPC_DIR/port"
 _start_mock_jsonrpc opnode "$MOCK_PORT_FILE"
 MOCK_URL="http://127.0.0.1:$(cat "$MOCK_PORT_FILE")"
@@ -357,11 +405,13 @@ fi
 
 # gen-viewer-config.sh against a fixture tree (no live chain)
 FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-viewer-XXXXXX")"
+register_tmp "$FIXTURE"
 SEPOLIA_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-sepolia-env-XXXXXX")"
+register_tmp "$SEPOLIA_FIXTURE"
 cleanup_fixtures() {
   rm -rf "$FIXTURE" "$SEPOLIA_FIXTURE"
 }
-trap cleanup_fixtures EXIT
+register_cleanup cleanup_fixtures
 mkdir -p "$FIXTURE/deployments/.deployer" "$FIXTURE/viewer" "$FIXTURE/data" "$FIXTURE/scripts"
 cp "$SCRIPT_DIR/lib.sh" "$SCRIPT_DIR/gen-viewer-config.sh" "$FIXTURE/scripts/"
 cat > "$FIXTURE/.env" <<EOF
@@ -824,6 +874,7 @@ fi
 
 # demo-checklist Sepolia path: --print with fixture env mentions Sepolia (not Anvil five-proc list)
 SEPOLIA_DEMO_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-demo-sepolia-XXXXXX")"
+register_tmp "$SEPOLIA_DEMO_FIXTURE"
 mkdir -p "$SEPOLIA_DEMO_FIXTURE/deployments/sepolia/.deployer" "$SEPOLIA_DEMO_FIXTURE/data"
 cat > "$SEPOLIA_DEMO_FIXTURE/.env.sepolia" <<EOF
 FORTEL2_ROOT=$SEPOLIA_DEMO_FIXTURE
@@ -989,9 +1040,9 @@ fi
 # gas-runway.sh: analyze-only fixtures (no RPC / cast / Sepolia env).
 GAS_RUNWAY="$SCRIPT_DIR/gas-runway.sh"
 GAS_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-gas-runway.XXXXXX")"
+register_tmp "$GAS_FIXTURE_DIR"
 cleanup_gas_fixtures() { rm -rf "$GAS_FIXTURE_DIR"; }
-trap cleanup_gas_fixtures EXIT
-
+register_cleanup cleanup_gas_fixtures
 # Two samples 1 h apart, 0.01 ETH consumed → ~0.24 ETH/day; ~3.5 days to 0.15 floor.
 cat >"$GAS_FIXTURE_DIR/burn.jsonl" <<'EOF'
 {"ts":1000000000,"batcher_wei":"1000000000000000000","proposer_wei":"1000000000000000000","l2_block":100}
@@ -1077,14 +1128,12 @@ else
 fi
 
 cleanup_gas_fixtures
-trap - EXIT
-
 # rail-interface-check.sh: corrupted proxy address fails; clean repo file passes.
 RAIL_CHECK="$SCRIPT_DIR/rail-interface-check.sh"
 RAIL_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-rail-iface.XXXXXX")"
+register_tmp "$RAIL_FIXTURE_DIR"
 cleanup_rail_fixtures() { rm -rf "$RAIL_FIXTURE_DIR"; }
-trap cleanup_rail_fixtures EXIT
-
+register_cleanup cleanup_rail_fixtures
 cp "$SCRIPT_DIR/../deployments/rail-interface.json" "$RAIL_FIXTURE_DIR/rail-interface.json"
 # Flip one hex digit in optimismPortalProxy (…c624 → …c625).
 python3 -c '
@@ -1122,13 +1171,12 @@ else
 fi
 
 cleanup_rail_fixtures
-trap - EXIT
-
 # --- funding-watch.sh: external funder (chainbank-wallet-reconciler) liveness ---------
 FW_CHECK="$SCRIPT_DIR/funding-watch.sh"
 FW_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-funding-watch.XXXXXX")"
+register_tmp "$FW_FIXTURE_DIR"
 cleanup_fw_fixtures() { rm -rf "$FW_FIXTURE_DIR"; }
-trap cleanup_fw_fixtures EXIT
+register_cleanup cleanup_fw_fixtures
 FW_NOW="$(date +%s)"
 
 # Below the 0.6 policy for a full day with no top-up => funder presumed dead.
@@ -1321,8 +1369,6 @@ else
 fi
 
 cleanup_fw_fixtures
-trap - EXIT
-
 # --- T5-D1: write-facing JSON-RPC method filter (eth/net/web3 allowlist) ---
 FILTER_PY="$SCRIPT_DIR/rpc-method-filter.py"
 FILTER_START="$SCRIPT_DIR/07-start-rpc-filter-sepolia.sh"
@@ -1945,6 +1991,7 @@ if [[ -z "$_F711_PREFLIGHT_FN" ]] || ! awk '
   fail=1
 else
   _f711_tmp="$(mktemp -d)"
+  register_tmp "$_f711_tmp"
   _f711_setup_mocks "$_f711_tmp" "zero_impl_8" ""
   _f711_rc=0
   _f711_out="$(_f711_run_preflight cannon-kona "" "" "$_f711_tmp" 2>&1)" || _f711_rc=$?
@@ -2043,6 +2090,7 @@ fi
 
 # Functional retry: extract helpers, stub start_bg so the "daemon" dies inside grace.
 _C429_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-challenger-429.XXXXXX")"
+register_tmp "$_C429_FIX"
 _C429_FN="${_C429_FIX}/fn.sh"
 # Extract the three helpers (alive / clear / retry) plus their call site is not needed.
 awk '
@@ -2191,6 +2239,7 @@ else
 fi
 
 _P429_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-proposer-429.XXXXXX")"
+register_tmp "$_P429_FIX"
 _P429_FN="${_P429_FIX}/fn.sh"
 awk '
   /^apply_proposer_start_retry_defaults\(\)/ { keep=1 }
@@ -2798,6 +2847,7 @@ _F711_VARS=(
 )
 _f711_fn="$(awk '/^# >>> F7-11$/,/^# <<< F7-11$/' "$DEPLOY_SEPOLIA")"
 _f711_dir="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-f711-XXXXXX")"
+register_tmp "$_f711_dir"
 _f711_rc=""
 _f711_out=""
 _f711_write_complete() {
@@ -3187,6 +3237,7 @@ else
   # bypassed (D-0065 Finding on vacuous tests).
   _f711_abs="$(mktemp "${TMPDIR:-/tmp}/fortel2-f711-env.XXXXXX")"
   _f711_root="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-f711-root.XXXXXX")"
+  register_tmp "$_f711_root"
   {
     echo "FORTEL2_ROOT=${_f711_root}"
     echo "DATA_DIR=${_f711_root}/data"
@@ -3298,8 +3349,9 @@ PY
 # another checkout (Codex P2 on #118).
 P7_CHECK="$SCRIPT_DIR/phase7-gate-parity.sh"
 P7_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-p7-gates.XXXXXX")"
+register_tmp "$P7_FIXTURE_DIR"
 cleanup_p7_fixtures() { rm -rf "$P7_FIXTURE_DIR"; }
-trap cleanup_p7_fixtures EXIT
+register_cleanup cleanup_p7_fixtures
 P7_ENV_CLEAR=(env -u FORTEL2_ENV -u FORTEL2_ROOT -u FORTEL2_ENV_FILE)
 
 cp "$SCRIPT_DIR/../README.md" "$P7_FIXTURE_DIR/README.md"
@@ -3507,14 +3559,12 @@ else
 fi
 
 cleanup_p7_fixtures
-trap - EXIT
-
 # resolve-games-sepolia.sh: analyze-only fixtures (no RPC / cast / Sepolia env).
 RESOLVE_GAMES="$SCRIPT_DIR/resolve-games-sepolia.sh"
 RG_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-resolve-games.XXXXXX")"
+register_tmp "$RG_FIXTURE_DIR"
 cleanup_rg_fixtures() { rm -rf "$RG_FIXTURE_DIR"; }
-trap cleanup_rg_fixtures EXIT
-
+register_cleanup cleanup_rg_fixtures
 # now=1000000, maxClock=7200, finality=1800, weth_delay=3600, bond=0.08 ETH
 # 0 fully claimed · 1 expired IN_PROGRESS · 2 resolved, not finalized
 # 3 unlocked, inside WETH delay · 4 unexpired clock · 5/6 more expired
@@ -4305,8 +4355,6 @@ else
 fi
 
 cleanup_rg_fixtures
-trap - EXIT
-
 # create-bad-proposal-sepolia.sh: empty FORWARD[@] crash (D-0083 Finding 1) and
 # silent game-type default (Finding 5). Structural greps cannot catch the crash;
 # this harness stubs go/cast/jq via BASH_ENV so the wrapper reaches `go run`
@@ -4314,9 +4362,9 @@ trap - EXIT
 # lib.sh's /opt/homebrew/bin prepend).
 BP_WRAPPER="$SCRIPT_DIR/create-bad-proposal-sepolia.sh"
 BP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-bad-proposal.XXXXXX")"
+register_tmp "$BP_FIX"
 cleanup_bp_fix() { rm -rf "$BP_FIX"; }
-trap cleanup_bp_fix EXIT
-
+register_cleanup cleanup_bp_fix
 mkdir -p "$BP_FIX/proposer" "$BP_FIX/data" "$BP_FIX/deployments/sepolia/.deployer"
 printf '%s\n' '{"DisputeGameFactoryProxy":"0x0000000000000000000000000000000000000001"}' \
   > "$BP_FIX/deployments/sepolia/deployments.json"
@@ -4496,8 +4544,6 @@ else
 fi
 
 cleanup_bp_fix
-trap - EXIT
-
 # deposit-eth-sepolia.sh: refuse a mismatched ADMIN_PRIVATE_KEY / ADMIN_ADDRESS
 # before any L1 send (D-0064 Finding 4 / D-0069 Finding 6). Generate the
 # keypair at runtime — never a key literal in this file. Mirror F7-10.
@@ -4591,8 +4637,9 @@ else
   # Full-script stub path: a missing check would reach cast send. sleep is a
   # no-op so a misplaced check after wait_for_rpc still fails fast via markers.
   _DEP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-deposit-pair.XXXXXX")"
+  register_tmp "$_DEP_FIX"
   cleanup_dep_fix() { rm -rf "$_DEP_FIX"; }
-  trap cleanup_dep_fix EXIT
+  register_cleanup cleanup_dep_fix
   mkdir -p "$_DEP_FIX/deployments/sepolia/.deployer" "$_DEP_FIX/data"
   printf '%s\n' '{"L1StandardBridgeProxy":"0x0000000000000000000000000000000000000001","OptimismPortalProxy":"0x0000000000000000000000000000000000000002"}' \
     > "$_DEP_FIX/deployments/sepolia/deployments.json"
@@ -4651,8 +4698,6 @@ EOS
     fail=1
   fi
   cleanup_dep_fix
-  trap - EXIT
-
   unset _dep_key _dep_addr _dep_addr_lc _dep_other_addr _dep_match_out _dep_mismatch_out _dep_script_out _dep_script_rc
 fi
 unset _dep_fn _dep_rc _dep_out
@@ -4660,8 +4705,9 @@ unset _dep_fn _dep_rc _dep_out
 # --- alert-watch.sh: funding FAIL + dead recovery agent (offline, PATH shims) ---
 AW_CHECK="$SCRIPT_DIR/alert-watch.sh"
 AW_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-alert-watch.XXXXXX")"
+register_tmp "$AW_FIX"
 cleanup_aw_fix() { rm -rf "$AW_FIX"; }
-trap cleanup_aw_fix EXIT
+register_cleanup cleanup_aw_fix
 AW_SHIM="$AW_FIX/shim"
 AW_MOCK="$AW_FIX/mock"
 mkdir -p "$AW_SHIM" "$AW_MOCK" "$AW_FIX/data" "$AW_FIX/bin" "$AW_FIX/deploy"
@@ -5018,7 +5064,6 @@ else
 fi
 
 cleanup_aw_fix
-trap - EXIT
 unset AW_CHECK AW_FIX AW_SHIM AW_MOCK AW_TOKEN AW_REASON AW_TO AW_OUT AW_EC AW_HAY
 unset AW_C1 AW_C2 AW_C3 AW_B2 AW_B3 AW_WARN_OUT AW_WARN_EC AW_INS_OUT AW_INS_EC
 unset AW_BAD_OUT AW_BAD_EC AW_MISS_B
@@ -5114,8 +5159,9 @@ fi
 
 # Loader duplicate detection: extract the marked block (names only; never values).
 _kg_dup_dir="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-env-dup.XXXXXX")"
+register_tmp "$_kg_dup_dir"
 cleanup_kg_dup() { rm -rf "$_kg_dup_dir"; }
-trap cleanup_kg_dup EXIT
+register_cleanup cleanup_kg_dup
 _kg_dup_run() {
   local file="$1"
   local snippet="$_kg_dup_dir/snippet.sh"
@@ -5238,8 +5284,6 @@ EOF
   fi
 fi
 cleanup_kg_dup
-trap - EXIT
-
 # phase7-preflight.sh: fixture FORTEL2_ROOT, never the operator's .env.sepolia.
 # Generate the keypair at runtime — never a key literal in this file.
 if ! command -v cast >/dev/null 2>&1; then
@@ -5250,8 +5294,9 @@ elif [[ ! -x "$SCRIPT_DIR/phase7-preflight.sh" ]]; then
   fail=1
 else
   _pf_root="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-preflight.XXXXXX")"
+  register_tmp "$_pf_root"
   cleanup_pf() { rm -rf "$_pf_root"; }
-  trap cleanup_pf EXIT
+  register_cleanup cleanup_pf
   mkdir -p "$_pf_root/scripts"
   cp "$SCRIPT_DIR/phase7-preflight.sh" "$_pf_root/scripts/phase7-preflight.sh"
   cp "$SCRIPT_DIR/lib.sh" "$_pf_root/scripts/lib.sh"
@@ -5335,7 +5380,6 @@ p.write_text(t.replace("require_key_matches_address()", "require_key_matches_add
 
   unset _pf_key _pf_addr _pf_other _pf_out _pf_bad _pf_brk
   cleanup_pf
-  trap - EXIT
 fi
 
 # Regression: GNU `stat -f` is --file-system and succeeds, so `stat -f || stat -c`
@@ -5409,8 +5453,9 @@ unset _hr_help_out _hr_help_rc
 
 _ml_dup_fn="$(awk '/^# >>> env-dup$/,/^# <<< env-dup$/' "$SCRIPT_DIR/lib.sh")"
 _ml_dup_dir="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-env-ml.XXXXXX")"
+register_tmp "$_ml_dup_dir"
 cleanup_ml_dup() { rm -rf "$_ml_dup_dir"; }
-trap cleanup_ml_dup EXIT
+register_cleanup cleanup_ml_dup
 _ml_dup_run() {
   local file="$1"
   local snippet="$_ml_dup_dir/snippet.sh"
@@ -5565,7 +5610,6 @@ EOF
   fi
 fi
 cleanup_ml_dup
-trap - EXIT
 unset _ml_dup_fn _ml_dup_dir _ml_rc _ml_out _ml_names _ml_load_rc _ml_load_out
 
 # build-public-viewer.sh: never rm -rf a directory this script did not create.
@@ -5608,9 +5652,9 @@ else
 fi
 
 BP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-public-viewer.XXXXXX")"
+register_tmp "$BP_FIX"
 cleanup_bp_pub() { rm -rf "$BP_FIX"; }
-trap cleanup_bp_pub EXIT
-
+register_cleanup cleanup_bp_pub
 mkdir -p "$BP_FIX/unmarked"
 printf 'keep-me\n' > "$BP_FIX/unmarked/keep-me.txt"
 BP_UNMARKED_OUT="$(
@@ -5738,7 +5782,6 @@ else
 fi
 
 cleanup_bp_pub
-trap - EXIT
 unset BP_BUILD BP_ROOT BP_SCRIPTS_SENTINEL BP_SCRIPTS_HASH BP_SCRIPTS_OUT BP_SCRIPTS_EC \
   BP_FONTS_SENTINEL BP_FONTS_HASH BP_FONTS_OUT BP_FONTS_EC BP_FIX BP_UNMARKED_OUT \
   BP_UNMARKED_EC BP_EMPTY BP_EMPTY_OUT BP_EMPTY_EC BP_MARKED_OUT BP_MARKED_EC \
@@ -6000,6 +6043,7 @@ _BAL_RPC="https://example.invalid/secret-token-do-not-leak"
 _BAL_CORR="https://corroboration.example.invalid/second"
 _BAL_REAL_CAST="$(command -v cast || true)"
 _BAL_STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-bal-stub.XXXXXX")"
+register_tmp "$_BAL_STUB_DIR"
 if [[ -z "$_BAL_REAL_CAST" ]]; then
   echo "FAIL require_min_balance_eth tests need cast on PATH" >&2
   fail=1
@@ -6353,6 +6397,7 @@ sys.stdout.write(m.group(0))
 PY
 )" && SYM_FN_EC=0 || SYM_FN_EC=$?
 SYM_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-stack-sym.XXXXXX")"
+register_tmp "$SYM_FIX"
 cat > "$SYM_FIX/proxy.sh" <<'EOS'
 #!/usr/bin/env bash
 printf 'proxy\n' >> "${SYM_ORDER_LOG}"
@@ -6485,6 +6530,7 @@ rm -rf "$SYM_FIX"
 # Alert: missing expected service fires; present stays silent. Isolated fixture
 # (existing alert-watch cases stay above; L2_CHAIN_ID=852 is the Sepolia gate).
 STK_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-stack-alert.XXXXXX")"
+register_tmp "$STK_FIX"
 mkdir -p "$STK_FIX/shim" "$STK_FIX/mock" "$STK_FIX/data" "$STK_FIX/bin" "$STK_FIX/deploy" "$STK_FIX/pids"
 cat > "$STK_FIX/env" <<EOF
 FORTEL2_ROOT=$STK_FIX
@@ -6927,6 +6973,7 @@ else
   fail=1
 fi
 PIN_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-el-pins.XXXXXX")"
+register_tmp "$PIN_FIX"
 cat > "$PIN_FIX/op-node" <<'EOS'
 #!/bin/sh
 echo "op-node version v1.19.2-da197e45-1782514747"
@@ -7082,6 +7129,7 @@ fi
 # Mutation: dropping only the reth start_bg flag must go red. print-plan
 # CORS=* and geth's later --http.corsdomain="*" must not keep this green.
 CORS_MUT="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-cors-mut.XXXXXX")"
+register_tmp "$CORS_MUT"
 cp "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" "$CORS_MUT/start.sh"
 if python3 - "$CORS_MUT/start.sh" <<'PY'
 from pathlib import Path
@@ -7186,6 +7234,7 @@ fi
 # op-reth / spike-op-reth datadirs. Auto-enable only on sequencer_faultproof.
 # Live op-node / 09-start-challenger untouched.
 RETH_SDB_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-safedb.XXXXXX")"
+register_tmp "$RETH_SDB_FIX"
 mkdir -p "$RETH_SDB_FIX/l2/op-geth" "$RETH_SDB_FIX/l2/op-reth/db" \
   "$RETH_SDB_FIX/l2/spike-op-reth" "$RETH_SDB_FIX/safedb"
 echo live > "$RETH_SDB_FIX/safedb/KEEP"
@@ -7304,6 +7353,7 @@ fi
 
 # reth pointed at the geth datadir refuses.
 RETH_DD_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-dd.XXXXXX")"
+register_tmp "$RETH_DD_FIX"
 mkdir -p "$RETH_DD_FIX/l2/op-geth" "$RETH_DD_FIX/l2/op-reth"
 echo marker > "$RETH_DD_FIX/l2/op-geth/KEEP"
 RETH_DD_OUT="$(
@@ -7375,6 +7425,7 @@ rm -rf "$RETH_DD_FIX"
 
 # 901 genesis refuses.
 RETH_GEN_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-gen.XXXXXX")"
+register_tmp "$RETH_GEN_FIX"
 printf '%s\n' '{"config":{"chainId":901}}' > "$RETH_GEN_FIX/genesis-901.json"
 printf '%s\n' '{"config":{"chainId":852}}' > "$RETH_GEN_FIX/genesis-852.json"
 RETH_901_OUT="$(
@@ -7507,6 +7558,7 @@ fi
 # dummy behind op-reth.pid would die. Mutation 5c: if the live-port refusal
 # were a warn, the dummy whose argv contains :9545 would die.
 SC_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-sidecar-pid.XXXXXX")"
+register_tmp "$SC_FIX"
 mkdir -p "$SC_FIX/pids" "$SC_FIX/logs" "$SC_FIX/l2"
 SC_LIVE_PID=""
 SC_SIDE_PID=""
@@ -7519,6 +7571,7 @@ cleanup_sc_fix() {
   [[ -n "${SC_DD_PID:-}" ]] && kill "$SC_DD_PID" 2>/dev/null || true
   rm -rf "$SC_FIX"
 }
+register_cleanup cleanup_sc_fix
 
 python3 -c 'import time; time.sleep(120)' </dev/null >/dev/null 2>&1 &
 SC_LIVE_PID=$!
@@ -7657,6 +7710,7 @@ fi
 # Caller DATA_DIR must survive Phase 1 .env load (Bugbot: env clobber).
 # Compare via pwd -P — matches fortel2_canon_path (macOS /var → /private/var).
 RETH_DD_KEEP="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-datadir-keep.XXXXXX")"
+register_tmp "$RETH_DD_KEEP"
 RETH_DD_KEEP_CANON="$(cd "$RETH_DD_KEEP" && pwd -P)"
 RETH_DD_KEEP_OUT="$(
   DATA_DIR="$RETH_DD_KEEP" FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
@@ -7676,6 +7730,7 @@ rm -rf "$RETH_DD_KEEP"
 # sourcing lib.sh. Saving into DATA_DIR itself then restore "$DATA_DIR"
 # lands in the Phase 1 tree (the disclosed isolated-challenger miss).
 SNAP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-data-dir-snap.XXXXXX")"
+register_tmp "$SNAP_FIX"
 mkdir -p "$SNAP_FIX/sepolia"
 printf 'DATA_DIR=%s/sepolia\n' "$SNAP_FIX" > "$SNAP_FIX/.env.sepolia"
 SNAP_OK="$(read_env_assignment "$SNAP_FIX/.env.sepolia" DATA_DIR)" && SNAP_OK_EC=0 || SNAP_OK_EC=$?
@@ -7744,8 +7799,9 @@ fi
 CFW_AW="$SCRIPT_DIR/alert-watch.sh"
 CFW_CL="$SCRIPT_DIR/check-launchd.sh"
 CFW_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-cloudflared-watch.XXXXXX")"
+register_tmp "$CFW_FIX"
 cleanup_cfw() { rm -rf "$CFW_FIX"; }
-trap cleanup_cfw EXIT
+register_cleanup cleanup_cfw
 mkdir -p "$CFW_FIX/shim" "$CFW_FIX/mock" "$CFW_FIX/data" "$CFW_FIX/bin" "$CFW_FIX/deploy"
 cat > "$CFW_FIX/env" <<EOF
 FORTEL2_ROOT=$CFW_FIX
@@ -8380,7 +8436,6 @@ fi
 unset CFW_C1 CFW_C2 CFW_OUT2 CFW_EC2 CFW_EDGE_BLK
 
 cleanup_cfw
-trap - EXIT
 unset CFW_AW CFW_CL CFW_FIX CFW_PLIST CFW_OUT CFW_EC CFW_CL_OUT
 unset -f cleanup_cfw cfw_reset cfw_run cfw_cl_run 2>/dev/null || true
 
@@ -8399,9 +8454,9 @@ RG_RT="$SCRIPT_DIR/resolve-games-sepolia.sh"
 RG_RT_PY_DIR="$(dirname "$(command -v python3)")"
 RG_RT_PATH="$RG_RT_PY_DIR:/usr/bin:/bin"
 RG_RT_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-rg-respected.XXXXXX")"
+register_tmp "$RG_RT_FIX"
 cleanup_rg_rt() { rm -rf "$RG_RT_FIX"; }
-trap cleanup_rg_rt EXIT
-
+register_cleanup cleanup_rg_rt
 rg_rt_analyze() {
   env -u FORTEL2_ENV -u RESOLVE_GAMES_MAX_TXS_PER_RUN PATH="$RG_RT_PATH" \
     RESOLVE_GAMES_SNAPSHOT="$1" \
@@ -8717,7 +8772,6 @@ else
 fi
 
 cleanup_rg_rt
-trap - EXIT
 unset RG_RT RG_RT_PY_DIR RG_RT_PATH RG_RT_FIX RG_RT_AB RG_RT_AB_EC
 unset RG_RT_C1 RG_RT_C1_EC RG_RT_C2 RG_RT_C2_EC RG_RT_C3 RG_RT_C3_EC
 unset RG_RT_D RG_RT_D_EC RG_RT_D_PLAN RG_RT_D_N RG_RT_DEF RG_RT_DEF_EC
@@ -8739,9 +8793,9 @@ RG_ZB="$SCRIPT_DIR/resolve-games-sepolia.sh"
 RG_ZB_PY_DIR="$(dirname "$(command -v python3)")"
 RG_ZB_PATH="$RG_ZB_PY_DIR:/usr/bin:/bin"
 RG_ZB_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-rg-zero-bond.XXXXXX")"
+register_tmp "$RG_ZB_FIX"
 cleanup_rg_zb() { rm -rf "$RG_ZB_FIX"; }
-trap cleanup_rg_zb EXIT
-
+register_cleanup cleanup_rg_zb
 rg_zb_write_game() {
   python3 - "$1" <<'PY'
 import json, os, sys
@@ -8896,7 +8950,6 @@ else
 fi
 
 cleanup_rg_zb
-trap - EXIT
 unset RG_ZB RG_ZB_PY_DIR RG_ZB_PATH RG_ZB_FIX
 unset RG_ZB_A RG_ZB_A_EC RG_ZB_A_SENT RG_ZB_A_OK
 unset RG_ZB_B RG_ZB_B_EC RG_ZB_B_SENT
@@ -8986,8 +9039,9 @@ else
 fi
 
 VRP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-parity.XXXXXX")"
+register_tmp "$VRP_FIX"
 cleanup_vrp() { rm -rf "$VRP_FIX"; }
-trap cleanup_vrp EXIT
+register_cleanup cleanup_vrp
 python3 - "$VRP_FIX/match.json" <<'PY'
 import json, sys
 
@@ -9172,7 +9226,6 @@ else
 fi
 
 cleanup_vrp
-trap - EXIT
 unset VRP VRP_NOTE VRP_HELP VRP_HELP_EC VRP_NL_OUT VRP_NL_EC
 unset VRP_FIX VRP_OK VRP_OK_EC VRP_BAD VRP_BAD_EC VRP_SR VRP_SR_EC
 unset VRP_BAL VRP_BAL_EC VRP_SHORT VRP_SHORT_EC
@@ -9194,9 +9247,9 @@ PA_CL="$SCRIPT_DIR/check-launchd.sh"
 PA_LAUNCHD="$(cd "$SCRIPT_DIR/../launchd" && pwd)"
 PA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PA_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pin-agents.XXXXXX")"
+register_tmp "$PA_FIX"
 cleanup_pa() { rm -rf "$PA_FIX"; }
-trap cleanup_pa EXIT
-
+register_cleanup cleanup_pa
 pa_git() {
   git -c user.email=pin-agents@test.invalid -c user.name=pin-agents "$@"
 }
@@ -9678,7 +9731,6 @@ else
 fi
 
 cleanup_pa
-trap - EXIT
 unset PA_DEPLOY PA_CL PA_LAUNCHD PA_ROOT PA_FIX PA_PIN PA_OUT PA_EC PA_OUT2 PA_EC2
 unset PA_OLD_HEAD PA_FF PA_FF_EC PA_NEW_HEAD PA_DIRTY PA_DIRTY_EC
 unset PA_BRANCH PA_BRANCH_EC PA_DIV PA_DIV_EC PA_CLEAN PA_CLEAN_EC PA_REG PA_REG_EC
@@ -9797,8 +9849,9 @@ else
 fi
 
 VRF_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-faultproof.XXXXXX")"
+register_tmp "$VRF_FIX"
 cleanup_vrf() { rm -rf "$VRF_FIX"; }
-trap cleanup_vrf EXIT
+register_cleanup cleanup_vrf
 python3 - "$VRF_FIX/match.json" "$VRF_FIX/short.json" "$VRF_FIX/collapse.json" <<'PY'
 import json, sys
 
@@ -9941,7 +9994,6 @@ else
 fi
 
 cleanup_vrf
-trap - EXIT
 unset VRF VRF_NOTE VRF_HELP VRF_HELP_EC VRF_NL_OUT VRF_NL_EC
 unset VRF_GAME_OUT VRF_GAME_EC VRF_PRE_REQ_OUT VRF_PRE_REQ_EC VRF_FIX VRF_OK VRF_OK_EC
 unset VRF_BAD VRF_BAD_EC VRF_SH VRF_SH_EC VRF_PR VRF_PR_EC
@@ -10043,6 +10095,7 @@ else
 fi
 
 T5_FIX_DIR="$(mktemp -d /tmp/fortel2-t5-admin.XXXXXX)"
+register_tmp "$T5_FIX_DIR"
 python3 - "$T5_FIX_DIR" <<'PY' &
 import json, sys, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -10144,6 +10197,7 @@ else
 fi
 
 T5_PF_DIR="$(mktemp -d /tmp/fortel2-t5-pf.XXXXXX)"
+register_tmp "$T5_PF_DIR"
 cat > "$T5_PF_DIR/ok.json" <<'EOF'
 {"game216_status":2,"withdrawal_finalized":true,"safe_head_lag":0,"verify_reth_parity":0,"verify_reth_faultproof":0,"check_el_pins":0,"batcher_funded":true,"proposer_funded":true,"check_launchd":0}
 EOF
@@ -10395,8 +10449,9 @@ fi
 # =============================================================================
 
 PRR_FIX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pin-runtime-root.XXXXXX")" && pwd)"
+register_tmp "$PRR_FIX"
 cleanup_prr() { rm -rf "$PRR_FIX"; }
-trap cleanup_prr EXIT
+register_cleanup cleanup_prr
 PRR_LIB="$SCRIPT_DIR/lib.sh"
 PRR_DEPLOY="$SCRIPT_DIR/deploy-agents.sh"
 PRR_CL="$SCRIPT_DIR/check-launchd.sh"
@@ -10682,11 +10737,11 @@ else
 fi
 
 WD_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-wd-sepolia-XXXXXX")"
+register_tmp "$WD_FIX"
 cleanup_wd_fix() {
   rm -rf "$WD_FIX"
 }
-# Append to existing EXIT trap without clobbering earlier fixture cleanup.
-trap 'cleanup_wd_fix; cleanup_fixtures 2>/dev/null || true' EXIT
+register_cleanup cleanup_wd_fix
 mkdir -p "$WD_FIX/data"
 cat > "$WD_FIX/.env.sepolia" <<EOF
 DATA_DIR=$WD_FIX/data
@@ -10767,6 +10822,7 @@ fi
 # start_bg. Assert on the L1 gate's own messages — not an early exit.
 # =============================================================================
 PN_L1_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pn-l1.XXXXXX")"
+register_tmp "$PN_L1_FIX"
 mkdir -p "$PN_L1_FIX/data/l2/op-reth" "$PN_L1_FIX/.foundry/bin"
 printf '%s\n' '{"config":{"chainId":852}}' > "$PN_L1_FIX/genesis-852.json"
 cat > "$PN_L1_FIX/.foundry/bin/lsof" <<'EOS'
@@ -11005,6 +11061,7 @@ rm -rf "$PN_L1_FIX"
 # can still pass here.
 # =============================================================================
 WG_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-wipe-guard.XXXXXX")"
+register_tmp "$WG_FIX"
 WG_FIX_CANON="$(cd "$WG_FIX" && pwd -P)"
 mkdir -p "$WG_FIX/pids" "$WG_FIX/logs" "$WG_FIX/l2/op-reth" "$WG_FIX/l2/spike-op-reth" \
   "$WG_FIX/bin-empty" "$WG_FIX/bin-9545" "$WG_FIX/bin-geth-9545"
@@ -11015,6 +11072,7 @@ cleanup_wg_fix() {
   [[ -n "${WG_GETH_PID:-}" ]] && kill "$WG_GETH_PID" 2>/dev/null || true
   rm -rf "$WG_FIX"
 }
+register_cleanup cleanup_wg_fix
 
 # Empty lsof: no listener. Isolates pidfile-only evidence from the host's :9545.
 cat > "$WG_FIX/bin-empty/lsof" <<'EOS'
@@ -11270,6 +11328,7 @@ unset -f cleanup_wg_fix 2>/dev/null || true
 # HOME/.foundry/bin so lib.sh PATH prepend cannot reach a real op-reth.
 # Empty lsof so this Mac's :9545 is not the evidence under test.
 WG8_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-start-guard.XXXXXX")"
+register_tmp "$WG8_FIX"
 WG8_FIX_CANON="$(cd "$WG8_FIX" && pwd -P)"
 mkdir -p "$WG8_FIX/data/l2/op-reth" "$WG8_FIX/data/pids" "$WG8_FIX/.foundry/bin"
 cat > "$WG8_FIX/.foundry/bin/lsof" <<'EOS'
@@ -11326,6 +11385,7 @@ unset WG8_PID WG8_FIX WG8_FIX_CANON WG8_RC WG8_OUT
 # =============================================================================
 RP_AW="$SCRIPT_DIR/alert-watch.sh"
 RP_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-replica-watch.XXXXXX")"
+register_tmp "$RP_FIX"
 cleanup_rp() {
   if [ -n "${RP_DRIP_PID:-}" ]; then
     kill "$RP_DRIP_PID" 2>/dev/null || true
@@ -11334,7 +11394,7 @@ cleanup_rp() {
   fi
   rm -rf "$RP_FIX"
 }
-trap cleanup_rp EXIT
+register_cleanup cleanup_rp
 mkdir -p "$RP_FIX/shim" "$RP_FIX/mock" "$RP_FIX/data" "$RP_FIX/bin" "$RP_FIX/deploy"
 cat > "$RP_FIX/env" <<EOF
 FORTEL2_ROOT=$RP_FIX
@@ -11897,7 +11957,7 @@ rp_reset
 rp_seed_last_ok 3600 180 982723
 RP_PREV_TS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["replica_last_ok"]["head_ts"])' "$RP_FIX/state.json")"
 RP_DRIP_PID=""
-trap 'rp_stop_server; cleanup_rp' EXIT
+register_cleanup cleanup_rp
 if ! rp_start_server drip; then
   fail=1
 else
@@ -11963,10 +12023,8 @@ else
   fi
 fi
 rp_stop_server
-trap cleanup_rp EXIT
-
+register_cleanup cleanup_rp
 cleanup_rp
-trap - EXIT
 unset RP_AW RP_FIX RP_OUT RP_EC RP_OUT2 RP_EC2 RP_OUT3 RP_EC3 RP_C1 RP_C2 RP_REPLICA_BLK
 unset RP_PREV_TS RP_KEEP_TS RP_DRIP_PID RP_DRIP_PORT RP_T0 RP_T1 RP_ELAPSED RP_STREAK RP_OK_TS
 unset -f rp_reset rp_run rp_seed_last_ok rp_live_run rp_start_server rp_stop_server cleanup_rp 2>/dev/null || true
@@ -11976,6 +12034,7 @@ unset -f rp_reset rp_run rp_seed_last_ok rp_live_run rp_start_server rp_stop_ser
 # are live EL/node; bind high and kill in a trap so a failing case cannot linger.
 PF_SCRIPT="$ROOT/scripts/l1-provider-preflight.sh"
 PF_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-pf.XXXXXX")"
+register_tmp "$PF_FIX"
 PF_TOKEN='pf_test_token_DO_NOT_LEAK'
 PF_GENESIS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["genesis"]["l1"]["number"])' "$ROOT/deployments/sepolia/rollup.json")"
 PF_HEAD=12000000
@@ -11990,8 +12049,7 @@ cleanup_pf() {
   fi
   rm -rf "$PF_FIX"
 }
-trap cleanup_pf EXIT
-
+register_cleanup cleanup_pf
 cat > "$PF_FIX/server.py" <<'PY'
 import json, os, socket, sys, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -12408,10 +12466,14 @@ fi
 pf_stop
 
 cleanup_pf
-trap - EXIT
 unset PF_SCRIPT PF_FIX PF_TOKEN PF_GENESIS PF_HEAD PF_SRV_PID PF_PORT
 unset PF_OUT PF_EC PF_OUT2 PF_EC2 PF_CLOSED PF_RET PF_T0 PF_T1 PF_ELAPSED
 unset -f cleanup_pf pf_stop pf_start pf_run pf_assert_token_absent 2>/dev/null || true
+
+# New fixture blocks go above this check. After mktemp, define cleanup_foo and
+# call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
+# `trap … EXIT` — bash replaces the handler and would drop every previously
+# registered cleanup.
 
 if (( fail )); then
   echo "script helper tests FAILED" >&2
