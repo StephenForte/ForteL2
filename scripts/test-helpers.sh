@@ -41,25 +41,6 @@ assert_false() {
 # Explicit cleanup_foo at end of the block is fine (idempotent). Never trap.
 _TEST_HELPER_CLEANUPS=()
 _TEST_HELPER_RM_PATHS=()
-# Canonical TMPDIR (no trailing slash) so snapshot and drain compare the same paths.
-# Never scan /tmp unless it *is* TMPDIR — a live resolve-games run may have a
-# game_file there (Bugbot on #235).
-_test_helpers_canon_tmpdir() {
-  local d="${TMPDIR:-/tmp}"
-  d="${d%/}"
-  if [ -d "$d" ]; then
-    (cd "$d" && pwd)
-  else
-    printf '%s\n' "$d"
-  fi
-}
-_test_helpers_list_resolve_one() {
-  find "$1" -maxdepth 1 -name 'fortel2-resolve-one.*' 2>/dev/null | sort || true
-}
-_TEST_HELPER_TMPDIR="$(_test_helpers_canon_tmpdir)"
-# resolve-games-sepolia.sh:1202 mktemps fortel2-resolve-one.* (out of scope).
-# Tests exercise that path; snapshot so EXIT only removes files this run created.
-_TEST_HELPER_PREEXISTING_RESOLVE_ONE="$(_test_helpers_list_resolve_one "$_TEST_HELPER_TMPDIR")"
 register_cleanup() {
   _TEST_HELPER_CLEANUPS+=("$1")
 }
@@ -67,7 +48,7 @@ register_tmp() {
   _TEST_HELPER_RM_PATHS+=("$1")
 }
 _test_helpers_run_cleanups() {
-  local i fn p f
+  local i fn p
   # Cleanup functions close over variables that later blocks `unset`.
   # `set -u` would abort this drain and leak everything still on the list.
   set +eu
@@ -89,14 +70,6 @@ _test_helpers_run_cleanups() {
       rm -rf -- "$p"
     fi
   done
-  # Same find as the snapshot, same directory — no extra /tmp glob.
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    printf '%s\n' "$_TEST_HELPER_PREEXISTING_RESOLVE_ONE" | grep -Fxq "$f" && continue
-    rm -f -- "$f"
-  done <<EOF
-$(_test_helpers_list_resolve_one "$_TEST_HELPER_TMPDIR")
-EOF
 }
 trap _test_helpers_run_cleanups EXIT
 # INT/TERM → exit so the EXIT trap still drains. SIGINT to the bash pid
@@ -104,6 +77,15 @@ trap _test_helpers_run_cleanups EXIT
 # the Ctrl-C equivalent (verified in this task's interrupt measurement).
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Isolate this process from the host TMPDIR. Child scripts (including
+# resolve-games-sepolia.sh:1202) inherit it, so their temps cannot collide
+# with a live hourly agent's game_file. Prefix is not fortel2-* so a
+# leaked isolation root would not inflate the suite's delta measurement.
+_TEST_HELPER_ISOLATED="$(mktemp -d "${TMPDIR:-/tmp}/th-helpers.XXXXXX")"
+export TMPDIR="${_TEST_HELPER_ISOLATED}/"
+register_tmp "$_TEST_HELPER_ISOLATED"
+
 
 # Wei-safe unsigned compare (deposit poll must require increase, not inequality).
 assert_true "uint_gt larger" uint_gt "1000000000000000001" "1000000000000000000"
