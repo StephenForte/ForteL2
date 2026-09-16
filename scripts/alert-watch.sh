@@ -15,9 +15,17 @@
 #   resolve-games-unloaded  launchctl print cannot find the job (read-only)
 #   resolve-games-nonzero   last exit code nonzero on 2 consecutive watcher runs
 #   stack-missing         Sepolia (L2_CHAIN_ID=852): some expected pids are up,
-#                         at least one (incl. op-challenger) is not
+#                         at least one (incl. op-challenger) is not. Still
+#                         fires on that trigger if no ExEx panic is found.
+#                         When op-reth is among the missing processes, a
+#                         current ExEx panic in the last 64 KiB of
+#                         op-reth.log may enrich the body — the log is
+#                         never the detector (cf_token_hint precedent).
 #   stack-down            Sepolia: nothing is up outside the 23:45–03:00 PT
-#                         sleep window (a failed 03:00 wake)
+#                         sleep window (a failed 03:00 wake). Same ExEx
+#                         enrichment as stack-missing when op-reth is down.
+#                         A historical panic (pid alive, or panic before
+#                         the last start banner in that tail) is ignored.
 #   cloudflared-failing   system LaunchDaemon com.cloudflare.cloudflared is
 #                         installed (plist exists) and unhealthy: launchctl print
 #                         missing/unparseable, or state is not running (any last
@@ -114,6 +122,19 @@
 #   ALERT_WATCH_HEALTH_STALE_SECS   ALERT_WATCH_RESOLVE_STALE_SECS
 #   ALERT_WATCH_SLEEP_GRACE_SECS
 #   ALERT_WATCH_PID_DIR        ALERT_WATCH_EXPECT_STACK (1=up, 0=sleep window)
+#   ALERT_WATCH_OP_RETH_LOG     canned op-reth.log path (skips the host log)
+#   ALERT_WATCH_EXEX_THROW=1    raise inside the ExEx scan; other conditions
+#                               must still evaluate
+#   ALERT_WATCH_EXEX_TAIL_BYTES test-only tail window (default 65536)
+#     When OP_RETH_LOG / EXEX_THROW / EXEX_TAIL_BYTES is set, or
+#     ALERT_WATCH_CURL / ALERT_WATCH_LAUNCHCTL is set (evaluation
+#     fixtures), the scan never opens the production log path. Unset
+#     hooks plus CURL/LAUNCHCTL default to no ExEx text (HEALTHY/quiet).
+#     Production launchd does not set those keys and reads the last
+#     64 KiB of $LOG_DIR/op-reth.log. Recency is the op-reth pidfile
+#     (must be down) plus a panic only after the last start banner in
+#     that tail. mtime is not used — the file is appended constantly
+#     by unrelated lines.
 #   ALERT_WATCH_CURL  ALERT_WATCH_OSASCRIPT  ALERT_WATCH_LAUNCHCTL
 #     (absolute shim paths — lib.sh prepends homebrew onto PATH)
 #   ALERT_WATCH_CLOUDFLARED_PLIST  ALERT_WATCH_CLOUDFLARED_ERR
@@ -303,7 +324,8 @@ mkdir -p "$(dirname "$STATE_FILE")" "$WORKDIR"
 python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$HEALTH_STALE_SECS" "$RESOLVE_STALE_SECS" "$SLEEP_GRACE_SECS" \
   "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
-  "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" <<'PY'
+  "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" \
+  "${ALERT_WATCH_OP_RETH_LOG:-$LOG_DIR/op-reth.log}" <<'PY'
 import json, os, re, shutil, sys, time, subprocess, signal
 import urllib.error
 import urllib.request
@@ -320,6 +342,7 @@ pid_dir_arg = sys.argv[12] if len(sys.argv) > 12 else ""
 cf_plist = sys.argv[13] if len(sys.argv) > 13 else ""
 cf_err = sys.argv[14] if len(sys.argv) > 14 else ""
 cf_label = sys.argv[15] if len(sys.argv) > 15 else "com.cloudflare.cloudflared"
+reth_log_arg = sys.argv[16] if len(sys.argv) > 16 else ""
 now = time.time()
 realert_secs = realert_hours * 3600.0
 
@@ -514,6 +537,126 @@ fortel2_env = os.environ.get("FORTEL2_ENV") or ""
 sepolia_env = "sepolia" in fortel2_env.lower()
 test_hook = bool(os.environ.get("ALERT_WATCH_PID_DIR") or expect_override)
 
+EXEX_TAIL_DEFAULT = 65536
+EXEX_PANIC_MARKERS = (
+    "Critical task `exex` panicked",
+    "ExEx proofs-history crashed",
+)
+_EXEX_START_RE = re.compile(r"reth\b.*\bstarting\b", re.IGNORECASE)
+
+def _exex_tail_bytes():
+    raw = os.environ.get("ALERT_WATCH_EXEX_TAIL_BYTES")
+    if raw is None or str(raw).strip() == "":
+        return EXEX_TAIL_DEFAULT
+    try:
+        n = int(str(raw).strip())
+        return n if n > 0 else EXEX_TAIL_DEFAULT
+    except (TypeError, ValueError):
+        return EXEX_TAIL_DEFAULT
+
+def _exex_log_path():
+    # Canned path wins. Evaluation fixtures (CURL/LAUNCHCTL) must never
+    # open the host op-reth.log — every existing runner sets those hooks.
+    canned = os.environ.get("ALERT_WATCH_OP_RETH_LOG")
+    if canned not in (None, ""):
+        return canned
+    if os.environ.get("ALERT_WATCH_CURL") or os.environ.get("ALERT_WATCH_LAUNCHCTL"):
+        return None
+    return reth_log_arg or None
+
+def _exex_last_start(text):
+    last = -1
+    for m in _EXEX_START_RE.finditer(text):
+        last = m.start()
+    needle = "Starting op-reth"
+    idx = 0
+    while True:
+        i = text.find(needle, idx)
+        if i < 0:
+            break
+        if i > last:
+            last = i
+        idx = i + 1
+    return last
+
+def _exex_last_panic(text):
+    last = -1
+    for needle in EXEX_PANIC_MARKERS:
+        idx = 0
+        while True:
+            i = text.find(needle, idx)
+            if i < 0:
+                break
+            if i > last:
+                last = i
+            idx = i + 1
+    return last
+
+def _exex_quote(snippet):
+    one = " ".join(snippet.split())
+    if len(one) > 240:
+        one = one[:237] + "..."
+    return one
+
+def _exex_body_from_region(region):
+    idx = _exex_last_panic(region)
+    if idx < 0:
+        return ""
+    lo = max(0, idx - 1500)
+    hi = min(len(region), idx + 500)
+    ctx = region[lo:hi]
+    quote = _exex_quote(ctx)
+    # Opposite remedies (D-0114 F3 vs D-0138). Classify from the LAST panic
+    # in the recency window, never from an earlier line in the same tail.
+    if "Parent hash mismatch" in ctx:
+        return (
+            " ExEx cause: divergent historical-proofs store (Parent hash mismatch). "
+            "Matched: %s. Remedy: stop the stack, delete $DATADIR/historical-proofs, "
+            "then start. Do not run op-reth proofs init — that is a no-op on a "
+            "divergent store."
+        ) % quote
+    if "Proofs storage not initialized" in ctx:
+        return (
+            " ExEx cause: proofs store not initialized. "
+            "Matched: %s. Remedy: op-reth proofs init (the start script already "
+            "does this idempotently). Do not delete $DATADIR/historical-proofs."
+        ) % quote
+    return (
+        " ExEx cause: Critical task `exex` panicked (unclassified). "
+        "Matched: %s. Do not guess between proofs init and deleting "
+        "historical-proofs — read the matched line."
+    ) % quote
+
+def exex_hint(missing_names):
+    """Symptom detail only — never the detector. Silent unless op-reth is down."""
+    if (os.environ.get("ALERT_WATCH_EXEX_THROW") or "") == "1":
+        raise RuntimeError("ALERT_WATCH_EXEX_THROW")
+    el = (os.environ.get("FORTEL2_EL") or "geth").strip()
+    if el != "reth":
+        return ""
+    if "op-reth" not in (missing_names or []):
+        return ""
+    path = _exex_log_path()
+    if not path:
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            window = _exex_tail_bytes()
+            fh.seek(max(0, size - window))
+            raw = fh.read(window)
+    except OSError:
+        return ""
+    try:
+        text = raw.decode("utf-8", "replace")
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return ""
+    start_at = _exex_last_start(text)
+    region = text[start_at:] if start_at >= 0 else text
+    return _exex_body_from_region(region)
+
+stack_missing_names = []
 if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
     el = (os.environ.get("FORTEL2_EL") or "geth").strip()
     el_pid = "op-reth" if el == "reth" else "op-geth"
@@ -525,6 +668,7 @@ if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
         expected.append("l1-batch-proxy")
     present = [n for n in expected if pid_running(pid_dir, n)]
     missing = [n for n in expected if n not in present]
+    stack_missing_names = missing
     if expect_override == "1":
         want_up = True
     elif expect_override == "0":
@@ -541,6 +685,18 @@ if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
             "ForteL2 stack is down",
             "Sepolia stack is not running outside the 23:45-03:00 PT sleep "
             "window: %s." % ", ".join(missing))
+
+# Isolated so a missing/unreadable log or a throw cannot skip cloudflared,
+# replica, or the stack conditions already recorded. Process state is the
+# trigger; the log is never a standalone page.
+try:
+    _exex = exex_hint(stack_missing_names)
+    if _exex:
+        for _c in conditions:
+            if _c["id"] in ("stack-missing", "stack-down"):
+                _c["body"] = _c["body"] + _exex
+except Exception:
+    pass
 
 # --- cloudflared system daemon (plist present = this host runs the tunnel) ---
 # Absence is not an alert. Unparseable print with plist present fails toward

@@ -12486,6 +12486,10 @@ unset -f cleanup_pf pf_stop pf_start pf_run pf_assert_token_absent 2>/dev/null |
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/test-log-hygiene.inc.sh"
 
+# alert-watch ExEx panic attribution (additive; sourced so this file stays append-only)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/test-exex-alert.inc.sh"
+
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
 # `trap … EXIT` — bash replaces the handler and would drop every previously
