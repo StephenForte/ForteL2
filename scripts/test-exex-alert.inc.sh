@@ -295,6 +295,25 @@ else
   fail=1
 fi
 
+# The remedy must name a path the operator can paste. $DATADIR is script-local to
+# 04-start-sequencer-sepolia.sh and unset in an operator shell, so printing it makes
+# `rm -rf $DATADIR/historical-proofs` a silent no-op during an outage (Codex P1 on #240).
+exex_reset
+rm -f "$EXEX_FIX/pids"/*.pid
+exex_write_noisy_log "$EXEX_PANIC_DIV"
+EXEX_OUT="$(exex_run ALERT_WATCH_EXPECT_STACK=1 RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$EXEX_AW" 2>&1)" && EXEX_EC=0 || EXEX_EC=$?
+EXEX_BODY="$(cat "$EXEX_FIX/mock/osascript.argv" 2>/dev/null || true)"
+if [[ "$EXEX_EC" -eq 0 ]] \
+  && ! printf '%s' "$EXEX_BODY" | grep -q 'DATADIR' \
+  && printf '%s' "$EXEX_BODY" | grep -q "delete $EXEX_FIX/data/l2/op-reth/historical-proofs"; then
+  echo "PASS alert-watch ExEx remedy names a resolved absolute proofs-store path"
+else
+  echo "FAIL ExEx remedy must print the resolved store path, never the script-local \$DATADIR (ec=$EXEX_EC)" >&2
+  echo "$EXEX_BODY" >&2
+  fail=1
+fi
+
 exex_reset
 rm -f "$EXEX_FIX/pids"/*.pid
 exex_write_noisy_log "$EXEX_PANIC_OTHER"

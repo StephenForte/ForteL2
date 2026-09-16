@@ -325,7 +325,8 @@ python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$HEALTH_STALE_SECS" "$RESOLVE_STALE_SECS" "$SLEEP_GRACE_SECS" \
   "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
   "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" \
-  "${ALERT_WATCH_OP_RETH_LOG:-$LOG_DIR/op-reth.log}" <<'PY'
+  "${ALERT_WATCH_OP_RETH_LOG:-$LOG_DIR/op-reth.log}" \
+  "${ALERT_WATCH_PROOFS_STORE:-${FORTEL2_RETH_DATADIR:-$DATA_DIR/l2/op-reth}/historical-proofs}" <<'PY'
 import json, os, re, shutil, sys, time, subprocess, signal
 import urllib.error
 import urllib.request
@@ -343,6 +344,12 @@ cf_plist = sys.argv[13] if len(sys.argv) > 13 else ""
 cf_err = sys.argv[14] if len(sys.argv) > 14 else ""
 cf_label = sys.argv[15] if len(sys.argv) > 15 else "com.cloudflare.cloudflared"
 reth_log_arg = sys.argv[16] if len(sys.argv) > 16 else ""
+# Absolute path to the proofs store, resolved the same way
+# 04-start-sequencer-sepolia.sh resolves it, so the two cannot drift. The
+# alert must never print $DATADIR: that is script-local to the start script
+# and unset in an operator shell, so the remedy would be a silent no-op.
+proofs_store_arg = sys.argv[17] if len(sys.argv) > 17 else ""
+PROOFS_STORE = proofs_store_arg or "$DATA_DIR/l2/op-reth/historical-proofs"
 now = time.time()
 realert_secs = realert_hours * 3600.0
 
@@ -617,16 +624,16 @@ def _exex_body_from_region(region):
     if "Parent hash mismatch" in ctx:
         return (
             " ExEx cause: divergent historical-proofs store (Parent hash mismatch). "
-            "Matched: %s. Remedy: stop the stack, delete $DATADIR/historical-proofs, "
+            "Matched: %s. Remedy: stop the stack, delete %s, "
             "then start. Do not run op-reth proofs init — that is a no-op on a "
             "divergent store."
-        ) % quote
+        ) % (quote, PROOFS_STORE)
     if "Proofs storage not initialized" in ctx:
         return (
             " ExEx cause: proofs store not initialized. "
             "Matched: %s. Remedy: op-reth proofs init (the start script already "
-            "does this idempotently). Do not delete $DATADIR/historical-proofs."
-        ) % quote
+            "does this idempotently). Do not delete %s."
+        ) % (quote, PROOFS_STORE)
     return (
         " ExEx cause: Critical task `exex` panicked (unclassified). "
         "Matched: %s. Do not guess between proofs init and deleting "
