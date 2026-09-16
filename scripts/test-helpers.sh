@@ -41,6 +41,9 @@ assert_false() {
 # Explicit cleanup_foo at end of the block is fine (idempotent). Never trap.
 _TEST_HELPER_CLEANUPS=()
 _TEST_HELPER_RM_PATHS=()
+# resolve-games-sepolia.sh:1202 mktemps fortel2-resolve-one.* (out of scope).
+# Tests exercise that path; snapshot so EXIT only removes files this run created.
+_TEST_HELPER_PREEXISTING_RESOLVE_ONE=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fortel2-resolve-one.*' 2>/dev/null | sort || true)
 register_cleanup() {
   _TEST_HELPER_CLEANUPS+=("$1")
 }
@@ -48,7 +51,10 @@ register_tmp() {
   _TEST_HELPER_RM_PATHS+=("$1")
 }
 _test_helpers_run_cleanups() {
-  local i fn p
+  local i fn p f
+  # Cleanup functions close over variables that later blocks `unset`.
+  # `set -u` would abort this drain and leak everything still on the list.
+  set +eu
   i=${#_TEST_HELPER_CLEANUPS[@]}
   # while-not-for: bash `for ((i--;))` with `set -e` aborts when the last
   # decrement yields 0.
@@ -66,6 +72,13 @@ _test_helpers_run_cleanups() {
     if [ -n "$p" ] && [ "$p" != / ]; then
       rm -rf -- "$p"
     fi
+  done
+  # Test-created leftovers from exercising resolve-games-sepolia.sh:1202.
+  # Do not glob-delete pre-existing files (live hourly agent may share TMPDIR).
+  for f in "${TMPDIR:-/tmp}"/fortel2-resolve-one.* /tmp/fortel2-resolve-one.*; do
+    [ -e "$f" ] || continue
+    printf '%s\n' "$_TEST_HELPER_PREEXISTING_RESOLVE_ONE" | grep -Fxq "$f" && continue
+    rm -f -- "$f"
   done
 }
 trap _test_helpers_run_cleanups EXIT
