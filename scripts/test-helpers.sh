@@ -4774,6 +4774,8 @@ aw_run() {
     ALERT_WATCH_LAUNCHCTL="$AW_SHIM/launchctl" \
     ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
     ALERT_WATCH_REPLICA_HEAD_AGE=0 \
+    ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+    ALERT_WATCH_CLOUDFLARED_RUNS=1 \
     ALERT_EMAIL_TO="$AW_TO" \
     "$@"
 }
@@ -6562,6 +6564,8 @@ stk_run() {
     ALERT_WATCH_LAUNCHCTL="$STK_FIX/shim/launchctl" \
     ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
     ALERT_WATCH_REPLICA_HEAD_AGE=0 \
+    ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+    ALERT_WATCH_CLOUDFLARED_RUNS=1 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
 }
@@ -6644,6 +6648,8 @@ STK_NATIVE_OUT="$(
     ALERT_WATCH_LAUNCHCTL="$STK_FIX/shim/launchctl" \
     ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
     ALERT_WATCH_REPLICA_HEAD_AGE=0 \
+    ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+    ALERT_WATCH_CLOUDFLARED_RUNS=1 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
     "$SCRIPT_DIR/alert-watch.sh" 2>&1
@@ -7810,8 +7816,9 @@ case "$target" in
       echo "this is not launchctl print output"
       exit 0
     fi
-    printf 'system/com.cloudflare.cloudflared = {\n\tstate = %s\n\tlast exit code = %s\n}\n' \
+    printf 'system/com.cloudflare.cloudflared = {\n\tstate = %s\n\truns = %s\n\tlast exit code = %s\n}\n' \
       "${ALERT_WATCH_CF_STATE:-running}" \
+      "${ALERT_WATCH_CF_RUNS:-1}" \
       "${ALERT_WATCH_CF_EXIT:-0}"
     exit 0
     ;;
@@ -7848,6 +7855,8 @@ cfw_run() {
     ALERT_WATCH_LAUNCHCTL="$CFW_FIX/shim/launchctl" \
     ALERT_WATCH_REPLICA_HEAD_NUMBER=1 \
     ALERT_WATCH_REPLICA_HEAD_AGE=0 \
+    ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+    ALERT_WATCH_CLOUDFLARED_RUNS=1 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
 }
@@ -8074,6 +8083,301 @@ if awk '/check_cloudflared_daemon/,/^}$/' "$CFW_CL" | grep -q 'gui/'; then
 else
   echo "PASS check-launchd cloudflared section is system-domain only (no gui/)"
 fi
+
+# --- cloudflared edge / restart / metrics (append-only; existing cases unchanged) ---
+CFW_EDGE_BLK="$(awk '/# Distinct cooldown keys/,/# --- public replica/' "$CFW_AW")"
+if grep -q 'cloudflared-no-edge' "$CFW_AW" \
+  && grep -q 'cloudflared-restart-storm' "$CFW_AW" \
+  && grep -q 'cloudflared-metrics-unreachable' "$CFW_AW" \
+  && grep -q 'ALERT_WATCH_CLOUDFLARED_METRICS' "$CFW_AW" \
+  && grep -q 'ALERT_WATCH_CLOUDFLARED_RUNS' "$CFW_AW" \
+  && grep -q 'ALERT_WATCH_CLOUDFLARED_UNREACHABLE' "$CFW_AW" \
+  && grep -q 'ALERT_WATCH_CLOUDFLARED_THROW' "$CFW_AW" \
+  && echo "$CFW_EDGE_BLK" | grep -q 'urllib.request' \
+  && echo "$CFW_EDGE_BLK" | grep -q 'setitimer' \
+  && echo "$CFW_EDGE_BLK" | grep -q 'cloudflared_tunnel_ha_connections' \
+  && echo "$CFW_EDGE_BLK" | grep -q 'Starting metrics server on' \
+  && ! echo "$CFW_EDGE_BLK" | grep -q 'fortel2-write.ente.ltd' \
+  && ! echo "$CFW_EDGE_BLK" | grep -q 'ALERT_WATCH_CURL:-curl' \
+  && ! echo "$CFW_EDGE_BLK" | grep -q 'slept' \
+  && ! grep -qE "sed -n '2,[0-9]+p'" "$CFW_AW"; then
+  echo "PASS alert-watch cloudflared edge conditions use loopback urllib, hooks, and no sleep grace"
+else
+  echo "FAIL cloudflared edge probe must be loopback urllib with test hooks, never the write hostname, never slept-skip" >&2
+  fail=1
+fi
+
+_cf_help_rc=0
+_cf_help_out="$(FORTEL2_ENV="$CFW_FIX/env" "$CFW_AW" --help 2>&1)" || _cf_help_rc=$?
+if [[ "$_cf_help_rc" == "0" ]] \
+  && printf '%s' "$_cf_help_out" | grep -q 'cloudflared-no-edge' \
+  && printf '%s' "$_cf_help_out" | grep -q 'cloudflared-restart-storm' \
+  && printf '%s' "$_cf_help_out" | grep -q 'cloudflared-metrics-unreachable' \
+  && printf '%s' "$_cf_help_out" | grep -q 'ALERT_WATCH_CLOUDFLARED_METRICS' \
+  && printf '%s' "$_cf_help_out" | grep -q 'ALERT_WATCH_CLOUDFLARED_THROW' \
+  && ! printf '%s' "$_cf_help_out" | grep -q 'set -euo pipefail'; then
+  echo "PASS alert-watch.sh --help prints cloudflared edge condition ids and ALERT_WATCH_CLOUDFLARED_* hooks"
+else
+  echo "FAIL --help must include cloudflared-no-edge and ALERT_WATCH_CLOUDFLARED_METRICS (ec=$_cf_help_rc)" >&2
+  printf '%s\n' "$_cf_help_out" >&2
+  fail=1
+fi
+unset _cf_help_out _cf_help_rc
+
+# Healthy daemon with edge connections → quiet.
+CFW_PLIST="$CFW_FIX/cf.plist"
+: > "$CFW_PLIST"
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CF_EXIT=0 \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+  ALERT_WATCH_CLOUDFLARED_RUNS=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-no-edge"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-restart-storm"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-metrics-unreachable"* ]]; then
+  echo "PASS alert-watch stays quiet for a running cloudflared with edge connections"
+else
+  echo "FAIL healthy running daemon with ha_connections>0 must be quiet (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Zero edge connections while running → fires immediately.
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CF_EXIT=0 \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 0' \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-no-edge"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-failing"* ]]; then
+  echo "PASS alert-watch cloudflared-no-edge fires when running with zero edge connections"
+else
+  echo "FAIL running + ha_connections=0 must fire cloudflared-no-edge, not cloudflared-failing (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Labeled gauge zero still fires (Prometheus with labels).
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections{tunnel="x"} 0' \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-no-edge"* ]]; then
+  echo "PASS alert-watch cloudflared-no-edge parses labeled ha_connections gauge"
+else
+  echo "FAIL labeled cloudflared_tunnel_ha_connections 0 must fire cloudflared-no-edge (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# runs counter constant → quiet across two observations.
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=18624 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+rm -f "$CFW_FIX/mock"/osascript.calls "$CFW_FIX/mock"/curl.calls \
+  "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/curl.argv
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=18624 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch stays quiet when cloudflared runs counter is constant"
+else
+  echo "FAIL a constant runs counter must not fire cloudflared-restart-storm (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# +1 legitimate restart (exactly the exclusive floor) → quiet.
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=10 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+rm -f "$CFW_FIX/mock"/osascript.calls "$CFW_FIX/mock"/curl.calls \
+  "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/curl.argv
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=11 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch stays quiet for a single legitimate cloudflared restart (+1)"
+else
+  echo "FAIL runs delta == 1 must stay quiet (exclusive floor 1) (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Exact boundary: +2 (floor 1 exclusive) fires.
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=10 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+rm -f "$CFW_FIX/mock"/osascript.calls "$CFW_FIX/mock"/curl.calls \
+  "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/curl.argv
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=12 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-restart-storm"* ]]; then
+  echo "PASS alert-watch cloudflared-restart-storm fires at runs delta +2 (exclusive floor 1)"
+else
+  echo "FAIL runs delta > 1 must fire cloudflared-restart-storm (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Climbing well past the floor (crash-loop class) fires.
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=100 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+rm -f "$CFW_FIX/mock"/osascript.calls "$CFW_FIX/mock"/curl.calls \
+  "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/curl.argv
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_RUNS=820 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-restart-storm"* ]]; then
+  echo "PASS alert-watch cloudflared-restart-storm fires when runs climbs well past the floor"
+else
+  echo "FAIL a crash-loop-sized runs climb must fire cloudflared-restart-storm (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Metrics unreachable once quiet; twice fires; success resets.
+CFW_PLIST="$CFW_FIX/cf.plist"
+: > "$CFW_PLIST"
+cfw_reset
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch cloudflared-metrics-unreachable is quiet on one failed read"
+else
+  echo "FAIL one failed cloudflared metrics read must be quiet (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+CFW_OUT2="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC2=0 || CFW_EC2=$?
+if [[ "$CFW_EC2" -eq 0 ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$CFW_OUT2" == *"cloudflared-metrics-unreachable"* ]]; then
+  echo "PASS alert-watch cloudflared-metrics-unreachable fires on two consecutive failures"
+else
+  echo "FAIL two consecutive failed cloudflared metrics reads must fire (ec=$CFW_EC2)" >&2
+  echo "$CFW_OUT2" >&2
+  fail=1
+fi
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+rm -f "$CFW_FIX/mock"/osascript.calls "$CFW_FIX/mock"/curl.calls \
+  "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/curl.argv
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_UNREACHABLE=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]]; then
+  echo "PASS alert-watch cloudflared-metrics-unreachable streak resets after a success"
+else
+  echo "FAIL a success must reset the metrics-unreachable streak so one later fail stays quiet (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Garbage metrics text is a failed read (not zero-edge).
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='this is not prometheus' \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+rm -f "$CFW_FIX/mock"/osascript.calls "$CFW_FIX/mock"/curl.calls \
+  "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/curl.argv
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='this is not prometheus' \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$CFW_OUT" == *"cloudflared-metrics-unreachable"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-no-edge"* ]]; then
+  echo "PASS alert-watch treats garbage metrics as unreachable, not zero-edge"
+else
+  echo "FAIL garbage metrics must be unreachable (two consecutive), not no-edge (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Metrics throw must not prevent funding-fail (or other conditions).
+cfw_reset
+printf '%s\n' '{"verdict":"FAIL","reason":"batcher below policy for 24.0 h with no top-up"}' \
+  > "$CFW_FIX/funding-health.json"
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' ALERT_WATCH_CLOUDFLARED_THROW=1 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ "$CFW_OUT" == *"condition funding-fail"* ]] \
+  && [[ "$(cat "$CFW_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && ! printf '%s' "$CFW_OUT" | grep -qi 'traceback'; then
+  echo "PASS alert-watch cloudflared metrics throw still evaluates funding-fail"
+else
+  echo "FAIL a cloudflared metrics throw must not prevent funding-fail from alerting (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Plist absent: none of the new conditions fire even with bad canned inputs.
+CFW_PLIST="$CFW_FIX/no-such-cloudflared.plist"
+rm -f "$CFW_PLIST"
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 0' \
+  ALERT_WATCH_CLOUDFLARED_UNREACHABLE=1 \
+  ALERT_WATCH_CLOUDFLARED_RUNS=50 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+rm -f "$CFW_FIX/mock"/osascript.calls "$CFW_FIX/mock"/curl.calls \
+  "$CFW_FIX/mock"/osascript.argv "$CFW_FIX/mock"/curl.argv
+CFW_OUT="$(cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 0' \
+  ALERT_WATCH_CLOUDFLARED_UNREACHABLE=1 \
+  ALERT_WATCH_CLOUDFLARED_RUNS=99 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" 2>&1)" && CFW_EC=0 || CFW_EC=$?
+if [[ "$CFW_EC" -eq 0 ]] \
+  && [[ ! -f "$CFW_FIX/mock/osascript.calls" ]] \
+  && [[ "$CFW_OUT" == *"no alert"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-no-edge"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-restart-storm"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-metrics-unreachable"* ]] \
+  && [[ "$CFW_OUT" != *"cloudflared-failing"* ]]; then
+  echo "PASS alert-watch new cloudflared edge conditions stay quiet when the plist is absent"
+else
+  echo "FAIL plist-absent hosts must not fire no-edge / restart-storm / metrics-unreachable (ec=$CFW_EC)" >&2
+  echo "$CFW_OUT" >&2
+  fail=1
+fi
+
+# Cooldown: two zero-edge runs send once.
+CFW_PLIST="$CFW_FIX/cf.plist"
+: > "$CFW_PLIST"
+cfw_reset
+cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 0' \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+CFW_C1="$(cat "$CFW_FIX/mock/curl.calls" 2>/dev/null || echo 0)"
+cfw_run ALERT_WATCH_CF_STATE='running' \
+  ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 0' \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$CFW_AW" >/dev/null 2>&1 || true
+CFW_C2="$(cat "$CFW_FIX/mock/curl.calls" 2>/dev/null || echo 0)"
+if [[ "$CFW_C1" -eq 1 && "$CFW_C2" -eq 1 ]]; then
+  echo "PASS alert-watch cloudflared-no-edge cooldown suppresses a second send"
+else
+  echo "FAIL cloudflared-no-edge should send once per ALERT_REALERT_HOURS (c1=$CFW_C1 c2=$CFW_C2)" >&2
+  fail=1
+fi
+unset CFW_C1 CFW_C2 CFW_OUT2 CFW_EC2 CFW_EDGE_BLK
 
 cleanup_cfw
 trap - EXIT
@@ -11100,6 +11404,8 @@ rp_run() {
     ALERT_WATCH_LAUNCHCTL="$RP_FIX/shim/launchctl" \
     ALERT_WATCH_REPLICA_HEAD_NUMBER="${ALERT_WATCH_REPLICA_HEAD_NUMBER:-982723}" \
     ALERT_WATCH_REPLICA_HEAD_AGE="${ALERT_WATCH_REPLICA_HEAD_AGE:-0}" \
+    ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+    ALERT_WATCH_CLOUDFLARED_RUNS=1 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
 }
@@ -11553,6 +11859,8 @@ rp_live_run() {
     ALERT_WATCH_RESOLVE_ERR="$RP_FIX/resolve.err.log" \
     ALERT_WATCH_OSASCRIPT="$RP_FIX/shim/osascript" \
     ALERT_WATCH_LAUNCHCTL="$RP_FIX/shim/launchctl" \
+    ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
+    ALERT_WATCH_CLOUDFLARED_RUNS=1 \
     ALERT_WATCH_REPLICA_RPC_URL="http://127.0.0.1:${RP_DRIP_PORT}" \
     ALERT_WATCH_REPLICA_TIMEOUT="${ALERT_WATCH_REPLICA_TIMEOUT:-2}" \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \

@@ -27,6 +27,28 @@
 #                         no-tunnel host, never an alert. Err-log "Failed to
 #                         read token file" may enrich the body; daemon state is
 #                         the trigger (D-0107 F5).
+#   cloudflared-no-edge   plist present, launchctl state is running, and the
+#                         loopback metrics gauge cloudflared_tunnel_ha_connections
+#                         is 0. The process is up and the hostname is dark. Do
+#                         not probe 127.0.0.1:9555 or the write hostname — the
+#                         origin is dark 23:45–03:00 by design (D-0034 / D-0035);
+#                         edge count stays >0 across that window. No sleep grace.
+#   cloudflared-restart-storm  plist present and the launchd `runs` counter grew
+#                         by more than 1 (exclusive floor) since the last
+#                         watcher observation, persisted as cloudflared_last_runs
+#                         in alert-watch-state.json. +1 is a brew upgrade or
+#                         kickstart (quiet); a crash loop is ~720/hour. First
+#                         sample is a baseline, never an alert. No sleep grace.
+#   cloudflared-metrics-unreachable  plist present, daemon running, and two
+#                         consecutive failed loopback metrics reads (timeout /
+#                         HTTP / garbage / missing gauge). One failure is quiet;
+#                         a later success resets cloudflared_metrics_unreachable_streak.
+#                         urllib + SIGALRM total deadline (default 5 s). Metrics
+#                         URL from the err-log line "Starting metrics server on
+#                         HOST:PORT/metrics" (last match); default
+#                         http://127.0.0.1:20241/metrics. A moved port with no
+#                         log line degrades to this condition, never to silence.
+#                         Throw/timeout/garbage must not skip other conditions.
 #   replica-losing-ground public replica head age grew by more than
 #                         REPLICA_TREND_NOISE_SECS (default 120, exclusive) on
 #                         two consecutive successful probes. One grown delta is
@@ -68,9 +90,11 @@
 # mtime is granted one cycle of grace — launchd fires one missed calendar
 # event on wake, and this watcher may race it. Unloaded / nonzero-exit still
 # alert on that first run; those are not sleep artefacts. cloudflared-failing
-# never takes that grace (the tunnel daemon is KeepAlive, not calendar).
-# replica-losing-ground / replica-head-stale / replica-unreachable never take
-# that grace either — Render does not sleep at 23:45.
+# / cloudflared-no-edge / cloudflared-restart-storm /
+# cloudflared-metrics-unreachable never take that grace (the tunnel daemon is
+# KeepAlive, not calendar). replica-losing-ground / replica-head-stale /
+# replica-unreachable never take that grace either — Render does not sleep at
+# 23:45.
 #
 # Usage: alert-watch.sh [--test]
 #   --test     synthetic alert, tagged TEST, both channels (post-install shakeout)
@@ -95,6 +119,17 @@
 #   ALERT_WATCH_CLOUDFLARED_PLIST  ALERT_WATCH_CLOUDFLARED_ERR
 #     A launchctl shim without CLOUDFLARED_PLIST does not observe the host's
 #     real tunnel plist (existing shims print resolve-games not-running/0).
+#   ALERT_WATCH_CLOUDFLARED_METRICS   canned Prometheus text (skips the socket)
+#   ALERT_WATCH_CLOUDFLARED_RUNS      canned launchd `runs` integer
+#   ALERT_WATCH_CLOUDFLARED_UNREACHABLE=1  inject a failed metrics read
+#   ALERT_WATCH_CLOUDFLARED_THROW=1        raise inside the metrics probe;
+#                                         other conditions must still evaluate
+#   ALERT_WATCH_CLOUDFLARED_TIMEOUT        test-only total deadline seconds
+#     When METRICS/RUNS/UNREACHABLE/THROW is set, or ALERT_WATCH_CURL /
+#     ALERT_WATCH_LAUNCHCTL is set (evaluation fixtures), the metrics probe
+#     never opens a socket. Unset hooks plus CURL/LAUNCHCTL default to a
+#     HEALTHY daemon (ha_connections=4, runs unchanged). Production launchd
+#     does not set those keys and uses urllib against loopback only.
 #   ALERT_WATCH_REPLICA_HEAD_NUMBER  canned block number (skips the network)
 #   ALERT_WATCH_REPLICA_HEAD_TS     unix timestamp of that head
 #   ALERT_WATCH_REPLICA_HEAD_AGE    seconds; timestamp = now - age at eval time
@@ -269,7 +304,7 @@ python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$HEALTH_STALE_SECS" "$RESOLVE_STALE_SECS" "$SLEEP_GRACE_SECS" \
   "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
   "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" <<'PY'
-import json, os, shutil, sys, time, subprocess, signal
+import json, os, re, shutil, sys, time, subprocess, signal
 import urllib.error
 import urllib.request
 
@@ -513,13 +548,14 @@ if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
 def parse_cf_print(stdout):
     """Defensive parse of `launchctl print` (format varies across macOS).
 
-    Returns (state, exit_code) where state is 'running', 'not running',
-    or None (unparseable) and exit_code is an int or None.
+    Returns (state, exit_code, runs) where state is 'running', 'not running',
+    or None (unparseable), and exit_code / runs are int or None.
     """
     state = None
     exit_code = None
+    runs = None
     if not stdout:
-        return None, None
+        return None, None, None
     for line in stdout.splitlines():
         line = line.strip()
         lower = line.lower()
@@ -542,7 +578,16 @@ def parse_cf_print(stdout):
                 exit_code = int(raw.split()[0])
             except (ValueError, IndexError):
                 exit_code = None
-    return state, exit_code
+        elif lower.startswith("runs =") or lower.startswith("runs="):
+            parts = line.split("=", 1)
+            if len(parts) != 2:
+                continue
+            raw = parts[1].strip()
+            try:
+                runs = int(raw.split()[0])
+            except (ValueError, IndexError):
+                runs = None
+    return state, exit_code, runs
 
 def cf_token_hint(path):
     """Symptom detail only — never the detector. Token file itself is root-only."""
@@ -578,7 +623,7 @@ if cf_plist and os.path.exists(cf_plist):
         if cf_proc is not None and cf_proc.returncode == 0:
             cf_print_ok = True
             cf_stdout = cf_proc.stdout or ""
-    cf_state, cf_exit = parse_cf_print(cf_stdout)
+    cf_state, cf_exit, cf_runs = parse_cf_print(cf_stdout)
     # Unhealthy: print missing/unparseable, or any not-running state.
     # KeepAlive SuccessfulExit=false: a clean exit is never restarted.
     # Last exit code is body detail, not a gate.
@@ -616,6 +661,184 @@ if cf_plist and os.path.exists(cf_plist):
             "ForteL2 cloudflared tunnel failing",
             "cloudflared system daemon is unhealthy: %s%s"
             % (cf_why, cf_token_hint(cf_err)))
+
+    # Distinct cooldown keys. Never sleep-grace. Never probe :9555 or the
+    # write hostname — edge count is the predicate while origin is asleep.
+    CF_RESTART_FLOOR = 1  # exclusive: delta > 1 fires; +1 is a legit restart
+    CF_METRICS_DEFAULT = "http://127.0.0.1:20241/metrics"
+    _cf_metrics_re = re.compile(
+        r"Starting metrics server on (\S+):(\d+)/metrics"
+    )
+
+    def _cf_env_int(name, default):
+        raw = os.environ.get(name)
+        if raw is None or str(raw).strip() == "":
+            return default
+        try:
+            return int(str(raw).strip())
+        except (TypeError, ValueError):
+            return default
+
+    def _cf_test_offline():
+        return bool(
+            os.environ.get("ALERT_WATCH_CURL")
+            or os.environ.get("ALERT_WATCH_LAUNCHCTL")
+            or os.environ.get("ALERT_WATCH_CLOUDFLARED_METRICS") not in (None, "")
+            or os.environ.get("ALERT_WATCH_CLOUDFLARED_RUNS") not in (None, "")
+            or (os.environ.get("ALERT_WATCH_CLOUDFLARED_UNREACHABLE") or "") == "1"
+            or (os.environ.get("ALERT_WATCH_CLOUDFLARED_THROW") or "") == "1"
+        )
+
+    def parse_ha_connections(text):
+        """Last cloudflared_tunnel_ha_connections sample, or None if missing/garbage."""
+        if not text:
+            return None
+        found = None
+        for line in text.splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            name = s.split("{", 1)[0].split()[0]
+            if name != "cloudflared_tunnel_ha_connections":
+                continue
+            try:
+                found = int(float(s.split()[-1]))
+            except (ValueError, IndexError, TypeError):
+                return None
+        return found
+
+    def cf_metrics_url_from_err(path):
+        """Loopback metrics URL from the err-log start line; else the default.
+
+        A moved port with no matching log line keeps the default; the GET then
+        fails and degrades to cloudflared-metrics-unreachable (two consecutive).
+        Non-loopback hosts in the log are rewritten to 127.0.0.1 on the same
+        port so this watcher never leaves loopback.
+        """
+        text = ""
+        if path:
+            try:
+                with open(path, "rb") as fh:
+                    fh.seek(0, os.SEEK_END)
+                    size = fh.tell()
+                    fh.seek(max(0, size - 65536))
+                    text = fh.read().decode("utf-8", "replace")
+            except OSError:
+                text = ""
+        matches = _cf_metrics_re.findall(text)
+        if not matches:
+            return CF_METRICS_DEFAULT
+        host, port = matches[-1]
+        host = host.strip("[]")
+        if host in ("0.0.0.0", "::", ""):
+            host = "127.0.0.1"
+        elif host not in ("127.0.0.1", "localhost", "::1"):
+            host = "127.0.0.1"
+        if host == "::1":
+            return "http://[::1]:%s/metrics" % port
+        return "http://%s:%s/metrics" % (host, port)
+
+    def probe_cf_metrics():
+        """Return ha_connections int, or None on a failed read. THROW raises."""
+        if (os.environ.get("ALERT_WATCH_CLOUDFLARED_THROW") or "") == "1":
+            raise RuntimeError("ALERT_WATCH_CLOUDFLARED_THROW")
+        if (os.environ.get("ALERT_WATCH_CLOUDFLARED_UNREACHABLE") or "") == "1":
+            return None
+        canned = os.environ.get("ALERT_WATCH_CLOUDFLARED_METRICS")
+        if canned not in (None, "") or _cf_test_offline():
+            if canned in (None, ""):
+                canned = "cloudflared_tunnel_ha_connections 4"
+            return parse_ha_connections(canned)
+
+        url = cf_metrics_url_from_err(cf_err)
+        timeout = _cf_env_int("ALERT_WATCH_CLOUDFLARED_TIMEOUT", 5)
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "text/plain"},
+            method="GET",
+        )
+
+        def _cf_deadline(signum, frame):
+            raise TimeoutError("cloudflared metrics total deadline")
+
+        prev_handler = signal.signal(signal.SIGALRM, _cf_deadline)
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read(65536)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            return None
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, prev_handler)
+        try:
+            text = raw.decode("utf-8", "replace")
+        except (ValueError, TypeError, UnicodeDecodeError):
+            return None
+        return parse_ha_connections(text)
+
+    runs_raw = os.environ.get("ALERT_WATCH_CLOUDFLARED_RUNS")
+    observed_runs = cf_runs
+    if runs_raw not in (None, ""):
+        try:
+            observed_runs = int(str(runs_raw).strip())
+        except (TypeError, ValueError):
+            observed_runs = None
+    prev_runs = state.get("cloudflared_last_runs")
+    try:
+        prev_runs = int(prev_runs) if prev_runs is not None else None
+    except (TypeError, ValueError):
+        prev_runs = None
+    if observed_runs is not None and prev_runs is not None:
+        delta = observed_runs - prev_runs
+        if delta > CF_RESTART_FLOOR:
+            add("cloudflared-restart-storm",
+                "ForteL2 cloudflared restart storm",
+                "cloudflared launchd runs counter climbed by %d between watcher "
+                "runs (floor %d, exclusive; a single legitimate restart is quiet). "
+                "previous %s current %s. KeepAlive 24/7, no Mac-sleep grace."
+                % (delta, CF_RESTART_FLOOR, prev_runs, observed_runs))
+    if observed_runs is not None:
+        state["cloudflared_last_runs"] = observed_runs
+
+    # Metrics / zero-edge only while the job reports running — down daemons
+    # are already cloudflared-failing; probing them would double-page as
+    # metrics-unreachable. Isolated so throw/timeout cannot skip replica etc.
+    if not cf_unhealthy and cf_state == "running":
+        try:
+            ha = probe_cf_metrics()
+            if ha is None:
+                streak = int(state.get("cloudflared_metrics_unreachable_streak") or 0) + 1
+                state["cloudflared_metrics_unreachable_streak"] = streak
+                if streak >= 2:
+                    add("cloudflared-metrics-unreachable",
+                        "ForteL2 cloudflared metrics unreachable",
+                        "cloudflared loopback metrics failed %d consecutive watcher "
+                        "runs (timeout, HTTP failure, garbage, or missing "
+                        "cloudflared_tunnel_ha_connections). last successful edge "
+                        "sample is not required. KeepAlive 24/7, no Mac-sleep grace."
+                        % streak)
+            else:
+                state["cloudflared_metrics_unreachable_streak"] = 0
+                if ha == 0:
+                    add("cloudflared-no-edge",
+                        "ForteL2 cloudflared has no edge connections",
+                        "cloudflared is running but cloudflared_tunnel_ha_connections "
+                        "is 0 — the process is up and the write hostname is dark. "
+                        "loopback metrics only; origin :9555 is not probed (nightly "
+                        "sleep window is expected). KeepAlive 24/7, no Mac-sleep grace.")
+        except Exception:
+            streak = int(state.get("cloudflared_metrics_unreachable_streak") or 0) + 1
+            state["cloudflared_metrics_unreachable_streak"] = streak
+            if streak >= 2:
+                add("cloudflared-metrics-unreachable",
+                    "ForteL2 cloudflared metrics unreachable",
+                    "cloudflared loopback metrics raised on %d consecutive watcher "
+                    "runs. other conditions still evaluated. KeepAlive 24/7, no "
+                    "Mac-sleep grace." % streak)
+else:
+    state["cloudflared_last_runs"] = None
+    state["cloudflared_metrics_unreachable_streak"] = 0
 
 # --- public replica liveness (Render; no Mac-sleep grace) ---
 # Head-timestamp age and its trend only. Do not compare to the sequencer.
