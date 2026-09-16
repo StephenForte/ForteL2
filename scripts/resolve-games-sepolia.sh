@@ -1168,6 +1168,34 @@ if leg == "claimCredit_withdraw" and credit != 0:
 PY
 }
 
+# Temp file for decide/confirm JSON. Owned path only — never rm by glob
+# (a concurrent hourly/manual run has its own fortel2-resolve-one.*).
+RESOLVE_GAMES_GAME_FILE=""
+_RG_PREV_EXIT_CMD=""
+_RG_GAME_FILE_TRAP_INSTALLED=0
+cleanup_resolve_game_file() {
+  if [[ -n "${RESOLVE_GAMES_GAME_FILE:-}" ]]; then
+    rm -f -- "$RESOLVE_GAMES_GAME_FILE"
+    RESOLVE_GAMES_GAME_FILE=""
+  fi
+}
+_rg_on_exit() {
+  cleanup_resolve_game_file
+  if [[ -n "${_RG_PREV_EXIT_CMD:-}" ]]; then
+    eval "$_RG_PREV_EXIT_CMD"
+  fi
+}
+_rg_install_game_file_trap() {
+  if [[ "$_RG_GAME_FILE_TRAP_INSTALLED" -eq 1 ]]; then
+    return 0
+  fi
+  _RG_PREV_EXIT_CMD="$(trap -p EXIT 2>/dev/null | sed -n "s/^trap -- '\(.*\)' EXIT$/\1/p")"
+  trap '_rg_on_exit' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  _RG_GAME_FILE_TRAP_INSTALLED=1
+}
+
 execute_selected() {
   local snapshot_file="$1"
   local selected_csv="$2"
@@ -1199,12 +1227,15 @@ print("" if v is None else v)
   export RESOLVE_GAMES_WETH_DELAY="$weth_delay"
   export RESOLVE_GAMES_RESPECTED_TYPE="$respected_type"
   export RESOLVE_GAMES_INIT_BOND="$init_bond"
-  game_file="$(mktemp "${TMPDIR:-/tmp}/fortel2-resolve-one.XXXXXX")"
+  _rg_install_game_file_trap
 
   # Split selected_indexes without assigning IFS (Semgrep bash.lang.security.ifs-tampering).
   # awk emits one index per line; the while-read keeps counters in this shell.
   while IFS= read -r idx; do
     [[ -z "$idx" ]] && continue
+    cleanup_resolve_game_file
+    game_file="$(mktemp "${TMPDIR:-/tmp}/fortel2-resolve-one.XXXXXX")"
+    RESOLVE_GAMES_GAME_FILE="$game_file"
     echo "--- game $idx ---"
     claim_already=0
     while true; do
@@ -1261,7 +1292,7 @@ print("" if v is None else v)
   done <<EOF
 $(printf '%s' "$selected_csv" | awk -F, '{for (i = 1; i <= NF; i++) print $i}')
 EOF
-  rm -f "$game_file"
+  cleanup_resolve_game_file
 
   echo "EXECUTE done"
   echo "txs_sent=$sent_n"

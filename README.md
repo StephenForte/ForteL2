@@ -1030,6 +1030,8 @@ Mid-chain rewind on op-reth (PRD §11 Q6, interim): wipe the reth datadir and re
 | op-batcher | `data/logs/op-batcher.log` | `publishing` / `Submit` / `Sent transaction` |
 | op-proposer | `data/logs/op-proposer.log` | `dispute game` / `Proposing` |
 
+Start scripts run `scripts/rotate-logs.sh` against `$LOG_DIR` (`$DATA_DIR/logs`) **before** `start_bg` opens the file. Mechanism is copy-then-truncate of the same inode so an `O_APPEND` writer actually frees space; `mv` of a live log does not. Default threshold is 100 MiB with five numbered copies (`.log.1` newest). Paths stay put — `alert-watch.sh` and `refresh_health.sh` keep reading the same `data/` files (D-0113 Finding 2). Rotation applies on the **next start**; merging does not truncate already-open logs or sweep the existing 3.9 GB. Retired `op-geth.log` is capped like any other file, not deleted. Optional knobs `FORTEL2_LOG_ROTATE_BYTES` / `FORTEL2_LOG_ROTATE_KEEP` ship commented in `.env.sepolia.example` (D-0065).
+
 ## Sequencer restart
 
 `./scripts/stop-all.sh` then `./scripts/start-all.sh` (without `reset.sh`) resumes from the existing EL datadir (local 901: op-geth; Sepolia 852: op-reth) — no re-genesis. Deploy artifacts are reused.

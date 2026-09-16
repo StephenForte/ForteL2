@@ -45,6 +45,10 @@ BATCHER_REBROADCAST="${SEPOLIA_BATCHER_TXMGR_REBROADCAST_INTERVAL:-36s}"
 wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
 wait_for_rpc "$L2_RPC_URL" "L2"
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 if [[ "${USE_CUSTOM_BATCHER:-0}" == "1" ]]; then
   if [[ "${CONFIRM_CUSTOM_BATCHER_SEPOLIA:-}" != "1" ]]; then
     echo "ERROR: Sepolia custom batcher is opt-in only." >&2

@@ -2,7 +2,14 @@
 # ForteL2 pipeline health snapshot for the Morning Briefing.
 # Runs pipeline-snapshot.py locally (where L2 RPCs on 127.0.0.1 are reachable)
 # and writes data/pipeline-health.json atomically. Read-only: never starts/stops the chain.
+# Every line launchd captures must be datable without launchctl (D-0138).
 cd "$(dirname "$0")" || exit 1
+timestamp_lines() {
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$line"
+  done
+}
+{
 mkdir -p data
 run_snapshot() {
   if [ -f .env.sepolia ]; then
@@ -36,3 +43,5 @@ if [ ! -f data/pipeline-health.json ]; then
   exit 1
 fi
 exit "$snap_rc"
+} 2>&1 | timestamp_lines
+exit "${pipestatus[1]}"

@@ -9,6 +9,10 @@ assert_block_times
 assert_local_rpc_urls
 warn_if_missing_env_file
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 "$SCRIPT_DIR/01-start-l1.sh"
 
 if [[ ! -f "$DEPLOY_DIR/genesis.json" || ! -f "$FORTEL2_ROOT/deployments/deployments.json" ]]; then

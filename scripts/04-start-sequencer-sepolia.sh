@@ -58,6 +58,10 @@ if [[ "$PRINT_PLAN" -eq 1 ]]; then
   exit 0
 fi
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 if [[ "$(fortel2_el)" == "reth" ]]; then
   require_reth_profile "${FORTEL2_RETH_PROFILE:-}"
   if [[ "${FORTEL2_RETH_PROFILE}" != "sequencer_faultproof" ]]; then

@@ -252,6 +252,10 @@ if [[ "$L1_ID" != "11155111" ]]; then
   exit 1
 fi
 
+# Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
+# `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
+"$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
 echo "Starting op-reth-verifier profile=${FORTEL2_RETH_PROFILE} http :$HTTP_PORT auth :$AUTH_PORT datadir=$DATADIR"
 start_bg op-reth-verifier op-reth node \
   --chain="$GENESIS" \
