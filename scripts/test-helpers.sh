@@ -11522,6 +11522,7 @@ if grep -q 'replica-losing-ground' "$RP_AW" \
   && echo "$RP_REPLICA_BLK" | grep -q 'https://fortel2-replica-rpc.onrender.com' \
   && echo "$RP_REPLICA_BLK" | grep -q 'urllib.request' \
   && echo "$RP_REPLICA_BLK" | grep -q 'eth_getBlockByNumber' \
+  && echo "$RP_REPLICA_BLK" | grep -q '_env_int("REPLICA_TREND_NOISE_SECS", 600)' \
   && ! echo "$RP_REPLICA_BLK" | grep -qiE 'quicknode\.com|quiknode' \
   && ! echo "$RP_REPLICA_BLK" | grep -q 'slept' \
   && ! echo "$RP_REPLICA_BLK" | grep -q 'ALERT_WATCH_CURL:-curl' \
@@ -11638,44 +11639,66 @@ else
   fail=1
 fi
 
-# Noise floor is exclusive: delta == 120 is quiet; 121 fires only after two
-# consecutive such deltas (180 → 301 → 422).
+# Noise floor is exclusive: delta == 600 is quiet; 601 fires only after two
+# consecutive such deltas (180 → 780 → 1381).
 rp_reset
 rp_seed_last_ok 3600 180 982723
-RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=300 \
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=780 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
 if [[ "$RP_EC" -eq 0 ]] \
   && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
   && [[ "$RP_OUT" == *"no alert"* ]]; then
   echo "PASS alert-watch replica-losing-ground stays quiet at the noise floor"
 else
-  echo "FAIL delta == 120 s (the noise floor) must stay quiet (ec=$RP_EC)" >&2
+  echo "FAIL delta == 600 s (the noise floor) must stay quiet (ec=$RP_EC)" >&2
   echo "$RP_OUT" >&2
   fail=1
 fi
 rp_reset
 rp_seed_last_ok 3600 180 982723
-RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=301 \
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=781 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
 if [[ "$RP_EC" -ne 0 ]] \
   || [[ -f "$RP_FIX/mock/osascript.calls" ]] \
   || [[ "$RP_OUT" == *"replica-losing-ground"* ]]; then
-  echo "FAIL delta == 121 s first grown delta must stay quiet (ec=$RP_EC)" >&2
+  echo "FAIL delta == 601 s first grown delta must stay quiet (ec=$RP_EC)" >&2
   echo "$RP_OUT" >&2
   fail=1
 fi
-rp_seed_last_ok 3600 301 982723
+rp_seed_last_ok 3600 781 982723
 rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
   "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
-RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=422 \
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=1382 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
 if [[ "$RP_EC" -eq 0 ]] \
   && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
   && [[ "$RP_OUT" == *"replica-losing-ground"* ]]; then
   echo "PASS alert-watch replica-losing-ground fires just past the noise floor"
 else
-  echo "FAIL delta == 121 s must fire replica-losing-ground (ec=$RP_EC)" >&2
+  echo "FAIL delta == 601 s must fire replica-losing-ground (ec=$RP_EC)" >&2
   echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# 2026-09-17 live false positive: two consecutive +121 s deltas on a healthy
+# L1-derived sawtooth (98 → 219 → 340). Must stay quiet at the 600 s floor.
+rp_reset
+rp_seed_last_ok 3600 98 1110887
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_NUMBER=1110887 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=219 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+RP_OUT2="$(rp_run ALERT_WATCH_REPLICA_HEAD_NUMBER=1110887 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=340 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]] \
+  && [[ "$RP_OUT2" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-losing-ground stays quiet on the 2026-09-17 batch sawtooth"
+else
+  echo "FAIL 98→219→340 (two +121 s deltas) must stay quiet at the 600 s floor (ec=$RP_EC/$RP_EC2)" >&2
+  echo "$RP_OUT" >&2
+  echo "$RP_OUT2" >&2
   fail=1
 fi
 

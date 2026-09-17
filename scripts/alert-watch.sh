@@ -58,13 +58,16 @@
 #                         log line degrades to this condition, never to silence.
 #                         Throw/timeout/garbage must not skip other conditions.
 #   replica-losing-ground public replica head age grew by more than
-#                         REPLICA_TREND_NOISE_SECS (default 120, exclusive) on
+#                         REPLICA_TREND_NOISE_SECS (default 600, exclusive) on
 #                         two consecutive successful probes. One grown delta is
 #                         quiet (redeploy replay: age up for one run, then
 #                         collapses). A later delta at or below the floor
-#                         resets replica_losing_streak. A following node
-#                         jitters by seconds; an hourly freeze grows ~3600 s.
-#                         No Mac-sleep grace — the replica is on Render (D-0135).
+#                         resets replica_losing_streak. An L1-derived replica
+#                         sawtooths by one batcher channel (~6 min at
+#                         SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=30); an hourly
+#                         freeze grows ~3600 s. The 2026-09-17 first live
+#                         firing (219→340, delta 121) was that sawtooth
+#                         (D-0140). No Mac-sleep grace — Render does not sleep.
 #   replica-head-stale    a single successful probe shows head age >
 #                         REPLICA_HEAD_STALE_SECS (default 10800, exclusive, same
 #                         operator as health-stale). Backstop when trend has no
@@ -113,7 +116,7 @@
 #   ALERT_EMAIL_TO        recipient (required for email)
 #   ALERT_REALERT_HOURS   default 6
 #   REPLICA_HEAD_STALE_SECS    default 10800 (comment in .env.sepolia.example)
-#   REPLICA_TREND_NOISE_SECS   default 120
+#   REPLICA_TREND_NOISE_SECS   default 600
 #
 # Test-only overrides (names never appear in env files, so they survive lib.sh
 # `set -a` sourcing):
@@ -1047,7 +1050,7 @@ replica_stale_secs = _env_int(
 )
 replica_noise_secs = _env_int(
     "ALERT_WATCH_REPLICA_NOISE_SECS",
-    _env_int("REPLICA_TREND_NOISE_SECS", 120),
+    _env_int("REPLICA_TREND_NOISE_SECS", 600),
 )
 REPLICA_RPC_TIMEOUT = _env_int("ALERT_WATCH_REPLICA_TIMEOUT", 15)
 
@@ -1159,8 +1162,10 @@ def replica_ok(sample):
         prev_age = prev_obs - prev_ts
         delta = age - prev_age
         # Exclusive: jitter of exactly the floor is not losing ground.
-        # One grown delta is a redeploy replay, not an outage; two consecutive
-        # such deltas are. A recovery (delta <= floor) resets the streak.
+        # Floor sits above one batcher channel (~360 s sawtooth) and far
+        # below an hourly freeze (~3600 s). One grown delta is a redeploy
+        # replay, not an outage; two consecutive such deltas are. A
+        # recovery (delta <= floor) resets the streak.
         if delta > replica_noise_secs:
             lg_streak = lg_streak + 1
         else:
