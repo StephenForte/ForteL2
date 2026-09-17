@@ -11529,7 +11529,7 @@ if grep -q 'replica-losing-ground' "$RP_AW" \
   && ! grep -qE "sed -n '2,[0-9]+p'" "$RP_AW"; then
   echo "PASS alert-watch replica conditions use the public-read gateway, urllib, and no sleep grace"
 else
-  echo "FAIL replica probe must be urllib against fortel2-replica-rpc.onrender.com, never QuickNode, never slept-skip" >&2
+  echo "FAIL replica probe must be urllib against fortel2-replica-rpc.onrender.com, never QuickNode, never slept-skip, default noise floor 600" >&2
   fail=1
 fi
 
