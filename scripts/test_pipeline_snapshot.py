@@ -419,5 +419,64 @@ class ProposerSnapshotAdditiveKeysTests(unittest.TestCase):
         self.assertEqual(verdict, pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
 
 
+class UnknownProposerPanelTests(unittest.TestCase):
+    """D-0143: a raised snapshot_proposer() (L1 timeout, JSON-RPC error,
+    malformed gameAtIndex) must land on the same three-state contract as a
+    clean call that couldn't tell (D-0142) — never a bare `null` panel, and
+    never silently collapsed into `healthy`.
+    """
+
+    def test_failed_call_yields_unknown_never_null_never_healthy(self) -> None:
+        factory = "0x" + "33" * 20
+        panel = pipeline_snapshot.unknown_proposer_panel(factory, "8h")
+        self.assertIsNotNone(panel)
+        self.assertEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
+        self.assertNotEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
+
+    def test_failed_call_keeps_frozen_key_names_and_types(self) -> None:
+        factory = "0x" + "33" * 20
+        panel = pipeline_snapshot.unknown_proposer_panel(factory, "8h")
+        for key, typ in _PROPOSER_FROZEN_KEYS.items():
+            self.assertIn(key, panel)
+            self.assertIsInstance(panel[key], typ)
+        self.assertEqual(panel["factory"], factory)
+        self.assertIsNone(panel["latest"])
+        self.assertIsInstance(panel["interval_sec"], int)
+        self.assertEqual(panel["interval_sec"], 8 * 3600)
+
+    def test_unparseable_configured_interval_still_unknown_with_null_interval_sec(
+        self,
+    ) -> None:
+        panel = pipeline_snapshot.unknown_proposer_panel("0x" + "44" * 20, "garbage")
+        self.assertEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
+        self.assertIsNone(panel["interval_sec"])
+
+    def test_main_falls_back_to_unknown_panel_when_snapshot_proposer_raises(
+        self,
+    ) -> None:
+        # Exercises the exact call site main() uses on a raised eth_call,
+        # without needing a live RPC endpoint (offline fixture only).
+        factory = "0x" + "55" * 20
+
+        def boom(*_args: object, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("eth_call failed: L1 timeout")
+
+        original = pipeline_snapshot.snapshot_proposer
+        pipeline_snapshot.snapshot_proposer = boom
+        try:
+            try:
+                panel = pipeline_snapshot.snapshot_proposer(
+                    "http://127.0.0.1:1", factory, "8h"
+                )
+            except Exception:  # noqa: BLE001 — mirrors main()'s except block
+                panel = pipeline_snapshot.unknown_proposer_panel(factory, "8h")
+        finally:
+            pipeline_snapshot.snapshot_proposer = original
+
+        self.assertIsNotNone(panel)
+        self.assertEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
+        self.assertNotEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
+
+
 if __name__ == "__main__":
     unittest.main()

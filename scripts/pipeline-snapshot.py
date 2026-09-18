@@ -444,6 +444,25 @@ def snapshot_proposer(l1_url: str, factory: str, interval_raw: str = "8h") -> di
     return out
 
 
+def unknown_proposer_panel(factory: str, interval_raw: str) -> dict[str, Any]:
+    """Proposer panel for a raised snapshot_proposer() call (D-0143).
+
+    Same shape snapshot_proposer() returns on its own "cannot tell" paths
+    (game_count 0 / empty gameAtIndex) — an L1 timeout, JSON-RPC error, or
+    malformed gameAtIndex reply must land on the identical three-state
+    contract (D-0142), never a bare `null` panel a downstream reader can't
+    tell apart from "no factory configured".
+    """
+    interval_secs = parse_duration_seconds(interval_raw)
+    return {
+        "factory": factory,
+        "game_count": 0,
+        "latest": None,
+        "interval_sec": interval_secs,
+        "verdict": proposer_verdict(0, None, interval_secs),
+    }
+
+
 def snapshot_aggregate(l2_url: str, window: int = L2_WINDOW_BLOCKS) -> dict[str, Any]:
     tip = hex_to_int(rpc(l2_url, "eth_blockNumber"))
     if tip is None:
@@ -590,6 +609,7 @@ def main() -> int:
         try:
             result["proposer"] = snapshot_proposer(l1_url, factory, proposer_interval_raw)
         except Exception as exc:  # noqa: BLE001
+            result["proposer"] = unknown_proposer_panel(factory, proposer_interval_raw)
             result["errors"].append({"panel": "proposer", "error": str(exc)})
     else:
         result["errors"].append(
