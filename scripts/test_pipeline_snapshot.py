@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import unittest
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 SCRIPT_PATH = Path(__file__).with_name("pipeline-snapshot.py")
@@ -189,6 +191,232 @@ class BatcherSnapshotTests(unittest.TestCase):
         self.assertIsInstance(with_post["verdict"], str)
         self.assertIsInstance(empty["verdict"], str)
         self.assertEqual(with_post["cadence_sec"], 40)
+
+
+def _pt(year, month, day, hour, minute, second=0) -> float:
+    return datetime(
+        year, month, day, hour, minute, second, tzinfo=ZoneInfo("America/Los_Angeles")
+    ).timestamp()
+
+
+class ParseDurationSecondsTests(unittest.TestCase):
+    def test_hours_minutes_seconds(self) -> None:
+        self.assertEqual(pipeline_snapshot.parse_duration_seconds("8h"), 8 * 3600)
+        self.assertEqual(pipeline_snapshot.parse_duration_seconds("30m"), 30 * 60)
+        self.assertEqual(pipeline_snapshot.parse_duration_seconds("12s"), 12)
+
+    def test_unparseable_forms_return_none(self) -> None:
+        # An unparseable interval must yield the "cannot tell" verdict, never
+        # a default that silently disagrees with the configured value (D-0142).
+        for raw in (None, "", "8", "8x", "-1h", "8 h", "8H", "abc", "1h2m"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(pipeline_snapshot.parse_duration_seconds(raw))
+
+
+class DevSleepWindowTests(unittest.TestCase):
+    def test_inside_window_after_2345(self) -> None:
+        self.assertTrue(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 18, 23, 50)))
+
+    def test_inside_window_before_0300(self) -> None:
+        self.assertTrue(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 1, 30)))
+
+    def test_outside_window_at_boundaries(self) -> None:
+        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 3, 0)))
+        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 18, 23, 44)))
+
+    def test_midday_is_awake(self) -> None:
+        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 18, 12, 0)))
+
+
+class AwakeSecondsBetweenTests(unittest.TestCase):
+    def test_zero_or_negative_range(self) -> None:
+        self.assertEqual(pipeline_snapshot.awake_seconds_between(100.0, 100.0), 0.0)
+        self.assertEqual(pipeline_snapshot.awake_seconds_between(200.0, 100.0), 0.0)
+
+    def test_daytime_only_range_is_unaffected(self) -> None:
+        lo = _pt(2026, 9, 18, 9, 0)
+        hi = _pt(2026, 9, 18, 17, 0)
+        self.assertEqual(pipeline_snapshot.awake_seconds_between(lo, hi), hi - lo)
+
+    def test_range_wholly_inside_one_window(self) -> None:
+        lo = _pt(2026, 9, 19, 0, 30)
+        hi = _pt(2026, 9, 19, 1, 30)
+        self.assertEqual(pipeline_snapshot.awake_seconds_between(lo, hi), 0.0)
+
+    def test_range_spanning_one_full_window(self) -> None:
+        # 22:00 the night before through 05:00 next day: raw span 7h, minus
+        # the 3h15m window = 3h45m awake (the §7 property: single-window
+        # spans are judged on awake time, not raw age).
+        lo = _pt(2026, 9, 18, 22, 0)
+        hi = _pt(2026, 9, 19, 5, 0)
+        awake = pipeline_snapshot.awake_seconds_between(lo, hi)
+        self.assertAlmostEqual(awake, (hi - lo) - (3 * 3600 + 15 * 60), delta=1.0)
+
+    def test_range_spanning_two_full_windows(self) -> None:
+        # §7 trap: a dead proposer over ~54h spans two nightly windows; both
+        # must be removed, not one.
+        lo = _pt(2026, 9, 17, 12, 0)
+        hi = _pt(2026, 9, 19, 18, 0)
+        awake = pipeline_snapshot.awake_seconds_between(lo, hi)
+        self.assertAlmostEqual(
+            awake, (hi - lo) - 2 * (3 * 3600 + 15 * 60), delta=1.0
+        )
+
+
+class ProposerVerdictTests(unittest.TestCase):
+    HEALTHY = pipeline_snapshot.PROPOSER_VERDICT_HEALTHY
+    OVERDUE = pipeline_snapshot.PROPOSER_VERDICT_OVERDUE
+    UNKNOWN = pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN
+
+    def test_unknown_when_game_count_zero(self) -> None:
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(0, None, 8 * 3600, now=1000.0),
+            self.UNKNOWN,
+        )
+
+    def test_unknown_when_latest_missing(self) -> None:
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(3, None, 8 * 3600, now=1000.0),
+            self.UNKNOWN,
+        )
+
+    def test_unknown_when_interval_unparseable(self) -> None:
+        latest = {"timestamp": 500.0}
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(3, latest, None, now=1000.0),
+            self.UNKNOWN,
+        )
+
+    def test_measured_8h02m_cadence_is_not_overdue(self) -> None:
+        # §9: the measured real cadence (8h 02m) must not be overdue against
+        # an 8h configured interval (threshold 10h), with no sleep window in
+        # play (noon PT origin).
+        now = _pt(2026, 9, 18, 12, 0)
+        ts = now - (8 * 3600 + 2 * 60)
+        latest = {"timestamp": ts}
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, latest, 8 * 3600, now=now),
+            self.HEALTHY,
+        )
+
+    def test_exact_threshold_is_healthy_one_second_past_is_overdue(self) -> None:
+        # Daytime range (no sleep window) so raw age == awake age exactly.
+        now = _pt(2026, 9, 18, 20, 0)
+        interval = 8 * 3600
+        threshold = interval + pipeline_snapshot.PROPOSER_OVERDUE_GRACE_SECS
+        at_threshold = {"timestamp": now - threshold}
+        past_threshold = {"timestamp": now - threshold - 1}
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, at_threshold, interval, now=now),
+            self.HEALTHY,
+        )
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, past_threshold, interval, now=now),
+            self.OVERDUE,
+        )
+
+    def test_one_sleep_window_under_threshold_on_awake_time_is_not_overdue(self) -> None:
+        # Raw age exceeds the 10h threshold, but awake age (minus one window)
+        # does not — the case a naive `age >` check gets wrong.
+        interval = 8 * 3600
+        threshold = interval + pipeline_snapshot.PROPOSER_OVERDUE_GRACE_SECS
+        now = _pt(2026, 9, 19, 5, 0)
+        ts = now - (threshold - 3600)  # awake age = threshold - 1h (under)
+        ts -= 3 * 3600 + 15 * 60  # raw age grows by exactly one window's width
+        latest = {"timestamp": ts}
+        raw_age = now - ts
+        self.assertGreater(raw_age, threshold)  # a naive check would fire
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, latest, interval, now=now),
+            self.HEALTHY,
+        )
+
+    def test_two_sleep_windows_judged_on_awake_time_not_one_windows_worth(self) -> None:
+        # §7 trap: subtracting only one window's width for a two-window gap
+        # would read this as healthy. The correct awake-time calc must not.
+        interval = 8 * 3600
+        threshold = interval + pipeline_snapshot.PROPOSER_OVERDUE_GRACE_SECS
+        now = _pt(2026, 9, 19, 18, 0)
+        lo = _pt(2026, 9, 17, 12, 0)
+        awake = pipeline_snapshot.awake_seconds_between(lo, now)
+        self.assertGreater(awake, threshold)
+        latest = {"timestamp": lo}
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, latest, interval, now=now),
+            self.OVERDUE,
+        )
+
+    def test_well_past_threshold_on_awake_time_is_overdue(self) -> None:
+        now = _pt(2026, 9, 18, 20, 0)
+        interval = 8 * 3600
+        latest = {"timestamp": now - 100 * 3600}
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, latest, interval, now=now),
+            self.OVERDUE,
+        )
+
+    def test_verdict_judged_against_configured_interval(self) -> None:
+        # Same age, different configured interval, different verdict.
+        now = _pt(2026, 9, 18, 20, 0)
+        age = 5 * 3600
+        latest = {"timestamp": now - age}
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, latest, 8 * 3600, now=now),
+            self.HEALTHY,
+        )
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, latest, 1 * 3600, now=now),
+            self.OVERDUE,
+        )
+
+
+# Frozen pipeline-health.json proposer keys (D-0142): types must not change.
+_PROPOSER_FROZEN_KEYS = {
+    "factory": str,
+    "game_count": int,
+    "latest": (dict, type(None)),
+}
+_PROPOSER_LATEST_FROZEN_KEYS = {
+    "index": int,
+    "game_type": int,
+    "timestamp": int,
+    "age_sec": (int, type(None)),
+    "proxy": str,
+}
+
+
+class ProposerSnapshotAdditiveKeysTests(unittest.TestCase):
+    def test_zero_games_is_unknown_and_keeps_frozen_keys(self) -> None:
+        factory = "0x" + "11" * 20
+        for key, typ in _PROPOSER_FROZEN_KEYS.items():
+            panel = {
+                "factory": factory,
+                "game_count": 0,
+                "latest": None,
+                "interval_sec": 8 * 3600,
+            }
+            panel["verdict"] = pipeline_snapshot.proposer_verdict(
+                panel["game_count"], panel["latest"], panel["interval_sec"]
+            )
+            self.assertIn(key, panel)
+            self.assertIsInstance(panel[key], typ)
+        self.assertEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
+        self.assertIsInstance(panel["interval_sec"], int)
+
+    def test_populated_latest_keeps_names_and_types(self) -> None:
+        now = _pt(2026, 9, 18, 20, 0)
+        latest = {
+            "index": 485,
+            "game_type": 8,
+            "timestamp": int(now - 3600),
+            "age_sec": 3600,
+            "proxy": "0x" + "22" * 20,
+        }
+        for key, typ in _PROPOSER_LATEST_FROZEN_KEYS.items():
+            self.assertIn(key, latest)
+            self.assertIsInstance(latest[key], typ)
+        verdict = pipeline_snapshot.proposer_verdict(1, latest, 8 * 3600, now=now)
+        self.assertEqual(verdict, pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
 
 
 if __name__ == "__main__":

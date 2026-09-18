@@ -38,6 +38,28 @@ L2_WINDOW_BLOCKS = 15
 BATCHER_VERDICT_HEALTHY = "healthy"
 BATCHER_VERDICT_NO_POSTS = "no-posts"
 
+# Closed set written on proposer.verdict (additive; existing keys are frozen).
+# "unknown" is the point of D-0142: a verdict that collapses "could not tell"
+# into "healthy" recreates the exact silent-failure class this closes.
+PROPOSER_VERDICT_HEALTHY = "healthy"
+PROPOSER_VERDICT_OVERDUE = "overdue"
+PROPOSER_VERDICT_UNKNOWN = "unknown"
+
+# Assigned, not derived (D-0142): observed live jitter is ~2 min across
+# consecutive 8h proposals, so 2 h is roughly 60x the worst observed slack —
+# generous without waiting a whole extra cycle.
+PROPOSER_OVERDUE_GRACE_SECS = 2 * 3600
+
+# Nightly dev-sleep window, America/Los_Angeles (D-0026 / launchd sleep+wake).
+# Independently reimplemented in scripts/alert-watch.sh's in_dev_sleep_window()
+# for its own proposer-overdue condition — two separate processes, so this is
+# necessarily a second copy of the same two numbers. Grep "23:45" in both
+# files if the sleep schedule ever moves.
+_DEV_SLEEP_START_MIN = 23 * 60 + 45
+_DEV_SLEEP_END_MIN = 3 * 60
+
+_DURATION_RE = re.compile(r"^(\d+)(h|m|s)$")
+
 
 def load_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -170,6 +192,92 @@ def age_seconds(ts: Any, now: float | None = None) -> int | None:
     return max(0, int(now) - n)
 
 
+def parse_duration_seconds(raw: str) -> int | None:
+    """Parse the op-proposer duration suffix form ('8h' / '30m' / '12s').
+
+    Returns None on anything unparseable — an unparseable interval must yield
+    the "cannot tell" proposer verdict, never a default that silently
+    disagrees with what the proposer is actually running (D-0142).
+    """
+    if not raw:
+        return None
+    m = _DURATION_RE.match(str(raw).strip())
+    if not m:
+        return None
+    unit_secs = {"h": 3600, "m": 60, "s": 1}[m.group(2)]
+    return int(m.group(1)) * unit_secs
+
+
+def in_dev_sleep_window(ts: float) -> bool:
+    """Mirrors alert-watch.sh's in_dev_sleep_window() — same two boundaries."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        local = datetime.fromtimestamp(ts, ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        return False
+    mins = local.hour * 60 + local.minute
+    return mins >= _DEV_SLEEP_START_MIN or mins < _DEV_SLEEP_END_MIN
+
+
+def awake_seconds_between(lo: float, hi: float) -> float:
+    """Seconds in [lo, hi] EXCLUDING every nightly 23:45-03:00 PT window it
+    overlaps, however many windows that spans (D-0142 §7 — a proposer silent
+    for 30h must have TWO windows removed, not a flat 3h15m once).
+    """
+    if hi <= lo:
+        return 0.0
+    try:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("America/Los_Angeles")
+        day = datetime.fromtimestamp(lo, tz).date() - timedelta(days=1)
+        end_day = datetime.fromtimestamp(hi, tz).date()
+    except Exception:
+        return max(0.0, hi - lo)
+    sleep_secs = 0.0
+    one_day = timedelta(days=1)
+    window_len = timedelta(hours=3, minutes=15)
+    while day <= end_day:
+        start_dt = datetime(day.year, day.month, day.day, 23, 45, tzinfo=tz)
+        end_dt = start_dt + window_len
+        ov_lo = max(lo, start_dt.timestamp())
+        ov_hi = min(hi, end_dt.timestamp())
+        if ov_hi > ov_lo:
+            sleep_secs += ov_hi - ov_lo
+        day += one_day
+    return max(0.0, (hi - lo) - sleep_secs)
+
+
+def proposer_verdict(
+    game_count: int,
+    latest: dict[str, Any] | None,
+    interval_secs: int | None,
+    now: float | None = None,
+) -> str:
+    """Closed set (D-0142): healthy / overdue / unknown.
+
+    unknown ("cannot tell") when game_count is 0, latest game details are
+    missing, or the configured interval is unparseable — never collapsed into
+    healthy, which would reproduce the exact defect this task closes.
+    """
+    if not game_count or not latest or interval_secs is None:
+        return PROPOSER_VERDICT_UNKNOWN
+    ts = latest.get("timestamp")
+    if ts is None:
+        return PROPOSER_VERDICT_UNKNOWN
+    now = now if now is not None else time.time()
+    awake_age = awake_seconds_between(float(ts), float(now))
+    threshold = interval_secs + PROPOSER_OVERDUE_GRACE_SECS
+    # Exclusive: exactly at the threshold is still healthy, one second past
+    # is overdue (D-0142 §4 P2 / §9 coverage).
+    if awake_age > threshold:
+        return PROPOSER_VERDICT_OVERDUE
+    return PROPOSER_VERDICT_HEALTHY
+
+
 def scan_from(tip: int, window: int) -> int:
     if tip < 0:
         return 0
@@ -297,7 +405,8 @@ def snapshot_batcher(
     return summarize_batcher(start, tip, posts, batcher, inbox)
 
 
-def snapshot_proposer(l1_url: str, factory: str) -> dict[str, Any]:
+def snapshot_proposer(l1_url: str, factory: str, interval_raw: str = "8h") -> dict[str, Any]:
+    interval_secs = parse_duration_seconds(interval_raw)
     # gameCount()
     raw = rpc(l1_url, "eth_call", [{"to": factory, "data": "0x4d1975b4"}, "latest"])
     count = hex_to_int(raw) or 0
@@ -305,14 +414,19 @@ def snapshot_proposer(l1_url: str, factory: str) -> dict[str, Any]:
         "factory": factory,
         "game_count": count,
         "latest": None,
+        # Additive (D-0142); existing keys above keep their names/types/null
+        # semantics — an external agent reads this file byte-for-byte.
+        "interval_sec": interval_secs,
     }
     if count == 0:
+        out["verdict"] = proposer_verdict(count, out["latest"], interval_secs)
         return out
     # gameAtIndex(uint256) — selector 0xbb8aa1fc
     idx = count - 1
     data = "0xbb8aa1fc" + f"{idx:064x}"
     raw_game = rpc(l1_url, "eth_call", [{"to": factory, "data": data}, "latest"])
     if not raw_game or raw_game == "0x" or len(raw_game) < 2 + 64 * 3:
+        out["verdict"] = proposer_verdict(count, out["latest"], interval_secs)
         return out
     # ABI: uint32 gameType, uint64 timestamp, address proxy (each 32-byte word)
     h = raw_game[2:]
@@ -326,6 +440,7 @@ def snapshot_proposer(l1_url: str, factory: str) -> dict[str, Any]:
         "age_sec": age_seconds(ts),
         "proxy": proxy,
     }
+    out["verdict"] = proposer_verdict(count, out["latest"], interval_secs)
     return out
 
 
@@ -423,6 +538,9 @@ def main() -> int:
     node_url = env_get(file_env, "L2_NODE_RPC_URL", "http://127.0.0.1:9547")
     batcher = env_get(file_env, "BATCHER_ADDRESS")
     deploy_dir = Path(env_get(file_env, "DEPLOY_DIR", str(root / "deployments" / ".deployer")))
+    # SEPOLIA_PROPOSER_INTERVAL only (D-0142) — the legacy PROPOSER_INTERVAL key
+    # is a Phase-1 Anvil knob that 06-start-proposer-sepolia.sh already ignores.
+    proposer_interval_raw = env_get(file_env, "SEPOLIA_PROPOSER_INTERVAL", "8h")
 
     if not l1_url:
         raise SystemExit("ERROR: L1_RPC_URL unset")
@@ -470,7 +588,7 @@ def main() -> int:
 
     if is_eth_address(factory):
         try:
-            result["proposer"] = snapshot_proposer(l1_url, factory)
+            result["proposer"] = snapshot_proposer(l1_url, factory, proposer_interval_raw)
         except Exception as exc:  # noqa: BLE001
             result["errors"].append({"panel": "proposer", "error": str(exc)})
     else:
