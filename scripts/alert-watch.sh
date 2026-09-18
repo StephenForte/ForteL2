@@ -90,6 +90,25 @@
 #                         never ALERT_WATCH_CURL (that shim is Resend). One
 #                         eth_getBlockByNumber(latest); URL is the published
 #                         public-read gateway, never QuickNode / Access / loopback.
+#   proposer-overdue      the proposer's last DisputeGameFactory game, with any
+#                         time inside 23:45-03:00 PT excluded (however many
+#                         windows the gap spans — reuses in_dev_sleep_window()),
+#                         is older than the configured SEPOLIA_PROPOSER_INTERVAL
+#                         (default 8h; legacy PROPOSER_INTERVAL is a Phase-1
+#                         Anvil knob and is ignored) plus a 2 h grace (D-0142;
+#                         ~60x the observed ~2 min proposer jitter). Exclusive:
+#                         exactly at the threshold is quiet, one second past
+#                         fires. This is the FIRST metered dependency in this
+#                         watcher — its own hourly L1 read (gameCount() +
+#                         gameAtIndex(), two eth_calls/run, ~48/day) against
+#                         L1_RPC_URL, separate from the daily pipeline-snapshot
+#                         scan. A failed/garbage read, an empty factory
+#                         (game_count 0), or an unparseable interval cannot
+#                         determine overdue-ness and is quiet once; the SAME
+#                         condition id only fires (as "cannot verify") after two
+#                         consecutive such reads, following the
+#                         replica_unreachable_streak precedent — a later
+#                         successful read resets that streak.
 #
 # Verdicts OK / WARN / INSUFFICIENT never alert (WARN is inside funding-watch's
 # documented tolerance; alerting on it is the cry-wolf class #146 removed).
@@ -129,6 +148,9 @@
 #   ALERT_REALERT_HOURS   default 6
 #   REPLICA_HEAD_STALE_SECS    default 10800 (comment in .env.sepolia.example)
 #   REPLICA_TREND_NOISE_SECS   default 600
+#   SEPOLIA_PROPOSER_INTERVAL  proposer cadence for proposer-overdue, default 8h
+#                              (D-0133/D-0142). Never the legacy PROPOSER_INTERVAL
+#                              Phase-1 Anvil knob — that key is ignored here too.
 #
 # Test-only overrides (names never appear in env files, so they survive lib.sh
 # `set -a` sourcing):
@@ -184,6 +206,23 @@
 #   shim), the probe never opens a socket. RPC_URL/TIMEOUT do not short-circuit.
 #   Production launchd does not set those keys and uses urllib against the
 #   hardcoded public-read gateway.
+#   ALERT_WATCH_PROPOSER_FACTORY       canned DisputeGameFactory address (skips
+#                                      deployments.json)
+#   ALERT_WATCH_PROPOSER_GAME_COUNT    canned gameCount() result
+#   ALERT_WATCH_PROPOSER_LATEST_INDEX  canned latest game index
+#   ALERT_WATCH_PROPOSER_LATEST_TS     unix timestamp of the latest game
+#   ALERT_WATCH_PROPOSER_LATEST_AGE    seconds; timestamp = now - age at eval
+#                                      time. Prefer LATEST_AGE for "fresh",
+#                                      same reasoning as REPLICA_HEAD_AGE.
+#   ALERT_WATCH_PROPOSER_UNREACHABLE=1  inject a failed probe (no network)
+#   ALERT_WATCH_PROPOSER_THROW=1        raise inside the probe; other
+#                                       conditions must still evaluate
+#   ALERT_WATCH_PROPOSER_TIMEOUT        test-only total deadline seconds
+#     When FACTORY/GAME_COUNT/LATEST_*/UNREACHABLE/THROW is set, or
+#     ALERT_WATCH_CURL is set (Resend shim), the probe never opens a socket
+#     and never reads deployments.json. Production launchd sets none of
+#     those keys and uses urllib against L1_RPC_URL plus the on-disk
+#     deployments file (D-0142).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -226,6 +265,24 @@ else
 fi
 CF_ERR="${ALERT_WATCH_CLOUDFLARED_ERR:-/Library/Logs/com.cloudflare.cloudflared.err.log}"
 CF_LABEL="com.cloudflare.cloudflared"
+
+# Proposer DisputeGameFactory address (D-0142): read the checked-in
+# deployments.json via lib.sh's deployments_json_path() — never discovered by
+# a live RPC. Canned ALERT_WATCH_PROPOSER_FACTORY skips the file entirely
+# (evaluation fixtures never need a real deployments.json on disk).
+PROPOSER_FACTORY="${ALERT_WATCH_PROPOSER_FACTORY:-}"
+if [ -z "$PROPOSER_FACTORY" ]; then
+  PROPOSER_FACTORY="$(python3 - "$(deployments_json_path)" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        data = json.load(fh)
+    print(str(data.get("DisputeGameFactoryProxy") or data.get("disputeGameFactoryProxy") or ""))
+except (OSError, ValueError, TypeError, IndexError):
+    print("")
+PY
+)"
+fi
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-alert-watch.XXXXXX")"
 cleanup_aw() { rm -rf "$WORKDIR"; }
@@ -344,9 +401,11 @@ python3 - "$FUNDING_JSON" "$STATE_FILE" "$RESOLVE_OUT" "$RESOLVE_ERR" \
   "$REALERT_HOURS" "$LABEL" "$WORKDIR" "${ALERT_WATCH_LAUNCHCTL:-}" \
   "${ALERT_WATCH_PID_DIR:-$PID_DIR}" "$CF_PLIST" "$CF_ERR" "$CF_LABEL" \
   "${ALERT_WATCH_OP_RETH_LOG:-$LOG_DIR/op-reth.log}" \
-  "${ALERT_WATCH_PROOFS_STORE:-${FORTEL2_RETH_DATADIR:-$DATA_DIR/l2/op-reth}/historical-proofs}" <<'PY'
+  "${ALERT_WATCH_PROOFS_STORE:-${FORTEL2_RETH_DATADIR:-$DATA_DIR/l2/op-reth}/historical-proofs}" \
+  "$PROPOSER_FACTORY" <<'PY'
 import json, os, re, shutil, sys, time, subprocess, signal
 import urllib.error
+import urllib.parse
 import urllib.request
 
 funding_json, state_file, resolve_out, resolve_err = sys.argv[1:5]
@@ -368,6 +427,9 @@ reth_log_arg = sys.argv[16] if len(sys.argv) > 16 else ""
 # and unset in an operator shell, so the remedy would be a silent no-op.
 proofs_store_arg = sys.argv[17] if len(sys.argv) > 17 else ""
 PROOFS_STORE = proofs_store_arg or "$DATA_DIR/l2/op-reth/historical-proofs"
+# Resolved by bash already (deployments.json or ALERT_WATCH_PROPOSER_FACTORY);
+# Python never re-reads the file (D-0142).
+proposer_factory_arg = sys.argv[18] if len(sys.argv) > 18 else ""
 now = time.time()
 _now_raw = os.environ.get("ALERT_WATCH_NOW")
 if _now_raw not in (None, ""):
@@ -1262,6 +1324,214 @@ try:
         replica_ok(replica_sample)
 except Exception as exc:
     replica_fail("probe error: %s" % type(exc).__name__)
+
+# --- proposer overdue liveness (D-0142) — own hourly L1 read, own metered dep ---
+# The FIRST metered dependency in this watcher (disclosed in D-0142): two
+# eth_calls per run against L1_RPC_URL (gameCount + gameAtIndex), separate
+# from pipeline-snapshot.py's daily scan. Never QuickNode-specific and never
+# a claim about which provider is configured — L1_RPC_URL is whatever the
+# active env already points at.
+_PROPOSER_DURATION_RE = re.compile(r"^(\d+)(h|m|s)$")
+
+def parse_proposer_interval(raw):
+    """'8h' / '30m' / '12s' -> seconds. None if unparseable — never a silent
+    default that disagrees with what the proposer is actually running."""
+    if raw is None:
+        return None
+    m = _PROPOSER_DURATION_RE.match(str(raw).strip())
+    if not m:
+        return None
+    unit_secs = {"h": 3600, "m": 60, "s": 1}[m.group(2)]
+    return int(m.group(1)) * unit_secs
+
+# SEPOLIA_PROPOSER_INTERVAL only — the legacy PROPOSER_INTERVAL key is a
+# Phase-1 Anvil knob that 06-start-proposer-sepolia.sh already ignores.
+PROPOSER_INTERVAL_RAW = os.environ.get("SEPOLIA_PROPOSER_INTERVAL") or "8h"
+PROPOSER_INTERVAL_SECS = parse_proposer_interval(PROPOSER_INTERVAL_RAW)
+# Assigned, not derived (D-0142): observed jitter ~2 min; 2 h is ~60x that.
+PROPOSER_OVERDUE_GRACE_SECS = 2 * 3600
+PROPOSER_RPC_TIMEOUT = _env_int("ALERT_WATCH_PROPOSER_TIMEOUT", 15)
+
+def awake_seconds(t0, t1):
+    """[t0, t1] minus every nightly 23:45-03:00 PT window it overlaps (the
+    §7 trap — a proposer silent for 30h must have TWO windows removed, not
+    one). Reuses in_dev_sleep_window(), already defined above for the
+    replica-losing-ground trend, the same way D-0141's
+    interval_touches_dev_sleep() walks an interval against it — generalised
+    from "does it touch" to "how much of it is inside".
+    """
+    try:
+        lo = float(t0)
+        hi = float(t1)
+    except (TypeError, ValueError):
+        return 0.0
+    if lo > hi:
+        lo, hi = hi, lo
+    total = hi - lo
+    if total <= 0:
+        return 0.0
+    if total >= 30 * 24 * 3600:
+        return total  # defensive cap; never seen in practice
+    step = 60.0
+    t = lo
+    sleep_secs = 0.0
+    while t < hi:
+        seg_end = t + step if t + step < hi else hi
+        if in_dev_sleep_window(t):
+            sleep_secs += seg_end - t
+        t = seg_end
+    return max(0.0, total - sleep_secs)
+
+def _redact_l1_url(url):
+    try:
+        p = urllib.parse.urlparse(url or "")
+    except Exception:
+        return "<unparseable>"
+    netloc = p.hostname or ""
+    if p.port:
+        netloc = "%s:%s" % (netloc, p.port)
+    path = "/…" if p.path and p.path != "/" else ""
+    return "%s://%s%s" % (p.scheme, netloc, path)
+
+L1_RPC_URL = os.environ.get("L1_RPC_URL") or ""
+
+def proposer_eth_call(data):
+    payload = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [{"to": proposer_factory_arg, "data": data}, "latest"],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        L1_RPC_URL,
+        data=payload,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    def _proposer_deadline(signum, frame):
+        raise TimeoutError("proposer L1 read total deadline")
+    prev_handler = signal.signal(signal.SIGALRM, _proposer_deadline)
+    signal.setitimer(signal.ITIMER_REAL, PROPOSER_RPC_TIMEOUT)
+    try:
+        with urllib.request.urlopen(req, timeout=PROPOSER_RPC_TIMEOUT) as resp:
+            raw = resp.read(65536)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev_handler)
+    doc = json.loads(raw.decode("utf-8"))
+    if not isinstance(doc, dict) or doc.get("error"):
+        return None
+    return doc.get("result")
+
+def probe_proposer_latest():
+    """Return {'index', 'timestamp'} or None ("cannot determine"). THROW raises."""
+    if (os.environ.get("ALERT_WATCH_PROPOSER_THROW") or "") == "1":
+        raise RuntimeError("ALERT_WATCH_PROPOSER_THROW")
+    if (os.environ.get("ALERT_WATCH_PROPOSER_UNREACHABLE") or "") == "1":
+        return None
+    canned_count = os.environ.get("ALERT_WATCH_PROPOSER_GAME_COUNT")
+    canned_idx = os.environ.get("ALERT_WATCH_PROPOSER_LATEST_INDEX")
+    canned_ts = os.environ.get("ALERT_WATCH_PROPOSER_LATEST_TS")
+    canned_age = os.environ.get("ALERT_WATCH_PROPOSER_LATEST_AGE")
+    canned = any(
+        v not in (None, "") for v in (canned_count, canned_idx, canned_ts, canned_age)
+    )
+    # Resend test shim on PATH/ALERT_WATCH_CURL returns {"id":"mock-resend"}
+    # for every URL; never live-eth_call from an evaluation fixture.
+    test_offline = bool(os.environ.get("ALERT_WATCH_CURL"))
+    if canned or test_offline:
+        count = _rpc_int(canned_count)
+        if count is None:
+            count = 1
+        if count == 0:
+            return None
+        idx = _rpc_int(canned_idx)
+        if idx is None:
+            idx = count - 1
+        if canned_age not in (None, ""):
+            try:
+                ts = now - float(canned_age)
+            except (TypeError, ValueError):
+                return None
+        elif canned_ts in (None, "", "now"):
+            ts = now
+        else:
+            try:
+                ts = float(canned_ts)
+            except (TypeError, ValueError):
+                return None
+        return {"index": idx, "timestamp": ts}
+    if not proposer_factory_arg:
+        return None
+    try:
+        raw_count = proposer_eth_call("0x4d1975b4")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    count = _rpc_int(raw_count)
+    if not count:
+        return None
+    idx = count - 1
+    data = "0xbb8aa1fc" + ("%064x" % idx)
+    try:
+        raw_game = proposer_eth_call(data)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    if not raw_game or raw_game == "0x" or len(raw_game) < 2 + 64 * 3:
+        return None
+    h = raw_game[2:]
+    try:
+        ts = int(h[64:128], 16)
+    except ValueError:
+        return None
+    return {"index": idx, "timestamp": float(ts)}
+
+def proposer_fail(why):
+    streak = int(state.get("proposer_unreachable_streak") or 0) + 1
+    state["proposer_unreachable_streak"] = streak
+    if streak >= 2:
+        add("proposer-overdue",
+            "ForteL2 proposer liveness unverifiable",
+            "proposer-overdue could not be evaluated on %d consecutive "
+            "watcher runs (%s). L1 read against %s; configured interval %s. "
+            "This is not a claim the proposer IS overdue — only that "
+            "liveness could not be verified."
+            % (streak, why, _redact_l1_url(L1_RPC_URL), PROPOSER_INTERVAL_RAW))
+
+def proposer_ok(sample):
+    if PROPOSER_INTERVAL_SECS is None:
+        # Unparseable interval is also "cannot determine" (P1's third state);
+        # route it through the same quiet-then-fire streak as a failed read.
+        # Do NOT reset the streak first — that would erase the very count
+        # this failure path is supposed to grow.
+        proposer_fail(
+            "configured SEPOLIA_PROPOSER_INTERVAL=%r is unparseable"
+            % PROPOSER_INTERVAL_RAW
+        )
+        return
+    state["proposer_unreachable_streak"] = 0
+    idx = sample["index"]
+    ts = sample["timestamp"]
+    age = now - ts
+    awake_age = awake_seconds(ts, now)
+    threshold = PROPOSER_INTERVAL_SECS + PROPOSER_OVERDUE_GRACE_SECS
+    # Exclusive: exactly at the threshold is quiet, one second past fires.
+    if awake_age > threshold:
+        add("proposer-overdue",
+            "ForteL2 proposer overdue",
+            "proposer game index %d is %.0f s old (%.0f s excluding the "
+            "nightly 23:45-03:00 PT sleep window, however many windows that "
+            "spans). threshold is configured interval %s (%d s) + 2 h grace "
+            "= %d s, exclusive."
+            % (idx, age, awake_age, PROPOSER_INTERVAL_RAW, PROPOSER_INTERVAL_SECS, threshold))
+
+try:
+    proposer_sample = probe_proposer_latest()
+    if proposer_sample is None:
+        proposer_fail("no games proposed yet, missing factory, or a garbage/timeout L1 read")
+    else:
+        proposer_ok(proposer_sample)
+except Exception as exc:
+    proposer_fail("probe error: %s" % type(exc).__name__)
 
 # --- cooldown filter (per condition × channel) ---
 cd = state.get("cooldown")

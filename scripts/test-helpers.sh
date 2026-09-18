@@ -12730,6 +12730,13 @@ unset ALERT_WATCH_NOW
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/test-exex-alert.inc.sh"
 
+# alert-watch proposer-overdue (D-0142; additive; sourced so this file stays
+# append-only). Drop a leaked process-level ALERT_WATCH_NOW so po_run's own
+# noon-PT default is not overridden by the ExEx section above.
+unset ALERT_WATCH_NOW
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/test-proposer-overdue-alert.inc.sh"
+
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
 # `trap … EXIT` — bash replaces the handler and would drop every previously
