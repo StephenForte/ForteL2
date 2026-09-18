@@ -28,9 +28,15 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Sepolia-friendly: few full L1 blocks (viewer uses 12 incremental; one-shot is smaller).
-L1_SCAN_BLOCKS = 8
+# Sepolia: 60 L1 blocks ≈ 12 min, ≥2 batch cycles at the measured ~360 s median (D-0141).
+# Assigned, not derived — a 8-block (~96 s) window missed a healthy 360 s batcher
+# on ~3/4 of daily snapshots.
+L1_SCAN_BLOCKS = 60
 L2_WINDOW_BLOCKS = 15
+
+# Closed set written on batcher.verdict (additive; existing keys are frozen).
+BATCHER_VERDICT_HEALTHY = "healthy"
+BATCHER_VERDICT_NO_POSTS = "no-posts"
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -215,6 +221,50 @@ def snapshot_sequencer(l2_url: str, node_url: str) -> dict[str, Any]:
     }
 
 
+def batcher_verdict(post_count: int) -> str:
+    """Closed set: healthy iff the scan already collected at least one post."""
+    if post_count > 0:
+        return BATCHER_VERDICT_HEALTHY
+    return BATCHER_VERDICT_NO_POSTS
+
+
+def summarize_batcher(
+    start: int,
+    tip: int,
+    posts: list[dict[str, Any]],
+    batcher: str,
+    inbox: str,
+) -> dict[str, Any]:
+    """Build the batcher panel from an already-scanned post list (no RPC).
+
+    Existing keys, types, and null semantics are frozen (D-0141); verdict is additive.
+    """
+    posts_sorted = sorted(posts, key=lambda p: (p.get("block_number") or 0), reverse=True)
+    last = posts_sorted[0] if posts_sorted else None
+    cadence = None
+    if len(posts_sorted) >= 2:
+        gaps = []
+        for i in range(len(posts_sorted) - 1):
+            newer = posts_sorted[i].get("block_timestamp") or 0
+            older = posts_sorted[i + 1].get("block_timestamp") or 0
+            if newer > older:
+                gaps.append(newer - older)
+        if gaps:
+            cadence = round(sum(gaps) / len(gaps))
+    post_count = len(posts_sorted)
+    return {
+        "scan_from": start,
+        "scan_to": tip,
+        "post_count": post_count,
+        "last_hash": last.get("hash") if last else None,
+        "last_age_sec": last.get("age_sec") if last else None,
+        "cadence_sec": cadence,
+        "batcher": batcher,
+        "inbox": inbox,
+        "verdict": batcher_verdict(post_count),
+    }
+
+
 def snapshot_batcher(
     l1_url: str, batcher: str, inbox: str, window: int = L1_SCAN_BLOCKS
 ) -> dict[str, Any]:
@@ -244,28 +294,7 @@ def snapshot_batcher(
                         "age_sec": age_seconds(ts),
                     }
                 )
-    posts.sort(key=lambda p: (p.get("block_number") or 0), reverse=True)
-    last = posts[0] if posts else None
-    cadence = None
-    if len(posts) >= 2:
-        gaps = []
-        for i in range(len(posts) - 1):
-            newer = posts[i].get("block_timestamp") or 0
-            older = posts[i + 1].get("block_timestamp") or 0
-            if newer > older:
-                gaps.append(newer - older)
-        if gaps:
-            cadence = round(sum(gaps) / len(gaps))
-    return {
-        "scan_from": start,
-        "scan_to": tip,
-        "post_count": len(posts),
-        "last_hash": last.get("hash") if last else None,
-        "last_age_sec": last.get("age_sec") if last else None,
-        "cadence_sec": cadence,
-        "batcher": batcher,
-        "inbox": inbox,
-    }
+    return summarize_batcher(start, tip, posts, batcher, inbox)
 
 
 def snapshot_proposer(l1_url: str, factory: str) -> dict[str, Any]:

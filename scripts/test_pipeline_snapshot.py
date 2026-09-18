@@ -104,5 +104,92 @@ class DeploymentPathTests(unittest.TestCase):
         )
 
 
+# Frozen pipeline-health.json batcher keys (D-0141): types must not change.
+_BATCHER_FROZEN_KEYS = {
+    "scan_from": int,
+    "scan_to": int,
+    "post_count": int,
+    "last_hash": (str, type(None)),
+    "last_age_sec": (int, type(None)),
+    "cadence_sec": (int, type(None)),
+    "batcher": str,
+    "inbox": str,
+}
+
+
+class BatcherSnapshotTests(unittest.TestCase):
+    def test_l1_scan_blocks_is_sixty(self) -> None:
+        self.assertEqual(pipeline_snapshot.L1_SCAN_BLOCKS, 60)
+        start = pipeline_snapshot.scan_from(tip=100, window=pipeline_snapshot.L1_SCAN_BLOCKS)
+        self.assertEqual(start, 41)
+        self.assertEqual(len(list(range(start, 100 + 1))), 60)
+
+    def test_one_post_in_sixty_block_window_is_healthy(self) -> None:
+        tip = 100
+        start = pipeline_snapshot.scan_from(tip, 60)
+        posts = [
+            {
+                "hash": "0xabc123",
+                "block_number": 70,
+                "block_timestamp": 1_000_000,
+                "age_sec": 360,
+            }
+        ]
+        panel = pipeline_snapshot.summarize_batcher(
+            start, tip, posts, "0x" + "11" * 20, "0x" + "22" * 20
+        )
+        self.assertEqual(panel["verdict"], "healthy")
+        self.assertEqual(panel["last_hash"], "0xabc123")
+        self.assertEqual(panel["post_count"], 1)
+        self.assertIsInstance(panel["last_hash"], str)
+        self.assertIsInstance(panel["last_age_sec"], int)
+
+    def test_zero_posts_in_sixty_block_window_is_not_healthy(self) -> None:
+        tip = 100
+        start = pipeline_snapshot.scan_from(tip, 60)
+        panel = pipeline_snapshot.summarize_batcher(
+            start, tip, [], "0x" + "11" * 20, "0x" + "22" * 20
+        )
+        self.assertEqual(panel["verdict"], "no-posts")
+        self.assertEqual(panel["post_count"], 0)
+        self.assertIsNone(panel["last_hash"])
+        self.assertIsNone(panel["last_age_sec"])
+        self.assertIsNone(panel["cadence_sec"])
+
+    def test_existing_batcher_keys_keep_names_and_types(self) -> None:
+        tip = 100
+        start = pipeline_snapshot.scan_from(tip, 60)
+        with_post = pipeline_snapshot.summarize_batcher(
+            start,
+            tip,
+            [
+                {
+                    "hash": "0xdead",
+                    "block_number": 90,
+                    "block_timestamp": 50,
+                    "age_sec": 10,
+                },
+                {
+                    "hash": "0xbeef",
+                    "block_number": 60,
+                    "block_timestamp": 10,
+                    "age_sec": 50,
+                },
+            ],
+            "0x" + "aa" * 20,
+            "0x" + "bb" * 20,
+        )
+        empty = pipeline_snapshot.summarize_batcher(
+            start, tip, [], "0x" + "aa" * 20, "0x" + "bb" * 20
+        )
+        for panel in (with_post, empty):
+            for key, typ in _BATCHER_FROZEN_KEYS.items():
+                self.assertIn(key, panel)
+                self.assertIsInstance(panel[key], typ)
+        self.assertIsInstance(with_post["verdict"], str)
+        self.assertIsInstance(empty["verdict"], str)
+        self.assertEqual(with_post["cadence_sec"], 40)
+
+
 if __name__ == "__main__":
     unittest.main()
