@@ -64,14 +64,23 @@
 #                         collapses). A later delta at or below the floor
 #                         resets replica_losing_streak. An L1-derived replica
 #                         sawtooths by one batcher channel (~6 min at
-#                         SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=30); an hourly
-#                         freeze grows ~3600 s. The 2026-09-17 first live
-#                         firing (219→340, delta 121) was that sawtooth
-#                         (D-0140). No Mac-sleep grace — Render does not sleep.
+#                         SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=30); 600 s is
+#                         one channel plus margin (D-0140). An hourly freeze
+#                         grows ~3600 s. A probe whose growth interval
+#                         [prev_obs, now] lies wholly or partly inside
+#                         23:45–03:00 PT does not advance the streak — judged
+#                         by in_dev_sleep_window on the INTERVAL, not "are we
+#                         asleep right now" (a 03:30 probe with a 02:30 sample
+#                         still spans the freeze). The first probe after 03:00
+#                         also does not advance (one cycle of catch-up grace).
+#                         Render does not sleep; its Mac SOURCE does (D-0141).
 #   replica-head-stale    a single successful probe shows head age >
 #                         REPLICA_HEAD_STALE_SECS (default 10800, exclusive, same
 #                         operator as health-stale). Backstop when trend has no
 #                         prior sample (first run, wiped state, watcher down).
+#                         Unchanged by D-0140 / D-0141; still fires during the
+#                         sleep window (a late wake can trip it — noted, not
+#                         fixed; needs its own decision).
 #   replica-unreachable   two consecutive failed probes of the public-read
 #                         gateway (timeout / HTTP / garbage JSON / missing
 #                         timestamp). One failure is quiet; a later success
@@ -102,10 +111,13 @@
 # event on wake, and this watcher may race it. Unloaded / nonzero-exit still
 # alert on that first run; those are not sleep artefacts. cloudflared-failing
 # / cloudflared-no-edge / cloudflared-restart-storm /
-# cloudflared-metrics-unreachable never take that grace (the tunnel daemon is
-# KeepAlive, not calendar). replica-losing-ground / replica-head-stale /
-# replica-unreachable never take that grace either — Render does not sleep at
-# 23:45.
+# cloudflared-metrics-unreachable never take that last_check grace (the tunnel
+# daemon is KeepAlive, not calendar). replica-head-stale / replica-unreachable
+# never take that last_check grace either — the replica process is on Render.
+# replica-losing-ground also does not take that last_check grace, but it does
+# not advance replica_losing_streak when the growth interval overlaps
+# 23:45–03:00 PT or is the first probe after 03:00: Render stays up, the Mac
+# SOURCE does not, and head age grows 1 s/s by arithmetic (D-0141).
 #
 # Usage: alert-watch.sh [--test]
 #   --test     synthetic alert, tagged TEST, both channels (post-install shakeout)
@@ -165,6 +177,9 @@
 #                                      must still evaluate
 #   ALERT_WATCH_REPLICA_RPC_URL        test-only live URL (does not skip urllib)
 #   ALERT_WATCH_REPLICA_TIMEOUT        test-only total deadline seconds
+#   ALERT_WATCH_NOW                    unix timestamp; pins evaluator "now" so
+#                                      sleep-window cases are not wall-clock
+#                                      flaky. Does not skip the probe.
 #   When HEAD_*/UNREACHABLE/THROW is set, or ALERT_WATCH_CURL is set (Resend
 #   shim), the probe never opens a socket. RPC_URL/TIMEOUT do not short-circuit.
 #   Production launchd does not set those keys and uses urllib against the
@@ -354,6 +369,12 @@ reth_log_arg = sys.argv[16] if len(sys.argv) > 16 else ""
 proofs_store_arg = sys.argv[17] if len(sys.argv) > 17 else ""
 PROOFS_STORE = proofs_store_arg or "$DATA_DIR/l2/op-reth/historical-proofs"
 now = time.time()
+_now_raw = os.environ.get("ALERT_WATCH_NOW")
+if _now_raw not in (None, ""):
+    try:
+        now = float(_now_raw)
+    except (TypeError, ValueError):
+        pass
 realert_secs = realert_hours * 3600.0
 
 def load_state(path):
@@ -531,6 +552,41 @@ def in_dev_sleep_window(now_ts):
         return False
     mins = local.hour * 60 + local.minute
     return mins >= (23 * 60 + 45) or mins < (3 * 60)
+
+def interval_touches_dev_sleep(t0, t1):
+    """True if [t0, t1] lies wholly or partly inside 23:45–03:00 PT.
+
+    Endpoints-only is the D-0141 trap: 03:30 is awake, 02:30 is asleep,
+    and the interval still spans the freeze.
+    """
+    try:
+        lo = float(t0)
+        hi = float(t1)
+    except (TypeError, ValueError):
+        return False
+    if lo > hi:
+        lo, hi = hi, lo
+    if (hi - lo) >= 24 * 3600:
+        return True
+    t = lo
+    while t <= hi:
+        if in_dev_sleep_window(t):
+            return True
+        t += 60.0
+    return in_dev_sleep_window(hi)
+
+def replica_losing_sleep_suppressed(prev_obs, now_ts):
+    """Do not advance replica_losing_streak (D-0141). Reuses in_dev_sleep_window."""
+    if prev_obs is None:
+        return False
+    if interval_touches_dev_sleep(prev_obs, now_ts):
+        return True
+    # One cycle of recovery grace after 03:00: current is awake, one hour
+    # ago was inside the window. Covers a 03:30 probe whose previous sample
+    # is also just after 03:00 (interval itself misses 23:45–03:00).
+    if (not in_dev_sleep_window(now_ts)) and in_dev_sleep_window(now_ts - 3600.0):
+        return True
+    return False
 
 l2_chain = os.environ.get("L2_CHAIN_ID") or ""
 # Argv from bash (ALERT_WATCH_PID_DIR override, else the shell's PID_DIR).
@@ -1167,7 +1223,10 @@ def replica_ok(sample):
         # replay, not an outage; two consecutive such deltas are. A
         # recovery (delta <= floor) resets the streak.
         if delta > replica_noise_secs:
-            lg_streak = lg_streak + 1
+            if replica_losing_sleep_suppressed(prev_obs, now):
+                pass
+            else:
+                lg_streak = lg_streak + 1
         else:
             lg_streak = 0
         state["replica_losing_streak"] = lg_streak
@@ -1175,9 +1234,10 @@ def replica_ok(sample):
             add("replica-losing-ground",
                 "ForteL2 public replica losing ground",
                 "public replica head age grew by %.0f s on %d consecutive "
-                "successful probes (noise floor %d s, exclusive). "
-                "current age %.0f s (head %s); previous age %.0f s. "
-                "gateway %s. Render does not sleep."
+                "successful probes (noise floor %d s, exclusive; intervals "
+                "that overlap 23:45-03:00 PT and the first probe after 03:00 "
+                "do not count). current age %.0f s (head %s); previous age "
+                "%.0f s. gateway %s."
                 % (delta, lg_streak, replica_noise_secs, age, number, prev_age,
                    REPLICA_RPC_URL))
     else:
@@ -1308,6 +1368,12 @@ cd = state.get("cooldown")
 if not isinstance(cd, dict):
     cd = {}
 now = time.time()
+_now_raw = os.environ.get("ALERT_WATCH_NOW")
+if _now_raw not in (None, ""):
+    try:
+        now = float(_now_raw)
+    except (TypeError, ValueError):
+        pass
 try:
     with open(sent_path) as fh:
         lines = [ln.strip() for ln in fh if ln.strip()]

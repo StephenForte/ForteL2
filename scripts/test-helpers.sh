@@ -4819,7 +4819,7 @@ aw_write_json() {
 }
 aw_run() {
   # FORTEL2_ENV fixture has no TOKEN/email keys, so caller-supplied values survive set -a.
-  env -u RESEND_API_TOKEN \
+  env -u RESEND_API_TOKEN -u ALERT_WATCH_NOW \
     PATH="$AW_SHIM:$PATH" \
     FORTEL2_ENV="$AW_FIX/env" \
     ALERT_WATCH_MOCK_DIR="$AW_MOCK" \
@@ -6607,7 +6607,7 @@ stk_mark() {
   done
 }
 stk_run() {
-  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL \
+  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL -u ALERT_WATCH_NOW \
     PATH="$STK_FIX/shim:$PATH" \
     FORTEL2_ENV="$STK_FIX/env" \
     L2_CHAIN_ID=852 \
@@ -6692,7 +6692,7 @@ for n in $STK_CORE; do
   printf '%s\n' "$$" > "$STK_FIX/data/pids/$n.pid"
 done
 STK_NATIVE_OUT="$(
-  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL -u ALERT_WATCH_PID_DIR \
+  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL -u ALERT_WATCH_PID_DIR -u ALERT_WATCH_NOW \
     PATH="$STK_FIX/shim:$PATH" \
     FORTEL2_ENV="$STK_FIX/env" \
     ALERT_WATCH_MOCK_DIR="$STK_FIX/mock" \
@@ -7908,7 +7908,7 @@ cfw_reset() {
     > "$CFW_FIX/funding-health.json"
 }
 cfw_run() {
-  env -u RESEND_API_TOKEN \
+  env -u RESEND_API_TOKEN -u ALERT_WATCH_NOW \
     PATH="$CFW_FIX/shim:$PATH" \
     FORTEL2_ENV="$CFW_FIX/env" \
     ALERT_WATCH_MOCK_DIR="$CFW_FIX/mock" \
@@ -11453,6 +11453,18 @@ printf 'gui/501/com.steve.fortel2-resolve-games = {\n\tstate = not running\n\tla
 exit 0
 EOS
 chmod +x "$RP_FIX/shim/curl" "$RP_FIX/shim/osascript" "$RP_FIX/shim/launchctl"
+# Pin evaluator "now" to noon PT so a 3600 s freeze still alerts outside the
+# sleep window (P5). This is a pin, not a weakening. rp_run / rp_seed_last_ok
+# ignore a leaked process-level ALERT_WATCH_NOW; sleep-window cases pass
+# ALERT_WATCH_NOW= as an argument.
+RP_DAYTIME_NOW="$(python3 -c 'from datetime import datetime; from zoneinfo import ZoneInfo; print("%.0f" % datetime(2026,9,18,12,0,0,tzinfo=ZoneInfo("America/Los_Angeles")).timestamp())')"
+rp_pt_now() {
+  python3 -c 'from datetime import datetime; from zoneinfo import ZoneInfo; import sys
+h, m = int(sys.argv[1]), int(sys.argv[2])
+d = int(sys.argv[3]) if len(sys.argv) > 3 else 18
+print("%.0f" % datetime(2026, 9, d, h, m, 0, tzinfo=ZoneInfo("America/Los_Angeles")).timestamp())
+' "$@"
+}
 rp_reset() {
   rm -f "$RP_FIX/mock"/curl.argv "$RP_FIX/mock"/curl.calls \
     "$RP_FIX/mock"/osascript.argv "$RP_FIX/mock"/osascript.calls \
@@ -11462,7 +11474,27 @@ rp_reset() {
   printf '%s\n' '{"verdict":"OK","reason":"balance at or above the funding policy minimum"}' \
     > "$RP_FIX/funding-health.json"
 }
+rp_stamp_now() {
+  python3 - "${1:?}" "$RP_FIX/resolve.out.log" "$RP_FIX/resolve.err.log" "$RP_FIX/funding-health.json" <<'PY'
+import os, sys
+now = float(sys.argv[1])
+for p in sys.argv[2:]:
+    if os.path.exists(p):
+        os.utime(p, (now, now))
+PY
+}
 rp_run() {
+  # Always pin to noon PT. A leaked process-level ALERT_WATCH_NOW (the §5
+  # sleep-window probe, or a morning CI wall-clock export) must not retarget
+  # daytime replica-trend cases. Sleep-window tests pass ALERT_WATCH_NOW= as
+  # an argument so it wins after this default.
+  _rp_now="$RP_DAYTIME_NOW"
+  for _rp_arg in "$@"; do
+    case "$_rp_arg" in
+      ALERT_WATCH_NOW=*) _rp_now="${_rp_arg#ALERT_WATCH_NOW=}"; break ;;
+    esac
+  done
+  rp_stamp_now "$_rp_now"
   env -u RESEND_API_TOKEN \
     PATH="$RP_FIX/shim:$PATH" \
     FORTEL2_ENV="$RP_FIX/env" \
@@ -11474,18 +11506,25 @@ rp_run() {
     ALERT_WATCH_CURL="$RP_FIX/shim/curl" \
     ALERT_WATCH_OSASCRIPT="$RP_FIX/shim/osascript" \
     ALERT_WATCH_LAUNCHCTL="$RP_FIX/shim/launchctl" \
+    ALERT_WATCH_NOW="$_rp_now" \
     ALERT_WATCH_REPLICA_HEAD_NUMBER="${ALERT_WATCH_REPLICA_HEAD_NUMBER:-982723}" \
     ALERT_WATCH_REPLICA_HEAD_AGE="${ALERT_WATCH_REPLICA_HEAD_AGE:-0}" \
     ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
     ALERT_WATCH_CLOUDFLARED_RUNS=1 \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
+  unset _rp_now _rp_arg
 }
 rp_seed_last_ok() {
-  python3 - "$RP_FIX/state.json" "$1" "$2" "${3:-982723}" <<'PY'
+  _rp_seed_now="$RP_DAYTIME_NOW"
+  if [[ "${1:-}" == ALERT_WATCH_NOW=* ]]; then
+    _rp_seed_now="${1#ALERT_WATCH_NOW=}"
+    shift
+  fi
+  ALERT_WATCH_NOW="$_rp_seed_now" python3 - "$RP_FIX/state.json" "$1" "$2" "${3:-982723}" <<'PY'
 import json, os, sys, time
 path, ago, age_then, number = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])
-now = time.time()
+now = float(os.environ["ALERT_WATCH_NOW"]) if os.environ.get("ALERT_WATCH_NOW") else time.time()
 doc = {}
 if os.path.exists(path):
     try:
@@ -11507,6 +11546,7 @@ with open(tmp, "w") as fh:
     fh.write("\n")
 os.replace(tmp, path)
 PY
+  unset _rp_seed_now
 }
 
 # Source-level: three condition ids, public-read URL, urllib not ALERT_WATCH_CURL,
@@ -11864,6 +11904,177 @@ else
   fail=1
 fi
 
+rp_streak() {
+  python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1])).get("replica_losing_streak") or 0))' "$RP_FIX/state.json"
+}
+
+# D-0141: interval spanning the sleep window must not advance the streak,
+# including the trap — current probe is outside, previous is inside (03:30 / 02:30).
+rp_reset
+RP_TRAP_NOW="$(rp_pt_now 3 30)"
+rp_seed_last_ok ALERT_WATCH_NOW="$RP_TRAP_NOW" 3600 2808 1097053
+RP_OUT="$(rp_run ALERT_WATCH_NOW="$RP_TRAP_NOW" \
+  ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=6407 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+RP_ST="$(rp_streak)"
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]] \
+  && [[ "$RP_ST" -eq 0 ]]; then
+  echo "PASS alert-watch replica-losing-ground does not advance streak when current is awake and previous is inside the sleep window"
+else
+  echo "FAIL 03:30 probe with 02:30 previous must not advance replica_losing_streak (trap) (ec=$RP_EC streak=$RP_ST)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# First probe after 03:00: both samples can be awake (03:30 / 03:05) and still
+# must not advance — one cycle of catch-up grace (now-3600 is inside the window).
+rp_reset
+RP_WAKE_NOW="$(rp_pt_now 3 30)"
+rp_seed_last_ok ALERT_WATCH_NOW="$RP_WAKE_NOW" 1500 200 1097053
+RP_OUT="$(rp_run ALERT_WATCH_NOW="$RP_WAKE_NOW" \
+  ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=3800 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+RP_ST="$(rp_streak)"
+if [[ "$RP_EC" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]] \
+  && [[ "$RP_ST" -eq 0 ]]; then
+  echo "PASS alert-watch replica-losing-ground does not advance streak on the first probe after 03:00"
+else
+  echo "FAIL first probe after 03:00 must not advance replica_losing_streak (ec=$RP_EC streak=$RP_ST)" >&2
+  echo "$RP_OUT" >&2
+  fail=1
+fi
+
+# Wholly inside the window (00:30 then 01:30 — the 2026-09-17 3599 s class).
+rp_reset
+RP_SLEEP_A="$(rp_pt_now 0 30)"
+RP_SLEEP_B="$(rp_pt_now 1 30)"
+rp_seed_last_ok ALERT_WATCH_NOW="$RP_SLEEP_A" 3600 2808 1097053
+RP_OUT="$(rp_run ALERT_WATCH_NOW="$RP_SLEEP_A" \
+  ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=6407 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
+  "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
+RP_OUT2="$(rp_run ALERT_WATCH_NOW="$RP_SLEEP_B" \
+  ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=10006 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
+RP_ST="$(rp_streak)"
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" != *"replica-losing-ground"* ]] \
+  && [[ "$RP_OUT2" != *"replica-losing-ground"* ]] \
+  && [[ "$RP_ST" -eq 0 ]]; then
+  echo "PASS alert-watch replica-losing-ground does not fire on two hourly freezes inside the sleep window"
+else
+  echo "FAIL sleep-window interval must not advance replica_losing_streak (ec=$RP_EC/$RP_EC2 streak=$RP_ST)" >&2
+  echo "$RP_OUT" >&2
+  echo "$RP_OUT2" >&2
+  fail=1
+fi
+
+# 400 s sawtooth outside the window does not alert (below 600 s floor).
+rp_reset
+rp_seed_last_ok 3600 200 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=600 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+rp_seed_last_ok 3600 600 982723
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
+  "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
+RP_OUT2="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=1000 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 ]] \
+  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+  && [[ "$RP_OUT" == *"no alert"* ]] \
+  && [[ "$RP_OUT2" == *"no alert"* ]]; then
+  echo "PASS alert-watch replica-losing-ground stays quiet on a 400 s daytime delta"
+else
+  echo "FAIL 400 s outside the sleep window must not alert at the 600 s floor (ec=$RP_EC/$RP_EC2)" >&2
+  echo "$RP_OUT" >&2
+  echo "$RP_OUT2" >&2
+  fail=1
+fi
+
+# 1200 s outside the window on two consecutive probes DOES alert.
+rp_reset
+rp_seed_last_ok 3600 200 982723
+RP_OUT="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=1400 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+rp_seed_last_ok 3600 1400 982723
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
+  "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
+RP_OUT2="$(rp_run ALERT_WATCH_REPLICA_HEAD_AGE=2600 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 ]] \
+  && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$RP_OUT" != *"replica-losing-ground"* ]] \
+  && [[ "$RP_OUT2" == *"replica-losing-ground"* ]]; then
+  echo "PASS alert-watch replica-losing-ground fires on two consecutive 1200 s daytime deltas"
+else
+  echo "FAIL 1200 s outside the sleep window on two probes must alert (ec=$RP_EC/$RP_EC2)" >&2
+  echo "$RP_OUT" >&2
+  echo "$RP_OUT2" >&2
+  fail=1
+fi
+
+# P5: a replica wedged outside the window still reaches streak 2 and alerts.
+# 14:00 PT, 200 → 3800 → 7400 (~3600 s/hour freeze).
+rp_reset
+RP_DAY_NOW="$(rp_pt_now 14 0)"
+rp_seed_last_ok ALERT_WATCH_NOW="$RP_DAY_NOW" 3600 200 982723
+RP_OUT="$(rp_run ALERT_WATCH_NOW="$RP_DAY_NOW" ALERT_WATCH_REPLICA_HEAD_AGE=3800 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC=0 || RP_EC=$?
+rp_seed_last_ok ALERT_WATCH_NOW="$RP_DAY_NOW" 3600 3800 982723
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
+  "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
+RP_OUT2="$(rp_run ALERT_WATCH_NOW="$RP_DAY_NOW" ALERT_WATCH_REPLICA_HEAD_AGE=7400 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
+RP_ST="$(rp_streak)"
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 ]] \
+  && [[ "$(cat "$RP_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$RP_OUT" != *"replica-losing-ground"* ]] \
+  && [[ "$RP_OUT2" == *"replica-losing-ground"* ]] \
+  && [[ "$RP_ST" -ge 2 ]] \
+  && grep -q 'do not count' "$RP_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch replica-losing-ground still alerts on a wedged replica outside the sleep window"
+else
+  echo "FAIL a wedged replica at 14:00 PT must still reach streak 2 and alert (ec=$RP_EC/$RP_EC2 streak=$RP_ST)" >&2
+  echo "$RP_OUT" >&2
+  echo "$RP_OUT2" >&2
+  fail=1
+fi
+
+# Header / --help contract: 600 s floor, interval sleep suppression, no leftover 120.
+_hr_help_rc=0
+_hr_help_out="$(FORTEL2_ENV="$RP_FIX/env" "$RP_AW" --help 2>&1)" || _hr_help_rc=$?
+if [[ "$_hr_help_rc" == "0" ]] \
+  && printf '%s' "$_hr_help_out" | grep -q 'default 600' \
+  && printf '%s' "$_hr_help_out" | grep -q 'INTERVAL' \
+  && printf '%s' "$_hr_help_out" | grep -q 'first probe after 03:00' \
+  && ! printf '%s' "$_hr_help_out" | grep -q 'default 120' \
+  && ! printf '%s' "$_hr_help_out" | grep -q 'default 900' \
+  && ! printf '%s' "$_hr_help_out" | grep -q 'Render does not sleep at'; then
+  echo "PASS alert-watch.sh --help documents the 600 s floor and sleep-interval suppression"
+else
+  echo "FAIL --help must quote default 600 and interval sleep suppression, not default 120 or 900 (ec=$_hr_help_rc)" >&2
+  printf '%s\n' "$_hr_help_out" >&2
+  fail=1
+fi
+unset _hr_help_out _hr_help_rc
+
+if ! grep -qE '^[[:space:]]*ALERT_WATCH_NOW=' "$SCRIPT_DIR/../.env.example" "$SCRIPT_DIR/../.env.sepolia.example" 2>/dev/null; then
+  echo "PASS ALERT_WATCH_NOW does not appear as an assignment in env example files"
+else
+  echo "FAIL ALERT_WATCH_NOW must never appear in env files (lib.sh set -a)" >&2
+  fail=1
+fi
+
 # Live urllib path: total deadline + 64 KiB body cap. Must not set
 # ALERT_WATCH_CURL or HEAD_* — those short-circuit to a canned head.
 if grep -q 'signal.setitimer(signal.ITIMER_REAL, REPLICA_RPC_TIMEOUT)' "$RP_AW" \
@@ -11938,7 +12149,10 @@ PY
 
 rp_live_run() {
   # No ALERT_WATCH_CURL, no HEAD_* — live urllib against the local server.
+  # Drop a leaked process-level ALERT_WATCH_NOW (the §5 probe) so resolve-games
+  # log mtime is compared to wall clock, matching an unpinned run.
   env -u RESEND_API_TOKEN \
+    -u ALERT_WATCH_NOW \
     -u ALERT_WATCH_CURL \
     -u ALERT_WATCH_REPLICA_HEAD_NUMBER \
     -u ALERT_WATCH_REPLICA_HEAD_AGE \
@@ -12510,6 +12724,9 @@ unset -f cleanup_pf pf_stop pf_start pf_run pf_assert_token_absent 2>/dev/null |
 source "$SCRIPT_DIR/test-log-hygiene.inc.sh"
 
 # alert-watch ExEx panic attribution (additive; sourced so this file stays append-only)
+# Drop a leaked process-level ALERT_WATCH_NOW so these cases match an unpinned
+# run; replica-trend tests above already pinned via rp_run.
+unset ALERT_WATCH_NOW
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/test-exex-alert.inc.sh"
 
