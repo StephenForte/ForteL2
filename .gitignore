@@ -49,3 +49,4 @@ config/cloudflared-write.yml
 .cloudflared/
 **/cloudflared*.json
 **/*.tunnel-token
+__pycache__/
