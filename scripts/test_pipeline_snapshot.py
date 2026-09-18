@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import sys
+import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -417,6 +421,111 @@ class ProposerSnapshotAdditiveKeysTests(unittest.TestCase):
             self.assertIsInstance(latest[key], typ)
         verdict = pipeline_snapshot.proposer_verdict(1, latest, 8 * 3600, now=now)
         self.assertEqual(verdict, pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
+
+
+class UnknownProposerPanelTests(unittest.TestCase):
+    """D-0143: a raised snapshot_proposer() (L1 timeout, JSON-RPC error,
+    malformed gameAtIndex) must land on the same three-state contract as a
+    clean call that couldn't tell (D-0142) — never a bare `null` panel, and
+    never silently collapsed into `healthy`.
+    """
+
+    def test_failed_call_yields_unknown_never_null_never_healthy(self) -> None:
+        factory = "0x" + "33" * 20
+        panel = pipeline_snapshot.unknown_proposer_panel(factory, "8h")
+        self.assertIsNotNone(panel)
+        self.assertEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
+        self.assertNotEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
+
+    def test_failed_call_keeps_frozen_key_names_and_types(self) -> None:
+        factory = "0x" + "33" * 20
+        panel = pipeline_snapshot.unknown_proposer_panel(factory, "8h")
+        for key, typ in _PROPOSER_FROZEN_KEYS.items():
+            self.assertIn(key, panel)
+            self.assertIsInstance(panel[key], typ)
+        self.assertEqual(panel["factory"], factory)
+        self.assertIsNone(panel["latest"])
+        self.assertIsInstance(panel["interval_sec"], int)
+        self.assertEqual(panel["interval_sec"], 8 * 3600)
+
+    def test_unparseable_configured_interval_still_unknown_with_null_interval_sec(
+        self,
+    ) -> None:
+        panel = pipeline_snapshot.unknown_proposer_panel("0x" + "44" * 20, "garbage")
+        self.assertEqual(panel["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
+        self.assertIsNone(panel["interval_sec"])
+
+    # Env keys main() reads via env_get() (os.environ takes priority over the
+    # loaded file) — cleared for the duration of the drive-through test below
+    # so the checked-in .env.example fixture values are what actually govern,
+    # regardless of what the ambient test-runner shell happens to export.
+    _MAIN_ENV_KEYS = (
+        "FORTEL2_ENV",
+        "FORTEL2_ROOT",
+        "L1_CHAIN_ID",
+        "L2_CHAIN_ID",
+        "L1_RPC_URL",
+        "L2_RPC_URL",
+        "L2_NODE_RPC_URL",
+        "BATCHER_ADDRESS",
+        "DEPLOY_DIR",
+        "SEPOLIA_PROPOSER_INTERVAL",
+    )
+
+    def test_main_emits_unknown_proposer_never_null_when_rpc_layer_raises(
+        self,
+    ) -> None:
+        """Drives the real main() end to end (D-0143 regression).
+
+        Deleting main()'s `except` fallback assignment (leaving
+        `result["proposer"]` at its `None` initializer) must turn this test
+        red — mocking only `snapshot_proposer` and asserting against
+        `unknown_proposer_panel()` directly, as an earlier version of this
+        test did, cannot detect that regression because it never calls
+        main() at all.
+
+        The shared `rpc()` transport is made to raise, the same externally
+        observable failure as an L1 timeout or JSON-RPC error — offline
+        fixture only, no live RPC. `deployments/deployments.json`'s checked-in
+        `DisputeGameFactoryProxy` (a real address, not live-queried) is what
+        lets main() reach the `snapshot_proposer()` call site at all.
+        """
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("offline fixture: simulated L1 timeout")
+
+        env_backup = {k: os.environ.get(k) for k in self._MAIN_ENV_KEYS}
+        original_rpc = pipeline_snapshot.rpc
+        original_argv = sys.argv
+        try:
+            for key in self._MAIN_ENV_KEYS:
+                os.environ.pop(key, None)
+            os.environ["FORTEL2_ENV"] = str(
+                SCRIPT_PATH.parents[1] / ".env.example"
+            )
+            pipeline_snapshot.rpc = boom
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = Path(tmp) / "pipeline-health.json"
+                sys.argv = ["pipeline-snapshot.py", "-o", str(out_path)]
+                pipeline_snapshot.main()
+                result = json.loads(out_path.read_text())
+        finally:
+            pipeline_snapshot.rpc = original_rpc
+            sys.argv = original_argv
+            for key, val in env_backup.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+
+        proposer = result["proposer"]
+        self.assertIsNotNone(proposer)
+        self.assertEqual(proposer["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
+        self.assertNotEqual(proposer["verdict"], pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
+        self.assertTrue(
+            any(e.get("panel") == "proposer" for e in result["errors"]),
+            "expected the raised eth_call recorded in errors alongside the unknown verdict",
+        )
 
 
 if __name__ == "__main__":
