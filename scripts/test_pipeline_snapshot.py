@@ -671,7 +671,13 @@ class UnknownProposerPanelTests(unittest.TestCase):
         )
 
 
-def _alert_watch_namespace() -> dict:
+def _alert_watch_module():
+    """Load alert-watch.sh's reader as a module.
+
+    The two processes do not share an import, so the parity test has to
+    take the shell copy off disk. The marked regions are repo source, written
+    to a temp file and loaded the same way this file loads pipeline-snapshot.py.
+    """
     text = Path(__file__).with_name("alert-watch.sh").read_text()
 
     def grab(start_mark: str, end_mark: str) -> str:
@@ -681,10 +687,23 @@ def _alert_watch_namespace() -> dict:
             raise AssertionError(f"missing {start_mark}")
         return text[start + len(start_mark) : end]
 
-    ns: dict = {"__name__": "alert_watch_dev_sleep"}
-    exec(grab("# <<<DEV_SLEEP_READER\n", "# >>>DEV_SLEEP_READER\n"), ns)
-    exec(grab("# <<<AWAKE_SECONDS\n", "# >>>AWAKE_SECONDS\n"), ns)
-    return ns
+    source = (
+        grab("# <<<DEV_SLEEP_READER\n", "# >>>DEV_SLEEP_READER\n")
+        + "\n"
+        + grab("# <<<AWAKE_SECONDS\n", "# >>>AWAKE_SECONDS\n")
+    )
+    fd, path = tempfile.mkstemp(prefix="fortel2-dev-sleep-reader-", suffix=".py")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(source)
+        spec = importlib.util.spec_from_file_location("alert_watch_dev_sleep", path)
+        if spec is None or spec.loader is None:
+            raise AssertionError("could not load the alert-watch dev-sleep reader")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        os.unlink(path)
 
 
 class TwoReaderParityTests(_WindowPin, unittest.TestCase):
@@ -693,9 +712,9 @@ class TwoReaderParityTests(_WindowPin, unittest.TestCase):
     def _assert_parity(self, start_h, start_m, end_h, end_m) -> None:
         self._pin(start_h, start_m, end_h, end_m)
         try:
-            watch = _alert_watch_namespace()
+            watch = _alert_watch_module()
             py_window = pipeline_snapshot.dev_sleep_window()
-            sh_window = watch["dev_sleep_window"]()
+            sh_window = watch.dev_sleep_window()
             self.assertEqual(py_window["start_min"], sh_window["start_min"])
             self.assertEqual(py_window["end_min"], sh_window["end_min"])
             self.assertEqual(py_window["source"], sh_window["source"])
@@ -710,7 +729,7 @@ class TwoReaderParityTests(_WindowPin, unittest.TestCase):
                 ts = cursor.timestamp()
                 self.assertEqual(
                     pipeline_snapshot.in_dev_sleep_window(ts),
-                    watch["in_dev_sleep_window"](ts),
+                    watch.in_dev_sleep_window(ts),
                     cursor.isoformat(),
                 )
                 month_day = (cursor.month, cursor.day)
@@ -720,7 +739,7 @@ class TwoReaderParityTests(_WindowPin, unittest.TestCase):
                     for span in spans:
                         hi = ts + span
                         left = pipeline_snapshot.awake_seconds_between(ts, hi)
-                        right = watch["awake_seconds"](ts, hi)
+                        right = watch.awake_seconds(ts, hi)
                         self.assertEqual(left, right, f"{cursor.isoformat()} +{span}")
                 cursor += timedelta(hours=1)
         finally:
