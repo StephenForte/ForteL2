@@ -21,9 +21,12 @@
 #                         current ExEx panic in the last 64 KiB of
 #                         op-reth.log may enrich the body — the log is
 #                         never the detector (cf_token_hint precedent).
-#   stack-down            Sepolia: nothing is up outside the 23:45–03:00 PT
-#                         sleep window (a failed 03:00 wake). Same ExEx
-#                         enrichment as stack-missing when op-reth is down.
+#   stack-down            Sepolia: nothing is up outside the dev-sleep window
+#                         (a failed wake). The window is the installed
+#                         launchd sleep and wake jobs (D-0144), not a
+#                         constant; absent plists assume 23:45–00:15 and say
+#                         so. Same ExEx enrichment as stack-missing when
+#                         op-reth is down.
 #                         A historical panic (pid alive, or panic before
 #                         the last start banner in that tail) is ignored.
 #   cloudflared-failing   system LaunchDaemon com.cloudflare.cloudflared is
@@ -39,7 +42,8 @@
 #                         loopback metrics gauge cloudflared_tunnel_ha_connections
 #                         is 0. The process is up and the hostname is dark. Do
 #                         not probe 127.0.0.1:9555 or the write hostname — the
-#                         origin is dark 23:45–03:00 by design (D-0034 / D-0035);
+#                         origin is dark during the dev-sleep window by design
+#                         (D-0034 / D-0035; currently 23:45–00:15, D-0144);
 #                         edge count stays >0 across that window. No sleep grace.
 #   cloudflared-restart-storm  plist present and the launchd `runs` counter grew
 #                         by more than 1 (exclusive floor) since the last
@@ -67,13 +71,15 @@
 #                         SEPOLIA_BATCHER_MAX_CHANNEL_DURATION=30); 600 s is
 #                         one channel plus margin (D-0140). An hourly freeze
 #                         grows ~3600 s. A probe whose growth interval
-#                         [prev_obs, now] lies wholly or partly inside
-#                         23:45–03:00 PT does not advance the streak — judged
+#                         [prev_obs, now] lies wholly or partly inside the
+#                         dev-sleep window does not advance the streak — judged
 #                         by in_dev_sleep_window on the INTERVAL, not "are we
-#                         asleep right now" (a 03:30 probe with a 02:30 sample
-#                         still spans the freeze). The first probe after 03:00
-#                         also does not advance (one cycle of catch-up grace).
-#                         Render does not sleep; its Mac SOURCE does (D-0141).
+#                         asleep right now" (both endpoints can be awake while
+#                         the middle still spans the freeze). The first probe
+#                         within one watcher cycle after the wake also does not
+#                         advance (catch-up grace anchored to the window end,
+#                         not to a fixed clock time). Render does not sleep;
+#                         its Mac SOURCE does (D-0141 / D-0144).
 #   replica-head-stale    a single successful probe shows head age >
 #                         REPLICA_HEAD_STALE_SECS (default 10800, exclusive, same
 #                         operator as health-stale). Backstop when trend has no
@@ -91,7 +97,7 @@
 #                         eth_getBlockByNumber(latest); URL is the published
 #                         public-read gateway, never QuickNode / Access / loopback.
 #   proposer-overdue      the proposer's last DisputeGameFactory game, with any
-#                         time inside 23:45-03:00 PT excluded (however many
+#                         time inside the dev-sleep window excluded (however many
 #                         windows the gap spans — reuses in_dev_sleep_window()),
 #                         is older than the configured SEPOLIA_PROPOSER_INTERVAL
 #                         (default 8h; legacy PROPOSER_INTERVAL is a Phase-1
@@ -134,9 +140,10 @@
 # daemon is KeepAlive, not calendar). replica-head-stale / replica-unreachable
 # never take that last_check grace either — the replica process is on Render.
 # replica-losing-ground also does not take that last_check grace, but it does
-# not advance replica_losing_streak when the growth interval overlaps
-# 23:45–03:00 PT or is the first probe after 03:00: Render stays up, the Mac
-# SOURCE does not, and head age grows 1 s/s by arithmetic (D-0141).
+# not advance replica_losing_streak when the growth interval overlaps the
+# dev-sleep window or is within one watcher cycle after the wake: Render
+# stays up, the Mac SOURCE does not, and head age grows 1 s/s by arithmetic
+# (D-0141 / D-0144). The window is read from the installed launchd jobs.
 #
 # Usage: alert-watch.sh [--test]
 #   --test     synthetic alert, tagged TEST, both channels (post-install shakeout)
@@ -202,6 +209,13 @@
 #   ALERT_WATCH_NOW                    unix timestamp; pins evaluator "now" so
 #                                      sleep-window cases are not wall-clock
 #                                      flaky. Does not skip the probe.
+#   FORTEL2_DEV_SLEEP_AGENTS_DIR       test-only directory of sleep/wake plists
+#                                      (replaces ~/Library/LaunchAgents for
+#                                      the dev-sleep window only). Never an
+#                                      env-file key. Unset reads the installed
+#                                      jobs; a directory with no parseable
+#                                      pair falls back to 23:45–00:15 and is
+#                                      labeled an assumed default.
 #   When HEAD_*/UNREACHABLE/THROW is set, or ALERT_WATCH_CURL is set (Resend
 #   shim), the probe never opens a socket. RPC_URL/TIMEOUT do not short-circuit.
 #   Production launchd does not set those keys and uses urllib against the
@@ -234,7 +248,34 @@ DO_TEST=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --test) DO_TEST=1; shift ;;
-    -h|--help) awk 'NR==1{next} /^#/{print; next} {exit}' "$0"; exit 0 ;;
+    -h|--help)
+      awk 'NR==1{next} /^#/{print; next} {exit}' "$0"
+      require_bin python3
+      # Resolved window, after the static contract, so a reader can tell a
+      # measurement from the documented fallback (D-0144). Same reader the
+      # evaluator execs — the markers below are the one copy in this file.
+      python3 - "$0" <<'PY'
+import pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+start = text.find("# <<<DEV_SLEEP_READER\n")
+end = text.find("# >>>DEV_SLEEP_READER\n")
+if start < 0 or end < 0 or end <= start:
+    print("dev-sleep window: unreadable (reader markers missing)", file=sys.stderr)
+    raise SystemExit(1)
+ns = {"__name__": "dev_sleep_reader"}
+exec(text[start + len("# <<<DEV_SLEEP_READER\n"):end], ns)
+window = ns["dev_sleep_window"]()
+if window["source"] == "launchd":
+    how = "measured from installed launchd: %s" % window["agentsDir"]
+else:
+    how = "assumed default; installed sleep/wake plists absent or unparseable"
+print(
+    "dev-sleep window: %s-%s %s (%s)"
+    % (window["startLocal"], window["endLocal"], window["tz"], how)
+)
+PY
+      exit 0
+      ;;
     *) echo "unknown argument: $1" >&2; exit 64 ;;
   esac
 done
@@ -604,22 +645,144 @@ def pid_running(pid_dir, name):
     except OSError:
         return False
 
+# <<<DEV_SLEEP_READER
+# Installed launchd jobs are the source of truth (D-0144). This block is
+# exec'd by --help as well as by the evaluator, so it carries its own
+# constants and does not close over the surrounding script.
+import os
+_DEV_SLEEP_TZ = "America/Los_Angeles"
+_DEV_SLEEP_DEFAULT_START_MIN = 23 * 60 + 45  # 23:45
+_DEV_SLEEP_DEFAULT_END_MIN = 15  # 00:15
+_DEV_SLEEP_LABEL_SLEEP = "com.steve.fortel2-sleep"
+_DEV_SLEEP_LABEL_WAKE = "com.steve.fortel2-wake"
+_DEV_SLEEP_CACHE = None
+
+def _dev_sleep_hhmm(mins):
+    hour, minute = divmod(int(mins), 60)
+    return "%02d:%02d" % (hour, minute)
+
+def _dev_sleep_plist_minutes(path):
+    # Same acceptance rules as scripts/check-launchd.sh plist_calendar:
+    # dict or single-element array. Missing Hour is a wildcard, not a
+    # nightly boundary.
+    import plistlib
+    try:
+        with open(path, "rb") as fh:
+            data = plistlib.load(fh)
+    except Exception:
+        return None
+    sci = data.get("StartCalendarInterval") if isinstance(data, dict) else None
+    if isinstance(sci, list):
+        if len(sci) != 1 or not isinstance(sci[0], dict):
+            return None
+        sci = sci[0]
+    if not isinstance(sci, dict):
+        return None
+    hour = sci.get("Hour")
+    minute = sci.get("Minute", 0)
+    if hour is None:
+        return None
+    try:
+        hour = int(hour)
+        minute = int(minute)
+    except (TypeError, ValueError):
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+def _dev_sleep_window_dict(start, end, source, agents_dir):
+    if start == end:
+        duration = 0
+        wraps = False
+    elif start > end:
+        duration = (24 * 60 - start + end) * 60
+        wraps = True
+    else:
+        duration = (end - start) * 60
+        wraps = False
+    return {
+        "start_min": start,
+        "end_min": end,
+        "startLocal": _dev_sleep_hhmm(start),
+        "endLocal": _dev_sleep_hhmm(end),
+        "tz": _DEV_SLEEP_TZ,
+        "source": source,
+        "agentsDir": agents_dir,
+        "wraps": wraps,
+        "duration_sec": duration,
+    }
+
+def dev_sleep_window():
+    global _DEV_SLEEP_CACHE
+    override = os.environ.get("FORTEL2_DEV_SLEEP_AGENTS_DIR")
+    if override:
+        agents = override
+    else:
+        agents = os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents")
+    if _DEV_SLEEP_CACHE is not None and _DEV_SLEEP_CACHE[0] == agents:
+        return _DEV_SLEEP_CACHE[1]
+    sleep_min = _dev_sleep_plist_minutes(
+        os.path.join(agents, _DEV_SLEEP_LABEL_SLEEP + ".plist")
+    )
+    wake_min = _dev_sleep_plist_minutes(
+        os.path.join(agents, _DEV_SLEEP_LABEL_WAKE + ".plist")
+    )
+    if sleep_min is None or wake_min is None or sleep_min == wake_min:
+        window = _dev_sleep_window_dict(
+            _DEV_SLEEP_DEFAULT_START_MIN,
+            _DEV_SLEEP_DEFAULT_END_MIN,
+            "default",
+            None,
+        )
+    else:
+        window = _dev_sleep_window_dict(sleep_min, wake_min, "launchd", agents)
+    _DEV_SLEEP_CACHE = (agents, window)
+    return window
+
+def _minutes_in_dev_sleep(mins, start, end):
+    # Inclusive start, exclusive end. start > end wraps midnight.
+    # start < end must NOT use `mins >= start or mins < end` — that is
+    # true from `start` through the end of the day (D-0144 §7).
+    if start == end:
+        return False
+    if start > end:
+        return mins >= start or mins < end
+    return mins >= start and mins < end
+
 def in_dev_sleep_window(now_ts):
-    # Nightly 23:45–03:00 America/Los_Angeles (D-0026 / launchd sleep+wake).
     try:
         from datetime import datetime
         from zoneinfo import ZoneInfo
-        local = datetime.fromtimestamp(now_ts, ZoneInfo("America/Los_Angeles"))
+        local = datetime.fromtimestamp(float(now_ts), ZoneInfo(_DEV_SLEEP_TZ))
     except Exception:
         return False
+    window = dev_sleep_window()
     mins = local.hour * 60 + local.minute
-    return mins >= (23 * 60 + 45) or mins < (3 * 60)
+    return _minutes_in_dev_sleep(mins, window["start_min"], window["end_min"])
+
+def seconds_since_dev_sleep_end(now_ts):
+    """Seconds since the most recent configured wake at or before now_ts."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    window = dev_sleep_window()
+    eh, em = divmod(window["end_min"], 60)
+    tz = ZoneInfo(window["tz"])
+    local = datetime.fromtimestamp(float(now_ts), tz)
+    end_local = datetime(local.year, local.month, local.day, eh, em, tzinfo=tz)
+    end_ts = end_local.timestamp()
+    if end_ts > float(now_ts):
+        prev = local.date() - timedelta(days=1)
+        end_local = datetime(prev.year, prev.month, prev.day, eh, em, tzinfo=tz)
+        end_ts = end_local.timestamp()
+    return float(now_ts) - end_ts
+# >>>DEV_SLEEP_READER
 
 def interval_touches_dev_sleep(t0, t1):
-    """True if [t0, t1] lies wholly or partly inside 23:45–03:00 PT.
+    """True if [t0, t1] lies wholly or partly inside the resolved window.
 
-    Endpoints-only is the D-0141 trap: 03:30 is awake, 02:30 is asleep,
-    and the interval still spans the freeze.
+    Endpoints-only is the D-0141 trap: both ends can be awake while the
+    middle still spans the freeze.
     """
     try:
         lo = float(t0)
@@ -638,15 +801,25 @@ def interval_touches_dev_sleep(t0, t1):
     return in_dev_sleep_window(hi)
 
 def replica_losing_sleep_suppressed(prev_obs, now_ts):
-    """Do not advance replica_losing_streak (D-0141). Reuses in_dev_sleep_window."""
+    """Do not advance replica_losing_streak (D-0141 / D-0144).
+
+    Reuses in_dev_sleep_window. Recovery grace is one watcher cycle (the
+    hourly probe, 3600 s) after the configured wake — the window's end —
+    not a lookback that assumes the wake is 03:00. A 30-minute window
+    ending at 00:15 does not contain 23:30, so `in_dev_sleep_window(now-3600)`
+    misses the 00:30 probe.
+    """
     if prev_obs is None:
         return False
     if interval_touches_dev_sleep(prev_obs, now_ts):
         return True
-    # One cycle of recovery grace after 03:00: current is awake, one hour
-    # ago was inside the window. Covers a 03:30 probe whose previous sample
-    # is also just after 03:00 (interval itself misses 23:45–03:00).
-    if (not in_dev_sleep_window(now_ts)) and in_dev_sleep_window(now_ts - 3600.0):
+    try:
+        since = seconds_since_dev_sleep_end(now_ts)
+    except Exception:
+        return False
+    # Exclusive at one full cycle: exactly 3600 s after the wake is awake
+    # for streak purposes, matching the old exclusive end+3600 boundary.
+    if 0 <= since < 3600.0:
         return True
     return False
 
@@ -815,10 +988,17 @@ if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
             "Sepolia stack is partially up; not running: %s."
             % ", ".join(missing))
     elif missing and want_up:
+        _sleep = dev_sleep_window()
+        _sleep_how = (
+            "measured from launchd" if _sleep["source"] == "launchd"
+            else "assumed default"
+        )
         add("stack-down",
             "ForteL2 stack is down",
-            "Sepolia stack is not running outside the 23:45-03:00 PT sleep "
-            "window: %s." % ", ".join(missing))
+            "Sepolia stack is not running outside the %s-%s PT sleep "
+            "window (%s): %s."
+            % (_sleep["startLocal"], _sleep["endLocal"], _sleep_how,
+               ", ".join(missing)))
 
 # Isolated so a missing/unreadable log or a throw cannot skip cloudflared,
 # replica, or the stack conditions already recorded. Process state is the
@@ -1297,11 +1477,13 @@ def replica_ok(sample):
                 "ForteL2 public replica losing ground",
                 "public replica head age grew by %.0f s on %d consecutive "
                 "successful probes (noise floor %d s, exclusive; intervals "
-                "that overlap 23:45-03:00 PT and the first probe after 03:00 "
-                "do not count). current age %.0f s (head %s); previous age "
-                "%.0f s. gateway %s."
-                % (delta, lg_streak, replica_noise_secs, age, number, prev_age,
-                   REPLICA_RPC_URL))
+                "that overlap %s-%s PT and the first probe within one "
+                "watcher cycle after the wake do not count). current age "
+                "%.0f s (head %s); previous age %.0f s. gateway %s."
+                % (delta, lg_streak, replica_noise_secs,
+                   dev_sleep_window()["startLocal"],
+                   dev_sleep_window()["endLocal"],
+                   age, number, prev_age, REPLICA_RPC_URL))
     else:
         state["replica_losing_streak"] = 0
     if age > replica_stale_secs:
@@ -1352,35 +1534,60 @@ PROPOSER_INTERVAL_SECS = parse_proposer_interval(PROPOSER_INTERVAL_RAW)
 PROPOSER_OVERDUE_GRACE_SECS = 2 * 3600
 PROPOSER_RPC_TIMEOUT = _env_int("ALERT_WATCH_PROPOSER_TIMEOUT", 15)
 
+# <<<AWAKE_SECONDS
 def awake_seconds(t0, t1):
-    """[t0, t1] minus every nightly 23:45-03:00 PT window it overlaps (the
-    §7 trap — a proposer silent for 30h must have TWO windows removed, not
-    one). Reuses in_dev_sleep_window(), already defined above for the
-    replica-losing-ground trend, the same way D-0141's
-    interval_touches_dev_sleep() walks an interval against it — generalised
-    from "does it touch" to "how much of it is inside".
+    """Seconds in [t0, t1] excluding every resolved nightly window it overlaps.
+
+    Exact overlap of the calendar boundaries, the same calculation as
+    pipeline-snapshot.awake_seconds_between. A 60 s walk that classifies
+    each bucket by its start instant disagrees once the endpoints are not
+    minute-aligned (a 23:45-00:15 window on [23:44:45, 00:15:15] was 60 s
+    here and 30 s there). However many nights the gap covers, each window
+    is removed. Duration comes from the boundaries, not a fixed 3 h 15 m.
     """
     try:
         lo = float(t0)
         hi = float(t1)
     except (TypeError, ValueError):
         return 0.0
-    if lo > hi:
-        lo, hi = hi, lo
-    total = hi - lo
-    if total <= 0:
+    if hi <= lo:
         return 0.0
-    if total >= 30 * 24 * 3600:
-        return total  # defensive cap; never seen in practice
-    step = 60.0
-    t = lo
+    try:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(_DEV_SLEEP_TZ)
+        day = datetime.fromtimestamp(lo, tz).date() - timedelta(days=1)
+        end_day = datetime.fromtimestamp(hi, tz).date()
+    except Exception:
+        return max(0.0, hi - lo)
+    window = dev_sleep_window()
+    start_min = window["start_min"]
+    end_min = window["end_min"]
+    if start_min == end_min:
+        return hi - lo
+    sh, sm = divmod(start_min, 60)
+    eh, em = divmod(end_min, 60)
     sleep_secs = 0.0
-    while t < hi:
-        seg_end = t + step if t + step < hi else hi
-        if in_dev_sleep_window(t):
-            sleep_secs += seg_end - t
-        t = seg_end
-    return max(0.0, total - sleep_secs)
+    one_day = timedelta(days=1)
+    while day <= end_day:
+        try:
+            start_dt = datetime(day.year, day.month, day.day, sh, sm, tzinfo=tz)
+            if start_min > end_min:
+                nxt = day + one_day
+                end_dt = datetime(nxt.year, nxt.month, nxt.day, eh, em, tzinfo=tz)
+            else:
+                end_dt = datetime(day.year, day.month, day.day, eh, em, tzinfo=tz)
+        except Exception:
+            day += one_day
+            continue
+        ov_lo = max(lo, start_dt.timestamp())
+        ov_hi = min(hi, end_dt.timestamp())
+        if ov_hi > ov_lo:
+            sleep_secs += ov_hi - ov_lo
+        day += one_day
+    return max(0.0, (hi - lo) - sleep_secs)
+# >>>AWAKE_SECONDS
 
 def _redact_l1_url(url):
     try:
@@ -1519,10 +1726,14 @@ def proposer_ok(sample):
         add("proposer-overdue",
             "ForteL2 proposer overdue",
             "proposer game index %d is %.0f s old (%.0f s excluding the "
-            "nightly 23:45-03:00 PT sleep window, however many windows that "
-            "spans). threshold is configured interval %s (%d s) + 2 h grace "
+            "nightly %s-%s PT sleep window, however many windows that "
+            "spans; %s). threshold is configured interval %s (%d s) + 2 h grace "
             "= %d s, exclusive."
-            % (idx, age, awake_age, PROPOSER_INTERVAL_RAW, PROPOSER_INTERVAL_SECS, threshold))
+            % (idx, age, awake_age,
+               dev_sleep_window()["startLocal"], dev_sleep_window()["endLocal"],
+               "measured from launchd" if dev_sleep_window()["source"] == "launchd"
+               else "assumed default",
+               PROPOSER_INTERVAL_RAW, PROPOSER_INTERVAL_SECS, threshold))
 
 try:
     proposer_sample = probe_proposer_latest()

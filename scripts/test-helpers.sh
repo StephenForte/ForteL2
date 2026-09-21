@@ -6539,11 +6539,42 @@ else
 fi
 rm -rf "$SYM_FIX"
 
+# Fixture launchd plists for the dev-sleep window (D-0144). Tests pin this
+# directory so they do not follow the host's installed jobs.
+aw_write_sleep_plists() {
+  local dir="$1" sh sm wh wm
+  sh="${2:-23}"; sm="${3:-45}"; wh="${4:-0}"; wm="${5:-15}"
+  mkdir -p "$dir"
+  cat > "$dir/com.steve.fortel2-sleep.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.steve.fortel2-sleep</string>
+  <key>StartCalendarInterval</key><dict>
+    <key>Hour</key><integer>${sh}</integer>
+    <key>Minute</key><integer>${sm}</integer>
+  </dict>
+</dict></plist>
+EOF
+  cat > "$dir/com.steve.fortel2-wake.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.steve.fortel2-wake</string>
+  <key>StartCalendarInterval</key><dict>
+    <key>Hour</key><integer>${wh}</integer>
+    <key>Minute</key><integer>${wm}</integer>
+  </dict>
+</dict></plist>
+EOF
+}
+
 # Alert: missing expected service fires; present stays silent. Isolated fixture
 # (existing alert-watch cases stay above; L2_CHAIN_ID=852 is the Sepolia gate).
 STK_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-stack-alert.XXXXXX")"
 register_tmp "$STK_FIX"
 mkdir -p "$STK_FIX/shim" "$STK_FIX/mock" "$STK_FIX/data" "$STK_FIX/bin" "$STK_FIX/deploy" "$STK_FIX/pids"
+aw_write_sleep_plists "$STK_FIX/agents"
 cat > "$STK_FIX/env" <<EOF
 FORTEL2_ROOT=$STK_FIX
 DATA_DIR=$STK_FIX/data
@@ -6624,6 +6655,7 @@ stk_run() {
     ALERT_WATCH_REPLICA_HEAD_AGE=0 \
     ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
     ALERT_WATCH_CLOUDFLARED_RUNS=1 \
+    FORTEL2_DEV_SLEEP_AGENTS_DIR="$STK_FIX/agents" \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
 }
@@ -6672,6 +6704,71 @@ if [[ "$STK_SLEEP_EC" -eq 0 ]] \
 else
   echo "FAIL alert-watch must not alert on a scheduled-down stack (ec=$STK_SLEEP_EC)" >&2
   echo "$STK_SLEEP_OUT" >&2
+  fail=1
+fi
+
+# D-0144: a 23:45–00:15 window leaves 00:30, 01:30 and 02:30 awake, so a
+# failed wake must alert. These instants used to be inside 23:45–03:00.
+stk_down_at() {
+  local hh="$1" mm="$2" expect="$3"
+  stk_reset
+  rm -f "$STK_FIX/pids"/*.pid
+  local now out ec
+  now="$(python3 -c 'from datetime import datetime; from zoneinfo import ZoneInfo; import sys
+print("%.0f" % datetime(2026, 9, 19, int(sys.argv[1]), int(sys.argv[2]), tzinfo=ZoneInfo("America/Los_Angeles")).timestamp())' "$hh" "$mm")"
+  out="$(stk_run ALERT_WATCH_NOW="$now" RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+    "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && ec=0 || ec=$?
+  if [[ "$expect" == "up" ]]; then
+    if [[ "$ec" -eq 0 ]] && [[ "$out" == *"condition stack-down"* ]]; then
+      echo "PASS alert-watch stack-down expects the stack up at ${hh}:${mm} (30-minute window)"
+    else
+      echo "FAIL stack-down must fire at ${hh}:${mm} outside 23:45-00:15 (ec=$ec)" >&2
+      echo "$out" >&2
+      fail=1
+    fi
+  else
+    if [[ "$ec" -eq 0 ]] && [[ "$out" != *"stack-down"* ]]; then
+      echo "PASS alert-watch stack-down stays quiet at ${hh}:${mm} inside 23:45-00:15"
+    else
+      echo "FAIL stack-down must stay quiet at ${hh}:${mm} inside the window (ec=$ec)" >&2
+      echo "$out" >&2
+      fail=1
+    fi
+  fi
+}
+stk_down_at 0 30 up
+stk_down_at 1 30 up
+stk_down_at 2 30 up
+stk_down_at 23 50 down
+stk_down_at 0 05 down
+
+# §7 trap in the watcher: a non-wrapping 01:00–03:00 window must not treat
+# 14:00 as asleep (that expression marks everything after 01:00).
+aw_write_sleep_plists "$STK_FIX/agents-day" 1 0 3 0
+stk_reset
+rm -f "$STK_FIX/pids"/*.pid
+STK_DAY_NOW="$(python3 -c 'from datetime import datetime; from zoneinfo import ZoneInfo; print("%.0f" % datetime(2026, 9, 19, 14, 0, tzinfo=ZoneInfo("America/Los_Angeles")).timestamp())')"
+STK_DAY_OUT="$(stk_run FORTEL2_DEV_SLEEP_AGENTS_DIR="$STK_FIX/agents-day" \
+  ALERT_WATCH_NOW="$STK_DAY_NOW" RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && STK_DAY_EC=0 || STK_DAY_EC=$?
+if [[ "$STK_DAY_EC" -eq 0 ]] && [[ "$STK_DAY_OUT" == *"condition stack-down"* ]]; then
+  echo "PASS alert-watch non-wrapping window still expects the stack up at 14:00"
+else
+  echo "FAIL a 01:00-03:00 window must not suppress stack-down at 14:00 (ec=$STK_DAY_EC)" >&2
+  echo "$STK_DAY_OUT" >&2
+  fail=1
+fi
+stk_reset
+rm -f "$STK_FIX/pids"/*.pid
+STK_NAP_NOW="$(python3 -c 'from datetime import datetime; from zoneinfo import ZoneInfo; print("%.0f" % datetime(2026, 9, 19, 2, 0, tzinfo=ZoneInfo("America/Los_Angeles")).timestamp())')"
+STK_NAP_OUT="$(stk_run FORTEL2_DEV_SLEEP_AGENTS_DIR="$STK_FIX/agents-day" \
+  ALERT_WATCH_NOW="$STK_NAP_NOW" RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$SCRIPT_DIR/alert-watch.sh" 2>&1)" && STK_NAP_EC=0 || STK_NAP_EC=$?
+if [[ "$STK_NAP_EC" -eq 0 ]] && [[ "$STK_NAP_OUT" != *"stack-down"* ]]; then
+  echo "PASS alert-watch non-wrapping window treats 02:00 as asleep"
+else
+  echo "FAIL a 01:00-03:00 window must keep stack-down quiet at 02:00 (ec=$STK_NAP_EC)" >&2
+  echo "$STK_NAP_OUT" >&2
   fail=1
 fi
 
@@ -11408,6 +11505,7 @@ cleanup_rp() {
 }
 register_cleanup cleanup_rp
 mkdir -p "$RP_FIX/shim" "$RP_FIX/mock" "$RP_FIX/data" "$RP_FIX/bin" "$RP_FIX/deploy"
+aw_write_sleep_plists "$RP_FIX/agents"
 cat > "$RP_FIX/env" <<EOF
 FORTEL2_ROOT=$RP_FIX
 DATA_DIR=$RP_FIX/data
@@ -11511,6 +11609,7 @@ rp_run() {
     ALERT_WATCH_REPLICA_HEAD_AGE="${ALERT_WATCH_REPLICA_HEAD_AGE:-0}" \
     ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
     ALERT_WATCH_CLOUDFLARED_RUNS=1 \
+    FORTEL2_DEV_SLEEP_AGENTS_DIR="$RP_FIX/agents" \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
   unset _rp_now _rp_arg
@@ -11908,10 +12007,11 @@ rp_streak() {
   python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1])).get("replica_losing_streak") or 0))' "$RP_FIX/state.json"
 }
 
-# D-0141: interval spanning the sleep window must not advance the streak,
-# including the trap — current probe is outside, previous is inside (03:30 / 02:30).
+# D-0141 trap, re-anchored to the 23:45–00:15 window (D-0144): both endpoints
+# are awake (23:30 and 00:30) and the interval still spans the freeze.
+# The old pin was 03:30 / 02:30, which only overlaps a window that ends at 03:00.
 rp_reset
-RP_TRAP_NOW="$(rp_pt_now 3 30)"
+RP_TRAP_NOW="$(rp_pt_now 0 30 19)"
 rp_seed_last_ok ALERT_WATCH_NOW="$RP_TRAP_NOW" 3600 2808 1097053
 RP_OUT="$(rp_run ALERT_WATCH_NOW="$RP_TRAP_NOW" \
   ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
@@ -11924,15 +12024,16 @@ if [[ "$RP_EC" -eq 0 ]] \
   && [[ "$RP_ST" -eq 0 ]]; then
   echo "PASS alert-watch replica-losing-ground does not advance streak when current is awake and previous is inside the sleep window"
 else
-  echo "FAIL 03:30 probe with 02:30 previous must not advance replica_losing_streak (trap) (ec=$RP_EC streak=$RP_ST)" >&2
+  echo "FAIL 00:30 probe with 23:30 previous must not advance replica_losing_streak (trap) (ec=$RP_EC streak=$RP_ST)" >&2
   echo "$RP_OUT" >&2
   fail=1
 fi
 
-# First probe after 03:00: both samples can be awake (03:30 / 03:05) and still
-# must not advance — one cycle of catch-up grace (now-3600 is inside the window).
+# First probe within one watcher cycle after the configured wake (00:15):
+# both samples can be awake (00:45 / 00:20) and the interval itself misses
+# the window. Re-anchored from 03:30 / 03:05, which assumed a 03:00 end.
 rp_reset
-RP_WAKE_NOW="$(rp_pt_now 3 30)"
+RP_WAKE_NOW="$(rp_pt_now 0 45 19)"
 rp_seed_last_ok ALERT_WATCH_NOW="$RP_WAKE_NOW" 1500 200 1097053
 RP_OUT="$(rp_run ALERT_WATCH_NOW="$RP_WAKE_NOW" \
   ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
@@ -11943,17 +12044,21 @@ if [[ "$RP_EC" -eq 0 ]] \
   && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
   && [[ "$RP_OUT" == *"no alert"* ]] \
   && [[ "$RP_ST" -eq 0 ]]; then
-  echo "PASS alert-watch replica-losing-ground does not advance streak on the first probe after 03:00"
+  echo "PASS alert-watch replica-losing-ground does not advance streak on the first probe within one watcher cycle after the wake"
 else
-  echo "FAIL first probe after 03:00 must not advance replica_losing_streak (ec=$RP_EC streak=$RP_ST)" >&2
+  echo "FAIL first probe within one watcher cycle after the wake must not advance replica_losing_streak (ec=$RP_EC streak=$RP_ST)" >&2
   echo "$RP_OUT" >&2
   fail=1
 fi
 
-# Wholly inside the window (00:30 then 01:30 — the 2026-09-17 3599 s class).
+# 00:30 then 01:30 used to be wholly inside 23:45–03:00 and were suppressed.
+# Under 23:45–00:15 the 00:30 probe's interval still overlaps the window
+# (suppressed); the 01:30 interval is wholly after 00:15 and MUST advance.
+# A third probe at 02:30 reaches streak 2 and alerts — the hidden outage.
 rp_reset
-RP_SLEEP_A="$(rp_pt_now 0 30)"
-RP_SLEEP_B="$(rp_pt_now 1 30)"
+RP_SLEEP_A="$(rp_pt_now 0 30 19)"
+RP_SLEEP_B="$(rp_pt_now 1 30 19)"
+RP_SLEEP_C="$(rp_pt_now 2 30 19)"
 rp_seed_last_ok ALERT_WATCH_NOW="$RP_SLEEP_A" 3600 2808 1097053
 RP_OUT="$(rp_run ALERT_WATCH_NOW="$RP_SLEEP_A" \
   ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
@@ -11966,16 +12071,25 @@ RP_OUT2="$(rp_run ALERT_WATCH_NOW="$RP_SLEEP_B" \
   ALERT_WATCH_REPLICA_HEAD_AGE=10006 \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC2=0 || RP_EC2=$?
 RP_ST="$(rp_streak)"
-if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 ]] \
-  && [[ ! -f "$RP_FIX/mock/osascript.calls" ]] \
+rm -f "$RP_FIX/mock"/osascript.calls "$RP_FIX/mock"/osascript.argv \
+  "$RP_FIX/mock"/curl.calls "$RP_FIX/mock"/curl.argv
+RP_OUT3="$(rp_run ALERT_WATCH_NOW="$RP_SLEEP_C" \
+  ALERT_WATCH_REPLICA_HEAD_NUMBER=1097053 \
+  ALERT_WATCH_REPLICA_HEAD_AGE=13605 \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$RP_AW" 2>&1)" && RP_EC3=0 || RP_EC3=$?
+RP_ST3="$(rp_streak)"
+if [[ "$RP_EC" -eq 0 && "$RP_EC2" -eq 0 && "$RP_EC3" -eq 0 ]] \
   && [[ "$RP_OUT" != *"replica-losing-ground"* ]] \
   && [[ "$RP_OUT2" != *"replica-losing-ground"* ]] \
-  && [[ "$RP_ST" -eq 0 ]]; then
-  echo "PASS alert-watch replica-losing-ground does not fire on two hourly freezes inside the sleep window"
+  && [[ "$RP_ST" -eq 1 ]] \
+  && [[ "$RP_OUT3" == *"replica-losing-ground"* ]] \
+  && [[ "$RP_ST3" -ge 2 ]]; then
+  echo "PASS alert-watch replica-losing-ground advances on hourly freezes after the 00:15 wake (00:30 suppressed, 01:30 advances, 02:30 alerts)"
 else
-  echo "FAIL sleep-window interval must not advance replica_losing_streak (ec=$RP_EC/$RP_EC2 streak=$RP_ST)" >&2
+  echo "FAIL freezes at 01:30 and 02:30 must no longer get a sleep-window pass (ec=$RP_EC/$RP_EC2/$RP_EC3 streak=$RP_ST/$RP_ST3)" >&2
   echo "$RP_OUT" >&2
   echo "$RP_OUT2" >&2
+  echo "$RP_OUT3" >&2
   fail=1
 fi
 
@@ -12056,7 +12170,7 @@ _hr_help_out="$(FORTEL2_ENV="$RP_FIX/env" "$RP_AW" --help 2>&1)" || _hr_help_rc=
 if [[ "$_hr_help_rc" == "0" ]] \
   && printf '%s' "$_hr_help_out" | grep -q 'default 600' \
   && printf '%s' "$_hr_help_out" | grep -q 'INTERVAL' \
-  && printf '%s' "$_hr_help_out" | grep -q 'first probe after 03:00' \
+  && printf '%s' "$_hr_help_out" | grep -q 'one watcher cycle after the wake' \
   && ! printf '%s' "$_hr_help_out" | grep -q 'default 120' \
   && ! printf '%s' "$_hr_help_out" | grep -q 'default 900' \
   && ! printf '%s' "$_hr_help_out" | grep -q 'Render does not sleep at'; then
@@ -12074,6 +12188,28 @@ else
   echo "FAIL ALERT_WATCH_NOW must never appear in env files (lib.sh set -a)" >&2
   fail=1
 fi
+
+if ! grep -qE '^[[:space:]]*(export[[:space:]]+)?FORTEL2_DEV_SLEEP_AGENTS_DIR=' \
+  "$SCRIPT_DIR/../.env.example" "$SCRIPT_DIR/../.env.sepolia.example" 2>/dev/null; then
+  echo "PASS FORTEL2_DEV_SLEEP_AGENTS_DIR does not appear as an assignment in env example files"
+else
+  echo "FAIL FORTEL2_DEV_SLEEP_AGENTS_DIR must never appear in env files" >&2
+  fail=1
+fi
+
+mkdir -p "$RP_FIX/agents-missing"
+_hr_fb="$(FORTEL2_DEV_SLEEP_AGENTS_DIR="$RP_FIX/agents-missing" FORTEL2_ENV="$RP_FIX/env" "$RP_AW" --help 2>&1)" || true
+_hr_ms="$(FORTEL2_DEV_SLEEP_AGENTS_DIR="$RP_FIX/agents" FORTEL2_ENV="$RP_FIX/env" "$RP_AW" --help 2>&1)" || true
+if printf '%s' "$_hr_fb" | grep -q 'dev-sleep window: 23:45-00:15 America/Los_Angeles (assumed default' \
+  && printf '%s' "$_hr_ms" | grep -q 'dev-sleep window: 23:45-00:15 America/Los_Angeles (measured from installed launchd:'; then
+  echo "PASS alert-watch.sh --help distinguishes an assumed dev-sleep default from a launchd measurement"
+else
+  echo "FAIL --help must label the fallback as assumed and a parsed plist pair as measured" >&2
+  printf '%s\n' "$_hr_fb" >&2
+  printf '%s\n' "$_hr_ms" >&2
+  fail=1
+fi
+unset _hr_fb _hr_ms
 
 # Live urllib path: total deadline + 64 KiB body cap. Must not set
 # ALERT_WATCH_CURL or HEAD_* — those short-circuit to a canned head.

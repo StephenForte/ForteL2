@@ -69,7 +69,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 ./scripts/rollback-to-geth-sepolia.sh --rehearse
 ./scripts/sequencer-admin.sh --help
 FORTEL2_ENV=.env.sepolia ./scripts/dev-sleep.sh sleep            # overnight: stop stack + HTTP; wake with … wake
-# Mac mini schedule: launchd health 05:00 / sleep 23:45 / wake 03:00 — see launchd/README.md (not cron)
+# Mac mini schedule: launchd health 05:00 / sleep 23:45 / wake 00:15 — see launchd/README.md (not cron)
 FORTEL2_ENV=.env.sepolia ./scripts/pack-replica-artifacts.sh      # Phase 3: genesis/rollup → replica/config/ (publish to fortel2-replica)
 # FORTEL2_ENV=.env.sepolia REPLICA_L2_RPC_URL=… ./scripts/replica-sync-check.sh
 ./scripts/stop-all.sh

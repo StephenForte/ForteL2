@@ -119,7 +119,7 @@ These close the skeleton’s “no acceptance criteria” gap for the four open 
 
 - [ ] Stance recorded: **single sequencer + documented failover** (default) **or** active standby
 - [ ] Failover runbook: who promotes, how `op-node` sequencer flags move, how the write filter / Access tunnel retargets
-- [ ] Nightly 23:45–03:00 sleep is **retired** before any pilot SLA (or the SLA names the window)
+- [ ] The nightly sleep window (installed launchd sleep/wake; currently 23:45–00:15) is **retired** before any pilot SLA (or the SLA names the window)
 - [ ] Explicit non-goal: Phase 8 leader election
 
 ### US-P7-004: RaaS re-check

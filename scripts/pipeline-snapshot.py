@@ -50,13 +50,20 @@ PROPOSER_VERDICT_UNKNOWN = "unknown"
 # generous without waiting a whole extra cycle.
 PROPOSER_OVERDUE_GRACE_SECS = 2 * 3600
 
-# Nightly dev-sleep window, America/Los_Angeles (D-0026 / launchd sleep+wake).
-# Independently reimplemented in scripts/alert-watch.sh's in_dev_sleep_window()
-# for its own proposer-overdue condition — two separate processes, so this is
-# necessarily a second copy of the same two numbers. Grep "23:45" in both
-# files if the sleep schedule ever moves.
-_DEV_SLEEP_START_MIN = 23 * 60 + 45
-_DEV_SLEEP_END_MIN = 3 * 60
+# Nightly dev-sleep window, America/Los_Angeles (D-0144). The installed
+# launchd jobs are the source of truth — sleep StartCalendarInterval is the
+# start, wake is the end — not these defaults. The defaults apply only when
+# those plists are absent or unparseable, and dev_sleep_window() labels that
+# source "default" so a reader can tell an assumption from a measurement.
+# Independently reimplemented in scripts/alert-watch.sh (two processes, no
+# shared import). The boundaries are read, not copied; do not reintroduce a
+# second hardcoded window.
+_DEV_SLEEP_TZ = "America/Los_Angeles"
+_DEV_SLEEP_DEFAULT_START_MIN = 23 * 60 + 45  # 23:45
+_DEV_SLEEP_DEFAULT_END_MIN = 15  # 00:15
+_DEV_SLEEP_LABEL_SLEEP = "com.steve.fortel2-sleep"
+_DEV_SLEEP_LABEL_WAKE = "com.steve.fortel2-wake"
+_DEV_SLEEP_CACHE: tuple[str, dict[str, Any]] | None = None
 
 _DURATION_RE = re.compile(r"^(\d+)(h|m|s)$")
 
@@ -208,47 +215,196 @@ def parse_duration_seconds(raw: str) -> int | None:
     return int(m.group(1)) * unit_secs
 
 
+# <<<DEV_SLEEP_READER
+def _dev_sleep_hhmm(mins: int) -> str:
+    hour, minute = divmod(int(mins), 60)
+    return "%02d:%02d" % (hour, minute)
+
+
+def _dev_sleep_plist_minutes(path: str) -> int | None:
+    """Hour*60+Minute from StartCalendarInterval.
+
+    Same acceptance rules as scripts/check-launchd.sh plist_calendar: a dict
+    or a single-element array of one dict. A missing Hour is a wildcard
+    (hourly jobs) and is not a nightly boundary. Anything else is unparseable.
+    """
+    import plistlib
+
+    try:
+        with open(path, "rb") as fh:
+            data = plistlib.load(fh)
+    except Exception:
+        return None
+    sci = data.get("StartCalendarInterval") if isinstance(data, dict) else None
+    if isinstance(sci, list):
+        if len(sci) != 1 or not isinstance(sci[0], dict):
+            return None
+        sci = sci[0]
+    if not isinstance(sci, dict):
+        return None
+    hour = sci.get("Hour")
+    minute = sci.get("Minute", 0)
+    if hour is None:
+        return None
+    try:
+        hour = int(hour)
+        minute = int(minute)
+    except (TypeError, ValueError):
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def _dev_sleep_window_dict(start: int, end: int, source: str, agents_dir: str | None) -> dict[str, Any]:
+    # start > end wraps midnight. start == end is empty and must not be
+    # treated as a measurement (caller falls back). Duration is derived
+    # from the two boundaries — never a restated 3 h 15 m.
+    if start == end:
+        duration = 0
+        wraps = False
+    elif start > end:
+        duration = (24 * 60 - start + end) * 60
+        wraps = True
+    else:
+        duration = (end - start) * 60
+        wraps = False
+    return {
+        "start_min": start,
+        "end_min": end,
+        "startLocal": _dev_sleep_hhmm(start),
+        "endLocal": _dev_sleep_hhmm(end),
+        "tz": _DEV_SLEEP_TZ,
+        "source": source,
+        "agentsDir": agents_dir,
+        "wraps": wraps,
+        "duration_sec": duration,
+    }
+
+
+def dev_sleep_window() -> dict[str, Any]:
+    """Installed sleep plist = start, wake plist = end.
+
+    FORTEL2_DEV_SLEEP_AGENTS_DIR overrides ~/Library/LaunchAgents (tests
+    only; never an env-file key). Absent, unparseable, or equal boundaries
+    fall back to the documented default and source "default".
+    """
+    global _DEV_SLEEP_CACHE
+    override = os.environ.get("FORTEL2_DEV_SLEEP_AGENTS_DIR")
+    if override:
+        agents = override
+    else:
+        agents = os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents")
+    if _DEV_SLEEP_CACHE is not None and _DEV_SLEEP_CACHE[0] == agents:
+        return _DEV_SLEEP_CACHE[1]
+    sleep_min = _dev_sleep_plist_minutes(
+        os.path.join(agents, _DEV_SLEEP_LABEL_SLEEP + ".plist")
+    )
+    wake_min = _dev_sleep_plist_minutes(
+        os.path.join(agents, _DEV_SLEEP_LABEL_WAKE + ".plist")
+    )
+    if sleep_min is None or wake_min is None or sleep_min == wake_min:
+        window = _dev_sleep_window_dict(
+            _DEV_SLEEP_DEFAULT_START_MIN,
+            _DEV_SLEEP_DEFAULT_END_MIN,
+            "default",
+            None,
+        )
+    else:
+        window = _dev_sleep_window_dict(sleep_min, wake_min, "launchd", agents)
+    _DEV_SLEEP_CACHE = (agents, window)
+    return window
+
+
+def dev_sleep_report() -> dict[str, Any]:
+    """JSON-facing view: source is "launchd" or "default", never implied."""
+    window = dev_sleep_window()
+    return {
+        "startLocal": window["startLocal"],
+        "endLocal": window["endLocal"],
+        "tz": window["tz"],
+        "source": window["source"],
+        "agentsDir": window["agentsDir"],
+    }
+
+
+def _minutes_in_dev_sleep(mins: int, start: int, end: int) -> bool:
+    # Inclusive start, exclusive end. Wrapping (start > end) is the midnight
+    # case. The non-wrapping branch is required: `mins >= start or mins < end`
+    # is true for most of the day when start < end (D-0144 §7).
+    if start == end:
+        return False
+    if start > end:
+        return mins >= start or mins < end
+    return mins >= start and mins < end
+
+
 def in_dev_sleep_window(ts: float) -> bool:
-    """Mirrors alert-watch.sh's in_dev_sleep_window() — same two boundaries."""
+    """True when local clock time is inside the resolved dev-sleep window."""
     try:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        local = datetime.fromtimestamp(ts, ZoneInfo("America/Los_Angeles"))
+        local = datetime.fromtimestamp(float(ts), ZoneInfo(_DEV_SLEEP_TZ))
     except Exception:
         return False
+    window = dev_sleep_window()
     mins = local.hour * 60 + local.minute
-    return mins >= _DEV_SLEEP_START_MIN or mins < _DEV_SLEEP_END_MIN
+    return _minutes_in_dev_sleep(mins, window["start_min"], window["end_min"])
 
 
 def awake_seconds_between(lo: float, hi: float) -> float:
-    """Seconds in [lo, hi] EXCLUDING every nightly 23:45-03:00 PT window it
-    overlaps, however many windows that spans (D-0142 §7 — a proposer silent
-    for 30h must have TWO windows removed, not a flat 3h15m once).
+    """Seconds in [lo, hi] excluding every resolved nightly window it overlaps.
+
+    Window length is the span between the two boundaries (wrapping across
+    midnight when start > end), however many nights the gap covers (D-0142
+    §7). It is not a fixed 3 h 15 m.
     """
     if hi <= lo:
+        return 0.0
+    try:
+        lo_f = float(lo)
+        hi_f = float(hi)
+    except (TypeError, ValueError):
+        return 0.0
+    if hi_f <= lo_f:
         return 0.0
     try:
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
 
-        tz = ZoneInfo("America/Los_Angeles")
-        day = datetime.fromtimestamp(lo, tz).date() - timedelta(days=1)
-        end_day = datetime.fromtimestamp(hi, tz).date()
+        tz = ZoneInfo(_DEV_SLEEP_TZ)
+        day = datetime.fromtimestamp(lo_f, tz).date() - timedelta(days=1)
+        end_day = datetime.fromtimestamp(hi_f, tz).date()
     except Exception:
-        return max(0.0, hi - lo)
+        return max(0.0, hi_f - lo_f)
+    window = dev_sleep_window()
+    start_min = window["start_min"]
+    end_min = window["end_min"]
+    if start_min == end_min:
+        return hi_f - lo_f
+    sh, sm = divmod(start_min, 60)
+    eh, em = divmod(end_min, 60)
     sleep_secs = 0.0
     one_day = timedelta(days=1)
-    window_len = timedelta(hours=3, minutes=15)
     while day <= end_day:
-        start_dt = datetime(day.year, day.month, day.day, 23, 45, tzinfo=tz)
-        end_dt = start_dt + window_len
-        ov_lo = max(lo, start_dt.timestamp())
-        ov_hi = min(hi, end_dt.timestamp())
+        try:
+            start_dt = datetime(day.year, day.month, day.day, sh, sm, tzinfo=tz)
+            if start_min > end_min:
+                nxt = day + one_day
+                end_dt = datetime(nxt.year, nxt.month, nxt.day, eh, em, tzinfo=tz)
+            else:
+                end_dt = datetime(day.year, day.month, day.day, eh, em, tzinfo=tz)
+        except Exception:
+            day += one_day
+            continue
+        ov_lo = max(lo_f, start_dt.timestamp())
+        ov_hi = min(hi_f, end_dt.timestamp())
         if ov_hi > ov_lo:
             sleep_secs += ov_hi - ov_lo
         day += one_day
-    return max(0.0, (hi - lo) - sleep_secs)
+    return max(0.0, (hi_f - lo_f) - sleep_secs)
+# >>>DEV_SLEEP_READER
 
 
 def proposer_verdict(
@@ -584,6 +740,9 @@ def main() -> int:
         "proposer": None,
         "aggregate": None,
         "errors": [],
+        # Additive (D-0144). Existing panel keys are unchanged. source is
+        # "launchd" when the installed jobs parsed, "default" when they did not.
+        "devSleep": dev_sleep_report(),
     }
 
     try:
