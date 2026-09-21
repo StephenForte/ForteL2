@@ -12,6 +12,7 @@ cleanup_po() { rm -rf "$PO_FIX"; }
 register_cleanup cleanup_po
 
 mkdir -p "$PO_FIX/shim" "$PO_FIX/mock" "$PO_FIX/data" "$PO_FIX/bin" "$PO_FIX/deploy"
+aw_write_sleep_plists "$PO_FIX/agents"
 cat > "$PO_FIX/env" <<EOF
 FORTEL2_ROOT=$PO_FIX
 DATA_DIR=$PO_FIX/data
@@ -59,10 +60,11 @@ EOS
 chmod +x "$PO_FIX/shim/curl" "$PO_FIX/shim/osascript" "$PO_FIX/shim/launchctl"
 
 # 20:00 PT default (a pin, not a weakening — same reasoning as rp_run's
-# RP_DAYTIME_NOW). Deliberately NOT noon: a 10h-old proposal at noon would
-# reach back to ~02:00, inside the 23:45-03:00 PT window, which is exactly
-# the trap this task closes — the boundary-exact cases below need an anchor
-# whose lookback of up to ~10h never touches the window.
+# RP_DAYTIME_NOW). Deliberately NOT noon: a 10h lookback from noon reaches
+# 02:00, and the boundary-exact cases need an anchor whose lookback of up
+# to ~10h never touches the pinned 23:45–00:15 window. The plists in
+# $PO_FIX/agents are that window (D-0144); the subtraction is no longer a
+# hardcoded 3 h 15 m.
 PO_DAYTIME_NOW="$(rp_pt_now 20 0)"
 
 po_reset() {
@@ -106,6 +108,7 @@ po_run() {
     ALERT_WATCH_PROPOSER_LATEST_AGE="${ALERT_WATCH_PROPOSER_LATEST_AGE:-0}" \
     ALERT_WATCH_CLOUDFLARED_METRICS='cloudflared_tunnel_ha_connections 4' \
     ALERT_WATCH_CLOUDFLARED_RUNS=1 \
+    FORTEL2_DEV_SLEEP_AGENTS_DIR="$PO_FIX/agents" \
     ALERT_EMAIL_TO='fortel2-alert-watch@example.invalid' \
     "$@"
   unset _po_now _po_arg
@@ -214,12 +217,12 @@ fi
 # §7 trap: a proposal whose raw age spans one full sleep window, but whose
 # AWAKE age is under the threshold, must stay quiet — the case a naive
 # `age >` check gets wrong. 8h interval => 10h threshold. Anchor "now" at
-# 05:00 PT so the window ends just before it; last proposal at 16:45 the
-# prior day (raw age 12h15m, awake age exactly 9h — under 10h).
+# 05:00 PT. Re-anchored from raw age 12h15m (one 3h15m window, awake 9h)
+# to raw age 9h30m (one 30-minute window, awake still 9h — under 10h).
 po_reset
 PO_WAKE_NOW="$(rp_pt_now 5 0 19)"
 PO_OUT="$(po_run ALERT_WATCH_NOW="$PO_WAKE_NOW" \
-  ALERT_WATCH_PROPOSER_LATEST_AGE=$((12 * 3600 + 15 * 60)) \
+  ALERT_WATCH_PROPOSER_LATEST_AGE=$((9 * 3600 + 30 * 60)) \
   SEPOLIA_PROPOSER_INTERVAL=8h \
   RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$PO_AW" 2>&1)" && PO_EC=0 || PO_EC=$?
 if [[ "$PO_EC" -eq 0 ]] \
@@ -227,7 +230,7 @@ if [[ "$PO_EC" -eq 0 ]] \
   && [[ "$PO_OUT" == *"no alert"* ]]; then
   echo "PASS alert-watch proposer-overdue stays quiet when awake age is under threshold despite raw age spanning one sleep window"
 else
-  echo "FAIL a 12h15m raw age spanning exactly one sleep window (awake age 9h, threshold 10h) must stay quiet (ec=$PO_EC)" >&2
+  echo "FAIL a 9h30m raw age spanning exactly one 30-minute sleep window (awake age 9h, threshold 10h) must stay quiet (ec=$PO_EC)" >&2
   echo "$PO_OUT" >&2
   fail=1
 fi

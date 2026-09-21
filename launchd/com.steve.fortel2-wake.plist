@@ -18,13 +18,14 @@
     <key>PATH</key>
     <string>/Users/steveforte/.foundry/bin:/Users/steveforte/fortel2-agents/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-  <!-- Daily 03:00 local — start Sepolia stack (after overnight sleep at 23:45) -->
+  <!-- Daily 00:15 local — start Sepolia stack (after overnight sleep at 23:45).
+       Checked-in schedule as of 2026-09-20. Alerting reads the installed job, not this file (D-0144). -->
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
-    <integer>3</integer>
-    <key>Minute</key>
     <integer>0</integer>
+    <key>Minute</key>
+    <integer>15</integer>
   </dict>
   <!--
     Log under ~/Library/Logs (always present on macOS). Do NOT use repo data/:

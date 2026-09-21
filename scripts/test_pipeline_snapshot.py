@@ -5,10 +5,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -217,22 +218,143 @@ class ParseDurationSecondsTests(unittest.TestCase):
                 self.assertIsNone(pipeline_snapshot.parse_duration_seconds(raw))
 
 
-class DevSleepWindowTests(unittest.TestCase):
-    def test_inside_window_after_2345(self) -> None:
+def _plist(label: str, hour: int, minute: int) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>\n'
+        f"  <key>Label</key><string>{label}</string>\n"
+        "  <key>StartCalendarInterval</key><dict>\n"
+        f"    <key>Hour</key><integer>{hour}</integer>\n"
+        f"    <key>Minute</key><integer>{minute}</integer>\n"
+        "  </dict>\n"
+        "</dict></plist>\n"
+    )
+
+
+def _write_window(directory: Path, start_h: int, start_m: int, end_h: int, end_m: int) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "com.steve.fortel2-sleep.plist").write_text(
+        _plist("com.steve.fortel2-sleep", start_h, start_m)
+    )
+    (directory / "com.steve.fortel2-wake.plist").write_text(
+        _plist("com.steve.fortel2-wake", end_h, end_m)
+    )
+
+
+class _WindowPin:
+    """Point both readers at fixture plists for the duration of a test."""
+
+    def _pin(self, start_h: int, start_m: int, end_h: int, end_m: int) -> None:
+        self._agents = Path(tempfile.mkdtemp(prefix="fortel2-sleepwin-"))
+        self._prev = os.environ.get("FORTEL2_DEV_SLEEP_AGENTS_DIR")
+        _write_window(self._agents, start_h, start_m, end_h, end_m)
+        os.environ["FORTEL2_DEV_SLEEP_AGENTS_DIR"] = str(self._agents)
+
+    def _unpin(self) -> None:
+        if self._prev is None:
+            os.environ.pop("FORTEL2_DEV_SLEEP_AGENTS_DIR", None)
+        else:
+            os.environ["FORTEL2_DEV_SLEEP_AGENTS_DIR"] = self._prev
+        shutil.rmtree(self._agents, ignore_errors=True)
+
+
+class DevSleepWindowTests(_WindowPin, unittest.TestCase):
+    """Re-anchored from the old 23:45–03:00 window to the configured
+    23:45–00:15 window (D-0144). 01:30 used to be asleep; it is awake.
+    """
+
+    def setUp(self) -> None:
+        self._pin(23, 45, 0, 15)
+
+    def tearDown(self) -> None:
+        self._unpin()
+
+    def test_wrapping_window_marks_2350_and_0005_asleep(self) -> None:
         self.assertTrue(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 18, 23, 50)))
+        self.assertTrue(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 0, 5)))
+        self.assertEqual(pipeline_snapshot.dev_sleep_window()["source"], "launchd")
+        self.assertEqual(pipeline_snapshot.dev_sleep_window()["duration_sec"], 30 * 60)
 
-    def test_inside_window_before_0300(self) -> None:
-        self.assertTrue(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 1, 30)))
+    def test_0030_0130_0230_are_awake(self) -> None:
+        # These were inside the old 03:00 window. They are the stack-down
+        # hours a 30-minute outage must not hide.
+        for hour in (0, 1, 2):
+            with self.subTest(hour=hour):
+                self.assertFalse(
+                    pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, hour, 30))
+                )
 
-    def test_outside_window_at_boundaries(self) -> None:
-        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 3, 0)))
+    def test_boundaries_are_inclusive_start_exclusive_end(self) -> None:
+        self.assertTrue(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 18, 23, 45)))
+        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 0, 15)))
         self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 18, 23, 44)))
 
     def test_midday_is_awake(self) -> None:
         self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 18, 12, 0)))
 
 
-class AwakeSecondsBetweenTests(unittest.TestCase):
+class NonWrappingDevSleepTests(_WindowPin, unittest.TestCase):
+    """§7 trap: start < end must not mark the rest of the day asleep."""
+
+    def setUp(self) -> None:
+        self._pin(1, 0, 3, 0)
+
+    def tearDown(self) -> None:
+        self._unpin()
+
+    def test_0200_asleep_and_1400_awake(self) -> None:
+        self.assertTrue(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 2, 0)))
+        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 14, 0)))
+        self.assertFalse(pipeline_snapshot.dev_sleep_window()["wraps"])
+        self.assertEqual(pipeline_snapshot.dev_sleep_window()["duration_sec"], 2 * 3600)
+
+    def test_non_wrapping_does_not_swallow_the_evening(self) -> None:
+        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 23, 50)))
+        self.assertFalse(pipeline_snapshot.in_dev_sleep_window(_pt(2026, 9, 19, 0, 30)))
+
+
+class DevSleepFallbackTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._agents = Path(tempfile.mkdtemp(prefix="fortel2-sleepwin-"))
+        self._prev = os.environ.get("FORTEL2_DEV_SLEEP_AGENTS_DIR")
+        os.environ["FORTEL2_DEV_SLEEP_AGENTS_DIR"] = str(self._agents)
+
+    def tearDown(self) -> None:
+        if self._prev is None:
+            os.environ.pop("FORTEL2_DEV_SLEEP_AGENTS_DIR", None)
+        else:
+            os.environ["FORTEL2_DEV_SLEEP_AGENTS_DIR"] = self._prev
+        shutil.rmtree(self._agents, ignore_errors=True)
+
+    def test_missing_plists_are_the_documented_default_and_labeled(self) -> None:
+        window = pipeline_snapshot.dev_sleep_window()
+        report = pipeline_snapshot.dev_sleep_report()
+        self.assertEqual(window["source"], "default")
+        self.assertIsNone(window["agentsDir"])
+        self.assertEqual(window["startLocal"], "23:45")
+        self.assertEqual(window["endLocal"], "00:15")
+        self.assertEqual(report["source"], "default")
+        self.assertIsNone(report["agentsDir"])
+
+    def test_unparseable_plist_is_not_reported_as_measured(self) -> None:
+        (self._agents / "com.steve.fortel2-sleep.plist").write_text("not a plist")
+        (self._agents / "com.steve.fortel2-wake.plist").write_text("not a plist")
+        # Cache key is the directory; contents changed under the same key.
+        pipeline_snapshot._DEV_SLEEP_CACHE = None
+        window = pipeline_snapshot.dev_sleep_window()
+        self.assertEqual(window["source"], "default")
+        self.assertEqual(window["endLocal"], "00:15")
+
+
+class AwakeSecondsBetweenTests(_WindowPin, unittest.TestCase):
+    def setUp(self) -> None:
+        self._pin(23, 45, 0, 15)
+
+    def tearDown(self) -> None:
+        self._unpin()
+
     def test_zero_or_negative_range(self) -> None:
         self.assertEqual(pipeline_snapshot.awake_seconds_between(100.0, 100.0), 0.0)
         self.assertEqual(pipeline_snapshot.awake_seconds_between(200.0, 100.0), 0.0)
@@ -243,28 +365,26 @@ class AwakeSecondsBetweenTests(unittest.TestCase):
         self.assertEqual(pipeline_snapshot.awake_seconds_between(lo, hi), hi - lo)
 
     def test_range_wholly_inside_one_window(self) -> None:
-        lo = _pt(2026, 9, 19, 0, 30)
-        hi = _pt(2026, 9, 19, 1, 30)
+        # Re-anchored: 00:30–01:30 is awake under a 00:15 wake. A range
+        # inside 23:45–00:15 is entirely asleep.
+        lo = _pt(2026, 9, 18, 23, 50)
+        hi = _pt(2026, 9, 19, 0, 10)
         self.assertEqual(pipeline_snapshot.awake_seconds_between(lo, hi), 0.0)
 
-    def test_range_spanning_one_full_window(self) -> None:
-        # 22:00 the night before through 05:00 next day: raw span 7h, minus
-        # the 3h15m window = 3h45m awake (the §7 property: single-window
-        # spans are judged on awake time, not raw age).
+    def test_thirty_minute_window_removes_thirty_minutes_not_three_hours(self) -> None:
         lo = _pt(2026, 9, 18, 22, 0)
         hi = _pt(2026, 9, 19, 5, 0)
         awake = pipeline_snapshot.awake_seconds_between(lo, hi)
-        self.assertAlmostEqual(awake, (hi - lo) - (3 * 3600 + 15 * 60), delta=1.0)
+        self.assertAlmostEqual(awake, (hi - lo) - 30 * 60, delta=1.0)
+        self.assertGreater(awake, (hi - lo) - (3 * 3600 + 15 * 60) + 60)
 
     def test_range_spanning_two_full_windows(self) -> None:
         # §7 trap: a dead proposer over ~54h spans two nightly windows; both
-        # must be removed, not one.
+        # must be removed, and each is the configured 30 minutes.
         lo = _pt(2026, 9, 17, 12, 0)
         hi = _pt(2026, 9, 19, 18, 0)
         awake = pipeline_snapshot.awake_seconds_between(lo, hi)
-        self.assertAlmostEqual(
-            awake, (hi - lo) - 2 * (3 * 3600 + 15 * 60), delta=1.0
-        )
+        self.assertAlmostEqual(awake, (hi - lo) - 2 * 30 * 60, delta=1.0)
 
 
 class ProposerVerdictTests(unittest.TestCase):
@@ -322,33 +442,53 @@ class ProposerVerdictTests(unittest.TestCase):
     def test_one_sleep_window_under_threshold_on_awake_time_is_not_overdue(self) -> None:
         # Raw age exceeds the 10h threshold, but awake age (minus one window)
         # does not — the case a naive `age >` check gets wrong.
-        interval = 8 * 3600
-        threshold = interval + pipeline_snapshot.PROPOSER_OVERDUE_GRACE_SECS
-        now = _pt(2026, 9, 19, 5, 0)
-        ts = now - (threshold - 3600)  # awake age = threshold - 1h (under)
-        ts -= 3 * 3600 + 15 * 60  # raw age grows by exactly one window's width
-        latest = {"timestamp": ts}
-        raw_age = now - ts
-        self.assertGreater(raw_age, threshold)  # a naive check would fire
-        self.assertEqual(
-            pipeline_snapshot.proposer_verdict(1, latest, interval, now=now),
-            self.HEALTHY,
-        )
+        # Re-anchored (D-0144): the subtracted width is the configured window,
+        # not a hardcoded 3 h 15 m. Pinned to 23:45–00:15 so the assertion
+        # does not follow whatever the host's launchd jobs happen to be.
+        self._pin = _WindowPin()
+        self._pin._pin(23, 45, 0, 15)
+        try:
+            interval = 8 * 3600
+            threshold = interval + pipeline_snapshot.PROPOSER_OVERDUE_GRACE_SECS
+            now = _pt(2026, 9, 19, 5, 0)
+            window = pipeline_snapshot.dev_sleep_window()["duration_sec"]
+            self.assertEqual(window, 30 * 60)
+            # Awake age sits 1 minute under the threshold. Raw age adds the
+            # whole 30-minute window, so a naive `age > threshold` fires and
+            # the awake-time check must not. (The old 1 h slack only exceeded
+            # the threshold when the window was 3 h 15 m.)
+            ts = now - (threshold - 60) - window
+            latest = {"timestamp": ts}
+            raw_age = now - ts
+            self.assertGreater(raw_age, threshold)  # a naive check would fire
+            self.assertEqual(
+                pipeline_snapshot.proposer_verdict(1, latest, interval, now=now),
+                self.HEALTHY,
+            )
+        finally:
+            self._pin._unpin()
 
     def test_two_sleep_windows_judged_on_awake_time_not_one_windows_worth(self) -> None:
-        # §7 trap: subtracting only one window's width for a two-window gap
-        # would read this as healthy. The correct awake-time calc must not.
-        interval = 8 * 3600
-        threshold = interval + pipeline_snapshot.PROPOSER_OVERDUE_GRACE_SECS
-        now = _pt(2026, 9, 19, 18, 0)
-        lo = _pt(2026, 9, 17, 12, 0)
-        awake = pipeline_snapshot.awake_seconds_between(lo, now)
-        self.assertGreater(awake, threshold)
-        latest = {"timestamp": lo}
-        self.assertEqual(
-            pipeline_snapshot.proposer_verdict(1, latest, interval, now=now),
-            self.OVERDUE,
-        )
+        # §7 trap: a gap that spans two nights has both windows removed.
+        # Re-anchored (D-0144) to the configured 30-minute window: two nights
+        # remove 60 minutes, not 2 × 3 h 15 m.
+        self._pin = _WindowPin()
+        self._pin._pin(23, 45, 0, 15)
+        try:
+            interval = 8 * 3600
+            threshold = interval + pipeline_snapshot.PROPOSER_OVERDUE_GRACE_SECS
+            now = _pt(2026, 9, 19, 18, 0)
+            lo = _pt(2026, 9, 17, 12, 0)
+            awake = pipeline_snapshot.awake_seconds_between(lo, now)
+            self.assertAlmostEqual(awake, (now - lo) - 2 * 30 * 60, delta=1.0)
+            self.assertGreater(awake, threshold)
+            latest = {"timestamp": lo}
+            self.assertEqual(
+                pipeline_snapshot.proposer_verdict(1, latest, interval, now=now),
+                self.OVERDUE,
+            )
+        finally:
+            self._pin._unpin()
 
     def test_well_past_threshold_on_awake_time_is_overdue(self) -> None:
         now = _pt(2026, 9, 18, 20, 0)
@@ -518,6 +658,9 @@ class UnknownProposerPanelTests(unittest.TestCase):
                 else:
                     os.environ[key] = val
 
+        self.assertIn(result["devSleep"]["source"], ("launchd", "default"))
+        self.assertRegex(result["devSleep"]["startLocal"], r"^\d{2}:\d{2}$")
+        self.assertRegex(result["devSleep"]["endLocal"], r"^\d{2}:\d{2}$")
         proposer = result["proposer"]
         self.assertIsNotNone(proposer)
         self.assertEqual(proposer["verdict"], pipeline_snapshot.PROPOSER_VERDICT_UNKNOWN)
@@ -526,6 +669,68 @@ class UnknownProposerPanelTests(unittest.TestCase):
             any(e.get("panel") == "proposer" for e in result["errors"]),
             "expected the raised eth_call recorded in errors alongside the unknown verdict",
         )
+
+
+def _alert_watch_namespace() -> dict:
+    text = Path(__file__).with_name("alert-watch.sh").read_text()
+
+    def grab(start_mark: str, end_mark: str) -> str:
+        start = text.find(start_mark)
+        end = text.find(end_mark)
+        if start < 0 or end < 0 or end <= start:
+            raise AssertionError(f"missing {start_mark}")
+        return text[start + len(start_mark) : end]
+
+    ns: dict = {"__name__": "alert_watch_dev_sleep"}
+    exec(grab("# <<<DEV_SLEEP_READER\n", "# >>>DEV_SLEEP_READER\n"), ns)
+    exec(grab("# <<<AWAKE_SECONDS\n", "# >>>AWAKE_SECONDS\n"), ns)
+    return ns
+
+
+class TwoReaderParityTests(_WindowPin, unittest.TestCase):
+    """pipeline-snapshot.py and alert-watch.sh must agree (D-0142 / D-0144)."""
+
+    def _assert_parity(self, start_h, start_m, end_h, end_m) -> None:
+        self._pin(start_h, start_m, end_h, end_m)
+        try:
+            watch = _alert_watch_namespace()
+            py_window = pipeline_snapshot.dev_sleep_window()
+            sh_window = watch["dev_sleep_window"]()
+            self.assertEqual(py_window["start_min"], sh_window["start_min"])
+            self.assertEqual(py_window["end_min"], sh_window["end_min"])
+            self.assertEqual(py_window["source"], sh_window["source"])
+            self.assertEqual(py_window["duration_sec"], sh_window["duration_sec"])
+            tz = ZoneInfo("America/Los_Angeles")
+            # Hourly samples across 2026, dense on both DST transitions.
+            # Minute-aligned so the 60 s walk and the boundary overlap match.
+            cursor = datetime(2026, 1, 1, 0, 0, tzinfo=tz)
+            stop = datetime(2027, 1, 1, 0, 0, tzinfo=tz)
+            spans = (12 * 3600, 30 * 3600, 54 * 3600)
+            while cursor < stop:
+                ts = cursor.timestamp()
+                self.assertEqual(
+                    pipeline_snapshot.in_dev_sleep_window(ts),
+                    watch["in_dev_sleep_window"](ts),
+                    cursor.isoformat(),
+                )
+                month_day = (cursor.month, cursor.day)
+                dense = month_day in ((3, 8), (3, 9), (11, 1), (11, 2))
+                step_hours = 1 if dense else 6
+                if cursor.hour % step_hours == 0:
+                    for span in spans:
+                        hi = ts + span
+                        left = pipeline_snapshot.awake_seconds_between(ts, hi)
+                        right = watch["awake_seconds"](ts, hi)
+                        self.assertEqual(left, right, f"{cursor.isoformat()} +{span}")
+                cursor += timedelta(hours=1)
+        finally:
+            self._unpin()
+
+    def test_wrapping_window_agrees_across_2026_including_dst(self) -> None:
+        self._assert_parity(23, 45, 0, 15)
+
+    def test_non_wrapping_window_agrees_across_2026_including_dst(self) -> None:
+        self._assert_parity(1, 0, 3, 0)
 
 
 if __name__ == "__main__":
