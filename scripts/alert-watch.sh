@@ -1536,32 +1536,57 @@ PROPOSER_RPC_TIMEOUT = _env_int("ALERT_WATCH_PROPOSER_TIMEOUT", 15)
 
 # <<<AWAKE_SECONDS
 def awake_seconds(t0, t1):
-    """[t0, t1] minus every resolved nightly window it overlaps (the §7
-    trap — a proposer silent for 30h must have TWO windows removed, not
-    one). Reuses in_dev_sleep_window(), already defined above. Window
-    length comes from those boundaries (D-0144), not a fixed 3 h 15 m.
+    """Seconds in [t0, t1] excluding every resolved nightly window it overlaps.
+
+    Exact overlap of the calendar boundaries, the same calculation as
+    pipeline-snapshot.awake_seconds_between. A 60 s walk that classifies
+    each bucket by its start instant disagrees once the endpoints are not
+    minute-aligned (a 23:45-00:15 window on [23:44:45, 00:15:15] was 60 s
+    here and 30 s there). However many nights the gap covers, each window
+    is removed. Duration comes from the boundaries, not a fixed 3 h 15 m.
     """
     try:
         lo = float(t0)
         hi = float(t1)
     except (TypeError, ValueError):
         return 0.0
-    if lo > hi:
-        lo, hi = hi, lo
-    total = hi - lo
-    if total <= 0:
+    if hi <= lo:
         return 0.0
-    if total >= 30 * 24 * 3600:
-        return total  # defensive cap; never seen in practice
-    step = 60.0
-    t = lo
+    try:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(_DEV_SLEEP_TZ)
+        day = datetime.fromtimestamp(lo, tz).date() - timedelta(days=1)
+        end_day = datetime.fromtimestamp(hi, tz).date()
+    except Exception:
+        return max(0.0, hi - lo)
+    window = dev_sleep_window()
+    start_min = window["start_min"]
+    end_min = window["end_min"]
+    if start_min == end_min:
+        return hi - lo
+    sh, sm = divmod(start_min, 60)
+    eh, em = divmod(end_min, 60)
     sleep_secs = 0.0
-    while t < hi:
-        seg_end = t + step if t + step < hi else hi
-        if in_dev_sleep_window(t):
-            sleep_secs += seg_end - t
-        t = seg_end
-    return max(0.0, total - sleep_secs)
+    one_day = timedelta(days=1)
+    while day <= end_day:
+        try:
+            start_dt = datetime(day.year, day.month, day.day, sh, sm, tzinfo=tz)
+            if start_min > end_min:
+                nxt = day + one_day
+                end_dt = datetime(nxt.year, nxt.month, nxt.day, eh, em, tzinfo=tz)
+            else:
+                end_dt = datetime(day.year, day.month, day.day, eh, em, tzinfo=tz)
+        except Exception:
+            day += one_day
+            continue
+        ov_lo = max(lo, start_dt.timestamp())
+        ov_hi = min(hi, end_dt.timestamp())
+        if ov_hi > ov_lo:
+            sleep_secs += ov_hi - ov_lo
+        day += one_day
+    return max(0.0, (hi - lo) - sleep_secs)
 # >>>AWAKE_SECONDS
 
 def _redact_l1_url(url):

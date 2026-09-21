@@ -721,7 +721,8 @@ class TwoReaderParityTests(_WindowPin, unittest.TestCase):
             self.assertEqual(py_window["duration_sec"], sh_window["duration_sec"])
             tz = ZoneInfo("America/Los_Angeles")
             # Hourly samples across 2026, dense on both DST transitions.
-            # Minute-aligned so the 60 s walk and the boundary overlap match.
+            # Awake-time samples include an off-minute shift so a bucket
+            # walk cannot pass by agreeing only on minute boundaries.
             cursor = datetime(2026, 1, 1, 0, 0, tzinfo=tz)
             stop = datetime(2027, 1, 1, 0, 0, tzinfo=tz)
             spans = (12 * 3600, 30 * 3600, 54 * 3600)
@@ -738,10 +739,49 @@ class TwoReaderParityTests(_WindowPin, unittest.TestCase):
                 if cursor.hour % step_hours == 0:
                     for span in spans:
                         hi = ts + span
-                        left = pipeline_snapshot.awake_seconds_between(ts, hi)
-                        right = watch.awake_seconds(ts, hi)
-                        self.assertEqual(left, right, f"{cursor.isoformat()} +{span}")
+                        # Minute-aligned, and the off-minute case Codex
+                        # flagged on #245: endpoints that are not on a
+                        # minute boundary must still agree to 0 s.
+                        for lo_off, hi_off in ((0.0, 0.0), (45.0, 15.0)):
+                            left = pipeline_snapshot.awake_seconds_between(
+                                ts + lo_off, hi + hi_off
+                            )
+                            right = watch.awake_seconds(ts + lo_off, hi + hi_off)
+                            self.assertEqual(
+                                left,
+                                right,
+                                f"{cursor.isoformat()} +{span} off={lo_off}/{hi_off}",
+                            )
                 cursor += timedelta(hours=1)
+        finally:
+            self._unpin()
+
+    def test_off_minute_wrapping_span_is_thirty_awake_seconds(self) -> None:
+        # [23:44:45, 00:15:15] overlaps 23:45:00–00:15:00 in exactly 30 min.
+        # A 60 s bucket walk counted the leading partial minute as awake
+        # and reported 60. Both readers must report 30.
+        self._pin(23, 45, 0, 15)
+        try:
+            watch = _alert_watch_module()
+            lo = _pt(2026, 9, 18, 23, 44, 45)
+            hi = _pt(2026, 9, 19, 0, 15, 15)
+            left = pipeline_snapshot.awake_seconds_between(lo, hi)
+            right = watch.awake_seconds(lo, hi)
+            self.assertEqual(left, 30.0)
+            self.assertEqual(right, 30.0)
+        finally:
+            self._unpin()
+
+    def test_off_minute_non_wrapping_span_is_thirty_awake_seconds(self) -> None:
+        self._pin(1, 0, 3, 0)
+        try:
+            watch = _alert_watch_module()
+            lo = _pt(2026, 9, 18, 0, 59, 45)
+            hi = _pt(2026, 9, 18, 3, 0, 15)
+            left = pipeline_snapshot.awake_seconds_between(lo, hi)
+            right = watch.awake_seconds(lo, hi)
+            self.assertEqual(left, 30.0)
+            self.assertEqual(right, 30.0)
         finally:
             self._unpin()
 

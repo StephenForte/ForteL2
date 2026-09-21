@@ -116,19 +116,22 @@ po_run() {
 
 # Source-level: condition id, env var, --help documents it, header documents
 # the metered dependency, legacy PROPOSER_INTERVAL never read for this condition.
+# Re-anchored from a grep for in_dev_sleep_window (the 60 s bucket walk) to
+# dev_sleep_window(), the same reader that predicate calls. Exact overlap
+# cannot be written as that walk without disagreeing off a minute boundary.
 PO_BLK="$(awk '/# --- proposer overdue/,/# --- cooldown/' "$PO_AW")"
 if grep -q 'proposer-overdue' "$PO_AW" \
   && grep -q 'SEPOLIA_PROPOSER_INTERVAL' "$PO_AW" \
   && grep -q 'ALERT_WATCH_PROPOSER_LATEST_AGE' "$PO_AW" \
   && grep -q 'ALERT_WATCH_PROPOSER_UNREACHABLE' "$PO_AW" \
   && grep -q 'ALERT_WATCH_PROPOSER_THROW' "$PO_AW" \
-  && echo "$PO_BLK" | grep -q 'in_dev_sleep_window' \
+  && echo "$PO_BLK" | grep -q 'dev_sleep_window()' \
   && echo "$PO_BLK" | grep -qF 'PROPOSER_OVERDUE_GRACE_SECS = 2 * 3600' \
   && ! echo "$PO_BLK" | grep -qiE 'quicknode\.com|quiknode' \
   && ! grep -q 'os.environ.get("PROPOSER_INTERVAL")' "$PO_AW"; then
-  echo "PASS alert-watch proposer-overdue reuses in_dev_sleep_window, reads SEPOLIA_PROPOSER_INTERVAL, never legacy PROPOSER_INTERVAL"
+  echo "PASS alert-watch proposer-overdue reuses dev_sleep_window, reads SEPOLIA_PROPOSER_INTERVAL, never legacy PROPOSER_INTERVAL"
 else
-  echo "FAIL proposer-overdue must reuse in_dev_sleep_window and never read legacy PROPOSER_INTERVAL" >&2
+  echo "FAIL proposer-overdue must reuse dev_sleep_window and never read legacy PROPOSER_INTERVAL" >&2
   fail=1
 fi
 
