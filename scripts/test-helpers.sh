@@ -2146,6 +2146,7 @@ EOS
       PID_DIR="$_C429_FIX/pids"
       LOG_DIR="$_C429_FIX/logs"
       CHALLENGER_START_GRACE_SEC=1
+      CHALLENGER_START_BACKOFF_SEC=0
       CHALLENGER_START_ATTEMPTS=3
       challenger_args=(--datadir=/tmp)
       START_BG_CALLS=0
@@ -2196,6 +2197,7 @@ EOS
       PID_DIR="$_C429_FIX/pids"
       LOG_DIR="$_C429_FIX/logs"
       CHALLENGER_START_GRACE_SEC=1
+      CHALLENGER_START_BACKOFF_SEC=0
       CHALLENGER_START_ATTEMPTS=3
       challenger_args=(--datadir=/tmp)
       # shellcheck disable=SC1090
@@ -2340,6 +2342,7 @@ EOS
       PID_DIR="$_P429_FIX/pids"
       LOG_DIR="$_P429_FIX/logs"
       PROPOSER_START_GRACE_SEC=1
+      PROPOSER_START_BACKOFF_SEC=0
       PROPOSER_START_ATTEMPTS=3
       proposer_cmd=(--datadir=/tmp)
       START_BG_CALLS=0
@@ -2392,6 +2395,7 @@ EOS
       PID_DIR="$_P429_FIX/pids"
       LOG_DIR="$_P429_FIX/logs"
       PROPOSER_START_GRACE_SEC=1
+      PROPOSER_START_BACKOFF_SEC=0
       PROPOSER_START_ATTEMPTS=3
       proposer_cmd=(--datadir=/tmp)
       # shellcheck disable=SC1090
