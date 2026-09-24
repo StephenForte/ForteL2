@@ -237,12 +237,18 @@ fi
 # enough that 3 attempts + backoff stay under ~1 min of wake time.
 CHALLENGER_START_GRACE_SEC="${CHALLENGER_START_GRACE_SEC:-15}"
 CHALLENGER_START_ATTEMPTS="${CHALLENGER_START_ATTEMPTS:-3}"
+# First retry backoff; doubles each retry. Tests set 0 to skip real sleeps.
+CHALLENGER_START_BACKOFF_SEC="${CHALLENGER_START_BACKOFF_SEC:-5}"
 if ! [[ "$CHALLENGER_START_GRACE_SEC" =~ ^[1-9][0-9]*$ ]]; then
   echo "ERROR: CHALLENGER_START_GRACE_SEC must be a positive integer (got $CHALLENGER_START_GRACE_SEC)" >&2
   exit 1
 fi
 if ! [[ "$CHALLENGER_START_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
   echo "ERROR: CHALLENGER_START_ATTEMPTS must be a positive integer (got $CHALLENGER_START_ATTEMPTS)" >&2
+  exit 1
+fi
+if ! [[ "$CHALLENGER_START_BACKOFF_SEC" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: CHALLENGER_START_BACKOFF_SEC must be a non-negative integer (got $CHALLENGER_START_BACKOFF_SEC)" >&2
   exit 1
 fi
 
@@ -551,7 +557,7 @@ start_challenger_with_retry() {
   local attempt=1
   local max_attempts="$CHALLENGER_START_ATTEMPTS"
   local grace="$CHALLENGER_START_GRACE_SEC"
-  local backoff=5
+  local backoff="${CHALLENGER_START_BACKOFF_SEC:-5}"
   local start_rc
 
   while (( attempt <= max_attempts )); do

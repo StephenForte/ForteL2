@@ -40,6 +40,7 @@ PROPOSER_RESUBMISSION="${SEPOLIA_PROPOSER_RESUBMISSION_TIMEOUT:-72s}"
 apply_proposer_start_retry_defaults() {
   PROPOSER_START_GRACE_SEC="${PROPOSER_START_GRACE_SEC-15}"
   PROPOSER_START_ATTEMPTS="${PROPOSER_START_ATTEMPTS-3}"
+  PROPOSER_START_BACKOFF_SEC="${PROPOSER_START_BACKOFF_SEC-5}"
 }
 validate_proposer_start_retry_env() {
   if ! [[ "${PROPOSER_START_GRACE_SEC:-}" =~ ^[1-9][0-9]*$ ]]; then
@@ -48,6 +49,10 @@ validate_proposer_start_retry_env() {
   fi
   if ! [[ "${PROPOSER_START_ATTEMPTS:-}" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: PROPOSER_START_ATTEMPTS must be a positive integer (got ${PROPOSER_START_ATTEMPTS:-})" >&2
+    return 1
+  fi
+  if ! [[ "${PROPOSER_START_BACKOFF_SEC:-}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: PROPOSER_START_BACKOFF_SEC must be a non-negative integer (got ${PROPOSER_START_BACKOFF_SEC:-})" >&2
     return 1
   fi
 }
@@ -91,7 +96,7 @@ start_proposer_with_retry() {
   local attempt=1
   local max_attempts="$PROPOSER_START_ATTEMPTS"
   local grace="$PROPOSER_START_GRACE_SEC"
-  local backoff=5
+  local backoff="${PROPOSER_START_BACKOFF_SEC:-5}"
   local start_rc
 
   while (( attempt <= max_attempts )); do
