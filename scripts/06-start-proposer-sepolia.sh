@@ -51,7 +51,7 @@ validate_proposer_start_retry_env() {
     echo "ERROR: PROPOSER_START_ATTEMPTS must be a positive integer (got ${PROPOSER_START_ATTEMPTS:-})" >&2
     return 1
   fi
-  if ! [[ "${PROPOSER_START_BACKOFF_SEC:-}" =~ ^[0-9]+$ ]]; then
+  if ! [[ "${PROPOSER_START_BACKOFF_SEC:-}" =~ ^(0|[1-9][0-9]*)$ ]]; then
     echo "ERROR: PROPOSER_START_BACKOFF_SEC must be a non-negative integer (got ${PROPOSER_START_BACKOFF_SEC:-})" >&2
     return 1
   fi

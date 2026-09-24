@@ -247,7 +247,7 @@ if ! [[ "$CHALLENGER_START_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
   echo "ERROR: CHALLENGER_START_ATTEMPTS must be a positive integer (got $CHALLENGER_START_ATTEMPTS)" >&2
   exit 1
 fi
-if ! [[ "$CHALLENGER_START_BACKOFF_SEC" =~ ^[0-9]+$ ]]; then
+if ! [[ "$CHALLENGER_START_BACKOFF_SEC" =~ ^(0|[1-9][0-9]*)$ ]]; then
   echo "ERROR: CHALLENGER_START_BACKOFF_SEC must be a non-negative integer (got $CHALLENGER_START_BACKOFF_SEC)" >&2
   exit 1
 fi

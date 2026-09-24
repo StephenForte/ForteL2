@@ -2300,6 +2300,41 @@ else
       _P429_ENV_FAIL=1
     fi
   done
+  # Backoff is doubled with $((…)); a leading zero is octal there, so 08 aborts
+  # the retry loop and 010 doubles to 16. Refuse non-canonical values; accept 0.
+  for _p429_backoff in '08' '010' '00' '' 'abc' '-1'; do
+    _P429_ENV_RC=0
+    _P429_ENV_OUT="$(
+      set +e
+      (
+        set -euo pipefail
+        PROPOSER_START_BACKOFF_SEC="$_p429_backoff"
+        # shellcheck disable=SC1090
+        source "$_P429_FN"
+        apply_proposer_start_retry_defaults
+        validate_proposer_start_retry_env
+      ) 2>&1
+    )" || _P429_ENV_RC=$?
+    if [[ "$_P429_ENV_RC" -eq 0 ]] \
+      || ! printf '%s' "$_P429_ENV_OUT" | grep -q 'must be a non-negative integer'; then
+      echo "FAIL proposer retry env must refuse BACKOFF=$_p429_backoff (rc=$_P429_ENV_RC)" >&2
+      echo "$_P429_ENV_OUT" >&2
+      _P429_ENV_FAIL=1
+    fi
+  done
+  for _p429_backoff in '0' '5' '10'; do
+    if ! (
+      set -euo pipefail
+      PROPOSER_START_BACKOFF_SEC="$_p429_backoff"
+      # shellcheck disable=SC1090
+      source "$_P429_FN"
+      apply_proposer_start_retry_defaults
+      validate_proposer_start_retry_env
+    ) >/dev/null 2>&1; then
+      echo "FAIL proposer retry env must accept BACKOFF=$_p429_backoff" >&2
+      _P429_ENV_FAIL=1
+    fi
+  done
   _P429_OK_ENV_RC=0
   (
     set -euo pipefail
