@@ -773,11 +773,11 @@ Nightly sleep/wake stop the sequencer; the tunnel process stays up and the origi
 | **Tunnel** | `SuperForteL2_mini`, id `64c3a080-44fa-4af6-9591-aba07d849757`, connector `supermini.local` (darwin_arm64), Healthy. |
 | **Origin** | `http://127.0.0.1:9555` only (`L2_WRITE_RPC_PORT`). Never `:9545`, never op-node `:9547`. |
 | **Hostname** | `https://fortel2-write.ente.ltd` |
-| **Access** | App `fortel2-write`, policy `settlementos` (Service Auth). Unauthenticated → 403. Token → `eth_chainId` `0x354`. |
-| **Audience** | `settlementos` Render (`srv-d9tafn3m8hqs73cks7cg`) only. Not the public internet. |
+| **Access** | App `fortel2-write`, policies `settlementos` and `Dude Write` (both Service Auth, one service token each; D-0146). Unauthenticated → 403. Token → `eth_chainId` `0x354`. |
+| **Audience** | `settlementos` Render (`srv-d9tafn3m8hqs73cks7cg`) and the operator's **Dude Test App** server (D-0146). Not the public internet, and never browser code. |
 | **`L2_RPC_URL`** | Stays loopback (`http://127.0.0.1:9545`). Do not point it at the tunnel hostname (`lib.sh` loopback asserts). |
 | **SOS Render env** | `FORTEL2_SEPOLIA_RPC_URL=https://fortel2-write.ente.ltd` plus `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` (operator-held; never git). |
-| **Rollback** | Stop the dashboard connector and/or revoke the Access service token. Sequencer bind and chain state are untouched. |
+| **Rollback** | Stop the dashboard connector and/or revoke a caller's Access service token (each caller has its own, so revoking one leaves the other working). Sequencer bind and chain state are untouched. |
 | **rail-interface** | Write URL **unpublished** (D-0035). Public reads published (D-0045): replica + sequencer-tip. |
 
 **Proven (2026-08-12):** unauthenticated curl → 403 Access HTML; mini token curl → `0x354`; Render Shell with live env → `0x354`.
@@ -785,7 +785,7 @@ Nightly sleep/wake stop the sequencer; the tunnel process stays up and the origi
 **Operator dashboard (do not invent a hostname or paste secrets into git/chat/`.env.sepolia.example`):**
 
 1. **Tunnel.** Live: Zero Trust → Networks → Tunnels → `SuperForteL2_mini` (remotely managed). Public hostname service **must** be `http://127.0.0.1:9555`. The yaml path (`cloudflared tunnel login` / `config/cloudflared-write.yml` / `scripts/08-run-cloudflared-write.sh`) is only if you switch off the dashboard connector first.
-2. **Access application.** Zero Trust → Access → Applications → `fortel2-write`. Domain `fortel2-write.ente.ltd`. Policy: **Service Auth** (`settlementos`). Do not use Bypass or Everyone.
+2. **Access application.** Zero Trust → Access → Applications → `fortel2-write`. Domain `fortel2-write.ente.ltd`. Policies: **Service Auth** `settlementos` and `Dude Write` (D-0146), one service token per caller. Do not use Bypass or Everyone. A new caller is a new token + Service Auth policy + decision record, never a shared token.
 3. **Service token.** Held by the operator in Cloudflare + settlementos Render env (`CF-Access-Client-Id` / `CF-Access-Client-Secret`). Never in this repo. Never `VITE_*`.
 
 ## Phase 2d — QuickNode L1 RPC (US-025)
@@ -1055,7 +1055,7 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 | US-012 item | Answer |
 |---|---|
 | **What is exposed** | The D1 write filter (`eth,net,web3` allowlist) on **`L2_WRITE_RPC_PORT` (default 9555)**, reached through a Cloudflare tunnel that dials `http://127.0.0.1:9555` only. op-geth itself stays bound to `127.0.0.1`; no raw bind leaves loopback and `scripts/lib.sh` loopback asserts are unchanged. Full `admin/debug/miner/txpool` stays on `:9545`. op-node's RPC is admin-enabled and is **never** published. |
-| **To whom** | The `settlementos` Render service only (`srv-d9tafn3m8hqs73cks7cg`). **Not** the public internet. Everyone else reads from the replica — see the public read path below. |
+| **To whom** | The `settlementos` Render service (`srv-d9tafn3m8hqs73cks7cg`) and the operator's **Dude Test App** server-side calls (D-0146). **Not** the public internet. Everyone else reads from the replica — see the public read path below. |
 | **Auth model** | Cloudflare Access service token, held as a Render environment variable and sent as a header on outbound JSON-RPC. The token is a US-022 secret: gitignored, never in `.env.sepolia.example`, redacted in logs (`redact_rpc_url`). |
 | **Rollback** | Revoke the service token, or stop the dashboard tunnel connector (do not also run a user LaunchAgent `cloudflared` while that connector is Healthy). Sequencer bind, chain state, and `L2_RPC_URL` are all untouched, so rollback is immediate and has no on-chain effect. |
 
