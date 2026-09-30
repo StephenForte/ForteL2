@@ -722,7 +722,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 | Script | Role |
 |---|---|
-| `start-all-sepolia.sh` | Sequencer + **write RPC filter** + batcher + proposer (calldata DA, beacon ignored) + **op-challenger** (and **l1-batch-proxy** first when `CHALLENGER_L1_RPC_URL` is set). Challenger-class start failures degrade: core stays up, error on stderr. |
+| `start-all-sepolia.sh` | Sequencer + **write RPC filter** + batcher + proposer (calldata DA, beacon ignored) + **op-challenger** (and **l1-batch-proxy** first when `CHALLENGER_L1_RPC_URL` is set) unless `SEPOLIA_START_CHALLENGER=0` (D-0145; the operator's current setting, D-0132). Challenger-class start failures degrade: core stays up, error on stderr. |
 | `stop-all-sepolia.sh` | Stops Sepolia PIDs only (incl. `l2-rpc-filter`) — no Anvil |
 | `07-start-rpc-filter-sepolia.sh` | Start the eth/net/web3 allowlist proxy alone (upstream must already be up) |
 | `deposit-eth-sepolia.sh` | L1→L2 via Sepolia `deployments.json` |
@@ -1081,6 +1081,8 @@ Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `t
 **Availability is unchanged by any of this:** the sequencer RPC is stopped nightly **23:45–00:15** `America/Los_Angeles` (D-0026). A published URL does not imply uptime.
 
 ## Phase 7 challenger (US-073)
+
+**Currently off (D-0132, D-0145):** the operator's `.env.sepolia` sets `SEPOLIA_START_CHALLENGER=0`, so start-all and the nightly wake skip the challenger and l1-batch-proxy, and `alert-watch.sh` does not expect them. Set `1` (or remove the line) and restart the stack to bring it back.
 
 Started by `start-all-sepolia.sh` (and therefore by `dev-sleep.sh wake`) **after** the sequencer, write filter, batcher, and proposer are up. Not a launchd unit of its own — it rides the stack start. A challenger (or l1-batch-proxy) start failure is **degraded, not fail-closed**: the core stack stays up, the error is loud on stderr, and `alert-watch.sh` raises if the process is still missing. Sequencer/batcher/proposer start failures still tear down the partial stack. Watches the DisputeGameFactory as the **challenger** role (`CHALLENGER_PRIVATE_KEY` / `CHALLENGER_ADDRESS`), never the proposer. A valid game should not be attacked; a deliberately bad proposal is US-074.
 

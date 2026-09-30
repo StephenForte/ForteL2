@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+# D-0145: an operator .env.sepolia sets SEPOLIA_START_CHALLENGER=0; cases that
+# expect the challenger must not inherit it. Cases that test the flag set it.
+unset SEPOLIA_START_CHALLENGER
 
 fail=0
 assert_true() {
@@ -6517,6 +6520,41 @@ if [[ "$SYM_OFF_EC" -eq 0 && "$SYM_OFF_ORDER" == "challenger" ]] \
 else
   echo "FAIL unset CHALLENGER_L1_RPC_URL must skip the proxy (ec=$SYM_OFF_EC order='$SYM_OFF_ORDER')" >&2
   echo "$SYM_OFF_OUT" >&2
+  fail=1
+fi
+
+# D-0145: SEPOLIA_START_CHALLENGER=0 skips proxy AND challenger; bad value → rc 2.
+: > "$SYM_FIX/order-skip"
+SYM_SKIP_OUT="$(
+  set -euo pipefail
+  SCRIPT_DIR="$SYM_FIX"
+  export SYM_ORDER_LOG="$SYM_FIX/order-skip"
+  FORTEL2_START_L1_BATCH_PROXY_SH="$SYM_FIX/proxy.sh"
+  FORTEL2_START_CHALLENGER_SH="$SYM_FIX/challenger.sh"
+  CHALLENGER_L1_RPC_URL='http://127.0.0.1:1'
+  SEPOLIA_START_CHALLENGER=0
+  # shellcheck disable=SC1091
+  source "$SYM_FIX/fn.sh"
+  start_optional_sepolia_fault_proofs
+)" && SYM_SKIP_EC=0 || SYM_SKIP_EC=$?
+SYM_BAD_OUT="$(
+  set -euo pipefail
+  SCRIPT_DIR="$SYM_FIX"
+  export SYM_ORDER_LOG="$SYM_FIX/order-skip"
+  FORTEL2_START_L1_BATCH_PROXY_SH="$SYM_FIX/proxy.sh"
+  FORTEL2_START_CHALLENGER_SH="$SYM_FIX/challenger.sh"
+  SEPOLIA_START_CHALLENGER=no
+  # shellcheck disable=SC1091
+  source "$SYM_FIX/fn.sh"
+  start_optional_sepolia_fault_proofs 2>&1
+)" && SYM_BAD_EC=0 || SYM_BAD_EC=$?
+if [[ "$SYM_FN_EC" -eq 0 && "$SYM_SKIP_EC" -eq 0 && ! -s "$SYM_FIX/order-skip" ]] \
+   && [[ "$SYM_SKIP_OUT" == *"SEPOLIA_START_CHALLENGER=0"* ]] \
+   && [[ "$SYM_BAD_EC" -eq 2 ]]; then
+  echo "PASS SEPOLIA_START_CHALLENGER=0 skips l1-batch-proxy and op-challenger; a non-0/1 value is refused"
+else
+  echo "FAIL SEPOLIA_START_CHALLENGER=0 must start neither proxy nor challenger (ec=$SYM_SKIP_EC bad_ec=$SYM_BAD_EC order='$(tr '\n' ' ' < "$SYM_FIX/order-skip")')" >&2
+  echo "$SYM_SKIP_OUT" >&2
   fail=1
 fi
 

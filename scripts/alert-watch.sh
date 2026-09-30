@@ -830,6 +830,12 @@ pid_dir = pid_dir_arg or ""
 expect_override = os.environ.get("ALERT_WATCH_EXPECT_STACK") or ""
 # Presence only — never print CHALLENGER_L1_RPC_URL (D-0049).
 want_proxy = bool((os.environ.get("CHALLENGER_L1_RPC_URL") or "").strip())
+# D-0145: same flag start-all-sepolia.sh reads. "0" = challenger and proxy are
+# deliberately off (D-0132), so neither is an expected pid. Anything else keeps
+# the historical expectation (a bad value fails start-all, so expect it).
+want_challenger = (os.environ.get("SEPOLIA_START_CHALLENGER") or "1").strip() != "0"
+if not want_challenger:
+    want_proxy = False
 # Existing helper tests inherit L2_CHAIN_ID=852 from earlier cases while
 # pointing FORTEL2_ENV at a throwaway fixture. Production launchd sets
 # FORTEL2_ENV=.env.sepolia. Test fixtures opt in via ALERT_WATCH_PID_DIR
@@ -969,8 +975,10 @@ if l2_chain == "852" and pid_dir and (sepolia_env or test_hook):
     el_pid = "op-reth" if el == "reth" else "op-geth"
     expected = [
         el_pid, "op-node", "op-batcher", "op-proposer",
-        "l2-rpc-filter", "op-challenger",
+        "l2-rpc-filter",
     ]
+    if want_challenger:
+        expected.append("op-challenger")
     if want_proxy:
         expected.append("l1-batch-proxy")
     present = [n for n in expected if pid_running(pid_dir, n)]

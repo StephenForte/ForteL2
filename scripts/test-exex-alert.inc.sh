@@ -120,7 +120,7 @@ sys.stdout.write(m.group(1) if m else "")
 '
 }
 exex_run() {
-  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL \
+  env -u RESEND_API_TOKEN -u CHALLENGER_L1_RPC_URL -u SEPOLIA_START_CHALLENGER \
     PATH="$EXEX_FIX/shim:$PATH" \
     FORTEL2_ENV="$EXEX_FIX/env" \
     L2_CHAIN_ID=852 \
@@ -396,6 +396,21 @@ else
   echo "FAIL missing challenger must not inherit ExEx text while op-reth is alive (ec=$EXEX_EC)" >&2
   echo "$EXEX_OUT" >&2
   echo "$EXEX_BODY" >&2
+  fail=1
+fi
+
+# D-0145: SEPOLIA_START_CHALLENGER=0 → challenger and proxy are not expected
+# (even with CHALLENGER_L1_RPC_URL set). Same pids as above: no stack-missing.
+exex_reset
+exex_mark op-reth op-node op-batcher op-proposer l2-rpc-filter
+EXEX_OUT="$(exex_run ALERT_WATCH_EXPECT_STACK=1 SEPOLIA_START_CHALLENGER=0 \
+  CHALLENGER_L1_RPC_URL='http://127.0.0.1:1' RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' \
+  "$EXEX_AW" 2>&1)" && EXEX_EC=0 || EXEX_EC=$?
+if [[ "$EXEX_EC" -eq 0 ]] && [[ "$EXEX_OUT" != *"condition stack-"* ]]; then
+  echo "PASS alert-watch does not expect op-challenger or l1-batch-proxy when SEPOLIA_START_CHALLENGER=0"
+else
+  echo "FAIL SEPOLIA_START_CHALLENGER=0 must drop challenger + proxy from the expected stack (ec=$EXEX_EC)" >&2
+  echo "$EXEX_OUT" >&2
   fail=1
 fi
 
