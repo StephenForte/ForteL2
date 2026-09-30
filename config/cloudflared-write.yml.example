@@ -8,8 +8,8 @@
 # auth :9551, or op-node :9547.
 #
 # Hostname is operator-local (Cloudflare dashboard). Do not invent one here.
-# Access (service token, audience = settlementos Render) sits in front of that
-# hostname — see README "Authenticated Cloudflare tunnel".
+# Access (one service token per caller: settlementos Render and the operator's
+# Dude Test App server, D-0146) sits in front of that hostname — see README "Authenticated Cloudflare tunnel".
 
 tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: /Users/steveforte/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json
