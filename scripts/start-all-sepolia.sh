@@ -79,6 +79,20 @@ sepolia_start_cleanup() {
 # FORTEL2_START_CHALLENGER_SH.
 start_optional_sepolia_fault_proofs() {
   local proxy_sh challenger_sh
+  # D-0145: SEPOLIA_START_CHALLENGER=0 skips both (proxy's only consumer is
+  # the challenger). Unset/1 keeps the historical start. alert-watch.sh reads
+  # the same flag so a skipped challenger is not "stack-missing".
+  case "${SEPOLIA_START_CHALLENGER:-1}" in
+    0)
+      echo "Skipping op-challenger and l1-batch-proxy (SEPOLIA_START_CHALLENGER=0; D-0132/D-0145)"
+      return 0
+      ;;
+    1) ;;
+    *)
+      echo "ERROR: SEPOLIA_START_CHALLENGER must be 0 or 1" >&2
+      return 2
+      ;;
+  esac
   proxy_sh="${FORTEL2_START_L1_BATCH_PROXY_SH:-$SCRIPT_DIR/start-l1-batch-proxy-sepolia.sh}"
   challenger_sh="${FORTEL2_START_CHALLENGER_SH:-$SCRIPT_DIR/09-start-challenger-sepolia.sh}"
   if [[ -n "${CHALLENGER_L1_RPC_URL:-}" ]]; then

@@ -6520,6 +6520,41 @@ else
   fail=1
 fi
 
+# D-0145: SEPOLIA_START_CHALLENGER=0 skips proxy AND challenger; bad value → rc 2.
+: > "$SYM_FIX/order-skip"
+SYM_SKIP_OUT="$(
+  set -euo pipefail
+  SCRIPT_DIR="$SYM_FIX"
+  export SYM_ORDER_LOG="$SYM_FIX/order-skip"
+  FORTEL2_START_L1_BATCH_PROXY_SH="$SYM_FIX/proxy.sh"
+  FORTEL2_START_CHALLENGER_SH="$SYM_FIX/challenger.sh"
+  CHALLENGER_L1_RPC_URL='http://127.0.0.1:1'
+  SEPOLIA_START_CHALLENGER=0
+  # shellcheck disable=SC1091
+  source "$SYM_FIX/fn.sh"
+  start_optional_sepolia_fault_proofs
+)" && SYM_SKIP_EC=0 || SYM_SKIP_EC=$?
+SYM_BAD_OUT="$(
+  set -euo pipefail
+  SCRIPT_DIR="$SYM_FIX"
+  export SYM_ORDER_LOG="$SYM_FIX/order-skip"
+  FORTEL2_START_L1_BATCH_PROXY_SH="$SYM_FIX/proxy.sh"
+  FORTEL2_START_CHALLENGER_SH="$SYM_FIX/challenger.sh"
+  SEPOLIA_START_CHALLENGER=no
+  # shellcheck disable=SC1091
+  source "$SYM_FIX/fn.sh"
+  start_optional_sepolia_fault_proofs 2>&1
+)" && SYM_BAD_EC=0 || SYM_BAD_EC=$?
+if [[ "$SYM_FN_EC" -eq 0 && "$SYM_SKIP_EC" -eq 0 && ! -s "$SYM_FIX/order-skip" ]] \
+   && [[ "$SYM_SKIP_OUT" == *"SEPOLIA_START_CHALLENGER=0"* ]] \
+   && [[ "$SYM_BAD_EC" -eq 2 ]]; then
+  echo "PASS SEPOLIA_START_CHALLENGER=0 skips l1-batch-proxy and op-challenger; a non-0/1 value is refused"
+else
+  echo "FAIL SEPOLIA_START_CHALLENGER=0 must start neither proxy nor challenger (ec=$SYM_SKIP_EC bad_ec=$SYM_BAD_EC order='$(tr '\n' ' ' < "$SYM_FIX/order-skip")')" >&2
+  echo "$SYM_SKIP_OUT" >&2
+  fail=1
+fi
+
 # Degrade: core markers survive a failing challenger; cleanup/stop-all must not run.
 # Reproduces start-all's trap - ERR then `|| optional_rc` wrapper with stub children.
 cat > "$SYM_FIX/degrade-driver.sh" <<'EOS'
