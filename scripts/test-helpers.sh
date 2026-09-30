@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+# D-0145: an operator .env.sepolia sets SEPOLIA_START_CHALLENGER=0; cases that
+# expect the challenger must not inherit it. Cases that test the flag set it.
+unset SEPOLIA_START_CHALLENGER
 
 fail=0
 assert_true() {
