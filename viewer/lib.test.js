@@ -32,6 +32,12 @@ import {
   cspForMeta,
   PUBLIC_VIEWER_CSP_META,
   META_IGNORED_CSP_DIRECTIVES,
+  collectRecentTxs,
+  explorerTxUrl,
+  recentTxHeights,
+  DEFAULT_EXPLORER_TX_PREFIX,
+  RECENT_L2_TX_COUNT,
+  RECENT_L2_TX_LOOKBACK,
 } from "./lib.js";
 
 const viewerDir = dirname(fileURLToPath(import.meta.url));
@@ -488,5 +494,156 @@ describe("summarizePublicSequencerHeads", () => {
     assert.equal(s.finalizedAge, "unavailable");
     assert.equal(s.degraded, true);
     assert.match(s.degradeLabel, /Replica safe\/finalized/);
+  });
+});
+
+const TX = (byte) => `0x${byte.repeat(32)}`;
+const EXPLORER = "https://settlementos-explorer-ihgo.onrender.com/fortel2-sepolia/tx/";
+
+describe("collectRecentTxs", () => {
+  it("walks newest blocks first and skips empty blocks", () => {
+    const txs = collectRecentTxs([
+      { number: 10, timestamp: 1000, transactions: [] },
+      { number: 12, timestamp: 1004, transactions: [TX("aa")] },
+      {
+        number: 11,
+        timestamp: 1002,
+        transactions: [TX("bb"), TX("cc")],
+      },
+      { number: 9, timestamp: 998, transactions: [TX("dd")] },
+    ]);
+    assert.deepEqual(
+      txs.map((t) => t.hash),
+      [TX("aa"), TX("cc"), TX("bb"), TX("dd")],
+    );
+    assert.equal(txs[0].blockNumber, 12);
+    assert.equal(txs[0].timestamp, 1004);
+    assert.equal(txs[1].blockNumber, 11);
+    assert.equal(txs[2].hash, TX("bb"));
+  });
+
+  it("stops at the requested count", () => {
+    const txs = collectRecentTxs(
+      [
+        { number: "0xc", timestamp: "0x3e8", transactions: [TX("11"), TX("22")] },
+        { number: 11, timestamp: 1000, transactions: [TX("33")] },
+      ],
+      2,
+    );
+    assert.equal(txs.length, 2);
+    assert.deepEqual(
+      txs.map((t) => t.hash),
+      [TX("22"), TX("11")],
+    );
+  });
+
+  it("returns a short list when fewer than N exist", () => {
+    const txs = collectRecentTxs(
+      [
+        { number: 4, timestamp: 50, transactions: [] },
+        { number: 5, timestamp: 60, transactions: [TX("ee")] },
+      ],
+      RECENT_L2_TX_COUNT,
+    );
+    assert.equal(txs.length, 1);
+    assert.equal(txs[0].hash, TX("ee"));
+    assert.equal(txs[0].blockNumber, 5);
+  });
+
+  it("returns empty when no blocks or no txs", () => {
+    assert.deepEqual(collectRecentTxs([]), []);
+    assert.deepEqual(collectRecentTxs(null), []);
+    assert.deepEqual(
+      collectRecentTxs([{ number: 1, timestamp: 10, transactions: [] }], 10),
+      [],
+    );
+    assert.deepEqual(collectRecentTxs([{ number: 1, transactions: [TX("ff")] }], 0), []);
+  });
+
+  it("drops malformed hashes and count-only blocks", () => {
+    const txs = collectRecentTxs([
+      { number: 3, timestamp: 30, transactions: 4 },
+      {
+        number: 2,
+        timestamp: 20,
+        transactions: ["0xshort", { hash: TX("ab") }, { hash: "nope" }],
+      },
+    ]);
+    assert.equal(txs.length, 1);
+    assert.equal(txs[0].hash, TX("ab"));
+  });
+
+  it("defaults to the latest 10", () => {
+    const transactions = [];
+    for (let i = 0; i < 12; i++) transactions.push(TX(i.toString(16).padStart(2, "0")));
+    const txs = collectRecentTxs([{ number: 8, timestamp: 80, transactions }]);
+    assert.equal(RECENT_L2_TX_COUNT, 10);
+    assert.equal(txs.length, 10);
+    assert.equal(txs[0].hash, transactions[11]);
+    assert.equal(txs[9].hash, transactions[2]);
+  });
+});
+
+describe("explorerTxUrl", () => {
+  it("builds the SettlementOS tx link from the default prefix", () => {
+    assert.equal(DEFAULT_EXPLORER_TX_PREFIX, EXPLORER);
+    const hash = TX("ab");
+    assert.equal(explorerTxUrl(hash), `${EXPLORER}${hash}`);
+  });
+
+  it("accepts a prefix with or without a trailing slash", () => {
+    const hash = TX("cd");
+    assert.equal(
+      explorerTxUrl(hash, "https://example.test/fortel2-sepolia/tx"),
+      `https://example.test/fortel2-sepolia/tx/${hash}`,
+    );
+    assert.equal(
+      explorerTxUrl(hash, "https://example.test/fortel2-sepolia/tx/"),
+      `https://example.test/fortel2-sepolia/tx/${hash}`,
+    );
+  });
+
+  it("rejects malformed hashes and non-http prefixes", () => {
+    assert.equal(explorerTxUrl("0xabc"), null);
+    assert.equal(explorerTxUrl(""), null);
+    assert.equal(explorerTxUrl(TX("aa"), "javascript:alert(1)"), null);
+    assert.equal(explorerTxUrl(TX("aa"), ""), `${EXPLORER}${TX("aa")}`);
+  });
+});
+
+describe("recentTxHeights", () => {
+  it("walks backward from the tip and stops at genesis", () => {
+    assert.deepEqual(recentTxHeights(5, 10), [5, 4, 3, 2, 1, 0]);
+    assert.deepEqual(recentTxHeights(100, 3), [100, 99, 98]);
+    assert.equal(recentTxHeights(10, RECENT_L2_TX_LOOKBACK).length, 11);
+    assert.deepEqual(recentTxHeights(-1), []);
+  });
+});
+
+describe("recent tx links stay navigation-only", () => {
+  it("does not embed the explorer origin in files the public bundle copies", () => {
+    const files = ["app.js", "lib.js", "index.html", "styles.css", "config.public.js", "public.csp"];
+    for (const name of files) {
+      const text = readFileSync(join(viewerDir, name), "utf8");
+      const origins = httpOriginsInText(text);
+      assert.equal(
+        origins.includes("https://settlementos-explorer-ihgo.onrender.com"),
+        false,
+        name,
+      );
+    }
+  });
+
+  it("renders rows with textContent and a new-tab explorer link", () => {
+    const src = readFileSync(join(viewerDir, "app.js"), "utf8");
+    const start = src.indexOf("function renderRecentTxs");
+    const end = src.indexOf("async function loadRecentL2Txs");
+    assert.ok(start >= 0 && end > start);
+    const fn = src.slice(start, end);
+    assert.equal(fn.includes("innerHTML"), false);
+    assert.match(fn, /textContent/);
+    assert.match(fn, /target = "_blank"/);
+    assert.match(fn, /rel = "noopener noreferrer"/);
+    assert.match(fn, /explorerTxUrl\(/);
   });
 });

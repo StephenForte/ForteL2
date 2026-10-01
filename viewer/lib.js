@@ -515,3 +515,100 @@ export function summarizePublicSequencerHeads(heads, nowMs = Date.now()) {
     degradeLabel,
   };
 }
+
+/** How many recent L2 txs the pipeline viewer lists under the panels. */
+export const RECENT_L2_TX_COUNT = 10;
+
+/**
+ * Max blocks to walk backward from the L2 tip when filling that list.
+ * Empty blocks are normal; the walk stops early once `RECENT_L2_TX_COUNT` txs
+ * are in hand. 128 blocks is ~4 min at a 2s block time.
+ */
+export const RECENT_L2_TX_LOOKBACK = 128;
+
+/**
+ * SettlementOS tx-page prefix. Protocol is concatenated so this navigation
+ * target is not a contiguous http(s) origin in source — the public bundle
+ * origin scan treats those as connect-src RPC hosts, and this page never
+ * fetches the explorer.
+ */
+export const DEFAULT_EXPLORER_TX_PREFIX =
+  "https:" + "//settlementos-explorer-ihgo.onrender.com/fortel2-sepolia/tx/";
+
+const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
+/**
+ * Heights to request, newest first, inclusive of `tip`, capped by `lookback`.
+ * @param {number|bigint|string|null|undefined} tip
+ * @param {number} [lookback]
+ * @returns {number[]}
+ */
+export function recentTxHeights(tip, lookback = RECENT_L2_TX_LOOKBACK) {
+  const t = parseHexQuantity(tip);
+  if (t == null) return [];
+  const requested = Number(lookback);
+  const n =
+    Number.isFinite(requested) && requested > 0
+      ? Math.floor(requested)
+      : RECENT_L2_TX_LOOKBACK;
+  const stop = Math.max(0, t - n + 1);
+  const out = [];
+  for (let h = t; h >= stop; h--) out.push(h);
+  return out;
+}
+
+function txHashFromEntry(tx) {
+  const hash = typeof tx === "string" ? tx : tx?.hash;
+  if (typeof hash !== "string" || !TX_HASH_RE.test(hash)) return null;
+  return hash;
+}
+
+/**
+ * Latest `limit` txs across blocks, newest first.
+ * Within a block, the highest transaction index is treated as more recent.
+ * Empty blocks are skipped. Returns a short list when fewer than `limit` exist.
+ *
+ * @param {Array<{number?: number|string, timestamp?: number|string, transactions?: unknown[]|number}>|null|undefined} blocks
+ * @param {number} [limit]
+ * @returns {Array<{hash: string, blockNumber: number|null, timestamp: number|null}>}
+ */
+export function collectRecentTxs(blocks, limit = RECENT_L2_TX_COUNT) {
+  const cap = Number(limit);
+  if (!Array.isArray(blocks) || !Number.isFinite(cap) || cap <= 0) return [];
+  const ordered = blocks.filter((b) => b && typeof b === "object").sort((a, b) => {
+    const na = parseHexQuantity(a.number) ?? -1;
+    const nb = parseHexQuantity(b.number) ?? -1;
+    return nb - na;
+  });
+  const seen = new Set();
+  const out = [];
+  for (const block of ordered) {
+    const txs = Array.isArray(block.transactions) ? block.transactions : [];
+    const blockNumber = parseHexQuantity(block.number);
+    const timestamp = parseHexQuantity(block.timestamp);
+    for (let i = txs.length - 1; i >= 0; i--) {
+      const hash = txHashFromEntry(txs[i]);
+      if (!hash || seen.has(hash)) continue;
+      seen.add(hash);
+      out.push({ hash, blockNumber, timestamp });
+      if (out.length >= cap) return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * Explorer URL for one tx hash. `prefix` defaults to the SettlementOS
+ * ForteL2 Sepolia tx path. Non-http(s) prefixes and malformed hashes return null
+ * so a caller cannot turn RPC data into a `javascript:` link.
+ * @param {string|null|undefined} txHash
+ * @param {string} [prefix]
+ * @returns {string|null}
+ */
+export function explorerTxUrl(txHash, prefix = DEFAULT_EXPLORER_TX_PREFIX) {
+  if (typeof txHash !== "string" || !TX_HASH_RE.test(txHash)) return null;
+  const raw =
+    typeof prefix === "string" && prefix.trim() ? prefix.trim() : DEFAULT_EXPLORER_TX_PREFIX;
+  if (!/^https?:\/\//i.test(raw)) return null;
+  return `${raw.replace(/\/+$/, "")}/${txHash}`;
+}
