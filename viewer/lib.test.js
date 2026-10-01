@@ -34,8 +34,10 @@ import {
   META_IGNORED_CSP_DIRECTIVES,
   collectRecentTxs,
   explorerTxUrl,
+  isL1AttributesDeposit,
   recentTxHeights,
   DEFAULT_EXPLORER_TX_PREFIX,
+  L1_ATTRIBUTES_DEPOSITOR,
   RECENT_L2_TX_COUNT,
   RECENT_L2_TX_LOOKBACK,
 } from "./lib.js";
@@ -573,6 +575,49 @@ describe("collectRecentTxs", () => {
     assert.equal(txs[0].hash, TX("ab"));
   });
 
+  it("does not fill the list with L1 attributes deposits", () => {
+    const l1Attr = (id) => ({
+      hash: TX(id),
+      from: "0xDeaDdeadDeaDdeadDeaDdeadDeaDdeadDeaD0001",
+      to: "0x4200000000000000000000000000000000000015",
+      type: "0x7e",
+    });
+    const guestbook = {
+      hash: TX("ab"),
+      from: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      to: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+      type: "0x2",
+    };
+    const userDeposit = {
+      hash: TX("cd"),
+      from: "0x1111111111111111111111111111111111111111",
+      to: "0x2222222222222222222222222222222222222222",
+      type: "0x7e",
+    };
+    const blocks = [];
+    for (let n = 30; n >= 11; n--) {
+      const id = n.toString(16).padStart(2, "0");
+      blocks.push({ number: n, timestamp: 1000 + n, transactions: [l1Attr(id)] });
+    }
+    blocks.push({
+      number: 10,
+      timestamp: 1010,
+      transactions: [l1Attr("ee"), userDeposit, guestbook],
+    });
+    const txs = collectRecentTxs(blocks, RECENT_L2_TX_COUNT);
+    assert.equal(txs.length, 2);
+    assert.deepEqual(
+      txs.map((t) => t.hash),
+      [guestbook.hash, userDeposit.hash],
+    );
+    assert.equal(txs[0].blockNumber, 10);
+    assert.equal(isL1AttributesDeposit(l1Attr("ee")), true);
+    assert.equal(L1_ATTRIBUTES_DEPOSITOR.length, 42);
+    assert.equal(isL1AttributesDeposit(userDeposit), false);
+    assert.equal(isL1AttributesDeposit(guestbook), false);
+    assert.equal(isL1AttributesDeposit(TX("ab")), false);
+  });
+
   it("defaults to the latest 10", () => {
     const transactions = [];
     for (let i = 0; i < 12; i++) transactions.push(TX(i.toString(16).padStart(2, "0")));
@@ -645,5 +690,13 @@ describe("recent tx links stay navigation-only", () => {
     assert.match(fn, /target = "_blank"/);
     assert.match(fn, /rel = "noopener noreferrer"/);
     assert.match(fn, /explorerTxUrl\(/);
+  });
+
+  it("prefetches L2 tx metadata when collecting recent txs", () => {
+    const src = readFileSync(join(viewerDir, "app.js"), "utf8");
+    const start = src.indexOf("async function loadRecentL2Txs");
+    const end = src.indexOf("async function refreshRecentTxs");
+    assert.ok(start >= 0 && end > start);
+    assert.match(src.slice(start, end), /getBlock\(\s*n\s*,\s*true\s*\)/);
   });
 });

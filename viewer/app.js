@@ -416,7 +416,8 @@ async function loadRecentL2Txs(l2) {
   const batch = 8;
   for (let i = 0; i < heights.length && found.length < RECENT_L2_TX_COUNT; i += batch) {
     const slice = heights.slice(i, i + batch);
-    const blocks = await Promise.all(slice.map((n) => l2.getBlock(n, false)));
+    // Prefetch sender metadata so the L1 attributes deposit can be skipped.
+    const blocks = await Promise.all(slice.map((n) => l2.getBlock(n, true)));
     const more = collectRecentTxs(
       blocks.filter(Boolean),
       RECENT_L2_TX_COUNT - found.length,

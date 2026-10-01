@@ -521,10 +521,17 @@ export const RECENT_L2_TX_COUNT = 10;
 
 /**
  * Max blocks to walk backward from the L2 tip when filling that list.
- * Empty blocks are normal; the walk stops early once `RECENT_L2_TX_COUNT` txs
- * are in hand. 128 blocks is ~4 min at a 2s block time.
+ * Empty blocks are normal, and each OP Stack block also carries one
+ * L1 attributes deposit that does not count. The walk stops early once
+ * `RECENT_L2_TX_COUNT` other txs are in hand. 128 blocks is ~4 min at a 2s block time.
  */
 export const RECENT_L2_TX_LOOKBACK = 128;
+
+/**
+ * OP Stack L1 attributes depositor. The per-block system deposit is sent
+ * from this address; user deposits and guestbook txs are not.
+ */
+export const L1_ATTRIBUTES_DEPOSITOR = "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001";
 
 /**
  * SettlementOS tx-page prefix. Protocol is concatenated so this navigation
@@ -564,9 +571,21 @@ function txHashFromEntry(tx) {
 }
 
 /**
+ * Per-block L1 attributes deposit (from the system depositor).
+ * Hash-only entries have no sender, so they are not treated as this tx.
+ * @param {unknown} tx
+ */
+export function isL1AttributesDeposit(tx) {
+  if (!tx || typeof tx !== "object") return false;
+  const from = typeof tx.from === "string" ? tx.from.toLowerCase() : "";
+  return from === L1_ATTRIBUTES_DEPOSITOR;
+}
+
+/**
  * Latest `limit` txs across blocks, newest first.
  * Within a block, the highest transaction index is treated as more recent.
- * Empty blocks are skipped. Returns a short list when fewer than `limit` exist.
+ * Empty blocks and the L1 attributes deposit are skipped. User deposits and
+ * other txs still count. Returns a short list when fewer than `limit` exist.
  *
  * @param {Array<{number?: number|string, timestamp?: number|string, transactions?: unknown[]|number}>|null|undefined} blocks
  * @param {number} [limit]
@@ -587,6 +606,7 @@ export function collectRecentTxs(blocks, limit = RECENT_L2_TX_COUNT) {
     const blockNumber = parseHexQuantity(block.number);
     const timestamp = parseHexQuantity(block.timestamp);
     for (let i = txs.length - 1; i >= 0; i--) {
+      if (isL1AttributesDeposit(txs[i])) continue;
       const hash = txHashFromEntry(txs[i]);
       if (!hash || seen.has(hash)) continue;
       seen.add(hash);
