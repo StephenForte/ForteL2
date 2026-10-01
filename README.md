@@ -534,6 +534,8 @@ Stopping the viewer (Ctrl-C) does **not** stop the chain. Config is built from t
 | **Proposer** | L1 DisputeGameFactory | `gameCount`, latest game proxy / age / type |
 | **Aggregate** | L2 recent blocks + `txpool_status` | Empty vs non-empty, tx/min, **mempool** pending/queued |
 
+Below the panels, **Recent L2 transactions** lists the latest 10 L2 txs (newest first), walking past empty blocks and the per-block L1 attributes deposit up to 128 back from the tip. User deposits and guestbook writes still count. Each hash opens `https://settlementos-explorer-ihgo.onrender.com/fortel2-sepolia/tx/{hash}` in a new tab. The prefix defaults in the page (`EXPLORER_TX_URL_PREFIX` overrides it; no config regen required).
+
 **Mempool vs heads:** Sequencer unsafe/safe is what already landed (or is safe via L1). Aggregate mempool is txs still waiting in op-geth — useful right after MetaMask submit, before the next L2 block. Not a full mempool dump or tx search.
 
 Refresh cadence defaults to **5s** locally and **15s** on Sepolia (override with `VIEWER_REFRESH_MS`). Local Sepolia mode (`:8081`) uses a **12-block** incremental L1 scan so Batcher/Proposer do not re-fetch dozens of full blocks every tick (operator QuickNode budget). The public build uses a **36-block** L1 scan so the batcher panel covers one ~25-block posting interval on free publicnode. Panel RPC failures surface as plain status text — panels do not silently go stale.

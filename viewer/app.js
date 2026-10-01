@@ -33,6 +33,12 @@ import {
   summarizeTxpoolStatus,
   viewerL1ScanBlocks,
   viewerRefreshMs,
+  collectRecentTxs,
+  explorerTxUrl,
+  recentTxHeights,
+  DEFAULT_EXPLORER_TX_PREFIX,
+  RECENT_L2_TX_COUNT,
+  RECENT_L2_TX_LOOKBACK,
 } from "./lib.js";
 
 /** Local gen-viewer-config.sh does not export this; public config.public.js does. */
@@ -69,6 +75,8 @@ const els = {
   aggTxs: document.getElementById("agg-txs"),
   aggRate: document.getElementById("agg-rate"),
   aggMempool: document.getElementById("agg-mempool"),
+  recentErr: document.getElementById("recent-err"),
+  recentTxs: document.getElementById("recent-txs"),
   panelSequencer: document.getElementById("panel-sequencer"),
   panelBatcher: document.getElementById("panel-batcher"),
   panelProposer: document.getElementById("panel-proposer"),
@@ -332,6 +340,103 @@ async function refreshAggregate(l2) {
   }
 }
 
+function explorerTxPrefix() {
+  const configured = cfg.EXPLORER_TX_URL_PREFIX;
+  if (typeof configured === "string" && configured.trim()) return configured.trim();
+  return DEFAULT_EXPLORER_TX_PREFIX;
+}
+
+function setRecentError(message) {
+  if (!els.recentErr) return;
+  if (message) {
+    els.recentErr.hidden = false;
+    els.recentErr.textContent = message;
+  } else {
+    els.recentErr.hidden = true;
+    els.recentErr.textContent = "";
+  }
+}
+
+function renderRecentTxs(txs) {
+  if (!els.recentTxs) return;
+  els.recentTxs.replaceChildren();
+  if (!txs.length) {
+    const empty = document.createElement("p");
+    empty.className = "recent-empty";
+    empty.textContent = `No L2 transactions in the last ${RECENT_L2_TX_LOOKBACK} blocks.`;
+    els.recentTxs.appendChild(empty);
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "recent-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const label of ["Tx", "Block", "Age"]) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = label;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  const prefix = explorerTxPrefix();
+  for (const tx of txs) {
+    const tr = document.createElement("tr");
+    const tdHash = document.createElement("td");
+    const href = explorerTxUrl(tx.hash, prefix);
+    if (href) {
+      const a = document.createElement("a");
+      a.className = "recent-hash";
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = shortHex(tx.hash, 10, 8);
+      a.title = tx.hash;
+      tdHash.appendChild(a);
+    } else {
+      tdHash.textContent = shortHex(tx.hash, 10, 8);
+    }
+    const tdBlock = document.createElement("td");
+    tdBlock.className = "recent-block";
+    tdBlock.textContent = tx.blockNumber == null ? "—" : `#${tx.blockNumber}`;
+    const tdAge = document.createElement("td");
+    tdAge.className = "recent-age";
+    tdAge.textContent = formatAge(tx.timestamp);
+    tr.append(tdHash, tdBlock, tdAge);
+    tbody.appendChild(tr);
+  }
+  table.append(thead, tbody);
+  els.recentTxs.appendChild(table);
+}
+
+async function loadRecentL2Txs(l2) {
+  const tip = await l2.getBlockNumber();
+  const heights = recentTxHeights(tip, RECENT_L2_TX_LOOKBACK);
+  const found = [];
+  const batch = 8;
+  for (let i = 0; i < heights.length && found.length < RECENT_L2_TX_COUNT; i += batch) {
+    const slice = heights.slice(i, i + batch);
+    // Prefetch sender metadata so the L1 attributes deposit can be skipped.
+    const blocks = await Promise.all(slice.map((n) => l2.getBlock(n, true)));
+    const more = collectRecentTxs(
+      blocks.filter(Boolean),
+      RECENT_L2_TX_COUNT - found.length,
+    );
+    found.push(...more);
+  }
+  return found.slice(0, RECENT_L2_TX_COUNT);
+}
+
+async function refreshRecentTxs(l2) {
+  try {
+    const txs = await loadRecentL2Txs(l2);
+    renderRecentTxs(txs);
+    setRecentError(null);
+  } catch (err) {
+    setRecentError(`Recent transactions RPC failed: ${err?.message || err}`);
+  }
+}
+
 async function tick() {
   if (inFlight) return;
   inFlight = true;
@@ -339,6 +444,7 @@ async function tick() {
   try {
     assertViewerConfig();
     const { l1, l2 } = getProviders();
+    const recentP = refreshRecentTxs(l2);
 
     const results = await Promise.allSettled([
       refreshSequencer(l2, L2_NODE_RPC_URL).then((result) =>
@@ -355,6 +461,7 @@ async function tick() {
         setPanelError(els.aggErr, els.panelAggregate, null),
       ),
     ]);
+    await recentP;
 
     const labels = ["Sequencer", "Batcher", "Proposer", "Aggregate"];
     const panels = [

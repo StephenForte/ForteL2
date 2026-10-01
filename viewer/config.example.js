@@ -19,3 +19,10 @@ export const DISPUTE_GAME_FACTORY_ABI = [
 ];
 
 export const REFRESH_MS = 5000;
+
+/**
+ * Optional. Recent-tx links use viewer/lib.js DEFAULT_EXPLORER_TX_PREFIX when
+ * this export is absent, so a config regen is not required.
+ */
+export const EXPLORER_TX_URL_PREFIX =
+  "https://settlementos-explorer-ihgo.onrender.com/fortel2-sepolia/tx/";

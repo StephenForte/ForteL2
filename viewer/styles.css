@@ -331,6 +331,71 @@ body {
   letter-spacing: -0.14px;
 }
 
+.recent {
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem 0.95rem;
+  border-radius: var(--r-lg);
+  background: var(--surface-soft);
+}
+
+.recent-title {
+  margin: 0 0 0.45rem;
+  font-family: var(--sans);
+  font-size: 1.0625rem;
+  font-weight: 540;
+  letter-spacing: -0.26px;
+  line-height: 1.25;
+}
+
+.recent-empty {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 330;
+}
+
+.recent-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.recent-table th {
+  padding: 0.18rem 0.75rem 0.35rem 0;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.6px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.recent-table td {
+  padding: 0.38rem 0.75rem 0.38rem 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.9375rem;
+  font-weight: 480;
+  font-variant-numeric: tabular-nums;
+  vertical-align: baseline;
+}
+
+.recent-table th:first-child,
+.recent-table td:first-child {
+  width: 46%;
+}
+
+.recent-hash {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 480;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  word-break: break-all;
+}
+
+.recent-hash:hover {
+  color: var(--accent-magenta);
+}
+
 .about {
   margin: 0.85rem 0 0;
   max-width: 48rem;
@@ -369,6 +434,11 @@ body {
 @media (max-width: 819px) {
   .lede {
     white-space: normal;
+  }
+
+  .recent-table th:first-child,
+  .recent-table td:first-child {
+    width: auto;
   }
 }
 
