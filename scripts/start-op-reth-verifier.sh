@@ -148,7 +148,9 @@ if [[ -n "${FORTEL2_OP_RETH_BIN:-}" ]]; then
     echo "ERROR: FORTEL2_OP_RETH_BIN is not executable: ${FORTEL2_OP_RETH_BIN}" >&2
     exit 1
   fi
-  OP_RETH_CMD="${FORTEL2_OP_RETH_BIN}"
+  # start_bg chdirs to / before execvp. A relative override would pass this
+  # check, run proofs init, then fail to exec the node.
+  OP_RETH_CMD="$(cd "$(dirname "${FORTEL2_OP_RETH_BIN}")" && pwd)/$(basename "${FORTEL2_OP_RETH_BIN}")"
 else
   require_bin op-reth
   OP_RETH_CMD="op-reth"

@@ -9368,6 +9368,33 @@ else
   fail=1
 fi
 rm -rf "$RETH_OVR_FIX"
+# Relative override must be absolute before start_bg (chdir /). Missing L1
+# stops the script after the echo and before init/start.
+RETH_REL_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-bin-abs.XXXXXX")"
+register_tmp "$RETH_REL_FIX"
+mkdir -p "$RETH_REL_FIX/bin"
+printf '#!/bin/sh\nexit 0\n' > "$RETH_REL_FIX/bin/op-reth"
+chmod +x "$RETH_REL_FIX/bin/op-reth"
+RETH_REL_OUT="$(
+  cd "$RETH_REL_FIX" && \
+  env -u L1_RPC_URL -u FORTEL2_ENV \
+    DATA_DIR="$RETH_REL_FIX" FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_RETH_DATADIR="$RETH_REL_FIX/l2/spike-op-reth" \
+    FORTEL2_OP_RETH_BIN="./bin/op-reth" \
+    "$RETH_START" 2>&1
+)" && RETH_REL_EC=0 || RETH_REL_EC=$?
+RETH_REL_EXPECTED="$(cd "$RETH_REL_FIX/bin" && pwd)/op-reth"
+if [[ "$RETH_REL_EC" -ne 0 ]] \
+  && echo "$RETH_REL_OUT" | grep -q "op-reth binary: ${RETH_REL_EXPECTED}" \
+  && ! echo "$RETH_REL_OUT" | grep -q 'op-reth binary: \./bin/op-reth' \
+  && ! echo "$RETH_REL_OUT" | grep -q 'Starting op-reth-verifier'; then
+  echo "PASS start-op-reth-verifier.sh resolves a relative FORTEL2_OP_RETH_BIN before start_bg"
+else
+  echo "FAIL a relative FORTEL2_OP_RETH_BIN must be absolute before start_bg (ec=$RETH_REL_EC)" >&2
+  echo "$RETH_REL_OUT" >&2
+  fail=1
+fi
+rm -rf "$RETH_REL_FIX"
 if grep -q 'L1_RPC_URL' "$VRP"; then
   echo "FAIL verify-reth-parity.sh must not mention L1_RPC_URL (no provider URL in parity)" >&2
   fail=1
