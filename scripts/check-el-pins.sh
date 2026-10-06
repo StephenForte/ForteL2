@@ -3,8 +3,10 @@
 # Mini-only for a green live run (darwin/arm64 builds). CI covers the red
 # path via stubs in scripts/test-helpers.sh — GitHub runners have no pin.
 #
-# Proven floor (P:0 sidecar 2026-08-29): op-node v1.19.2 (da197e45) + tag
-# op-reth/v2.3.3, which reports "Reth Version: 2.3.0-dev" and commit
+# Live sequencer pin (D-0147): op-node v1.19.8 (9f76a9d2), the commit
+# op-node/v1.19.8 peels to. The annotated tag object is 448a900969; --version
+# prints the commit, so the pin is 9f76a9d2. op-reth is unchanged from the
+# P:0 floor: tag op-reth/v2.3.3 reports "Reth Version: 2.3.0-dev" and commit
 # 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216. Do not grep the tag string
 # "2.3.3" in --version output (it is absent). Do not grep a bare "2.3"
 # (that would accept unpinned later 2.3.x builds).
@@ -14,8 +16,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 # Pin tokens as measured on the Mini. Tag op-reth/v2.3.3 ≠ reported version.
-PIN_OP_NODE_VERSION='v1.19.2'
-PIN_OP_NODE_COMMIT='da197e45'
+PIN_OP_NODE_VERSION='v1.19.8'
+PIN_OP_NODE_COMMIT='9f76a9d2'
 PIN_RETH_VERSION='2.3.0-dev'
 PIN_RETH_COMMIT='9384bc53d8c0c77e59cac83fdaaf3b372c6d2216'
 
@@ -102,8 +104,8 @@ if [[ "$FORTEL2_EL" == "reth" ]] && looks_like_geth "$RETH_VER" "$OP_RETH_BIN"; 
     "op-geth binary ($OP_RETH_BIN): $(oneline "$RETH_VER")"
 fi
 
-# v1.19.2 not v1.19.20: next char must be non-digit (or end).
-if ! echo "$NODE_VER" | grep -qE "v1\\.19\\.2([^0-9]|\$)" \
+# v1.19.8 not v1.19.80: next char must be non-digit (or end).
+if ! echo "$NODE_VER" | grep -qE "v1\\.19\\.8([^0-9]|\$)" \
   || ! echo "$NODE_VER" | grep -q "$PIN_OP_NODE_COMMIT"; then
   fail_mismatch "op-node" \
     "${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})" \

@@ -7145,11 +7145,11 @@ fi
 # reported 2.3.0-dev + full commit, not a bare 2.3 or the tag 2.3.3.
 if grep -q "PIN_RETH_VERSION='2.3.0-dev'" "$PIN_CHECK" \
   && grep -q "PIN_RETH_COMMIT='9384bc53d8c0c77e59cac83fdaaf3b372c6d2216'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_NODE_VERSION='v1.19.2'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_NODE_COMMIT='da197e45'" "$PIN_CHECK"; then
-  echo "PASS check-el-pins.sh pins reported Reth 2.3.0-dev + commit 9384bc53 and op-node v1.19.2 da197e45"
+  && grep -q "PIN_OP_NODE_VERSION='v1.19.8'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_NODE_COMMIT='9f76a9d2'" "$PIN_CHECK"; then
+  echo "PASS check-el-pins.sh pins reported Reth 2.3.0-dev + commit 9384bc53 and op-node v1.19.8 9f76a9d2"
 else
-  echo "FAIL check-el-pins.sh must pin 2.3.0-dev / 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216 / v1.19.2 / da197e45" >&2
+  echo "FAIL check-el-pins.sh must pin 2.3.0-dev / 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216 / v1.19.8 / 9f76a9d2" >&2
   fail=1
 fi
 if grep -q 'file -L' "$PIN_CHECK"; then
@@ -7162,7 +7162,7 @@ PIN_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-el-pins.XXXXXX")"
 register_tmp "$PIN_FIX"
 cat > "$PIN_FIX/op-node" <<'EOS'
 #!/bin/sh
-echo "op-node version v1.19.2-da197e45-1782514747"
+echo "op-node version v1.19.8-9f76a9d2-1790167011"
 EOS
 cat > "$PIN_FIX/op-reth" <<'EOS'
 #!/bin/sh

@@ -113,7 +113,8 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | yq | 4.53.3 | Homebrew |
 | jq | 1.8.2 | Homebrew |
 | Foundry (`forge`/`cast`/`anvil`) | 1.7.1 | `foundryup` |
-| optimism monorepo | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` (shallow live sequencer tree — **never** `git checkout` this clone for op-reth work) |
+| optimism monorepo (sequencer) | `op-node/v1.19.8` (`9f76a9d2…`, tag object `448a900969`) | `~/src/fortel2/optimism-v1.19.8` — op-node, op-batcher, op-proposer (D-0147) |
+| optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
 | op-reth | tag `op-reth/v2.3.3` → reports `Reth Version: 2.3.0-dev` commit `9384bc53d8c0c77e59cac83fdaaf3b372c6d2216` | **Second clone** `~/src/fortel2/optimism-op-reth` (source of truth for the op-reth binary). Assert with `./scripts/check-el-pins.sh`. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
@@ -185,7 +186,7 @@ python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pi
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
-./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.2 (da197e45) + op-reth reported 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
+./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.8 (9f76a9d2) + op-reth reported 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
 # Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL=reth (since 2026-09-02).
 # Local 901 still defaults geth (no 901 reth path). Task 5 already ran; there is no
 # geth rollback (Task 9 deleted the Render disk).
@@ -249,13 +250,20 @@ brew install go just yq jq
 curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 mkdir -p ~/src/fortel2 && cd ~/src/fortel2
-git clone --depth 1 --branch op-node/v1.19.2 https://github.com/ethereum-optimism/optimism.git
+# Sequencer binaries (D-0147). Glamsterdam L1 headers need op-node v1.19.8.
+git clone --depth 1 --branch op-node/v1.19.8 https://github.com/ethereum-optimism/optimism.git optimism-v1.19.8
+# Prestate tree. cannon, op-challenger, and kona-host stay here (da197e45).
+# Do not git checkout this clone — the absolute prestate is tied to it.
+git clone --depth 1 --branch op-node/v1.19.2 https://github.com/ethereum-optimism/optimism.git optimism
 git clone --depth 1 --branch v1.101702.2 https://github.com/ethereum-optimism/op-geth.git
 
-cd optimism
+cd optimism-v1.19.8
 git submodule update --init --recursive
 just build-superchain-go
 just op-node && just op-batcher && just op-proposer
+
+cd ../optimism
+git submodule update --init --recursive
 
 cd ../op-geth && make geth
 
@@ -265,9 +273,9 @@ curl -L -o /tmp/op-deployer.tgz \
 tar -xzf /tmp/op-deployer.tgz -C /tmp
 mkdir -p ~/src/fortel2/bin
 cp /tmp/op-deployer-0.7.1-darwin-arm64/op-deployer ~/src/fortel2/bin/
-ln -sfn ~/src/fortel2/optimism/op-node/bin/op-node ~/src/fortel2/bin/op-node
-ln -sfn ~/src/fortel2/optimism/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
-ln -sfn ~/src/fortel2/optimism/op-proposer/bin/op-proposer ~/src/fortel2/bin/op-proposer
+ln -sfn ~/src/fortel2/optimism-v1.19.8/op-node/bin/op-node ~/src/fortel2/bin/op-node
+ln -sfn ~/src/fortel2/optimism-v1.19.8/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
+ln -sfn ~/src/fortel2/optimism-v1.19.8/op-proposer/bin/op-proposer ~/src/fortel2/bin/op-proposer
 ln -sfn ~/src/fortel2/op-geth/build/bin/geth ~/src/fortel2/bin/op-geth
 # Rust — kona-host (below) and the op-reth second clone. Nothing Rust-related
 # ships with the other tooling, so a cold-start Mac must install it here (D-0062).
@@ -278,9 +286,10 @@ source "$HOME/.cargo/env"   # or open a new shell
 (cd ~/src/fortel2/optimism/rust && cargo build --release -p kona-host)
 ln -sfn ~/src/fortel2/optimism/rust/target/release/kona-host ~/src/fortel2/bin/kona-host
 
-# op-reth — second optimism clone at the Task 1 pin. Do NOT `git checkout` the
-# shallow live tree (~/src/fortel2/optimism, branch op-node/v1.19.2); that clone
-# is what the running sequencer is built from.
+# op-reth — second optimism clone at the Task 1 pin. Do NOT `git checkout`
+# ~/src/fortel2/optimism (op-node/v1.19.2, da197e45): that tree still backs
+# cannon, op-challenger, and kona-host. The sequencer binaries are the
+# v1.19.8 tree above.
 git clone --depth 1 --branch op-reth/v2.3.3 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth
 cd ~/src/fortel2/optimism-op-reth
 git submodule update --init --recursive
