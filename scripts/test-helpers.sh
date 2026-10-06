@@ -13029,6 +13029,13 @@ unset ALERT_WATCH_NOW
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/test-proposer-overdue-alert.inc.sh"
 
+# alert-watch sequencer-stalled / sequencer-unreachable (D-0148; additive).
+# Drop a leaked process-level ALERT_WATCH_NOW so sq_run's daytime pin is not
+# overridden by the proposer section above.
+unset ALERT_WATCH_NOW
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/test-sequencer-stall-alert.inc.sh"
+
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
 # `trap … EXIT` — bash replaces the handler and would drop every previously
