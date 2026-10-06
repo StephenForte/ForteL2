@@ -7141,19 +7141,20 @@ else
   echo "FAIL scripts/check-el-pins.sh must be tracked and executable" >&2
   fail=1
 fi
-# Trap: tag op-reth/v2.3.3 is not the --version string. Matcher must use
-# reported 2.3.0-dev + full commit, not a bare 2.3 or the tag 2.3.3.
-if grep -q "PIN_RETH_VERSION='2.3.0-dev'" "$PIN_CHECK" \
-  && grep -q "PIN_RETH_COMMIT='9384bc53d8c0c77e59cac83fdaaf3b372c6d2216'" "$PIN_CHECK" \
+# Trap: tag op-reth/v2.5.0 is not the --version string. Matcher must use
+# the measured line "op-reth Version: 2.5.0" plus the full commit, not a
+# bare "2.5", the tag string, or the previous 2.3.0-dev pin.
+if grep -q "PIN_RETH_VERSION='2.5.0'" "$PIN_CHECK" \
+  && grep -q "PIN_RETH_COMMIT='9f76a9d216f2d9aa99c5f45d7aad674acde93c14'" "$PIN_CHECK" \
   && grep -q "PIN_OP_NODE_VERSION='v1.19.8'" "$PIN_CHECK" \
   && grep -q "PIN_OP_NODE_COMMIT='9f76a9d2'" "$PIN_CHECK" \
   && grep -q "PIN_OP_BATCHER_VERSION='v1.17.1'" "$PIN_CHECK" \
   && grep -q "PIN_OP_BATCHER_COMMIT='9f76a9d2'" "$PIN_CHECK" \
   && grep -q "PIN_OP_PROPOSER_VERSION='untagged'" "$PIN_CHECK" \
   && grep -q "PIN_OP_PROPOSER_COMMIT='9f76a9d2'" "$PIN_CHECK"; then
-  echo "PASS check-el-pins.sh pins Reth 2.3.0-dev / 9384bc53, op-node v1.19.8, op-batcher v1.17.1, op-proposer untagged, commit 9f76a9d2"
+  echo "PASS check-el-pins.sh pins op-reth Version 2.5.0 / 9f76a9d2, op-node v1.19.8, op-batcher v1.17.1, op-proposer untagged"
 else
-  echo "FAIL check-el-pins.sh must pin 2.3.0-dev / 9384bc53 / op-node v1.19.8 / op-batcher v1.17.1 / op-proposer untagged / 9f76a9d2" >&2
+  echo "FAIL check-el-pins.sh must pin 2.5.0 / 9f76a9d216f2d9aa99c5f45d7aad674acde93c14 / op-node v1.19.8 / op-batcher v1.17.1 / op-proposer untagged / 9f76a9d2" >&2
   fail=1
 fi
 if grep -q 'file -L' "$PIN_CHECK"; then
@@ -7192,19 +7193,40 @@ echo "op-batcher version v1.17.10-9f76a9d2-1790167011"
 EOS
 cat > "$PIN_FIX/op-reth" <<'EOS'
 #!/bin/sh
+echo "op-reth Version: 2.5.0"
+echo "Commit SHA: 9f76a9d216f2d9aa99c5f45d7aad674acde93c14"
+EOS
+# Previous live pin. Must go red after D-0149.
+cat > "$PIN_FIX/op-reth-wrong" <<'EOS'
+#!/bin/sh
 echo "Reth Version: 2.3.0-dev"
 echo "Commit SHA: 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216"
 EOS
-cat > "$PIN_FIX/op-reth-wrong" <<'EOS'
+# Bare tag string. Must not satisfy the measured version line.
+cat > "$PIN_FIX/op-reth-tag" <<'EOS'
 #!/bin/sh
-echo "Reth Version: 2.4.0"
-echo "Commit SHA: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+echo "op-reth/v2.5.0"
+echo "Commit SHA: 9f76a9d216f2d9aa99c5f45d7aad674acde93c14"
 EOS
-# Would pass a naive "2.3" grep; must fail the exact 2.3.0-dev + commit check.
+# Bare major.minor. Would pass a naive "2.5" grep.
+cat > "$PIN_FIX/op-reth-major" <<'EOS'
+#!/bin/sh
+echo "op-reth Version: 2.5"
+echo "Commit SHA: 9f76a9d216f2d9aa99c5f45d7aad674acde93c14"
+EOS
+# Next patch. Would pass a prefix grep of "2.5.0" without a whole-line match
+# only if the matcher were "2.5"; this one is "2.5.1" so a "2.5.0" substring
+# check already fails. Kept so a loosened "2.5" grep cannot go green.
 cat > "$PIN_FIX/op-reth-prefix" <<'EOS'
 #!/bin/sh
-echo "Reth Version: 2.3.1-dev"
-echo "Commit SHA: 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216"
+echo "op-reth Version: 2.5.1"
+echo "Commit SHA: 9f76a9d216f2d9aa99c5f45d7aad674acde93c14"
+EOS
+# Right version, wrong commit.
+cat > "$PIN_FIX/op-reth-commit" <<'EOS'
+#!/bin/sh
+echo "op-reth Version: 2.5.0"
+echo "Commit SHA: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 EOS
 cat > "$PIN_FIX/op-geth" <<'EOS'
 #!/bin/sh
@@ -7212,8 +7234,9 @@ echo "op-geth version 1.101702.2-stable-e8800cff"
 EOS
 chmod +x "$PIN_FIX/op-node" "$PIN_FIX/op-batcher" "$PIN_FIX/op-proposer" \
   "$PIN_FIX/op-batcher-old" "$PIN_FIX/op-proposer-old" "$PIN_FIX/op-batcher-prefix" \
-  "$PIN_FIX/op-reth" "$PIN_FIX/op-reth-wrong" \
-  "$PIN_FIX/op-reth-prefix" "$PIN_FIX/op-geth"
+  "$PIN_FIX/op-reth" "$PIN_FIX/op-reth-wrong" "$PIN_FIX/op-reth-tag" \
+  "$PIN_FIX/op-reth-major" "$PIN_FIX/op-reth-prefix" "$PIN_FIX/op-reth-commit" \
+  "$PIN_FIX/op-geth"
 pin_stub_env() {
   OP_NODE_BIN="$PIN_FIX/op-node" \
   OP_BATCHER_BIN="$PIN_FIX/op-batcher" \
@@ -7236,11 +7259,11 @@ PIN_BAD_OUT="$(pin_stub_env "$PIN_FIX/op-reth-wrong")" && PIN_BAD_EC=0 || PIN_BA
 if [[ "$PIN_BAD_EC" -ne 0 ]] \
   && echo "$PIN_BAD_OUT" | grep -q 'expected:' \
   && echo "$PIN_BAD_OUT" | grep -q 'got:' \
-  && echo "$PIN_BAD_OUT" | grep -q '2.3.0-dev' \
-  && echo "$PIN_BAD_OUT" | grep -q '2.4.0'; then
-  echo "PASS check-el-pins.sh goes red on a wrong op-reth pin (expected vs got)"
+  && echo "$PIN_BAD_OUT" | grep -q '2.5.0' \
+  && echo "$PIN_BAD_OUT" | grep -q '2.3.0-dev'; then
+  echo "PASS check-el-pins.sh goes red on the previous op-reth pin (expected vs got)"
 else
-  echo "FAIL check-el-pins.sh must exit nonzero and name expected vs got on a wrong pin (ec=$PIN_BAD_EC)" >&2
+  echo "FAIL check-el-pins.sh must exit nonzero and name expected vs got on the v2.3.3 pin (ec=$PIN_BAD_EC)" >&2
   echo "$PIN_BAD_OUT" >&2
   fail=1
 fi
@@ -7291,11 +7314,35 @@ else
   fail=1
 fi
 PIN_PFX_OUT="$(pin_stub_env "$PIN_FIX/op-reth-prefix")" && PIN_PFX_EC=0 || PIN_PFX_EC=$?
-if [[ "$PIN_PFX_EC" -ne 0 ]] && echo "$PIN_PFX_OUT" | grep -q '2.3.1-dev'; then
-  echo "PASS check-el-pins.sh refuses a 2.3.x prefix match (not a bare 2.3 grep)"
+if [[ "$PIN_PFX_EC" -ne 0 ]] && echo "$PIN_PFX_OUT" | grep -q '2.5.1'; then
+  echo "PASS check-el-pins.sh refuses a 2.5.x prefix match (not a bare 2.5 grep)"
 else
-  echo "FAIL check-el-pins.sh must not accept 2.3.1-dev as the 2.3.0-dev pin (ec=$PIN_PFX_EC)" >&2
+  echo "FAIL check-el-pins.sh must not accept 2.5.1 as the 2.5.0 pin (ec=$PIN_PFX_EC)" >&2
   echo "$PIN_PFX_OUT" >&2
+  fail=1
+fi
+PIN_TAG_OUT="$(pin_stub_env "$PIN_FIX/op-reth-tag")" && PIN_TAG_EC=0 || PIN_TAG_EC=$?
+if [[ "$PIN_TAG_EC" -ne 0 ]] && echo "$PIN_TAG_OUT" | grep -q 'op-reth/v2.5.0'; then
+  echo "PASS check-el-pins.sh refuses a bare op-reth/v2.5.0 tag string"
+else
+  echo "FAIL check-el-pins.sh must not accept the bare tag string as the pin (ec=$PIN_TAG_EC)" >&2
+  echo "$PIN_TAG_OUT" >&2
+  fail=1
+fi
+PIN_MAJ_OUT="$(pin_stub_env "$PIN_FIX/op-reth-major")" && PIN_MAJ_EC=0 || PIN_MAJ_EC=$?
+if [[ "$PIN_MAJ_EC" -ne 0 ]] && echo "$PIN_MAJ_OUT" | grep -q 'op-reth Version: 2.5 '; then
+  echo "PASS check-el-pins.sh refuses a bare 2.5 major.minor"
+else
+  echo "FAIL check-el-pins.sh must not accept bare 2.5 as the 2.5.0 pin (ec=$PIN_MAJ_EC)" >&2
+  echo "$PIN_MAJ_OUT" >&2
+  fail=1
+fi
+PIN_CMT_OUT="$(pin_stub_env "$PIN_FIX/op-reth-commit")" && PIN_CMT_EC=0 || PIN_CMT_EC=$?
+if [[ "$PIN_CMT_EC" -ne 0 ]] && echo "$PIN_CMT_OUT" | grep -q 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'; then
+  echo "PASS check-el-pins.sh refuses a mismatched op-reth commit"
+else
+  echo "FAIL check-el-pins.sh must not accept a mismatched commit (ec=$PIN_CMT_EC)" >&2
+  echo "$PIN_CMT_OUT" >&2
   fail=1
 fi
 PIN_GETH_OUT="$(
@@ -9276,6 +9323,51 @@ else
   echo "FAIL sidecar start must initialize proofs-history before --proofs-history" >&2
   fail=1
 fi
+# Candidate binary override. Unset still require_bin's PATH op-reth. A set
+# path is what proofs init and the node exec. A missing file must fail closed
+# before start_bg (the check can go red).
+if grep -q 'FORTEL2_OP_RETH_BIN' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && grep -q '"\$OP_RETH_CMD" proofs init' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && grep -q 'start_bg op-reth-verifier "\$OP_RETH_CMD" node' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && grep -q 'require_bin op-reth' "$SCRIPT_DIR/start-op-reth-verifier.sh"; then
+  echo "PASS start-op-reth-verifier.sh selects FORTEL2_OP_RETH_BIN or PATH op-reth"
+else
+  echo "FAIL sidecar must exec FORTEL2_OP_RETH_BIN for proofs init and node, else PATH op-reth" >&2
+  fail=1
+fi
+RETH_OVR_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-reth-bin-override.XXXXXX")"
+register_tmp "$RETH_OVR_FIX"
+RETH_OVR_OUT="$(
+  DATA_DIR="$RETH_OVR_FIX" FORTEL2_EL=reth FORTEL2_RETH_PROFILE=verifier \
+    FORTEL2_RETH_DATADIR="$RETH_OVR_FIX/l2/spike-op-reth" \
+    FORTEL2_OP_RETH_BIN="$RETH_OVR_FIX/missing-op-reth" \
+    "$RETH_START" 2>&1
+)" && RETH_OVR_EC=0 || RETH_OVR_EC=$?
+if [[ "$RETH_OVR_EC" -ne 0 ]] \
+  && echo "$RETH_OVR_OUT" | grep -q 'FORTEL2_OP_RETH_BIN is not executable' \
+  && ! echo "$RETH_OVR_OUT" | grep -q 'Starting op-reth-verifier'; then
+  echo "PASS start-op-reth-verifier.sh refuses a missing FORTEL2_OP_RETH_BIN before start"
+else
+  echo "FAIL a missing FORTEL2_OP_RETH_BIN must fail closed before start_bg (ec=$RETH_OVR_EC)" >&2
+  echo "$RETH_OVR_OUT" >&2
+  fail=1
+fi
+# Verifier profile leaves SAFEDB_ARGS empty. bash 3.2 + set -u treats bare
+# "${arr[@]}" as unbound and aborts before op-node starts (G2, 2026-10-06).
+# Same idiom as the reth batcher throttle flags.
+if grep -qE '[[:space:]]"\$\{SAFEDB_ARGS\[@\]\}"[[:space:]]*$' \
+     "$SCRIPT_DIR/start-op-reth-verifier.sh"; then
+  echo "FAIL start-op-reth-verifier.sh must not expand empty \"\${SAFEDB_ARGS[@]}\" under set -u" >&2
+  fail=1
+elif grep -q 'SAFEDB_ARGS\[@\]+' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && bash -c 'set -euo pipefail; SAFEDB_ARGS=(); set -- ${SAFEDB_ARGS[@]+"${SAFEDB_ARGS[@]}"}; [[ $# -eq 0 ]]' \
+  && bash -c 'set -euo pipefail; SAFEDB_ARGS=(--safedb.path=/tmp/x); set -- ${SAFEDB_ARGS[@]+"${SAFEDB_ARGS[@]}"}; [[ $# -eq 1 && $1 == --safedb.path=/tmp/x ]]'; then
+  echo "PASS start-op-reth-verifier.sh SafeDB args survive empty expansion on bash $BASH_VERSION"
+else
+  echo "FAIL sidecar SafeDB expansion must be nounset-safe when the array is empty" >&2
+  fail=1
+fi
+rm -rf "$RETH_OVR_FIX"
 if grep -q 'L1_RPC_URL' "$VRP"; then
   echo "FAIL verify-reth-parity.sh must not mention L1_RPC_URL (no provider URL in parity)" >&2
   fail=1

@@ -140,7 +140,20 @@ fi
 # inherits the same check with no edit there.
 refuse_if_live_reth_datadir "$DATADIR" "start"
 
-require_bin op-reth
+# Unset: PATH op-reth (bin/op-reth, the live pin). Set: that executable only,
+# so a candidate build can be hash-matched without repointing the live symlink.
+# lib.sh prepends BIN_DIR, so a PATH tweak cannot select the candidate.
+if [[ -n "${FORTEL2_OP_RETH_BIN:-}" ]]; then
+  if [[ ! -x "${FORTEL2_OP_RETH_BIN}" ]]; then
+    echo "ERROR: FORTEL2_OP_RETH_BIN is not executable: ${FORTEL2_OP_RETH_BIN}" >&2
+    exit 1
+  fi
+  OP_RETH_CMD="${FORTEL2_OP_RETH_BIN}"
+else
+  require_bin op-reth
+  OP_RETH_CMD="op-reth"
+fi
+echo "op-reth binary: ${OP_RETH_CMD}"
 require_bin op-node
 require_bin cast
 require_bin jq
@@ -236,7 +249,7 @@ done < <(reth_profile_flags)
 # starts at genesis so history is filled forward during Task 3 derive.
 if [[ "$FORTEL2_RETH_PROFILE" == "sequencer_faultproof" ]]; then
   echo "Initializing proofs-history store at $DATADIR/historical-proofs (skip-backfill; idempotent)"
-  op-reth proofs init --datadir="$DATADIR" --chain="$GENESIS" \
+  "$OP_RETH_CMD" proofs init --datadir="$DATADIR" --chain="$GENESIS" \
     --proofs-history.skip-backfill
 fi
 
@@ -257,7 +270,7 @@ fi
 "$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
 
 echo "Starting op-reth-verifier profile=${FORTEL2_RETH_PROFILE} http :$HTTP_PORT auth :$AUTH_PORT datadir=$DATADIR"
-start_bg op-reth-verifier op-reth node \
+start_bg op-reth-verifier "$OP_RETH_CMD" node \
   --chain="$GENESIS" \
   --datadir="$DATADIR" \
   --http \
@@ -309,7 +322,7 @@ start_bg op-reth-verifier-node op-node \
   --rpc.port="$NODE_PORT" \
   --rpc.enable-admin \
   --log.level=info \
-  "${SAFEDB_ARGS[@]}"
+  ${SAFEDB_ARGS[@]+"${SAFEDB_ARGS[@]}"}
 
 wait_for_opnode_rpc "$NODE_HTTP" "op-reth-verifier-node" 90
 

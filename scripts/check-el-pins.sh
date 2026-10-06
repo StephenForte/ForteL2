@@ -9,25 +9,27 @@
 #   op-proposer untagged-9f76a9d2-…  (no op-proposer tag on that commit)
 # The annotated tag object is 448a900969; --version prints the commit, so
 # the pin is 9f76a9d2. A green op-node with a v1.19.2 batcher or proposer
-# is a failure. op-reth is unchanged from the P:0 floor: tag op-reth/v2.3.3
-# reports "Reth Version: 2.3.0-dev" and commit
-# 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216. Do not grep the tag string
-# "2.3.3" in --version output (it is absent). Do not grep a bare "2.3"
-# (that would accept unpinned later 2.3.x builds).
+# is a failure. op-reth (D-0149): tag op-reth/v2.5.0 reports
+# "op-reth Version: 2.5.0" and commit
+# 9f76a9d216f2d9aa99c5f45d7aad674acde93c14. The tag string is not the
+# --version line (it has never matched). Do not grep a bare "2.5"
+# (that would accept unpinned later 2.5.x builds) or the tag
+# "op-reth/v2.5.0" by itself. Match the measured version line and the
+# full commit, each on its own line.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
-# Pin tokens as measured on the Mini. Tag op-reth/v2.3.3 ≠ reported version.
+# Pin tokens as measured on the Mini. Tag op-reth/v2.5.0 ≠ reported version.
 PIN_OP_NODE_VERSION='v1.19.8'
 PIN_OP_NODE_COMMIT='9f76a9d2'
 PIN_OP_BATCHER_VERSION='v1.17.1'
 PIN_OP_BATCHER_COMMIT='9f76a9d2'
 PIN_OP_PROPOSER_VERSION='untagged'
 PIN_OP_PROPOSER_COMMIT='9f76a9d2'
-PIN_RETH_VERSION='2.3.0-dev'
-PIN_RETH_COMMIT='9384bc53d8c0c77e59cac83fdaaf3b372c6d2216'
+PIN_RETH_VERSION='2.5.0'
+PIN_RETH_COMMIT='9f76a9d216f2d9aa99c5f45d7aad674acde93c14'
 
 FORTEL2_EL="${FORTEL2_EL:-geth}"
 OP_NODE_BIN="${OP_NODE_BIN:-$BIN_DIR/op-node}"
@@ -116,7 +118,7 @@ assert_macho_arm64_if_macho "op-reth" "$OP_RETH_BIN"
 
 if [[ "$FORTEL2_EL" == "reth" ]] && looks_like_geth "$RETH_VER" "$OP_RETH_BIN"; then
   fail_mismatch "op-reth (FORTEL2_EL=reth)" \
-    "op-reth reporting Reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}" \
+    "op-reth reporting op-reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}" \
     "op-geth binary ($OP_RETH_BIN): $(oneline "$RETH_VER")"
 fi
 
@@ -144,15 +146,18 @@ if ! echo "$PROPOSER_VER" | grep -qE "(^|[^A-Za-z])untagged([^A-Za-z]|$)" \
     "$(oneline "$PROPOSER_VER")"
 fi
 
-if ! echo "$RETH_VER" | grep -q "Reth Version: ${PIN_RETH_VERSION}" \
-  || ! echo "$RETH_VER" | grep -q "$PIN_RETH_COMMIT"; then
+# Whole line, not a substring: "2.5.0" must not accept "2.5.0-dev" or
+# "2.5.00", and "op-reth Version:" must not accept the old "Reth Version:"
+# line or the bare tag "op-reth/v2.5.0".
+if ! echo "$RETH_VER" | grep -qx "op-reth Version: ${PIN_RETH_VERSION}" \
+  || ! echo "$RETH_VER" | grep -qx "Commit SHA: ${PIN_RETH_COMMIT}"; then
   fail_mismatch "op-reth" \
-    "Reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}" \
+    "op-reth Version: ${PIN_RETH_VERSION} / Commit SHA: ${PIN_RETH_COMMIT}" \
     "$(oneline "$RETH_VER")"
 fi
 
 echo "ok op-node ${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})"
 echo "ok op-batcher ${PIN_OP_BATCHER_VERSION} (${PIN_OP_BATCHER_COMMIT})"
 echo "ok op-proposer ${PIN_OP_PROPOSER_VERSION} (${PIN_OP_PROPOSER_COMMIT})"
-echo "ok op-reth tag op-reth/v2.3.3 reports Reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}"
+echo "ok op-reth tag op-reth/v2.5.0 reports op-reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}"
 echo "ok FORTEL2_EL=${FORTEL2_EL}"
