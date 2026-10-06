@@ -115,6 +115,28 @@
 #                         consecutive such reads, following the
 #                         replica_unreachable_streak precedent — a later
 #                         successful read resets that streak.
+#   sequencer-stalled     Sepolia (L2_CHAIN_ID=852) only: op-node
+#                         optimism_syncStatus on L2_NODE_RPC_URL (loopback;
+#                         a non-loopback URL is not opened) shows unsafe_l2
+#                         timestamp age > SEQUENCER_STALL_SECS (default 600,
+#                         exclusive, same operator as REPLICA_HEAD_STALE_SECS).
+#                         Evaluated only outside the dev-sleep window and
+#                         after the one-cycle post-wake grace (exactly 3600 s
+#                         after the configured wake is eligible again — the
+#                         same boundary replica-losing-ground uses). The body
+#                         names the unsafe number and age, plus current_l1,
+#                         head_l1, and their gap. Not a metered L1 read.
+#                         Phase 1 / Anvil (chain 901) never evaluates this.
+#   sequencer-unreachable that same probe failed (connection, timeout,
+#                         garbage JSON, missing/null unsafe timestamp) on two
+#                         consecutive runs while the op-node pid is up. One
+#                         failure is quiet; a later success resets
+#                         sequencer_unreachable_streak. This is "cannot
+#                         verify", not a claim the head is fresh and not a
+#                         claim it is stalled. A missing op-node pid does
+#                         not advance the streak and does not alert —
+#                         stack-missing / stack-down already own that. A
+#                         probe exception does not skip other conditions.
 #
 # Verdicts OK / WARN / INSUFFICIENT never alert (WARN is inside funding-watch's
 # documented tolerance; alerting on it is the cry-wolf class #146 removed).
@@ -144,6 +166,10 @@
 # dev-sleep window or is within one watcher cycle after the wake: Render
 # stays up, the Mac SOURCE does not, and head age grows 1 s/s by arithmetic
 # (D-0141 / D-0144). The window is read from the installed launchd jobs.
+# sequencer-stalled / sequencer-unreachable do not take that last_check
+# grace either. sequencer-stalled is skipped inside the dev-sleep window
+# and during the one-cycle post-wake grace. sequencer-unreachable is skipped
+# when the op-node pid is absent (D-0148).
 #
 # Usage: alert-watch.sh [--test]
 #   --test     synthetic alert, tagged TEST, both channels (post-install shakeout)
@@ -155,6 +181,9 @@
 #   ALERT_REALERT_HOURS   default 6
 #   REPLICA_HEAD_STALE_SECS    default 10800 (comment in .env.sepolia.example)
 #   REPLICA_TREND_NOISE_SECS   default 600
+#   SEQUENCER_STALL_SECS       default 600 (comment in .env.sepolia.example).
+#                              Sepolia unsafe-head age for sequencer-stalled.
+#                              Exclusive. Chain 901 ignores it.
 #   SEPOLIA_PROPOSER_INTERVAL  proposer cadence for proposer-overdue, default 8h
 #                              (D-0133/D-0142). Never the legacy PROPOSER_INTERVAL
 #                              Phase-1 Anvil knob — that key is ignored here too.
@@ -237,6 +266,31 @@
 #     and never reads deployments.json. Production launchd sets none of
 #     those keys and uses urllib against L1_RPC_URL plus the on-disk
 #     deployments file (D-0142).
+#   ALERT_WATCH_SEQUENCER_UNSAFE_AGE   seconds; unsafe timestamp = now - age.
+#                                      Numeric age is a successful probe.
+#                                      "none" / "null" is a missing timestamp
+#                                      (cannot verify — never age 0).
+#   ALERT_WATCH_SEQUENCER_UNSAFE_NUMBER  canned unsafe_l2 number. Defaults
+#                                      to 0 when UNSAFE_AGE is numeric.
+#   ALERT_WATCH_SEQUENCER_CURRENT_L1   canned current_l1 number
+#   ALERT_WATCH_SEQUENCER_HEAD_L1      canned head_l1 number
+#   ALERT_WATCH_SEQUENCER_SYNC_JSON    canned optimism_syncStatus body (raw
+#                                      JSON, envelope or result). Parsed by
+#                                      the same function as a live reply.
+#                                      Malformed JSON or a missing/null
+#                                      unsafe timestamp is cannot-verify,
+#                                      never a fresh head.
+#   ALERT_WATCH_SEQUENCER_UNREACHABLE=1  inject a failed probe (no socket)
+#   ALERT_WATCH_SEQUENCER_THROW=1      raise inside the probe; other
+#                                      conditions must still evaluate
+#   ALERT_WATCH_SEQUENCER_TIMEOUT      test-only total deadline seconds.
+#                                      Does not by itself skip the socket.
+#     When UNSAFE_AGE / UNSAFE_NUMBER / CURRENT_L1 / HEAD_L1 / SYNC_JSON /
+#     UNREACHABLE / THROW is set, or ALERT_WATCH_CURL is set (Resend shim),
+#     the probe never opens a socket. CURL alone with none of those keys
+#     is a fresh unsafe head (age 0) so other fixtures stay quiet.
+#     Production launchd sets none of those keys and uses urllib against
+#     loopback L2_NODE_RPC_URL only (D-0148).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1751,6 +1805,297 @@ try:
         proposer_ok(proposer_sample)
 except Exception as exc:
     proposer_fail("probe error: %s" % type(exc).__name__)
+
+# --- sequencer stall (D-0148) — loopback op-node optimism_syncStatus only ---
+# Sepolia (L2_CHAIN_ID=852) only. Chain 901 never reaches this block.
+# Not a metered read: urllib against L2_NODE_RPC_URL, and only when that
+# URL is loopback. A missing unsafe timestamp is a failed probe, never an
+# age of 0. The op-node pid being absent is stack-missing / stack-down,
+# not sequencer-unreachable.
+SEQUENCER_STALL_SECS = _env_int("SEQUENCER_STALL_SECS", 600)
+SEQUENCER_RPC_TIMEOUT = _env_int("ALERT_WATCH_SEQUENCER_TIMEOUT", 15)
+SEQUENCER_RPC_URL = (os.environ.get("L2_NODE_RPC_URL") or "").strip()
+# One watcher cycle after the configured wake. Exclusive at 3600 s, the
+# same boundary as replica_losing_sleep_suppressed.
+SEQUENCER_WAKE_GRACE_SECS = 3600.0
+
+def _is_loopback_rpc(url):
+    """Match assert_loopback_url: http(s)://127.0.0.1 or localhost, with a port."""
+    try:
+        parsed = urllib.parse.urlsplit(url or "")
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if host not in ("127.0.0.1", "localhost"):
+        return False
+    if parsed.port is None:
+        return False
+    return True
+
+def _block_field_number(block):
+    if not isinstance(block, dict) or block.get("number") is None:
+        return None
+    return _rpc_int(block.get("number"))
+
+def parse_sync_status_doc(doc):
+    """Sample dict, or None when the payload cannot prove a fresh head.
+
+    A missing unsafe_l2, a null timestamp, or a non-numeric timestamp is
+    None — never an age of 0. current_l1 / head_l1 may be absent; that
+    does not invent a timestamp.
+    """
+    if not isinstance(doc, dict):
+        return None
+    if "jsonrpc" in doc or "error" in doc or "result" in doc:
+        if doc.get("error"):
+            return None
+        if "result" not in doc:
+            return None
+        doc = doc.get("result")
+        if not isinstance(doc, dict):
+            return None
+    unsafe = doc.get("unsafe_l2")
+    if not isinstance(unsafe, dict):
+        unsafe = doc.get("unsafeL2")
+    if not isinstance(unsafe, dict):
+        return None
+    if unsafe.get("timestamp") is None:
+        return None
+    ts = _rpc_int(unsafe.get("timestamp"))
+    if ts is None:
+        return None
+    if unsafe.get("number") is None:
+        return None
+    number = _rpc_int(unsafe.get("number"))
+    if number is None:
+        return None
+    current_blk = doc.get("current_l1")
+    if not isinstance(current_blk, dict):
+        current_blk = doc.get("currentL1")
+    head_blk = doc.get("head_l1")
+    if not isinstance(head_blk, dict):
+        head_blk = doc.get("headL1")
+    return {
+        "unsafe_number": number,
+        "unsafe_ts": float(ts),
+        "current_l1": _block_field_number(current_blk),
+        "head_l1": _block_field_number(head_blk),
+    }
+
+def _sequencer_env_set(name):
+    return os.environ.get(name) not in (None, "")
+
+def _sequencer_short_circuit():
+    """True when this run must not open a socket."""
+    if (os.environ.get("ALERT_WATCH_SEQUENCER_THROW") or "") == "1":
+        return True
+    if (os.environ.get("ALERT_WATCH_SEQUENCER_UNREACHABLE") or "") == "1":
+        return True
+    if _sequencer_env_set("ALERT_WATCH_SEQUENCER_UNSAFE_AGE"):
+        return True
+    if _sequencer_env_set("ALERT_WATCH_SEQUENCER_UNSAFE_NUMBER"):
+        return True
+    if _sequencer_env_set("ALERT_WATCH_SEQUENCER_CURRENT_L1"):
+        return True
+    if _sequencer_env_set("ALERT_WATCH_SEQUENCER_HEAD_L1"):
+        return True
+    if _sequencer_env_set("ALERT_WATCH_SEQUENCER_SYNC_JSON"):
+        return True
+    if os.environ.get("ALERT_WATCH_CURL"):
+        return True
+    return False
+
+def sequencer_stall_suppressed(now_ts):
+    """Quiet inside the dev-sleep window and for one cycle after the wake."""
+    try:
+        if in_dev_sleep_window(now_ts):
+            return True
+    except Exception:
+        return False
+    try:
+        since = seconds_since_dev_sleep_end(now_ts)
+    except Exception:
+        return False
+    if 0 <= since < SEQUENCER_WAKE_GRACE_SECS:
+        return True
+    return False
+
+def op_node_pid_up():
+    if not pid_dir:
+        return False
+    return pid_running(pid_dir, "op-node")
+
+def probe_sequencer():
+    """Return a sync sample, or None when the head cannot be verified.
+
+    THROW raises. None is never rewritten into a fresh (age 0) head.
+    """
+    if (os.environ.get("ALERT_WATCH_SEQUENCER_THROW") or "") == "1":
+        raise RuntimeError("ALERT_WATCH_SEQUENCER_THROW")
+    if (os.environ.get("ALERT_WATCH_SEQUENCER_UNREACHABLE") or "") == "1":
+        return None
+    sync_raw = os.environ.get("ALERT_WATCH_SEQUENCER_SYNC_JSON")
+    if sync_raw not in (None, ""):
+        try:
+            parsed = json.loads(sync_raw)
+        except (ValueError, TypeError):
+            return None
+        return parse_sync_status_doc(parsed)
+    age_raw = os.environ.get("ALERT_WATCH_SEQUENCER_UNSAFE_AGE")
+    if age_raw not in (None, ""):
+        token = str(age_raw).strip()
+        if token.lower() in ("none", "null"):
+            return None
+        try:
+            age = float(token)
+        except (TypeError, ValueError):
+            return None
+        number = _rpc_int(os.environ.get("ALERT_WATCH_SEQUENCER_UNSAFE_NUMBER"))
+        if number is None:
+            number = 0
+        return {
+            "unsafe_number": number,
+            "unsafe_ts": now - age,
+            "current_l1": _rpc_int(os.environ.get("ALERT_WATCH_SEQUENCER_CURRENT_L1")),
+            "head_l1": _rpc_int(os.environ.get("ALERT_WATCH_SEQUENCER_HEAD_L1")),
+        }
+    # A canned L1 number without an unsafe age is not a fresh head.
+    if (
+        _sequencer_env_set("ALERT_WATCH_SEQUENCER_CURRENT_L1")
+        or _sequencer_env_set("ALERT_WATCH_SEQUENCER_HEAD_L1")
+        or _sequencer_env_set("ALERT_WATCH_SEQUENCER_UNSAFE_NUMBER")
+    ):
+        return None
+    if os.environ.get("ALERT_WATCH_CURL"):
+        # Evaluation fixtures that are not about the sequencer. Age 0 is
+        # explicit here, never the result of a missing live field.
+        return {
+            "unsafe_number": 0,
+            "unsafe_ts": float(now),
+            "current_l1": None,
+            "head_l1": None,
+        }
+
+    if not _is_loopback_rpc(SEQUENCER_RPC_URL):
+        return None
+    payload = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "optimism_syncStatus",
+        "params": [],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        SEQUENCER_RPC_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    def _sequencer_deadline(signum, frame):
+        raise TimeoutError("sequencer probe total deadline")
+
+    prev_handler = signal.signal(signal.SIGALRM, _sequencer_deadline)
+    signal.setitimer(signal.ITIMER_REAL, SEQUENCER_RPC_TIMEOUT)
+    try:
+        with urllib.request.urlopen(req, timeout=SEQUENCER_RPC_TIMEOUT) as resp:
+            raw = resp.read(65536)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev_handler)
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+    return parse_sync_status_doc(doc)
+
+def sequencer_fail(why):
+    streak = int(state.get("sequencer_unreachable_streak") or 0) + 1
+    state["sequencer_unreachable_streak"] = streak
+    if streak >= 2:
+        shown = SEQUENCER_RPC_URL if _is_loopback_rpc(SEQUENCER_RPC_URL) else "<non-loopback>"
+        add("sequencer-unreachable",
+            "ForteL2 sequencer unreachable",
+            "sequencer liveness could not be verified on %d consecutive "
+            "watcher runs (%s). op-node optimism_syncStatus at %s. "
+            "This is not a claim the unsafe head is stalled and not a "
+            "claim it is fresh. op-node pid is up; a missing pid is "
+            "stack-missing, not this condition."
+            % (streak, why, _redact_l1_url(shown) if shown != "<non-loopback>" else shown))
+
+def _fmt_num(n):
+    if n is None:
+        return "unknown"
+    return str(int(n))
+
+def sequencer_ok(sample):
+    ts = sample.get("unsafe_ts") if isinstance(sample, dict) else None
+    if ts is None:
+        sequencer_fail("unsafe timestamp missing")
+        return
+    try:
+        age = now - float(ts)
+    except (TypeError, ValueError):
+        sequencer_fail("unsafe timestamp unparseable")
+        return
+    state["sequencer_unreachable_streak"] = 0
+    if sequencer_stall_suppressed(now):
+        return
+    # Exclusive: exactly SEQUENCER_STALL_SECS is quiet, one second past fires.
+    if age > SEQUENCER_STALL_SECS:
+        number = sample.get("unsafe_number")
+        current_l1 = sample.get("current_l1")
+        head_l1 = sample.get("head_l1")
+        if current_l1 is None or head_l1 is None:
+            gap = "unknown"
+        else:
+            gap = str(int(head_l1) - int(current_l1))
+        shown = SEQUENCER_RPC_URL if _is_loopback_rpc(SEQUENCER_RPC_URL) else "<non-loopback>"
+        endpoint = _redact_l1_url(shown) if shown != "<non-loopback>" else shown
+        add("sequencer-stalled",
+            "ForteL2 sequencer stalled",
+            "sequencer unsafe head %s is %.0f s old (threshold %d s, "
+            "exclusive). current_l1 %s head_l1 %s gap %s. op-node %s. "
+            "evaluated outside the %s-%s PT dev-sleep window and after "
+            "one watcher cycle of post-wake grace."
+            % (
+                _fmt_num(number), age, SEQUENCER_STALL_SECS,
+                _fmt_num(current_l1), _fmt_num(head_l1), gap, endpoint,
+                dev_sleep_window()["startLocal"],
+                dev_sleep_window()["endLocal"],
+            ))
+
+if l2_chain == "852":
+    try:
+        if not _sequencer_short_circuit() and not op_node_pid_up():
+            # Process is down. Do not dial a dead port and do not count
+            # this run toward sequencer-unreachable.
+            state["sequencer_unreachable_streak"] = 0
+        else:
+            sequencer_sample = probe_sequencer()
+            if sequencer_sample is None:
+                if op_node_pid_up():
+                    sequencer_fail(
+                        "timeout, HTTP failure, garbage JSON, missing unsafe "
+                        "timestamp, or non-loopback URL"
+                    )
+                else:
+                    state["sequencer_unreachable_streak"] = 0
+            else:
+                sequencer_ok(sequencer_sample)
+    except Exception as exc:
+        if op_node_pid_up():
+            sequencer_fail("probe error: %s" % type(exc).__name__)
+        else:
+            # Still swallow the exception so funding and the other
+            # conditions already recorded are dispatched.
+            state["sequencer_unreachable_streak"] = 0
 
 # --- cooldown filter (per condition × channel) ---
 cd = state.get("cooldown")
