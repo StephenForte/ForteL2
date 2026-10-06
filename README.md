@@ -186,7 +186,7 @@ python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pi
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
-./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.8 (9f76a9d2) + op-reth reported 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
+./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.8, op-batcher v1.17.1, op-proposer untagged (all 9f76a9d2) + op-reth 2.3.0-dev / 9384bc53 (CI has no Mini binaries)
 # Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL=reth (since 2026-09-02).
 # Local 901 still defaults geth (no 901 reth path). Task 5 already ran; there is no
 # geth rollback (Task 9 deleted the Render disk).

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Assert the documented op-node / op-reth pin against local binaries.
+# Assert the documented sequencer / op-reth pin against local binaries.
 # Mini-only for a green live run (darwin/arm64 builds). CI covers the red
 # path via stubs in scripts/test-helpers.sh — GitHub runners have no pin.
 #
-# Live sequencer pin (D-0147): op-node v1.19.8 (9f76a9d2), the commit
-# op-node/v1.19.8 peels to. The annotated tag object is 448a900969; --version
-# prints the commit, so the pin is 9f76a9d2. op-reth is unchanged from the
-# P:0 floor: tag op-reth/v2.3.3 reports "Reth Version: 2.3.0-dev" and commit
+# Live sequencer pin (D-0147), all three built from tag op-node/v1.19.8:
+#   op-node     v1.19.8-9f76a9d2-…
+#   op-batcher  v1.17.1-9f76a9d2-…   (component version, same monorepo commit)
+#   op-proposer untagged-9f76a9d2-…  (no op-proposer tag on that commit)
+# The annotated tag object is 448a900969; --version prints the commit, so
+# the pin is 9f76a9d2. A green op-node with a v1.19.2 batcher or proposer
+# is a failure. op-reth is unchanged from the P:0 floor: tag op-reth/v2.3.3
+# reports "Reth Version: 2.3.0-dev" and commit
 # 9384bc53d8c0c77e59cac83fdaaf3b372c6d2216. Do not grep the tag string
 # "2.3.3" in --version output (it is absent). Do not grep a bare "2.3"
 # (that would accept unpinned later 2.3.x builds).
@@ -18,11 +22,17 @@ source "$SCRIPT_DIR/lib.sh"
 # Pin tokens as measured on the Mini. Tag op-reth/v2.3.3 ≠ reported version.
 PIN_OP_NODE_VERSION='v1.19.8'
 PIN_OP_NODE_COMMIT='9f76a9d2'
+PIN_OP_BATCHER_VERSION='v1.17.1'
+PIN_OP_BATCHER_COMMIT='9f76a9d2'
+PIN_OP_PROPOSER_VERSION='untagged'
+PIN_OP_PROPOSER_COMMIT='9f76a9d2'
 PIN_RETH_VERSION='2.3.0-dev'
 PIN_RETH_COMMIT='9384bc53d8c0c77e59cac83fdaaf3b372c6d2216'
 
 FORTEL2_EL="${FORTEL2_EL:-geth}"
 OP_NODE_BIN="${OP_NODE_BIN:-$BIN_DIR/op-node}"
+OP_BATCHER_BIN="${OP_BATCHER_BIN:-$BIN_DIR/op-batcher}"
+OP_PROPOSER_BIN="${OP_PROPOSER_BIN:-$BIN_DIR/op-proposer}"
 OP_RETH_BIN="${OP_RETH_BIN:-$BIN_DIR/op-reth}"
 
 fail_mismatch() {
@@ -90,12 +100,18 @@ case "$FORTEL2_EL" in
 esac
 
 require_executable "op-node" "$OP_NODE_BIN"
+require_executable "op-batcher" "$OP_BATCHER_BIN"
+require_executable "op-proposer" "$OP_PROPOSER_BIN"
 require_executable "op-reth" "$OP_RETH_BIN"
 
 NODE_VER="$(version_of "$OP_NODE_BIN")"
+BATCHER_VER="$(version_of "$OP_BATCHER_BIN")"
+PROPOSER_VER="$(version_of "$OP_PROPOSER_BIN")"
 RETH_VER="$(version_of "$OP_RETH_BIN")"
 
 assert_macho_arm64_if_macho "op-node" "$OP_NODE_BIN"
+assert_macho_arm64_if_macho "op-batcher" "$OP_BATCHER_BIN"
+assert_macho_arm64_if_macho "op-proposer" "$OP_PROPOSER_BIN"
 assert_macho_arm64_if_macho "op-reth" "$OP_RETH_BIN"
 
 if [[ "$FORTEL2_EL" == "reth" ]] && looks_like_geth "$RETH_VER" "$OP_RETH_BIN"; then
@@ -104,12 +120,28 @@ if [[ "$FORTEL2_EL" == "reth" ]] && looks_like_geth "$RETH_VER" "$OP_RETH_BIN"; 
     "op-geth binary ($OP_RETH_BIN): $(oneline "$RETH_VER")"
 fi
 
-# v1.19.8 not v1.19.80: next char must be non-digit (or end).
+# v1.19.8 not v1.19.80, v1.17.1 not v1.17.10: next char must be non-digit (or end).
+# Proposer --version says "untagged" because the build tag is op-node/v1.19.8,
+# not an op-proposer tag. The commit is what distinguishes it from da197e45.
 if ! echo "$NODE_VER" | grep -qE "v1\\.19\\.8([^0-9]|\$)" \
   || ! echo "$NODE_VER" | grep -q "$PIN_OP_NODE_COMMIT"; then
   fail_mismatch "op-node" \
     "${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})" \
     "$(oneline "$NODE_VER")"
+fi
+
+if ! echo "$BATCHER_VER" | grep -qE "v1\\.17\\.1([^0-9]|\$)" \
+  || ! echo "$BATCHER_VER" | grep -q "$PIN_OP_BATCHER_COMMIT"; then
+  fail_mismatch "op-batcher" \
+    "${PIN_OP_BATCHER_VERSION} (${PIN_OP_BATCHER_COMMIT})" \
+    "$(oneline "$BATCHER_VER")"
+fi
+
+if ! echo "$PROPOSER_VER" | grep -qE "(^|[^A-Za-z])untagged([^A-Za-z]|$)" \
+  || ! echo "$PROPOSER_VER" | grep -q "$PIN_OP_PROPOSER_COMMIT"; then
+  fail_mismatch "op-proposer" \
+    "${PIN_OP_PROPOSER_VERSION} (${PIN_OP_PROPOSER_COMMIT})" \
+    "$(oneline "$PROPOSER_VER")"
 fi
 
 if ! echo "$RETH_VER" | grep -q "Reth Version: ${PIN_RETH_VERSION}" \
@@ -120,5 +152,7 @@ if ! echo "$RETH_VER" | grep -q "Reth Version: ${PIN_RETH_VERSION}" \
 fi
 
 echo "ok op-node ${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})"
+echo "ok op-batcher ${PIN_OP_BATCHER_VERSION} (${PIN_OP_BATCHER_COMMIT})"
+echo "ok op-proposer ${PIN_OP_PROPOSER_VERSION} (${PIN_OP_PROPOSER_COMMIT})"
 echo "ok op-reth tag op-reth/v2.3.3 reports Reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}"
 echo "ok FORTEL2_EL=${FORTEL2_EL}"
