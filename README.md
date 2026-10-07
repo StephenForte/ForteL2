@@ -296,7 +296,7 @@ cd ~/src/fortel2/optimism-op-reth-v2.5.0
 git submodule update --init --recursive
 just update-superchain-registry-submodule || true
 cd rust && GIT_VERSION=v2.5.0 \
-  GIT_COMMIT=9f76a9d216f2d9aa99c5f45d7aad674acde93c14 \
+  GIT_COMMIT="$(git rev-parse HEAD)" \
   GIT_DATE=2026-09-23T12:36:51Z \
   BUILD_PROFILE=release \
   cargo build --release --locked --bin op-reth --manifest-path op-reth/bin/Cargo.toml
