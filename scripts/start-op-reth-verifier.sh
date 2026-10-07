@@ -156,7 +156,22 @@ else
   OP_RETH_CMD="op-reth"
 fi
 echo "op-reth binary: ${OP_RETH_CMD}"
-require_bin op-node
+# Unset: PATH op-node (bin/op-node, the live pin). Set: that executable only,
+# so a candidate build can be hash-matched without repointing the live symlink.
+# lib.sh prepends BIN_DIR, so a PATH tweak cannot select the candidate.
+# start_bg chdirs to / before execvp. A relative override would pass an -x
+# check, then fail to exec the node.
+if [[ -n "${FORTEL2_OP_NODE_BIN:-}" ]]; then
+  if [[ ! -x "${FORTEL2_OP_NODE_BIN}" ]]; then
+    echo "ERROR: FORTEL2_OP_NODE_BIN is not executable: ${FORTEL2_OP_NODE_BIN}" >&2
+    exit 1
+  fi
+  OP_NODE_CMD="$(cd "$(dirname "${FORTEL2_OP_NODE_BIN}")" && pwd)/$(basename "${FORTEL2_OP_NODE_BIN}")"
+else
+  require_bin op-node
+  OP_NODE_CMD="op-node"
+fi
+echo "op-node binary: ${OP_NODE_CMD}"
 require_bin cast
 require_bin jq
 require_bin openssl
@@ -305,8 +320,8 @@ else
   unset OP_NODE_SAFEDB_PATH || true
 fi
 
-echo "Starting op-reth-verifier-node --l2.enginekind=reth (rpc :$NODE_PORT) l1.rpckind=${L1_RPC_KIND} l1.rpc-rate-limit=${L1_RPC_RATE_LIMIT}"
-start_bg op-reth-verifier-node op-node \
+echo "Starting op-reth-verifier-node --l2.enginekind=reth (rpc :$NODE_PORT) l1.rpckind=${L1_RPC_KIND} l1.rpc-rate-limit=${L1_RPC_RATE_LIMIT} binary=${OP_NODE_CMD}"
+start_bg op-reth-verifier-node "$OP_NODE_CMD" \
   --l1="$L1_RPC_URL" \
   --l1.rpckind="${L1_RPC_KIND}" \
   --l1.trustrpc=true \
