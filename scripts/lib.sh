@@ -1048,7 +1048,13 @@ reth_profile_flags() {
   require_reth_profile "$profile"
   case "$profile" in
     sequencer_faultproof)
-      printf '%s\n' --proofs-history
+      # v2.6.0 raised the engine persistence defaults (threshold 2 → 7;
+      # memory-block-buffer-target was 0, now min(threshold, 5)). The
+      # sequencer keeps the previous behaviour (D-0150). The verifier
+      # profile does not take these flags.
+      printf '%s\n' --proofs-history \
+        --engine.persistence-threshold=2 \
+        --engine.memory-block-buffer-target=0
       ;;
     verifier)
       printf '%s\n' --full --rollup.disable-tx-pool-gossip
