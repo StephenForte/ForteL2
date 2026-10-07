@@ -78,6 +78,9 @@ if [[ "$(fortel2_el)" == "reth" ]]; then
   refuse_foundry_defaults_unless_local_l2 "${SEQUENCER_PRIVATE_KEY:-}" "SEQUENCER_PRIVATE_KEY"
 
   DATADIR="$(require_reth_datadir "${FORTEL2_RETH_DATADIR:-$DATA_DIR/l2/op-reth}")"
+  # Before 03-init-l2.sh and proofs init. D-0151: a non-live or fresh
+  # datadir here resets the live SafeDB to genesis (D-0150).
+  refuse_live_sequencer_datadir "$DATADIR"
   JWT="$DATA_DIR/jwt/jwt.txt"
   ROLLUP="$DEPLOY_DIR/rollup.json"
   LIVE_SAFEDB="$(fortel2_live_safedb_path)"
