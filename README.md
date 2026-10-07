@@ -116,7 +116,7 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | optimism monorepo (sequencer) | `op-node/v1.19.9` (`da6d3252…`, tag object `d643cea0b218`) | `~/src/fortel2/optimism-v1.19.9` — op-node v1.19.9, op-batcher v1.17.2, op-proposer untagged (D-0150) |
 | optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
-| op-reth | tag `op-reth/v2.6.0` → reports `op-reth Version: 2.6.0` commit `da6d3252491754837a778061db0cc47236ec13c6` | Clone `~/src/fortel2/optimism-op-reth-v2.6.0` (source of truth for the **Mac sequencer** op-reth binary). The Render replica stays on the published `op-reth:v2.3.3` image: v2.5.0 is parked (fortel2-replica R-0022) because its published binary needs glibc 2.44 and the replica runtime is `ubuntu:24.04`. `~/src/fortel2/optimism-op-reth-v2.5.0` is the Mac rollback binary. `~/src/fortel2/optimism-op-reth` stays the v2.3.3 binary. Assert with `./scripts/check-el-pins.sh`. |
+| op-reth | tag `op-reth/v2.6.0` → reports `op-reth Version: 2.6.0` commit `da6d3252491754837a778061db0cc47236ec13c6` | Clone `~/src/fortel2/optimism-op-reth-v2.6.0` (source of truth for the **Mac sequencer** op-reth binary). The Render replica runs the published `op-reth:v2.6.0` image on its own Wolfi base since 2026-10-07 13:49 PT (D-0152, fortel2-replica R-0023). `~/src/fortel2/optimism-op-reth-v2.5.0` is the Mac rollback binary. `~/src/fortel2/optimism-op-reth` stays the v2.3.3 binary. Assert with `./scripts/check-el-pins.sh`. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
 | Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
 | kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
@@ -910,7 +910,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/alert-watch.sh --test
 
 ## Phase 3 — Render L2 replica (US-030 / US-031) ✅
 
-Stock **verifier** on Render: **op-reth** (`v2.3.3`; v2.5.0 parked, fortel2-replica R-0022) + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1** (live since Task 7, 2026-09-11; geth replica deleted in Task 9, 2026-09-14). Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032**). Native Mac L1 is **Phase 3a** (after 4–6).
+Stock **verifier** on Render: **op-reth** (`v2.6.0` on the Wolfi base since 2026-10-07; D-0152, fortel2-replica R-0023) + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1** (live since Task 7, 2026-09-11; geth replica deleted in Task 9, 2026-09-14). Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032**). Native Mac L1 is **Phase 3a** (after 4–6).
 
 **Status:** Operator-verified after a fresh Phase 2b cutover (2026-07-22): Mac and Render share matching L2 block hashes (e.g. block 20). Package: [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica). Use **≥2GB** RAM on Render (Starter 512MB OOMs). Prefer **Private Service**. Friends with a Render account: that repo's [`RUNNING.md` § On Render](https://github.com/StephenForte/fortel2-replica/blob/main/RUNNING.md) — do not copy operator archive/snapshot/gateway setup. Public read is `https://fortel2-replica-rpc.onrender.com`.
 
