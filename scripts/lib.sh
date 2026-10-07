@@ -1337,6 +1337,72 @@ refuse_if_live_reth_datadir() {
   exit 1
 }
 
+# Live sequencer start only (04-start-sequencer-sepolia.sh, reth path).
+# Sidecars keep refuse_if_live_reth_datadir. This is the other direction:
+# the live start must not open a datadir that would reset chain 852 (D-0151).
+#
+# (a) The physical path is not $DATA_DIR/l2/op-reth.
+#     Opt-in: FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1
+# (b) No db/mdbx.dat, and the live SafeDB exists and is non-empty.
+#     Opt-in: FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1
+# Each opt-in covers only its own case. Physical path is `cd -P && pwd -P`
+# (macOS bash 3.2). A missing leaf is the parent's physical path plus the
+# leaf, so a not-yet-created spike path still compares.
+refuse_live_sequencer_datadir() {
+  local raw="${1:-}" got live safedb entry nonempty
+  if [[ -z "$raw" ]]; then
+    echo "ERROR: refuse_live_sequencer_datadir requires a datadir (FORTEL2_RETH_DATADIR)" >&2
+    exit 1
+  fi
+  _flsd_physical() {
+    local p="$1" parent base
+    while [[ "$p" == */ && "$p" != "/" ]]; do
+      p="${p%/}"
+    done
+    if [[ -d "$p" ]]; then
+      (cd -P "$p" && pwd -P)
+      return 0
+    fi
+    parent="$(dirname "$p")"
+    base="$(basename "$p")"
+    if [[ -d "$parent" ]]; then
+      printf '%s/%s\n' "$(cd -P "$parent" && pwd -P)" "$base"
+      return 0
+    fi
+    printf '%s\n' "$p"
+  }
+  got="$(_flsd_physical "$raw")"
+  live="$(_flsd_physical "$DATA_DIR/l2/op-reth")"
+  if [[ "$got" != "$live" ]]; then
+    if [[ "${FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR:-}" == "1" ]]; then
+      echo "WARN: FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1 — live sequencer starting on non-live datadir $got (D-0150)." >&2
+    else
+      echo "ERROR: refusing live sequencer start: FORTEL2_RETH_DATADIR resolves to $got, not the live datadir $live. D-0150 misstart 09:35:17–09:36:15 opened a non-live datadir and reset the live SafeDB to genesis. Set FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1 to opt in." >&2
+      exit 1
+    fi
+  fi
+  if [[ ! -f "$got/db/mdbx.dat" ]]; then
+    safedb="$(fortel2_live_safedb_path)"
+    nonempty=0
+    if [[ -d "$safedb" ]]; then
+      for entry in "$safedb"/* "$safedb"/.[!.]* "$safedb"/..?*; do
+        if [[ -e "$entry" || -L "$entry" ]]; then
+          nonempty=1
+          break
+        fi
+      done
+    fi
+    if [[ "$nonempty" -eq 1 ]]; then
+      if [[ "${FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR:-}" == "1" ]]; then
+        echo "WARN: FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1 — live sequencer starting on a fresh datadir $got while SafeDB $safedb is non-empty (D-0150)." >&2
+      else
+        echo "ERROR: refusing live sequencer start: FORTEL2_RETH_DATADIR $got has no db/mdbx.dat and live SafeDB $safedb is non-empty. Starting would reset that SafeDB to genesis (D-0150). Set FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1 to opt in." >&2
+        exit 1
+      fi
+    fi
+  fi
+}
+
 # Wipe only an allowed reth datadir. Never $DATA_DIR/l2/op-geth.
 # Guard the rm -rf here (not in a caller): reset.sh calls this with no
 # argument and would otherwise delete chain 852's archive.

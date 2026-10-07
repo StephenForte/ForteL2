@@ -13341,6 +13341,281 @@ unset ALERT_WATCH_NOW
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/test-sequencer-stall-alert.inc.sh"
 
+# D-0151: live sequencer start refuses a non-live datadir, and a fresh
+# datadir under a non-empty SafeDB. Each case below is a property of
+# refuse_live_sequencer_datadir. The last one runs the reth start script
+# against a stub 03-init-l2.sh and asserts that stub was not executed.
+SQG_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-seq-datadir.XXXXXX")"
+register_tmp "$SQG_FIX"
+cleanup_sqg() { rm -rf "$SQG_FIX"; }
+register_cleanup cleanup_sqg
+
+sqg_live_tree() {
+  local root="$1"
+  mkdir -p "$root/l2/op-reth/db" "$root/logs" "$root/pids"
+  echo initialized > "$root/l2/op-reth/db/mdbx.dat"
+}
+
+sqg_call() {
+  local datadir="$1" kv
+  shift
+  (
+    unset OP_NODE_SAFEDB_PATH FORTEL2_RETH_SAFEDB_PATH \
+      FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR \
+      FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR
+    for kv in "$@"; do
+      case "$kv" in
+        DATA_DIR=*|FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=*|FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=*)
+          export "$kv"
+          ;;
+        *)
+          echo "sqg_call: refused env $kv" >&2
+          exit 2
+          ;;
+      esac
+    done
+    refuse_live_sequencer_datadir "$datadir"
+  )
+}
+
+SQG_LIVE="$SQG_FIX/live"
+sqg_live_tree "$SQG_LIVE"
+ln -s "$SQG_LIVE" "$SQG_FIX/live-link"
+
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_LIVE/l2/op-reth" DATA_DIR="$SQG_LIVE" 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -eq 0 ]] && ! printf '%s\n' "$SQG_OUT" | grep -q 'ERROR:'; then
+  echo "PASS refuse_live_sequencer_datadir accepts the canonical live datadir"
+else
+  echo "FAIL canonical live datadir must pass (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_FIX/live-link/l2/op-reth" DATA_DIR="$SQG_FIX/live-link" 2>&1)" || SQG_RC=$?
+SQG_RC2=0
+SQG_OUT2="$(sqg_call "$SQG_LIVE/l2/op-reth" DATA_DIR="$SQG_FIX/live-link" 2>&1)" || SQG_RC2=$?
+if [[ "$SQG_RC" -eq 0 && "$SQG_RC2" -eq 0 ]] \
+  && ! printf '%s\n' "$SQG_OUT$SQG_OUT2" | grep -q 'ERROR:'; then
+  echo "PASS refuse_live_sequencer_datadir accepts the live datadir when DATA_DIR is a symlink"
+else
+  echo "FAIL symlinked DATA_DIR must still be the live datadir (rc=$SQG_RC/$SQG_RC2)" >&2
+  printf '%s\n' "$SQG_OUT" "$SQG_OUT2" >&2
+  fail=1
+fi
+
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_LIVE/l2/spike-op-reth" DATA_DIR="$SQG_LIVE" 2>&1)" || SQG_RC=$?
+SQG_RC2=0
+SQG_OUT2="$(sqg_call "$SQG_LIVE/l2/spike-op-reth" DATA_DIR="$SQG_LIVE" \
+  FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=yes 2>&1)" || SQG_RC2=$?
+if [[ "$SQG_RC" -ne 0 && "$SQG_RC2" -ne 0 ]] \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'FORTEL2_RETH_DATADIR' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'D-0150' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR' \
+  && [[ ! -e "$SQG_LIVE/l2/spike-op-reth" ]]; then
+  echo "PASS refuse_live_sequencer_datadir refuses the spike path"
+else
+  echo "FAIL spike path must be refused and not created (rc=$SQG_RC/$SQG_RC2)" >&2
+  printf '%s\n' "$SQG_OUT" "$SQG_OUT2" >&2
+  fail=1
+fi
+
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_LIVE/l2/spike-op-reth" DATA_DIR="$SQG_LIVE" \
+  FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -eq 0 ]] \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'WARN: FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1' \
+  && [[ ! -e "$SQG_LIVE/l2/spike-op-reth" ]]; then
+  echo "PASS refuse_live_sequencer_datadir allows the spike path with FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1"
+else
+  echo "FAIL spike opt-in must WARN and pass (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_LIVE/l2/op-reth/" DATA_DIR="$SQG_LIVE/" 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -eq 0 ]] && ! printf '%s\n' "$SQG_OUT" | grep -q 'ERROR:'; then
+  echo "PASS refuse_live_sequencer_datadir accepts a trailing-slash live path"
+else
+  echo "FAIL trailing-slash live path must pass (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_RC=0
+SQG_OUT="$(
+  cd "$SQG_LIVE/l2" && sqg_call "./op-reth/" DATA_DIR="$SQG_LIVE" 2>&1
+)" || SQG_RC=$?
+if [[ "$SQG_RC" -eq 0 ]] && ! printf '%s\n' "$SQG_OUT" | grep -q 'ERROR:'; then
+  echo "PASS refuse_live_sequencer_datadir accepts a relative live path"
+else
+  echo "FAIL relative live path must pass (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_FRESH="$SQG_FIX/fresh"
+mkdir -p "$SQG_FRESH/l2/op-reth" "$SQG_FRESH/safedb"
+echo kept > "$SQG_FRESH/safedb/CURRENT"
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_FRESH/l2/op-reth" DATA_DIR="$SQG_FRESH" 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -ne 0 ]] \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'no db/mdbx.dat' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'D-0150' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR'; then
+  echo "PASS refuse_live_sequencer_datadir refuses an empty datadir when SafeDB is non-empty"
+else
+  echo "FAIL empty datadir under a non-empty SafeDB must be refused (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_FRESH/l2/op-reth" DATA_DIR="$SQG_FRESH" \
+  FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -eq 0 ]] \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'WARN: FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1'; then
+  echo "PASS refuse_live_sequencer_datadir allows an empty datadir with FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1"
+else
+  echo "FAIL fresh-datadir opt-in must WARN and pass (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_FIRST="$SQG_FIX/first"
+mkdir -p "$SQG_FIRST/l2/op-reth"
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_FIRST/l2/op-reth" DATA_DIR="$SQG_FIRST" 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -eq 0 ]] \
+  && [[ ! -e "$SQG_FIRST/safedb" ]] \
+  && ! printf '%s\n' "$SQG_OUT" | grep -q 'ERROR:'; then
+  echo "PASS refuse_live_sequencer_datadir accepts an empty datadir when SafeDB is absent"
+else
+  echo "FAIL first start with no SafeDB must pass (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_CROSS="$SQG_FIX/cross-a"
+mkdir -p "$SQG_CROSS/l2/op-reth" "$SQG_CROSS/safedb"
+echo kept > "$SQG_CROSS/safedb/CURRENT"
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_CROSS/l2/spike-op-reth" DATA_DIR="$SQG_CROSS" \
+  FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -ne 0 ]] \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'WARN: FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR=1' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'no db/mdbx.dat' \
+  && [[ ! -e "$SQG_CROSS/l2/spike-op-reth" ]]; then
+  echo "PASS FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR does not bypass a fresh datadir under a non-empty SafeDB"
+else
+  echo "FAIL non-live opt-in must not bypass the fresh-datadir refusal (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_CROSSB="$SQG_FIX/cross-b"
+mkdir -p "$SQG_CROSSB/l2/op-reth/db" "$SQG_CROSSB/l2/spike-op-reth/db"
+echo initialized > "$SQG_CROSSB/l2/op-reth/db/mdbx.dat"
+echo initialized > "$SQG_CROSSB/l2/spike-op-reth/db/mdbx.dat"
+SQG_RC=0
+SQG_OUT="$(sqg_call "$SQG_CROSSB/l2/spike-op-reth" DATA_DIR="$SQG_CROSSB" \
+  FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1 2>&1)" || SQG_RC=$?
+if [[ "$SQG_RC" -ne 0 ]] \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'D-0150' \
+  && ! printf '%s\n' "$SQG_OUT" | grep -q 'WARN: FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR=1'; then
+  echo "PASS FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR does not bypass a non-live datadir"
+else
+  echo "FAIL fresh-datadir opt-in must not bypass the non-live refusal (rc=$SQG_RC)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+SQG_RUN="$SQG_FIX/run"
+mkdir -p "$SQG_RUN/scripts" "$SQG_RUN/bin"
+cp "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  "$SCRIPT_DIR/lib.sh" \
+  "$SCRIPT_DIR/rotate-logs.sh" \
+  "$SQG_RUN/scripts/"
+# Stubs win over a later PATH op-reth: lib.sh prepends this bin dir.
+# If the guard does not exit, the stub records an exec instead of opening a datadir.
+for SQG_BIN in op-reth op-node cast; do
+  cat > "$SQG_RUN/bin/$SQG_BIN" <<EOS
+#!/bin/sh
+echo "stub $SQG_BIN executed" >&2
+exit 99
+EOS
+  chmod +x "$SQG_RUN/bin/$SQG_BIN"
+done
+cat > "$SQG_RUN/scripts/03-init-l2.sh" <<'EOS'
+#!/usr/bin/env bash
+echo invoked > "$(cd "$(dirname "$0")/.." && pwd)/03-init-called"
+echo "03-init-l2.sh was invoked" >&2
+exit 1
+EOS
+chmod +x "$SQG_RUN/scripts/03-init-l2.sh"
+cat > "$SQG_RUN/fixture.env" <<EOF
+DATA_DIR=$SQG_RUN/data
+DEPLOY_DIR=$SQG_RUN/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_BLOCK_TIME=12
+L2_BLOCK_TIME=2
+L1_RPC_URL=http://127.0.0.1:9
+L2_RPC_URL=http://127.0.0.1:45945
+L2_NODE_RPC_URL=http://127.0.0.1:45947
+L2_EL_HTTP_PORT=45945
+L2_EL_WS_PORT=45946
+L2_EL_AUTH_PORT=45951
+L2_NODE_RPC_PORT=45947
+BATCHER_RPC_PORT=45948
+PROPOSER_RPC_PORT=45960
+FORTEL2_EL=reth
+FORTEL2_RETH_PROFILE=sequencer_faultproof
+FORTEL2_RETH_DATADIR=$SQG_RUN/data/l2/spike-op-reth
+EOF
+SQG_RC=0
+SQG_OUT="$(
+  env -u OP_NODE_SAFEDB_PATH -u FORTEL2_RETH_SAFEDB_PATH \
+    -u FORTEL2_ALLOW_NONLIVE_SEQUENCER_DATADIR \
+    -u FORTEL2_ALLOW_SEQUENCER_FRESH_DATADIR \
+    -u SEQUENCER_PRIVATE_KEY \
+    FORTEL2_ENV="$SQG_RUN/fixture.env" \
+    FORTEL2_EL=reth \
+    FORTEL2_RETH_PROFILE=sequencer_faultproof \
+    FORTEL2_RETH_DATADIR="$SQG_RUN/data/l2/spike-op-reth" \
+    "$SQG_RUN/scripts/04-start-sequencer-sepolia.sh" 2>&1
+)" || SQG_RC=$?
+SQG_ORDER=0
+if awk '
+  /^[[:space:]]*#/ { next }
+  /refuse_live_sequencer_datadir/ { n++; if (!call) call = NR }
+  /03-init-l2\.sh/ { if (!init) init = NR }
+  END { exit !(n == 1 && call && init && call < init) }
+' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && ! grep -q 'refuse_live_sequencer_datadir' "$SCRIPT_DIR/start-op-reth-verifier.sh"; then
+  SQG_ORDER=1
+fi
+if [[ "$SQG_RC" -ne 0 && "$SQG_ORDER" -eq 1 ]] \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'D-0150' \
+  && printf '%s\n' "$SQG_OUT" | grep -q 'FORTEL2_RETH_DATADIR' \
+  && [[ ! -e "$SQG_RUN/03-init-called" ]] \
+  && [[ ! -e "$SQG_RUN/data/l2/spike-op-reth" ]]; then
+  echo "PASS live sequencer start refuses before 03-init-l2.sh"
+else
+  echo "FAIL start must refuse before 03-init-l2.sh (rc=$SQG_RC order=$SQG_ORDER)" >&2
+  printf '%s\n' "$SQG_OUT" >&2
+  fail=1
+fi
+
+unset SQG_FIX SQG_LIVE SQG_FRESH SQG_FIRST SQG_CROSS SQG_CROSSB SQG_RUN
+unset SQG_RC SQG_RC2 SQG_OUT SQG_OUT2 SQG_ORDER
+unset -f cleanup_sqg sqg_live_tree sqg_call 2>/dev/null || true
+
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
 # `trap … EXIT` — bash replaces the handler and would drop every previously
