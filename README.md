@@ -433,7 +433,7 @@ Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike
 
 ### Tracked dependency advisories (Go modules + frontend vendors)
 
-Last refresh: **2026-10-20** (Go modules: `x/crypto` v0.56.0; stdlib 1.26.10, pion/stun v3.1.7). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
+Last refresh: **2026-10-20** (Go modules: `x/crypto` v0.56.0; stdlib 1.26.10, pion/stun v3.1.7, gorilla/websocket v1.5.3). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
@@ -445,6 +445,7 @@ Last refresh: **2026-10-20** (Go modules: `x/crypto` v0.56.0; stdlib 1.26.10, pi
 |---|---|---|---|
 | `batcher/` `proposer/` `derivation/` | `golang.org/x/crypto` | v0.55.0 → **v0.56.0** | [CVE-2026-56855](https://pkg.go.dev/vuln/GO-2026-6355) (GO-2026-6355) — `x/crypto/ssh` denial of service: crafted channel messages deadlock an established connection (CWE-770). Not reachable: `go list -deps` shows no `golang.org/x/crypto/ssh` (scanners flag the module pin). `go mod tidy` moved only this pin and its `go.sum` lines. |
 | `batcher/` `proposer/` `derivation/` | Go stdlib (module `go` line + CI `setup-go`) | 1.26.7 → **1.26.10** | [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) `crypto/x509`; [GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617), [GO-2026-6613](https://pkg.go.dev/vuln/GO-2026-6613), [GO-2026-6612](https://pkg.go.dev/vuln/GO-2026-6612), [GO-2026-6611](https://pkg.go.dev/vuln/GO-2026-6611), [GO-2026-6610](https://pkg.go.dev/vuln/GO-2026-6610), [GO-2026-6605](https://pkg.go.dev/vuln/GO-2026-6605), [GO-2026-6603](https://pkg.go.dev/vuln/GO-2026-6603) `net/http`; [GO-2026-6608](https://pkg.go.dev/vuln/GO-2026-6608) `net/textproto`; [GO-2026-6607](https://pkg.go.dev/vuln/GO-2026-6607) `crypto/tls`. All fixed in go1.26.10. |
+| `batcher/` `proposer/` `derivation/` | `github.com/gorilla/websocket` | v1.4.2 → **v1.5.3** | [GHSA-w67g-5rqw-f597](https://pkg.go.dev/vuln/GO-2026-6278) (GO-2026-6278) — math/rand used for frame mask keys; required directly because go-ethereum (v1.17.5 and latest v1.17.8) still pins v1.4.2. |
 
 **2026-08-31 bumps:**
 
