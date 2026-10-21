@@ -1,6 +1,6 @@
 module github.com/StephenForte/ForteL2/derivation
 
-go 1.26.7
+go 1.26.10
 
 require (
 	github.com/StephenForte/ForteL2/batcher v0.0.0-00010101000000-000000000000
@@ -86,7 +86,7 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

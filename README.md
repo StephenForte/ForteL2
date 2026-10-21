@@ -433,11 +433,18 @@ Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike
 
 ### Tracked dependency advisories (Go modules + frontend vendors)
 
-Last refresh: **2026-08-31** (Go modules: `x/crypto` v0.55.0; stdlib 1.26.7, pion/stun v3.1.7). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
+Last refresh: **2026-10-20** (Go modules: `x/crypto` v0.56.0; stdlib 1.26.10, pion/stun v3.1.7). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
-| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep 2026-08-31 + `govulncheck -show verbose` on `derivation/` at `x/crypto` v0.55.0 — symbol scan clean for `openpgp`; module-level note only). Indirect pin is `golang.org/x/crypto v0.55.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep 2026-08-31 + `govulncheck -show verbose` on `derivation/` at `x/crypto` v0.55.0 — symbol scan clean for `openpgp`; module-level note only). Indirect pin is `golang.org/x/crypto v0.56.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+
+**2026-10-20 bumps:**
+
+| Area | Dependency | From → To | Advisory / reason |
+|---|---|---|---|
+| `batcher/` `proposer/` `derivation/` | `golang.org/x/crypto` | v0.55.0 → **v0.56.0** | [CVE-2026-56855](https://pkg.go.dev/vuln/GO-2026-6355) (GO-2026-6355) — `x/crypto/ssh` denial of service: crafted channel messages deadlock an established connection (CWE-770). Not reachable: `go list -deps` shows no `golang.org/x/crypto/ssh` (scanners flag the module pin). `go mod tidy` moved only this pin and its `go.sum` lines. |
+| `batcher/` `proposer/` `derivation/` | Go stdlib (module `go` line + CI `setup-go`) | 1.26.7 → **1.26.10** | [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) `crypto/x509`; [GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617), [GO-2026-6613](https://pkg.go.dev/vuln/GO-2026-6613), [GO-2026-6612](https://pkg.go.dev/vuln/GO-2026-6612), [GO-2026-6611](https://pkg.go.dev/vuln/GO-2026-6611), [GO-2026-6610](https://pkg.go.dev/vuln/GO-2026-6610), [GO-2026-6605](https://pkg.go.dev/vuln/GO-2026-6605), [GO-2026-6603](https://pkg.go.dev/vuln/GO-2026-6603) `net/http`; [GO-2026-6608](https://pkg.go.dev/vuln/GO-2026-6608) `net/textproto`; [GO-2026-6607](https://pkg.go.dev/vuln/GO-2026-6607) `crypto/tls`. All fixed in go1.26.10. |
 
 **2026-08-31 bumps:**
 
