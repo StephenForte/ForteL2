@@ -433,11 +433,18 @@ Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike
 
 ### Tracked dependency advisories (Go modules + frontend vendors)
 
-Last refresh: **2026-10-20** (Go modules: `x/crypto` v0.56.0; stdlib 1.26.10, pion/stun v3.1.7, gorilla/websocket v1.5.3). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
+Last refresh: **2026-10-21** (Go modules: `otel` v1.45.0; `x/crypto` v0.56.0; stdlib 1.26.10, pion/stun v3.1.7, gorilla/websocket v1.5.3). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
 | [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep 2026-08-31 + `govulncheck -show verbose` on `derivation/` at `x/crypto` v0.55.0 — symbol scan clean for `openpgp`; module-level note only). Indirect pin is `golang.org/x/crypto v0.56.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+
+**2026-10-21 bumps:**
+
+| Area | Dependency | From → To | Advisory / reason |
+|---|---|---|---|
+| `batcher/` `proposer/` `derivation/` | `go.opentelemetry.io/otel` (+ `/metric`, `/sdk`, `/trace`) | v1.44.0 → **v1.45.0** | [CVE-2026-81870](https://pkg.go.dev/vuln/GO-2026-6505) (GO-2026-6505) — exporter config logging may leak endpoint URLs; not reachable (no otlptrace/zipkin exporter; otel/sdk only via go-ethereum rpc tests). `derivation/go.mod` has no `otel/sdk` require; the module graph selects v1.45.0. |
+| `batcher/` `proposer/` `derivation/` | `github.com/go-logr/logr` | v1.4.3 → **v1.4.4** | tidy transitive via otel v1.45.0. |
 
 **2026-10-20 bumps:**
 
