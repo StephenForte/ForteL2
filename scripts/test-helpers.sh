@@ -7141,20 +7141,22 @@ else
   echo "FAIL scripts/check-el-pins.sh must be tracked and executable" >&2
   fail=1
 fi
-# Trap: tag op-reth/v2.6.0 is not the --version string. Matcher must use
-# the measured line "op-reth Version: 2.6.0" plus the full commit, not a
-# bare "2.6", the tag string, the previous 2.5.0 pin, or 2.3.0-dev.
-if grep -q "PIN_RETH_VERSION='2.6.0'" "$PIN_CHECK" \
-  && grep -q "PIN_RETH_COMMIT='da6d3252491754837a778061db0cc47236ec13c6'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_NODE_VERSION='v1.19.9'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_NODE_COMMIT='da6d3252'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_BATCHER_VERSION='v1.17.2'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_BATCHER_COMMIT='da6d3252'" "$PIN_CHECK" \
+# Trap: tag op-reth/v2.6.1 is not the --version string. Matcher must use
+# the measured line "op-reth Version: 2.6.1" plus the full commit, not a
+# bare "2.6", the tag string, the D-0150 2.6.0 pin, the previous 2.5.0 pin,
+# or 2.3.0-dev. Go binaries pin commit 43c071cb (what --version prints).
+# The annotated op-node tag object 4193077c is not that commit.
+if grep -q "PIN_RETH_VERSION='2.6.1'" "$PIN_CHECK" \
+  && grep -q "PIN_RETH_COMMIT='e16bffa18420c86dbab693097bc33117f74a5f7d'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_NODE_VERSION='v1.19.11'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_NODE_COMMIT='43c071cb'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_BATCHER_VERSION='v1.17.4'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_BATCHER_COMMIT='43c071cb'" "$PIN_CHECK" \
   && grep -q "PIN_OP_PROPOSER_VERSION='untagged'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_PROPOSER_COMMIT='da6d3252'" "$PIN_CHECK"; then
-  echo "PASS check-el-pins.sh pins op-reth Version 2.6.0 / da6d3252, op-node v1.19.9, op-batcher v1.17.2, op-proposer untagged"
+  && grep -q "PIN_OP_PROPOSER_COMMIT='43c071cb'" "$PIN_CHECK"; then
+  echo "PASS check-el-pins.sh pins op-reth Version 2.6.1 / e16bffa1, op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged at 43c071cb"
 else
-  echo "FAIL check-el-pins.sh must pin 2.6.0 / da6d3252491754837a778061db0cc47236ec13c6 / op-node v1.19.9 / op-batcher v1.17.2 / op-proposer untagged / da6d3252" >&2
+  echo "FAIL check-el-pins.sh must pin 2.6.1 / e16bffa18420c86dbab693097bc33117f74a5f7d / op-node v1.19.11 / op-batcher v1.17.4 / op-proposer untagged / 43c071cb" >&2
   fail=1
 fi
 if grep -q 'file -L' "$PIN_CHECK"; then
@@ -7167,13 +7169,26 @@ PIN_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-el-pins.XXXXXX")"
 register_tmp "$PIN_FIX"
 cat > "$PIN_FIX/op-node" <<'EOS'
 #!/bin/sh
-echo "op-node version v1.19.9-da6d3252-1790802614"
+echo "op-node version v1.19.11-43c071cb-1792624643"
 EOS
 cat > "$PIN_FIX/op-batcher" <<'EOS'
 #!/bin/sh
-echo "op-batcher version v1.17.2-da6d3252-1790802614"
+echo "op-batcher version v1.17.4-43c071cb-1792624643"
 EOS
 cat > "$PIN_FIX/op-proposer" <<'EOS'
+#!/bin/sh
+echo "op-proposer version untagged-43c071cb-1792624643"
+EOS
+# D-0150 set. Right component shape, previous commit. Must go red.
+cat > "$PIN_FIX/op-node-d0150" <<'EOS'
+#!/bin/sh
+echo "op-node version v1.19.9-da6d3252-1790802614"
+EOS
+cat > "$PIN_FIX/op-batcher-d0150" <<'EOS'
+#!/bin/sh
+echo "op-batcher version v1.17.2-da6d3252-1790802614"
+EOS
+cat > "$PIN_FIX/op-proposer-d0150" <<'EOS'
 #!/bin/sh
 echo "op-proposer version untagged-da6d3252-1790802614"
 EOS
@@ -7190,10 +7205,10 @@ cat > "$PIN_FIX/op-proposer-prev" <<'EOS'
 #!/bin/sh
 echo "op-proposer version untagged-9f76a9d2-1790167011"
 EOS
-# Would pass a naive "v1.19.9" prefix grep.
+# Would pass a naive "v1.19.11" prefix grep.
 cat > "$PIN_FIX/op-node-prefix" <<'EOS'
 #!/bin/sh
-echo "op-node version v1.19.90-da6d3252-1790802614"
+echo "op-node version v1.19.110-43c071cb-1792624643"
 EOS
 # Right op-node version, previous commit.
 cat > "$PIN_FIX/op-node-commit" <<'EOS'
@@ -7209,12 +7224,18 @@ cat > "$PIN_FIX/op-proposer-old" <<'EOS'
 #!/bin/sh
 echo "op-proposer version untagged-da197e45-1782514747"
 EOS
-# Would pass a naive "v1.17.2" prefix grep.
+# Would pass a naive "v1.17.4" prefix grep.
 cat > "$PIN_FIX/op-batcher-prefix" <<'EOS'
 #!/bin/sh
-echo "op-batcher version v1.17.20-da6d3252-1790802614"
+echo "op-batcher version v1.17.40-43c071cb-1792624643"
 EOS
 cat > "$PIN_FIX/op-reth" <<'EOS'
+#!/bin/sh
+echo "op-reth Version: 2.6.1"
+echo "Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d"
+EOS
+# D-0150 live pin. Must go red after D-0154.
+cat > "$PIN_FIX/op-reth-d0150" <<'EOS'
 #!/bin/sh
 echo "op-reth Version: 2.6.0"
 echo "Commit SHA: da6d3252491754837a778061db0cc47236ec13c6"
@@ -7234,25 +7255,31 @@ EOS
 # Bare tag string. Must not satisfy the measured version line.
 cat > "$PIN_FIX/op-reth-tag" <<'EOS'
 #!/bin/sh
+echo "op-reth/v2.6.1"
+echo "Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d"
+EOS
+# Previous tag string, right-looking commit family. Must still go red.
+cat > "$PIN_FIX/op-reth-tag-d0150" <<'EOS'
+#!/bin/sh
 echo "op-reth/v2.6.0"
 echo "Commit SHA: da6d3252491754837a778061db0cc47236ec13c6"
 EOS
-# Bare major.minor. Would pass a naive "2.6" grep.
+# Bare major.minor with the new commit. A naive "2.6" grep would accept this.
 cat > "$PIN_FIX/op-reth-major" <<'EOS'
 #!/bin/sh
 echo "op-reth Version: 2.6"
-echo "Commit SHA: da6d3252491754837a778061db0cc47236ec13c6"
+echo "Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d"
 EOS
-# Next patch. A loosened "2.6" grep would accept this.
+# Next patch with the new commit. A loosened "2.6.1" prefix grep would accept this.
 cat > "$PIN_FIX/op-reth-prefix" <<'EOS'
 #!/bin/sh
-echo "op-reth Version: 2.6.1"
-echo "Commit SHA: da6d3252491754837a778061db0cc47236ec13c6"
+echo "op-reth Version: 2.6.10"
+echo "Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d"
 EOS
 # Right version, wrong commit.
 cat > "$PIN_FIX/op-reth-commit" <<'EOS'
 #!/bin/sh
-echo "op-reth Version: 2.6.0"
+echo "op-reth Version: 2.6.1"
 echo "Commit SHA: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 EOS
 cat > "$PIN_FIX/op-geth" <<'EOS'
@@ -7260,10 +7287,12 @@ cat > "$PIN_FIX/op-geth" <<'EOS'
 echo "op-geth version 1.101702.2-stable-e8800cff"
 EOS
 chmod +x "$PIN_FIX/op-node" "$PIN_FIX/op-batcher" "$PIN_FIX/op-proposer" \
+  "$PIN_FIX/op-node-d0150" "$PIN_FIX/op-batcher-d0150" "$PIN_FIX/op-proposer-d0150" \
   "$PIN_FIX/op-node-prev" "$PIN_FIX/op-batcher-prev" "$PIN_FIX/op-proposer-prev" \
   "$PIN_FIX/op-node-prefix" "$PIN_FIX/op-node-commit" \
   "$PIN_FIX/op-batcher-old" "$PIN_FIX/op-proposer-old" "$PIN_FIX/op-batcher-prefix" \
-  "$PIN_FIX/op-reth" "$PIN_FIX/op-reth-prev" "$PIN_FIX/op-reth-wrong" "$PIN_FIX/op-reth-tag" \
+  "$PIN_FIX/op-reth" "$PIN_FIX/op-reth-d0150" "$PIN_FIX/op-reth-prev" "$PIN_FIX/op-reth-wrong" \
+  "$PIN_FIX/op-reth-tag" "$PIN_FIX/op-reth-tag-d0150" \
   "$PIN_FIX/op-reth-major" "$PIN_FIX/op-reth-prefix" "$PIN_FIX/op-reth-commit" \
   "$PIN_FIX/op-geth"
 pin_stub_env() {
@@ -7284,11 +7313,95 @@ else
   echo "$PIN_OK_OUT" >&2
   fail=1
 fi
+PIN_D0150_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node-d0150" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher-d0150" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer-d0150" \
+  OP_RETH_BIN="$PIN_FIX/op-reth-d0150" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_D0150_EC=0 || PIN_D0150_EC=$?
+if [[ "$PIN_D0150_EC" -ne 0 ]] \
+  && echo "$PIN_D0150_OUT" | grep -q 'pin mismatch' \
+  && echo "$PIN_D0150_OUT" | grep -q 'da6d3252'; then
+  echo "PASS check-el-pins.sh goes red on the D-0150 set (v1.19.9 / v1.17.2 / untagged / 2.6.0 at da6d3252)"
+else
+  echo "FAIL the D-0150 set must fail the pin check (ec=$PIN_D0150_EC)" >&2
+  echo "$PIN_D0150_OUT" >&2
+  fail=1
+fi
+PIN_D0150_RETH_OUT="$(pin_stub_env "$PIN_FIX/op-reth-d0150")" && PIN_D0150_RETH_EC=0 || PIN_D0150_RETH_EC=$?
+if [[ "$PIN_D0150_RETH_EC" -ne 0 ]] \
+  && echo "$PIN_D0150_RETH_OUT" | grep -q 'op-reth pin mismatch' \
+  && echo "$PIN_D0150_RETH_OUT" | grep -q '2.6.0' \
+  && echo "$PIN_D0150_RETH_OUT" | grep -q 'da6d3252491754837a778061db0cc47236ec13c6'; then
+  echo "PASS check-el-pins.sh goes red on the D-0150 op-reth pin (2.6.0)"
+else
+  echo "FAIL the v2.6.0 op-reth pin must fail (ec=$PIN_D0150_RETH_EC)" >&2
+  echo "$PIN_D0150_RETH_OUT" >&2
+  fail=1
+fi
+PIN_D0150_NODE_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node-d0150" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer" \
+  OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_D0150_NODE_EC=0 || PIN_D0150_NODE_EC=$?
+if [[ "$PIN_D0150_NODE_EC" -ne 0 ]] \
+  && echo "$PIN_D0150_NODE_OUT" | grep -q 'op-node pin mismatch' \
+  && echo "$PIN_D0150_NODE_OUT" | grep -q 'v1.19.9'; then
+  echo "PASS check-el-pins.sh goes red on the D-0150 op-node pin (v1.19.9-da6d3252)"
+else
+  echo "FAIL a v1.19.9-da6d3252 op-node must fail the pin check (ec=$PIN_D0150_NODE_EC)" >&2
+  echo "$PIN_D0150_NODE_OUT" >&2
+  fail=1
+fi
+PIN_D0150_BATCH_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher-d0150" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer" \
+  OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_D0150_BATCH_EC=0 || PIN_D0150_BATCH_EC=$?
+if [[ "$PIN_D0150_BATCH_EC" -ne 0 ]] \
+  && echo "$PIN_D0150_BATCH_OUT" | grep -q 'op-batcher pin mismatch' \
+  && echo "$PIN_D0150_BATCH_OUT" | grep -q 'v1.17.2'; then
+  echo "PASS check-el-pins.sh goes red on the D-0150 op-batcher pin (v1.17.2-da6d3252)"
+else
+  echo "FAIL a v1.17.2-da6d3252 op-batcher must fail the pin check (ec=$PIN_D0150_BATCH_EC)" >&2
+  echo "$PIN_D0150_BATCH_OUT" >&2
+  fail=1
+fi
+PIN_D0150_PROP_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer-d0150" \
+  OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_D0150_PROP_EC=0 || PIN_D0150_PROP_EC=$?
+if [[ "$PIN_D0150_PROP_EC" -ne 0 ]] \
+  && echo "$PIN_D0150_PROP_OUT" | grep -q 'op-proposer pin mismatch' \
+  && echo "$PIN_D0150_PROP_OUT" | grep -q 'da6d3252'; then
+  echo "PASS check-el-pins.sh goes red on the D-0150 op-proposer pin (untagged-da6d3252)"
+else
+  echo "FAIL an untagged-da6d3252 op-proposer must fail the pin check (ec=$PIN_D0150_PROP_EC)" >&2
+  echo "$PIN_D0150_PROP_OUT" >&2
+  fail=1
+fi
+PIN_TAG_OLD_OUT="$(pin_stub_env "$PIN_FIX/op-reth-tag-d0150")" && PIN_TAG_OLD_EC=0 || PIN_TAG_OLD_EC=$?
+if [[ "$PIN_TAG_OLD_EC" -ne 0 ]] && echo "$PIN_TAG_OLD_OUT" | grep -q 'op-reth/v2.6.0'; then
+  echo "PASS check-el-pins.sh refuses a bare op-reth/v2.6.0 tag string"
+else
+  echo "FAIL check-el-pins.sh must not accept the v2.6.0 tag string as the pin (ec=$PIN_TAG_OLD_EC)" >&2
+  echo "$PIN_TAG_OLD_OUT" >&2
+  fail=1
+fi
 PIN_BAD_OUT="$(pin_stub_env "$PIN_FIX/op-reth-wrong")" && PIN_BAD_EC=0 || PIN_BAD_EC=$?
 if [[ "$PIN_BAD_EC" -ne 0 ]] \
   && echo "$PIN_BAD_OUT" | grep -q 'expected:' \
   && echo "$PIN_BAD_OUT" | grep -q 'got:' \
-  && echo "$PIN_BAD_OUT" | grep -q '2.6.0' \
+  && echo "$PIN_BAD_OUT" | grep -q '2.6.1' \
+  && echo "$PIN_BAD_OUT" | grep -q 'e16bffa18420c86dbab693097bc33117f74a5f7d' \
   && echo "$PIN_BAD_OUT" | grep -q '2.3.0-dev'; then
   echo "PASS check-el-pins.sh goes red on the v2.3.3 op-reth pin (expected vs got)"
 else
@@ -7362,10 +7475,10 @@ PIN_NODE_PFX_OUT="$(
   OP_RETH_BIN="$PIN_FIX/op-reth" \
     "$PIN_CHECK" 2>&1
 )" && PIN_NODE_PFX_EC=0 || PIN_NODE_PFX_EC=$?
-if [[ "$PIN_NODE_PFX_EC" -ne 0 ]] && echo "$PIN_NODE_PFX_OUT" | grep -q 'v1.19.90'; then
-  echo "PASS check-el-pins.sh refuses a v1.19.90 prefix match (not a bare v1.19.9 grep)"
+if [[ "$PIN_NODE_PFX_EC" -ne 0 ]] && echo "$PIN_NODE_PFX_OUT" | grep -q 'v1.19.110'; then
+  echo "PASS check-el-pins.sh refuses a v1.19.110 prefix match (not a bare v1.19.11 grep)"
 else
-  echo "FAIL check-el-pins.sh must not accept v1.19.90 as the v1.19.9 pin (ec=$PIN_NODE_PFX_EC)" >&2
+  echo "FAIL check-el-pins.sh must not accept v1.19.110 as the v1.19.11 pin (ec=$PIN_NODE_PFX_EC)" >&2
   echo "$PIN_NODE_PFX_OUT" >&2
   fail=1
 fi
@@ -7422,24 +7535,24 @@ PIN_BATCH_PFX_OUT="$(
   OP_RETH_BIN="$PIN_FIX/op-reth" \
     "$PIN_CHECK" 2>&1
 )" && PIN_BATCH_PFX_EC=0 || PIN_BATCH_PFX_EC=$?
-if [[ "$PIN_BATCH_PFX_EC" -ne 0 ]] && echo "$PIN_BATCH_PFX_OUT" | grep -q 'v1.17.20'; then
-  echo "PASS check-el-pins.sh refuses a v1.17.20 prefix match (not a bare v1.17.2 grep)"
+if [[ "$PIN_BATCH_PFX_EC" -ne 0 ]] && echo "$PIN_BATCH_PFX_OUT" | grep -q 'v1.17.40'; then
+  echo "PASS check-el-pins.sh refuses a v1.17.40 prefix match (not a bare v1.17.4 grep)"
 else
-  echo "FAIL check-el-pins.sh must not accept v1.17.20 as the v1.17.2 pin (ec=$PIN_BATCH_PFX_EC)" >&2
+  echo "FAIL check-el-pins.sh must not accept v1.17.40 as the v1.17.4 pin (ec=$PIN_BATCH_PFX_EC)" >&2
   echo "$PIN_BATCH_PFX_OUT" >&2
   fail=1
 fi
 PIN_PFX_OUT="$(pin_stub_env "$PIN_FIX/op-reth-prefix")" && PIN_PFX_EC=0 || PIN_PFX_EC=$?
-if [[ "$PIN_PFX_EC" -ne 0 ]] && echo "$PIN_PFX_OUT" | grep -q '2.6.1'; then
-  echo "PASS check-el-pins.sh refuses a 2.6.x prefix match (not a bare 2.6 grep)"
+if [[ "$PIN_PFX_EC" -ne 0 ]] && echo "$PIN_PFX_OUT" | grep -q '2.6.10'; then
+  echo "PASS check-el-pins.sh refuses a 2.6.10 prefix match (not a bare 2.6.1 grep)"
 else
-  echo "FAIL check-el-pins.sh must not accept 2.6.1 as the 2.6.0 pin (ec=$PIN_PFX_EC)" >&2
+  echo "FAIL check-el-pins.sh must not accept 2.6.10 as the 2.6.1 pin (ec=$PIN_PFX_EC)" >&2
   echo "$PIN_PFX_OUT" >&2
   fail=1
 fi
 PIN_TAG_OUT="$(pin_stub_env "$PIN_FIX/op-reth-tag")" && PIN_TAG_EC=0 || PIN_TAG_EC=$?
-if [[ "$PIN_TAG_EC" -ne 0 ]] && echo "$PIN_TAG_OUT" | grep -q 'op-reth/v2.6.0'; then
-  echo "PASS check-el-pins.sh refuses a bare op-reth/v2.6.0 tag string"
+if [[ "$PIN_TAG_EC" -ne 0 ]] && echo "$PIN_TAG_OUT" | grep -q 'op-reth/v2.6.1'; then
+  echo "PASS check-el-pins.sh refuses a bare op-reth/v2.6.1 tag string"
 else
   echo "FAIL check-el-pins.sh must not accept the bare tag string as the pin (ec=$PIN_TAG_EC)" >&2
   echo "$PIN_TAG_OUT" >&2
@@ -7449,7 +7562,7 @@ PIN_MAJ_OUT="$(pin_stub_env "$PIN_FIX/op-reth-major")" && PIN_MAJ_EC=0 || PIN_MA
 if [[ "$PIN_MAJ_EC" -ne 0 ]] && echo "$PIN_MAJ_OUT" | grep -q 'op-reth Version: 2.6 '; then
   echo "PASS check-el-pins.sh refuses a bare 2.6 major.minor"
 else
-  echo "FAIL check-el-pins.sh must not accept bare 2.6 as the 2.6.0 pin (ec=$PIN_MAJ_EC)" >&2
+  echo "FAIL check-el-pins.sh must not accept bare 2.6 as the 2.6.1 pin (ec=$PIN_MAJ_EC)" >&2
   echo "$PIN_MAJ_OUT" >&2
   fail=1
 fi

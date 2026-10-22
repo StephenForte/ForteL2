@@ -3,36 +3,41 @@
 # Mini-only for a green live run (darwin/arm64 builds). CI covers the red
 # path via stubs in scripts/test-helpers.sh — GitHub runners have no pin.
 #
-# Live sequencer pin (D-0150), all four built from monorepo commit da6d3252
-# (tags op-node/v1.19.9 and op-reth/v2.6.0):
-#   op-node     v1.19.9-da6d3252-…
-#   op-batcher  v1.17.2-da6d3252-…   (component version, same monorepo commit)
-#   op-proposer untagged-da6d3252-…  (no op-proposer tag on that commit)
-# The annotated op-node tag object is d643cea0b218; --version prints the
-# commit, so the pin is da6d3252. A green op-node with a v1.19.8 batcher
-# or proposer is a failure. op-reth: tag op-reth/v2.6.0 reports
-# "op-reth Version: 2.6.0" and commit
-# da6d3252491754837a778061db0cc47236ec13c6. The tag string is not the
-# --version line (it has never matched). Do not grep a bare "2.6"
-# (that would accept unpinned later 2.6.x builds) or the tag
-# "op-reth/v2.6.0" by itself. Match the measured version line and the
-# full commit, each on its own line. The D-0149/D-0147 set
-# (2.5.0 / 9f76a9d216f2d9aa99c5f45d7aad674acde93c14, v1.19.8 / v1.17.1 /
-# untagged at 9f76a9d2) must fail.
+# Live sequencer pin (D-0154). Two commits, each binary matched to its own.
+# They are not one monorepo commit (op-reth/v2.6.1 and op-node/v1.19.11 diverged).
+#   op-node/v1.19.11 is an annotated tag. The tag object is
+#   4193077c6f5620fb0105a23757af1fce2369445b; it peels to commit
+#   43c071cbff8ad7512581561aa2d43c990544b650. --version prints the commit,
+#   so the Go pin is 43c071cb, not the tag object.
+#   op-reth/v2.6.1 peels to e16bffa18420c86dbab693097bc33117f74a5f7d.
+#   op-node     v1.19.11-43c071cb-…
+#   op-batcher  v1.17.4-43c071cb-…   (op-batcher/v1.17.4 is on that commit)
+#   op-proposer untagged-43c071cb-…  (no op-proposer tag on that commit)
+# A green op-node with a v1.19.9 batcher or proposer is a failure.
+# op-reth reports the whole line "op-reth Version: 2.6.1" and
+# "Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d".
+# The tag string is not the --version line. Do not grep a bare "2.6"
+# (that would accept 2.6.0 and later 2.6.x) or "op-reth/v2.6.1" by itself.
+# Match the measured version line and the full commit, each on its own line.
+# The D-0150 set (2.6.0 / da6d3252491754837a778061db0cc47236ec13c6,
+# v1.19.9 / v1.17.2 / untagged at da6d3252) must fail, and so must the
+# D-0149/D-0147 set (2.5.0 / 9f76a9d216f2d9aa99c5f45d7aad674acde93c14,
+# v1.19.8 / v1.17.1 / untagged at 9f76a9d2).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
-# Pin tokens as measured on the Mini. Tag op-reth/v2.6.0 ≠ reported version.
-PIN_OP_NODE_VERSION='v1.19.9'
-PIN_OP_NODE_COMMIT='da6d3252'
-PIN_OP_BATCHER_VERSION='v1.17.2'
-PIN_OP_BATCHER_COMMIT='da6d3252'
+# Pin tokens as measured on the Mini. Tag object 4193077c ≠ the commit
+# --version prints. Tag op-reth/v2.6.1 ≠ the reported version line.
+PIN_OP_NODE_VERSION='v1.19.11'
+PIN_OP_NODE_COMMIT='43c071cb'
+PIN_OP_BATCHER_VERSION='v1.17.4'
+PIN_OP_BATCHER_COMMIT='43c071cb'
 PIN_OP_PROPOSER_VERSION='untagged'
-PIN_OP_PROPOSER_COMMIT='da6d3252'
-PIN_RETH_VERSION='2.6.0'
-PIN_RETH_COMMIT='da6d3252491754837a778061db0cc47236ec13c6'
+PIN_OP_PROPOSER_COMMIT='43c071cb'
+PIN_RETH_VERSION='2.6.1'
+PIN_RETH_COMMIT='e16bffa18420c86dbab693097bc33117f74a5f7d'
 
 FORTEL2_EL="${FORTEL2_EL:-geth}"
 OP_NODE_BIN="${OP_NODE_BIN:-$BIN_DIR/op-node}"
@@ -125,17 +130,17 @@ if [[ "$FORTEL2_EL" == "reth" ]] && looks_like_geth "$RETH_VER" "$OP_RETH_BIN"; 
     "op-geth binary ($OP_RETH_BIN): $(oneline "$RETH_VER")"
 fi
 
-# v1.19.9 not v1.19.90, v1.17.2 not v1.17.20: next char must be non-digit (or end).
-# Proposer --version says "untagged" because the build tag is op-node/v1.19.9,
-# not an op-proposer tag. The commit is what distinguishes it from 9f76a9d2.
-if ! echo "$NODE_VER" | grep -qE "v1\\.19\\.9([^0-9]|\$)" \
+# v1.19.11 not v1.19.110, v1.17.4 not v1.17.40: next char must be non-digit (or end).
+# Proposer --version says "untagged" because no op-proposer tag is on
+# 43c071cb. The commit is what distinguishes it from da6d3252 and 9f76a9d2.
+if ! echo "$NODE_VER" | grep -qE "v1\\.19\\.11([^0-9]|\$)" \
   || ! echo "$NODE_VER" | grep -q "$PIN_OP_NODE_COMMIT"; then
   fail_mismatch "op-node" \
     "${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})" \
     "$(oneline "$NODE_VER")"
 fi
 
-if ! echo "$BATCHER_VER" | grep -qE "v1\\.17\\.2([^0-9]|\$)" \
+if ! echo "$BATCHER_VER" | grep -qE "v1\\.17\\.4([^0-9]|\$)" \
   || ! echo "$BATCHER_VER" | grep -q "$PIN_OP_BATCHER_COMMIT"; then
   fail_mismatch "op-batcher" \
     "${PIN_OP_BATCHER_VERSION} (${PIN_OP_BATCHER_COMMIT})" \
@@ -149,10 +154,10 @@ if ! echo "$PROPOSER_VER" | grep -qE "(^|[^A-Za-z])untagged([^A-Za-z]|$)" \
     "$(oneline "$PROPOSER_VER")"
 fi
 
-# Whole line, not a substring: "2.6.0" must not accept "2.6.0-dev" or
-# "2.6.00", and "op-reth Version:" must not accept the old "Reth Version:"
-# line, the previous "op-reth Version: 2.5.0" line, or the bare tag
-# "op-reth/v2.6.0".
+# Whole line, not a substring: "2.6.1" must not accept "2.6.10", "2.6.0",
+# or "2.6", and "op-reth Version:" must not accept the old "Reth Version:"
+# line, the D-0150 "op-reth Version: 2.6.0" line, or the bare tag
+# "op-reth/v2.6.1".
 if ! echo "$RETH_VER" | grep -qx "op-reth Version: ${PIN_RETH_VERSION}" \
   || ! echo "$RETH_VER" | grep -qx "Commit SHA: ${PIN_RETH_COMMIT}"; then
   fail_mismatch "op-reth" \
@@ -163,5 +168,5 @@ fi
 echo "ok op-node ${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})"
 echo "ok op-batcher ${PIN_OP_BATCHER_VERSION} (${PIN_OP_BATCHER_COMMIT})"
 echo "ok op-proposer ${PIN_OP_PROPOSER_VERSION} (${PIN_OP_PROPOSER_COMMIT})"
-echo "ok op-reth tag op-reth/v2.6.0 reports op-reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}"
+echo "ok op-reth tag op-reth/v2.6.1 reports op-reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}"
 echo "ok FORTEL2_EL=${FORTEL2_EL}"
