@@ -113,10 +113,10 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | yq | 4.53.3 | Homebrew |
 | jq | 1.8.2 | Homebrew |
 | Foundry (`forge`/`cast`/`anvil`) | 1.7.1 | `foundryup` |
-| optimism monorepo (sequencer) | `op-node/v1.19.11` (commit `43c071cb…`, annotated tag object `4193077c…`) | `~/src/fortel2/optimism-v1.19.11` — op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (D-0154). `./bin` still serves `~/src/fortel2/optimism-v1.19.9` (`da6d3252`) until the operator swap; that tree is the rollback afterward |
+| optimism monorepo (sequencer) | `op-node/v1.19.11` (commit `43c071cb…`, annotated tag object `4193077c…`) | `~/src/fortel2/optimism-v1.19.11` — op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (D-0154). `./bin` serves this tree since the 2026-10-22 09:08 PT swap; `~/src/fortel2/optimism-v1.19.9` (`da6d3252`) is the rollback |
 | optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
-| op-reth | tag `op-reth/v2.6.1` → reports `op-reth Version: 2.6.1` commit `e16bffa18420c86dbab693097bc33117f74a5f7d` | Clone `~/src/fortel2/optimism-op-reth-v2.6.1` (D-0154 pin for the Mac sequencer binary). `./bin/op-reth` still serves `~/src/fortel2/optimism-op-reth-v2.6.0` until that swap; that tree is the rollback afterward. `~/src/fortel2/optimism-op-reth-v2.5.0` and `~/src/fortel2/optimism-op-reth` (v2.3.3) stay. The Render replica is already v2.6.1 (fortel2-replica R-0028), a separate bump. `./scripts/check-el-pins.sh` requires 2.6.1 and rejects the running binary until the symlinks move. |
+| op-reth | tag `op-reth/v2.6.1` → reports `op-reth Version: 2.6.1` commit `e16bffa18420c86dbab693097bc33117f74a5f7d` | Clone `~/src/fortel2/optimism-op-reth-v2.6.1` (D-0154 pin for the Mac sequencer binary). `./bin/op-reth` serves it since the 2026-10-22 09:08 PT swap; `~/src/fortel2/optimism-op-reth-v2.6.0` is the rollback (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.6.1`). `~/src/fortel2/optimism-op-reth-v2.5.0` and `~/src/fortel2/optimism-op-reth` (v2.3.3) stay. The Render replica is already v2.6.1 (fortel2-replica R-0028), a separate bump. `./scripts/check-el-pins.sh` requires 2.6.1 and passes on the live symlinks. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
 | Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
 | kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
@@ -1060,7 +1060,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 |---|---|---|
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
 | op-geth (not running since 2026-09-02; Render geth deleted 2026-09-14; not a rollback path) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
-| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | Until the D-0154 symlink swap the running sequencer logs `Starting op-reth version="2.6.0 (da6d3252)"`. After that swap the known-good line is `Starting op-reth version="2.6.1 (e16bffa1)"` / `Status … latest_block=`. The v2.5.0 binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
+| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | Known-good since the D-0154 swap (2026-10-22): `Starting op-reth version="2.6.1 (e16bffa1)"`. The v2.6.0 rollback binary logs `Starting op-reth version="2.6.0 (da6d3252)"` / `Status … latest_block=`. The v2.5.0 binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
 | op-reth-verifier / op-reth-verifier-node (sidecar) | `data/logs/op-reth-verifier.log`, `op-reth-verifier-node.log` | `Starting JSON-RPC` / `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
