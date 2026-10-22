@@ -113,10 +113,10 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | yq | 4.53.3 | Homebrew |
 | jq | 1.8.2 | Homebrew |
 | Foundry (`forge`/`cast`/`anvil`) | 1.7.1 | `foundryup` |
-| optimism monorepo (sequencer) | `op-node/v1.19.11` (commit `43c071cb…`, annotated tag object `4193077c…`) | `~/src/fortel2/optimism-v1.19.11` — op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (D-0154). `~/src/fortel2/optimism-v1.19.9` (`da6d3252`) is the Mac rollback |
+| optimism monorepo (sequencer) | `op-node/v1.19.11` (commit `43c071cb…`, annotated tag object `4193077c…`) | `~/src/fortel2/optimism-v1.19.11` — op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (D-0154). `./bin` still serves `~/src/fortel2/optimism-v1.19.9` (`da6d3252`) until the operator swap; that tree is the rollback afterward |
 | optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
-| op-reth | tag `op-reth/v2.6.1` → reports `op-reth Version: 2.6.1` commit `e16bffa18420c86dbab693097bc33117f74a5f7d` | Clone `~/src/fortel2/optimism-op-reth-v2.6.1` (source of truth for the **Mac sequencer** op-reth binary, D-0154). `~/src/fortel2/optimism-op-reth-v2.6.0` is the Mac rollback binary. `~/src/fortel2/optimism-op-reth-v2.5.0` and `~/src/fortel2/optimism-op-reth` (v2.3.3) stay. The Render replica is a separate bump. Assert with `./scripts/check-el-pins.sh`. |
+| op-reth | tag `op-reth/v2.6.1` → reports `op-reth Version: 2.6.1` commit `e16bffa18420c86dbab693097bc33117f74a5f7d` | Clone `~/src/fortel2/optimism-op-reth-v2.6.1` (D-0154 pin for the Mac sequencer binary). `./bin/op-reth` still serves `~/src/fortel2/optimism-op-reth-v2.6.0` until that swap; that tree is the rollback afterward. `~/src/fortel2/optimism-op-reth-v2.5.0` and `~/src/fortel2/optimism-op-reth` (v2.3.3) stay. The Render replica is already v2.6.1 (fortel2-replica R-0028), a separate bump. `./scripts/check-el-pins.sh` requires 2.6.1 and rejects the running binary until the symlinks move. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
 | Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
 | kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
@@ -926,7 +926,7 @@ FORTEL2_ENV=.env.sepolia ./scripts/alert-watch.sh --test
 
 ## Phase 3 — Render L2 replica (US-030 / US-031) ✅
 
-Stock **verifier** on Render: **op-reth** (`v2.6.0` on the Wolfi base since 2026-10-07; D-0152, fortel2-replica R-0023) + `op-node` deriving ForteL2 (chain **852**) from **Sepolia L1** (live since Task 7, 2026-09-11; geth replica deleted in Task 9, 2026-09-14). Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032**). Native Mac L1 is **Phase 3a** (after 4–6).
+Stock **verifier** on Render: **op-reth** `v2.6.1` (commit `e16bffa1`, fortel2-replica R-0028) + `op-node` v1.19.8 deriving ForteL2 (chain **852**) from **Sepolia L1** (live since Task 7, 2026-09-11; geth replica deleted in Task 9, 2026-09-14). The earlier image was `v2.6.0` on the Wolfi base (D-0152, fortel2-replica R-0023). Safe/finalized sync does **not** require opening the Mac mini sequencer — batches already live on L1. Sequencer P2P / Tailscale is stretch (**US-032**). Native Mac L1 is **Phase 3a** (after 4–6).
 
 **Status:** Operator-verified after a fresh Phase 2b cutover (2026-07-22): Mac and Render share matching L2 block hashes (e.g. block 20). Package: [StephenForte/fortel2-replica](https://github.com/StephenForte/fortel2-replica). Use **≥2GB** RAM on Render (Starter 512MB OOMs). Prefer **Private Service**. Friends with a Render account: that repo's [`RUNNING.md` § On Render](https://github.com/StephenForte/fortel2-replica/blob/main/RUNNING.md) — do not copy operator archive/snapshot/gateway setup. Public read is `https://fortel2-replica-rpc.onrender.com`.
 
@@ -1060,7 +1060,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 |---|---|---|
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
 | op-geth (not running since 2026-09-02; Render geth deleted 2026-09-14; not a rollback path) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
-| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | `Starting op-reth version="2.6.1 (e16bffa1)"` after the D-0154 symlink / `Status … latest_block=`. The v2.6.0 rollback binary logs `Starting op-reth version="2.6.0 (da6d3252)"`. The v2.5.0 binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
+| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | Until the D-0154 symlink swap the running sequencer logs `Starting op-reth version="2.6.0 (da6d3252)"`. After that swap the known-good line is `Starting op-reth version="2.6.1 (e16bffa1)"` / `Status … latest_block=`. The v2.5.0 binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
 | op-reth-verifier / op-reth-verifier-node (sidecar) | `data/logs/op-reth-verifier.log`, `op-reth-verifier-node.log` | `Starting JSON-RPC` / `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
