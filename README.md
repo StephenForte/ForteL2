@@ -113,10 +113,10 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | yq | 4.53.3 | Homebrew |
 | jq | 1.8.2 | Homebrew |
 | Foundry (`forge`/`cast`/`anvil`) | 1.7.1 | `foundryup` |
-| optimism monorepo (sequencer) | `op-node/v1.19.9` (`da6d3252…`, tag object `d643cea0b218`) | `~/src/fortel2/optimism-v1.19.9` — op-node v1.19.9, op-batcher v1.17.2, op-proposer untagged (D-0150) |
+| optimism monorepo (sequencer) | `op-node/v1.19.11` (commit `43c071cb…`, annotated tag object `4193077c…`) | `~/src/fortel2/optimism-v1.19.11` — op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (D-0154). `~/src/fortel2/optimism-v1.19.9` (`da6d3252`) is the Mac rollback |
 | optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
-| op-reth | tag `op-reth/v2.6.0` → reports `op-reth Version: 2.6.0` commit `da6d3252491754837a778061db0cc47236ec13c6` | Clone `~/src/fortel2/optimism-op-reth-v2.6.0` (source of truth for the **Mac sequencer** op-reth binary). The Render replica runs the published `op-reth:v2.6.0` image on its own Wolfi base since 2026-10-07 13:49 PT (D-0152, fortel2-replica R-0023). `~/src/fortel2/optimism-op-reth-v2.5.0` is the Mac rollback binary. `~/src/fortel2/optimism-op-reth` stays the v2.3.3 binary. Assert with `./scripts/check-el-pins.sh`. |
+| op-reth | tag `op-reth/v2.6.1` → reports `op-reth Version: 2.6.1` commit `e16bffa18420c86dbab693097bc33117f74a5f7d` | Clone `~/src/fortel2/optimism-op-reth-v2.6.1` (source of truth for the **Mac sequencer** op-reth binary, D-0154). `~/src/fortel2/optimism-op-reth-v2.6.0` is the Mac rollback binary. `~/src/fortel2/optimism-op-reth-v2.5.0` and `~/src/fortel2/optimism-op-reth` (v2.3.3) stay. The Render replica is a separate bump. Assert with `./scripts/check-el-pins.sh`. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
 | Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
 | kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
@@ -186,7 +186,7 @@ python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pi
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
-./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.9, op-batcher v1.17.2, op-proposer untagged (all da6d3252) + op-reth Version 2.6.0 / da6d3252491754837a778061db0cc47236ec13c6 (CI has no Mini binaries)
+./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (commit 43c071cb; tag object 4193077c) + op-reth Version 2.6.1 / e16bffa18420c86dbab693097bc33117f74a5f7d (CI has no Mini binaries)
 # Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL=reth (since 2026-09-02).
 # Local 901 still defaults geth (no 901 reth path). Task 5 already ran; there is no
 # geth rollback (Task 9 deleted the Render disk).
@@ -250,14 +250,14 @@ brew install go just yq jq
 curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 mkdir -p ~/src/fortel2 && cd ~/src/fortel2
-# Sequencer binaries (D-0150). Glamsterdam L1 headers need op-node v1.19.9.
-git clone --depth 1 --branch op-node/v1.19.9 https://github.com/ethereum-optimism/optimism.git optimism-v1.19.9
+# Sequencer binaries (D-0154). Glamsterdam L1 headers need op-node ≥ v1.19.9.
+git clone --depth 1 --branch op-node/v1.19.11 https://github.com/ethereum-optimism/optimism.git optimism-v1.19.11
 # Prestate tree. cannon, op-challenger, and kona-host stay here (da197e45).
 # Do not git checkout this clone — the absolute prestate is tied to it.
 git clone --depth 1 --branch op-node/v1.19.2 https://github.com/ethereum-optimism/optimism.git optimism
 git clone --depth 1 --branch v1.101702.2 https://github.com/ethereum-optimism/op-geth.git
 
-cd optimism-v1.19.9
+cd optimism-v1.19.11
 git submodule update --init --recursive
 just build-superchain-go
 just op-node && just op-batcher && just op-proposer
@@ -273,9 +273,9 @@ curl -L -o /tmp/op-deployer.tgz \
 tar -xzf /tmp/op-deployer.tgz -C /tmp
 mkdir -p ~/src/fortel2/bin
 cp /tmp/op-deployer-0.7.1-darwin-arm64/op-deployer ~/src/fortel2/bin/
-ln -sfn ~/src/fortel2/optimism-v1.19.9/op-node/bin/op-node ~/src/fortel2/bin/op-node
-ln -sfn ~/src/fortel2/optimism-v1.19.9/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
-ln -sfn ~/src/fortel2/optimism-v1.19.9/op-proposer/bin/op-proposer ~/src/fortel2/bin/op-proposer
+ln -sfn ~/src/fortel2/optimism-v1.19.11/op-node/bin/op-node ~/src/fortel2/bin/op-node
+ln -sfn ~/src/fortel2/optimism-v1.19.11/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
+ln -sfn ~/src/fortel2/optimism-v1.19.11/op-proposer/bin/op-proposer ~/src/fortel2/bin/op-proposer
 ln -sfn ~/src/fortel2/op-geth/build/bin/geth ~/src/fortel2/bin/op-geth
 # Rust — kona-host (below) and the op-reth second clone. Nothing Rust-related
 # ships with the other tooling, so a cold-start Mac must install it here (D-0062).
@@ -286,28 +286,29 @@ source "$HOME/.cargo/env"   # or open a new shell
 (cd ~/src/fortel2/optimism/rust && cargo build --release -p kona-host)
 ln -sfn ~/src/fortel2/optimism/rust/target/release/kona-host ~/src/fortel2/bin/kona-host
 
-# op-reth — clone at tag op-reth/v2.6.0 (D-0150). Do NOT `git checkout`
+# op-reth — clone at tag op-reth/v2.6.1 (D-0154). Do NOT `git checkout`
 # ~/src/fortel2/optimism (op-node/v1.19.2, da197e45): that tree still backs
 # cannon, op-challenger, and kona-host. Do NOT `git checkout`
-# ~/src/fortel2/optimism-op-reth (v2.3.3) or optimism-op-reth-v2.5.0
-# (Mac rollback). The sequencer op-node/op-batcher/op-proposer binaries
-# are the v1.19.9 tree above.
-git clone --depth 1 --branch op-reth/v2.6.0 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth-v2.6.0
-cd ~/src/fortel2/optimism-op-reth-v2.6.0
+# ~/src/fortel2/optimism-op-reth (v2.3.3), optimism-op-reth-v2.5.0, or
+# optimism-op-reth-v2.6.0 (Mac rollback). The sequencer
+# op-node/op-batcher/op-proposer binaries are the v1.19.11 tree above.
+# Unset CARGO_TARGET_DIR so the binary lands in this clone, not a sandbox cache.
+git clone --depth 1 --branch op-reth/v2.6.1 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth-v2.6.1
+cd ~/src/fortel2/optimism-op-reth-v2.6.1
 git submodule update --init --recursive
 just update-superchain-registry-submodule || true
-cd rust && GIT_VERSION=v2.6.0 \
+cd rust && unset CARGO_TARGET_DIR && GIT_VERSION=v2.6.1 \
   GIT_COMMIT="$(git rev-parse HEAD)" \
-  GIT_DATE=2026-09-30T21:10:14Z \
+  GIT_DATE=2026-10-21T21:58:34Z \
   BUILD_PROFILE=release \
   cargo build --release --locked --bin op-reth --manifest-path op-reth/bin/Cargo.toml
 # Binary lands at rust/target/release/op-reth.
 # Measured --version (tag string is not this line):
-#   op-reth Version: 2.6.0
-#   Commit SHA: da6d3252491754837a778061db0cc47236ec13c6
-ln -sfn ~/src/fortel2/optimism-op-reth-v2.6.0/rust/target/release/op-reth ~/src/fortel2/bin/op-reth
+#   op-reth Version: 2.6.1
+#   Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d
+ln -sfn ~/src/fortel2/optimism-op-reth-v2.6.1/rust/target/release/op-reth ~/src/fortel2/bin/op-reth
 # Mini .env BIN_DIR is this repo's ./bin. From the ForteL2 repo root:
-#   ln -sfn ~/src/fortel2/optimism-op-reth-v2.6.0/rust/target/release/op-reth ./bin/op-reth
+#   ln -sfn ~/src/fortel2/optimism-op-reth-v2.6.1/rust/target/release/op-reth ./bin/op-reth
 #   ./scripts/check-el-pins.sh
 ```
 
@@ -1059,7 +1060,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 |---|---|---|
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
 | op-geth (not running since 2026-09-02; Render geth deleted 2026-09-14; not a rollback path) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
-| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | `Starting op-reth version="2.6.0 (da6d3252)"` after the D-0150 symlink / `Status … latest_block=`. The v2.5.0 rollback binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
+| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | `Starting op-reth version="2.6.1 (e16bffa1)"` after the D-0154 symlink / `Status … latest_block=`. The v2.6.0 rollback binary logs `Starting op-reth version="2.6.0 (da6d3252)"`. The v2.5.0 binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
 | op-reth-verifier / op-reth-verifier-node (sidecar) | `data/logs/op-reth-verifier.log`, `op-reth-verifier-node.log` | `Starting JSON-RPC` / `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
