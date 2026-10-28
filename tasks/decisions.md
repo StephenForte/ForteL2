@@ -1502,6 +1502,18 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - **An unmoved v1 store does not panic on the start-script path.** Scratch, v2.6.1: v1 `proofs init`, then v2 `proofs init` (exit 0, same `mdbx.dat`), then a v2 node gives `(v2)`, `ExEx started`, and serves proofs. The same store without the flag gives `(v1)` and also runs. The worker's "panics and stops the sequencer" holds only for a bare `op-reth node` with no init first.
   - Consequence: if any start with T1 runs before Step 1's `mv` (including the 00:15 wake after `~/fortel2-agents` is pulled), v2 is written in place inside the 38 GB v1 file. The node keeps running and nothing alerts, but move-based rollback and the cleanup are lost. Step 1 must run in the same sitting as the merge and pull, before 23:45 PT.
 - **T1 re-review (PR #266, 8f933c0): approved.** README-only fix (+6/−4) applies both changes. CI is green on all 6 checks. Code is unchanged from the re-gated 0e89e54.
+- **Step 1 executed 2026-10-28 (planner, on operator go after #266 merged as `bc8632e`).**
+  - Ran from `~/fortel2-agents`, fast-forwarded 120437d → bc8632e. The shared `~/ForteL2` checkout was not touched.
+  - Pre-stop: latest 2885588, safe 2885505, finalized 2884875.
+  - `stop-all-sepolia.sh` 09:21:10–09:21:15 PDT. op-reth logged `Received SIGTERM` after block 2885592 (clean). No listeners on :9545/:9546/:9547/:9551.
+  - `mv historical-proofs historical-proofs.v1-pre-d0155`: the 42,949,672,960 B `mdbx.dat` kept, `lock` gone.
+  - `start-all-sepolia.sh` 09:21:27–09:21:57 PDT; challenger skipped (`SEPOLIA_START_CHALLENGER=0`).
+  - op-reth 16:21:32Z: `Starting op-reth version="2.6.1 (e16bffa1)"`, `Using on-disk storage for proofs history (v2)`, `Loaded storage settings … storage_v2: true`, `exex{id="proofs-history"}: ExEx started`, `Proofs-history RPC overrides installed`. No panic, crash or ParentHashMismatch since.
+  - New store 6.6 MB.
+  - README check at 09:22:24 PDT: head−10 `eth_getProof(0x4200…0016)` returned a proof object, exit 0. Block 2885580 (before the re-init) returned `-32603 no state found`, so the window starts at the re-init tip ≈2885592.
+  - Liveness, 30 s samples 09:22:40–09:27:11: latest 2885636 → 2885771, steady 2 s blocks. Safe re-derived from 2885325 after the restart, reaching 2885505 (the pre-stop value) at 09:23:10 and 2885666 (past the re-init tip, new batches) at 09:24:40. Finalized stayed 2884875; its age was 1427 s before the stop, so that is normal L1-finality lag.
+  - Sequencer gap ≈ 09:21:11 → 09:21:57 PDT.
+  - Delete `historical-proofs.v1-pre-d0155` (38 GB) after 2026-11-04 if no ExEx alert. Rollback until then is the README procedure.
 - Next free decision id is **D-0156**.
 
 ## Template
