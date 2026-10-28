@@ -1501,6 +1501,7 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - Replacement check: `eth_getProof` at head−10 (via `cast to-hex`), run ≥1 min after start. Measured green on live; red at block 1,000,000.
   - **An unmoved v1 store does not panic on the start-script path.** Scratch, v2.6.1: v1 `proofs init`, then v2 `proofs init` (exit 0, same `mdbx.dat`), then a v2 node gives `(v2)`, `ExEx started`, and serves proofs. The same store without the flag gives `(v1)` and also runs. The worker's "panics and stops the sequencer" holds only for a bare `op-reth node` with no init first.
   - Consequence: if any start with T1 runs before Step 1's `mv` (including the 00:15 wake after `~/fortel2-agents` is pulled), v2 is written in place inside the 38 GB v1 file. The node keeps running and nothing alerts, but move-based rollback and the cleanup are lost. Step 1 must run in the same sitting as the merge and pull, before 23:45 PT.
+- **T1 re-review (PR #266, 8f933c0): approved.** README-only fix (+6/−4) applies both changes. CI is green on all 6 checks. Code is unchanged from the re-gated 0e89e54.
 - Next free decision id is **D-0156**.
 
 ## Template
