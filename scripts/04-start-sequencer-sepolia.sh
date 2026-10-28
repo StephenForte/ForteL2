@@ -100,7 +100,8 @@ if [[ "$(fortel2_el)" == "reth" ]]; then
 
   echo "Initializing proofs-history store at $DATADIR/historical-proofs (skip-backfill; idempotent)"
   op-reth proofs init --datadir="$DATADIR" --chain="$GENESIS" \
-    --proofs-history.skip-backfill
+    --proofs-history.skip-backfill \
+    "$(proofs_history_storage_version_flag)"
 
   wait_for_rpc "$L1_RPC_URL" "L1 Sepolia"
   L1_ID="$(cast chain-id --rpc-url "$L1_RPC_URL")"

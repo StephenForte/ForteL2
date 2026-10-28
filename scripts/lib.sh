@@ -1041,6 +1041,18 @@ require_reth_profile() {
   esac
 }
 
+# D-0155. Single source for the proofs-history schema. Omitted, op-reth
+# defaults to v1, and v2.8.0 refuses a v1-only proofs DB. The value does not
+# follow which binary is running: v2.6.1 and a later bump both receive it, so
+# a rollback still opens the v2 store. Verifier does not call this.
+proofs_history_storage_version() {
+  printf '%s\n' v2
+}
+
+proofs_history_storage_version_flag() {
+  printf '%s\n' "--proofs-history.storage-version=$(proofs_history_storage_version)"
+}
+
 # Prints one flag per line (bash 3.2 — no mapfile). Archive is op-reth default
 # (no --full). Task 4 proves historical-proof sufficiency; we enable the flag.
 reth_profile_flags() {
@@ -1051,8 +1063,10 @@ reth_profile_flags() {
       # v2.6.0 raised the engine persistence defaults (threshold 2 → 7;
       # memory-block-buffer-target was 0, now min(threshold, 5)). The
       # sequencer keeps the previous behaviour (D-0150). The verifier
-      # profile does not take these flags.
+      # profile does not take these flags. Storage version is the helper
+      # above (D-0155), not a second literal.
       printf '%s\n' --proofs-history \
+        "$(proofs_history_storage_version_flag)" \
         --engine.persistence-threshold=2 \
         --engine.memory-block-buffer-target=0
       ;;

@@ -1074,6 +1074,58 @@ Start scripts run `scripts/rotate-logs.sh` against `$LOG_DIR` (`$DATA_DIR/logs`)
 
 `./scripts/stop-all.sh` then `./scripts/start-all.sh` (without `reset.sh`) resumes from the existing EL datadir (local 901: op-geth; Sepolia 852: op-reth) — no re-genesis. Deploy artifacts are reused.
 
+## Proofs-history v1 → v2 rebuild (D-0155)
+
+The live proofs store was created without `--proofs-history.storage-version`, so it is v1 (`Using on-disk storage for proofs history (v1)` on every boot). op-reth v2.8.0 refuses a proofs DB that holds only v1 data. This tree passes `--proofs-history.storage-version=v2` from `proofs_history_storage_version` in `scripts/lib.sh` on the `sequencer_faultproof` profile and both `proofs init` sites. The binary pin stays v2.6.1 until a later change. Run Step 1 below on that binary, after this change is on `main` and `~/fortel2-agents` has been pulled. Launchd sleep/wake/health jobs run from `~/fortel2-agents`; without that pull the next wake (00:15 PT) starts the old scripts and `proofs init` creates a v1 store again.
+
+After the rebuild, `eth_getProof` serves only blocks from the re-init tip forward. There is no archive fallback below the window (measured). The window stays the default 1,296,000 blocks and refills over about 30 days. A bare `op-reth node` with the v2 flag on a v1-only store logs `(v2)` and then exits on `Proofs storage not initialized`. The start script runs `proofs init` first, so that is not what an unmoved store does.
+
+Do not start the stack with this change — including the 00:15 launchd wake after ~/fortel2-agents is pulled — until the mv step has run. The start script would otherwise write v2 into the v1 store in place: the node keeps running, but move-based rollback and cleanup are lost.
+
+Each block is one command. Run them from the repo root, in order. Do not run them across the 23:45–00:15 PT sleep window.
+
+```bash
+git -C "$HOME/fortel2-agents" pull
+```
+
+```bash
+FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+```
+
+```bash
+DATA_DIR="$(grep '^DATA_DIR=' .env.sepolia | cut -d= -f2-)" && mv "$DATA_DIR/l2/op-reth/historical-proofs" "$DATA_DIR/l2/op-reth/historical-proofs.v1-pre-d0155"
+```
+
+```bash
+FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
+```
+
+```bash
+grep -F 'Using on-disk storage for proofs history (v2)' "$(grep '^DATA_DIR=' .env.sepolia | cut -d= -f2-)/logs/op-reth.log"
+```
+
+```bash
+cast rpc eth_getProof 0x4200000000000000000000000000000000000016 '[]' "$(cast to-hex $(( $(cast block-number --rpc-url http://127.0.0.1:9545) - 10 )))" --rpc-url http://127.0.0.1:9545
+```
+
+Run it at least one minute after the start. The proofs store trails the head by 1–3 blocks, so `latest` always returns `-32603` on a healthy node, and a fresh v2 store starts at the re-init tip. A proof object means that block is served. `-32603` on this call means it is not.
+
+Rollback is the reverse, and the flag has to come off before the v1 store is opened. Starting with the flag still set runs `proofs init` and writes v2 back into the restored file. Move the fresh store aside, put the v1 store back, revert this change, then start.
+
+```bash
+FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
+```
+
+```bash
+DATA_DIR="$(grep '^DATA_DIR=' .env.sepolia | cut -d= -f2-)" && mv "$DATA_DIR/l2/op-reth/historical-proofs" "$DATA_DIR/l2/op-reth/historical-proofs.v2-attempt" && mv "$DATA_DIR/l2/op-reth/historical-proofs.v1-pre-d0155" "$DATA_DIR/l2/op-reth/historical-proofs"
+```
+
+Revert this PR (the storage-version flag) in both this checkout and `~/fortel2-agents`, then:
+
+```bash
+FORTEL2_ENV=.env.sepolia ./scripts/start-all-sepolia.sh
+```
+
 ## Phase 2 readiness checklist (US-012 — complete in Phase 1b before Sepolia)
 
 Full phase table is in [Roadmap](#roadmap) above; acceptance criteria live in `tasks/prd-l2-learning-chain.md`. Phases **0–6 done** (Sepolia + Render replica + custom batcher/proposer/derivation + block viewer). **3a** native Mac L1 stays deferred. Next learning work: Phase **7** fault proofs ([`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md)) via the redeploy gate, Phase **3b** friend replicas ([`replica/FRIENDS.md`](replica/FRIENDS.md); Render path in fortel2-replica `RUNNING.md`), or leftover op-reth follow-ups ([`tasks/prd-op-reth-migration.md`](tasks/prd-op-reth-migration.md); Tasks 1–7 and 9 executed — chain 852 sequences on op-reth since 2026-09-02; Task 8 clean-room deploy unrun; Task 9 friend-sync gate skipped; no geth rollback). Product track: expand/execute [`tasks/prd-mainnet-pilot.md`](tasks/prd-mainnet-pilot.md). Do **not** start Phase 2b+ until all of these are true:

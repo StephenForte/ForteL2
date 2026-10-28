@@ -243,7 +243,9 @@ EXEX_BODY="$(cat "$EXEX_FIX/mock/osascript.argv" 2>/dev/null || true)"
 if [[ "$EXEX_EC" -eq 0 ]] \
   && [[ "$EXEX_OUT" == *"condition stack-down"* ]] \
   && printf '%s' "$EXEX_BODY" | grep -q 'not initialized' \
-  && printf '%s' "$EXEX_BODY" | grep -q 'proofs init' \
+  && printf '%s' "$EXEX_BODY" | grep -q 'start script' \
+  && printf '%s' "$EXEX_BODY" | grep -q -- '--proofs-history.storage-version=v2' \
+  && printf '%s' "$EXEX_BODY" | grep -q 'bare proofs init' \
   && printf '%s' "$EXEX_BODY" | grep -q 'Do not delete' \
   && ! printf '%s' "$EXEX_BODY" | grep -q 'Parent hash mismatch' \
   && ! printf '%s' "$EXEX_BODY" | grep -q 'divergent'; then

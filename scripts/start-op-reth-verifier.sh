@@ -262,12 +262,15 @@ done < <(reth_profile_flags)
 
 # --proofs-history ExEx refuses to start unless the store is initialized.
 # Panic text names `initialize-op-proofs`; the pinned binary's command is
-# `op-reth proofs init`. skip-backfill: V1 has no backfill, and this datadir
-# starts at genesis so history is filled forward during Task 3 derive.
+# `op-reth proofs init`. skip-backfill: V1 has no backfill, and a v2 init
+# with this flag leaves the window at the tip (D-0155). The storage-version
+# argument below is the shared helper. A bare proofs init on v2.6.1 creates
+# a v1 store.
 if [[ "$FORTEL2_RETH_PROFILE" == "sequencer_faultproof" ]]; then
   echo "Initializing proofs-history store at $DATADIR/historical-proofs (skip-backfill; idempotent)"
   "$OP_RETH_CMD" proofs init --datadir="$DATADIR" --chain="$GENESIS" \
-    --proofs-history.skip-backfill
+    --proofs-history.skip-backfill \
+    "$(proofs_history_storage_version_flag)"
 fi
 
 L1_RPC_KIND="${SEPOLIA_L1_RPC_KIND:-quicknode}"
