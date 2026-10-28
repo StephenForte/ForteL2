@@ -1514,6 +1514,13 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - Liveness, 30 s samples 09:22:40–09:27:11: latest 2885636 → 2885771, steady 2 s blocks. Safe re-derived from 2885325 after the restart, reaching 2885505 (the pre-stop value) at 09:23:10 and 2885666 (past the re-init tip, new batches) at 09:24:40. Finalized stayed 2884875; its age was 1427 s before the stop, so that is normal L1-finality lag.
   - Sequencer gap ≈ 09:21:11 → 09:21:57 PDT.
   - Delete `historical-proofs.v1-pre-d0155` (38 GB) after 2026-11-04 if no ExEx alert. Rollback until then is the README procedure.
+- **T2 briefed 2026-10-28 (branch `chore/op-reth-v2.8.0`, strong model, Mac mini, dispatch before 21:00 PT).**
+  - `op-reth/v2.8.0` is an annotated tag: object `b0763e57…` peels to commit `d6620202d4e563957830e688007a0cab29bd80f3`. Rust channel 1.95, the same as v2.6.1.
+  - Build tree `~/src/fortel2/optimism-op-reth-v2.8.0` (~3 GB; 62 GiB free).
+  - G1: scratch snapshot 811872, v2.6.1 → v2.8.0 → v2.6.1 on one datadir with a v2 proofs store, plus a flagless v2.8.0 case.
+  - G2: sidecar on QuickNode, pre-approved to the D-0154 cap (1000 L1 origins, ≈$0.005).
+  - Live swap: operator-run after merge.
+  - Measured: `eth_getLogs` with fromBlock > head returns `[]` today on :9545 and :9555 (v2.8.0: -32602). SettlementOS has no chain-852 log poller (its getLogs is an explorer fallback on 84532/80002).
 - Next free decision id is **D-0156**.
 
 ## Template
