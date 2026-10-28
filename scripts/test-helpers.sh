@@ -7781,6 +7781,33 @@ else
   echo "FAIL persistence flags must be sequencer-only (verifier='$RETH_VF_FLAGS' sequencer='$RETH_SF_FLAGS')" >&2
   fail=1
 fi
+# D-0155: storage version is one helper. The node profile and both proofs init
+# sites call it. A literal at a call site, or a missing call, fails this check.
+RETH_PH_VER="$(proofs_history_storage_version)"
+RETH_PH_FLAG="$(proofs_history_storage_version_flag)"
+RETH_PH_LITERALS="$(grep -c -- '--proofs-history.storage-version=' "$SCRIPT_DIR/lib.sh" || true)"
+if [[ "$RETH_PH_FLAG" == "--proofs-history.storage-version=${RETH_PH_VER}" ]] \
+  && echo "$RETH_SF_FLAGS" | grep -q -- '--proofs-history' \
+  && echo "$RETH_SF_FLAGS" | grep -Fq -- "$RETH_PH_FLAG" \
+  && ! echo "$RETH_VF_FLAGS" | grep -q -- 'proofs-history' \
+  && ! echo "$RETH_VF_FLAGS" | grep -q -- 'storage-version' \
+  && [[ "$RETH_PH_LITERALS" -eq 1 ]] \
+  && awk '
+      /sequencer_faultproof\)/ { in_sf = 1 }
+      in_sf && /verifier\)/ { exit found ? 0 : 1 }
+      in_sf && /proofs_history_storage_version_flag/ { found = 1 }
+      END { exit found ? 0 : 1 }
+    ' "$SCRIPT_DIR/lib.sh" \
+  && grep -F -q '$(proofs_history_storage_version_flag)' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && grep -F -q '$(proofs_history_storage_version_flag)' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && ! grep -q -- '--proofs-history.storage-version=' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh" \
+  && ! grep -q -- '--proofs-history.storage-version=' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && grep -q -- "--proofs-history.storage-version=${RETH_PH_VER}" "$SCRIPT_DIR/alert-watch.sh"; then
+  echo "PASS proofs-history storage-version=${RETH_PH_VER} comes from one helper at the profile and both proofs init sites"
+else
+  echo "FAIL proofs-history storage-version must be one helper, emitted by sequencer_faultproof and both proofs init sites (ver='${RETH_PH_VER}' flag='${RETH_PH_FLAG}' literals=${RETH_PH_LITERALS} sequencer='${RETH_SF_FLAGS}' verifier='${RETH_VF_FLAGS}')" >&2
+  fail=1
+fi
 
 # Task 4 SafeDB: default path, refuse live $DATA_DIR/safedb, op-geth, and the
 # op-reth / spike-op-reth datadirs. Auto-enable only on sequencer_faultproof.
@@ -9557,7 +9584,9 @@ else
   echo "PASS verify-reth-parity.sh does not invoke debug_setHead or admin_ methods"
 fi
 if grep -q 'proofs init' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
-  && grep -q 'skip-backfill' "$SCRIPT_DIR/start-op-reth-verifier.sh"; then
+  && grep -q 'skip-backfill' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && grep -F -q '$(proofs_history_storage_version_flag)' "$SCRIPT_DIR/start-op-reth-verifier.sh" \
+  && grep -F -q '$(proofs_history_storage_version_flag)' "$SCRIPT_DIR/04-start-sequencer-sepolia.sh"; then
   echo "PASS start-op-reth-verifier.sh runs proofs init --skip-backfill for sequencer_faultproof"
 else
   echo "FAIL sidecar start must initialize proofs-history before --proofs-history" >&2

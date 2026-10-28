@@ -985,8 +985,11 @@ def _exex_body_from_region(region):
     if "Proofs storage not initialized" in ctx:
         return (
             " ExEx cause: proofs store not initialized. "
-            "Matched: %s. Remedy: op-reth proofs init (the start script already "
-            "does this idempotently). Do not delete %s."
+            "Matched: %s. Remedy: run the Sepolia start script. It runs "
+            "op-reth proofs init --proofs-history.skip-backfill "
+            "--proofs-history.storage-version=v2. A hand-run proofs init must "
+            "pass that storage-version flag; a bare proofs init on v2.6.1 "
+            "recreates a v1 store. Do not delete %s."
         ) % (quote, PROOFS_STORE)
     return (
         " ExEx cause: Critical task `exex` panicked (unclassified). "
