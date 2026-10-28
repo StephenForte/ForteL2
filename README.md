@@ -1078,7 +1078,9 @@ Start scripts run `scripts/rotate-logs.sh` against `$LOG_DIR` (`$DATA_DIR/logs`)
 
 The live proofs store was created without `--proofs-history.storage-version`, so it is v1 (`Using on-disk storage for proofs history (v1)` on every boot). op-reth v2.8.0 refuses a proofs DB that holds only v1 data. This tree passes `--proofs-history.storage-version=v2` from `proofs_history_storage_version` in `scripts/lib.sh` on the `sequencer_faultproof` profile and both `proofs init` sites. The binary pin stays v2.6.1 until a later change. Run Step 1 below on that binary, after this change is on `main` and `~/fortel2-agents` has been pulled. Launchd sleep/wake/health jobs run from `~/fortel2-agents`; without that pull the next wake (00:15 PT) starts the old scripts and `proofs init` creates a v1 store again.
 
-After the rebuild, `eth_getProof` serves only blocks from the re-init tip forward. There is no archive fallback below the window (measured). The window stays the default 1,296,000 blocks and refills over about 30 days. A log line that says `(v2)` and is followed by `Proofs storage not initialized` means the store was not initialized at v2; the process exits. That is what v2.6.1 does when the v2 flag opens a v1-only store.
+After the rebuild, `eth_getProof` serves only blocks from the re-init tip forward. There is no archive fallback below the window (measured). The window stays the default 1,296,000 blocks and refills over about 30 days. A bare `op-reth node` with the v2 flag on a v1-only store logs `(v2)` and then exits on `Proofs storage not initialized`. The start script runs `proofs init` first, so that is not what an unmoved store does.
+
+Do not start the stack with this change — including the 00:15 launchd wake after ~/fortel2-agents is pulled — until the mv step has run. The start script would otherwise write v2 into the v1 store in place: the node keeps running, but move-based rollback and cleanup are lost.
 
 Each block is one command. Run them from the repo root, in order. Do not run them across the 23:45–00:15 PT sleep window.
 
@@ -1103,12 +1105,12 @@ grep -F 'Using on-disk storage for proofs history (v2)' "$(grep '^DATA_DIR=' .en
 ```
 
 ```bash
-cast rpc eth_getProof 0x4200000000000000000000000000000000000016 '[]' latest --rpc-url http://127.0.0.1:9545
+cast rpc eth_getProof 0x4200000000000000000000000000000000000016 '[]' "$(cast to-hex $(( $(cast block-number --rpc-url http://127.0.0.1:9545) - 10 )))" --rpc-url http://127.0.0.1:9545
 ```
 
-A proof object from that call means the head is served. `-32603` means it is not.
+Run it at least one minute after the start. The proofs store trails the head by 1–3 blocks, so `latest` always returns `-32603` on a healthy node, and a fresh v2 store starts at the re-init tip. A proof object means that block is served. `-32603` on this call means it is not.
 
-Rollback is the reverse, and the flag has to come off before the v1 store is opened. v2.6.1 with the v2 flag on a v1-only store panics and shuts down. Move the fresh store aside, put the v1 store back, revert this change, then start.
+Rollback is the reverse, and the flag has to come off before the v1 store is opened. Starting with the flag still set runs `proofs init` and writes v2 back into the restored file. Move the fresh store aside, put the v1 store back, revert this change, then start.
 
 ```bash
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
