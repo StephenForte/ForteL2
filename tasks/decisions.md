@@ -1495,6 +1495,12 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - op-challenger (stopped, D-0132) is the only consumer that needs the full window. Re-enabling it within 30 days of Step 1 means games whose blocks predate the re-init cannot be played.
   - `resolve-games-sepolia.sh` and the proposer are unaffected (measured above).
   - Any hand-run `op-reth proofs init` must pass `--proofs-history.storage-version=v2` from now on. Without it, v2.6.1 creates a v1 store again.
+- **T1 review (PR #266, head 0e89e54, 2026-10-28; changes requested, README only).**
+  - Gate re-run in a scratch clone: `test-helpers.sh` 769 PASS / 0 FAIL, matching the handoff. Base = main db25b09. Scope clean.
+  - **The head is never provable.** On live `:9545`, `eth_getProof` at `latest` returns `-32603 no state found`. The proofs ExEx trails the head by 1–3 blocks (three samples; head−3/−4 served). `safe` and `finalized` are served. The worker's README check used `latest`, which would read as a failure on a healthy node.
+  - Replacement check: `eth_getProof` at head−10 (via `cast to-hex`), run ≥1 min after start. Measured green on live; red at block 1,000,000.
+  - **An unmoved v1 store does not panic on the start-script path.** Scratch, v2.6.1: v1 `proofs init`, then v2 `proofs init` (exit 0, same `mdbx.dat`), then a v2 node gives `(v2)`, `ExEx started`, and serves proofs. The same store without the flag gives `(v1)` and also runs. The worker's "panics and stops the sequencer" holds only for a bare `op-reth node` with no init first.
+  - Consequence: if any start with T1 runs before Step 1's `mv` (including the 00:15 wake after `~/fortel2-agents` is pulled), v2 is written in place inside the 38 GB v1 file. The node keeps running and nothing alerts, but move-based rollback and the cleanup are lost. Step 1 must run in the same sitting as the merge and pull, before 23:45 PT.
 - Next free decision id is **D-0156**.
 
 ## Template
