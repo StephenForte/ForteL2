@@ -1041,10 +1041,14 @@ require_reth_profile() {
   esac
 }
 
-# D-0155. Single source for the proofs-history schema. Omitted, op-reth
-# defaults to v1, and v2.8.0 refuses a v1-only proofs DB. The value does not
-# follow which binary is running: v2.6.1 and a later bump both receive it, so
-# a rollback still opens the v2 store. Verifier does not call this.
+# D-0155. Single source for the proofs-history schema. Omitted on the v2.6.1
+# rollback binary, op-reth defaults to v1: a bare proofs init there recreates
+# a v1 store. v2.8.0 has no v1 format (the flag is a no-op, any other value
+# is rejected) and still refuses a v1-only proofs DB. A v2.8.0 node with
+# --proofs-history and no prior proofs init does not create a store; ExEx
+# exits "Proofs storage not initialized" (G1, 2026-10-28). The value does not
+# follow which binary is running: v2.6.1 and v2.8.0 both receive it, so a
+# rollback still opens the v2 store. Verifier does not call this.
 proofs_history_storage_version() {
   printf '%s\n' v2
 }
