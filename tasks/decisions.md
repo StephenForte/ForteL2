@@ -1454,6 +1454,110 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
 - **Planner re-check 09:28 PDT.** `:9545` `op-reth/v2.6.1-e16bffa1/aarch64-macos`; latest 2626612 → 2626614, age 0–1 s; safe 2626557 (age 117 s); finalized 2626077, hash `0x82309cc4b717a0ababa53d36c49126173dbce5b36071cb683ffc6a16d269cb51` = public replica (a post-swap block, finalized). `check-el-pins.sh` on the live symlinks exit 0. Batcher receipt re-read via PublicNode: status 0x1, block 11970642.
 - **Decision:** the Mac sequencer pin is the pair above. Rollback = repoint the four symlinks to `optimism-op-reth-v2.6.0` / `optimism-v1.19.9` and restart (G1). `SEPOLIA_START_CHALLENGER` stays 0; cannon/op-challenger/kona-host stay on the v1.19.2 prestate tree.
 - **Consequence:** Mac and replica both run op-reth v2.6.1 (`e16bffa1`); the replica's op-node is v1.19.8 and the Mac's v1.19.11. `snapshot-reth-state.sh` captures should no longer need `--allow-pin-mismatch` (R-0028's reason was the Mini still on v2.6.0); unverified, no capture has run since the swap. Nightly jobs run from `~/fortel2-agents`, which needs a pull to see the new pin script. Next free decision id is **D-0155**.
+### D-0155 — **op-reth v2.8.0 response: rebuild the Mac proofs-history store as v2 on the current v2.6.1 binary first (v1 store moved aside, not deleted), then bump op-reth to v2.8.0 as a plain binary swap. op-node stays v1.19.11. Main-DB storage v1 EOL (2027-01-26) applies to neither node: the Mac and the Render replica are both storage v2.**
+- **Context:** OP's 2026-10-27 batch (13:17 PT): op-reth/v2.8.0 (recommended) and op-node/v1.20.0 (optional; recommended only for GIWA Sepolia). v2.8.0 **removes v1 historical-proofs storage** and refuses to start on a proofs DB that holds only v1 data. A node is on v1 if it never set `--proofs-history.storage-version` (#23067, #23328). Separately, OP's notice "op-reth storage v1 deprecation" (announced 2026-10-26) ends support for the **main-DB** storage v1 on 2027-01-26. A binary upgrade does not migrate the main DB (`op-reth db migrate-v2` or a v2 snapshot). The notice says it is unrelated to the proofs storage version.
+- **Measured (planner, 2026-10-28, read-only; live stack not stopped):**
+  - **Mac main DB is v2.** Every op-reth start in `$DATA_DIR/logs/op-reth.log*` logs `Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode="archive"` (latest boot 2026-10-28 00:15 PT). The datadir has `rocksdb/` (448 MB) and `static_files/` (3.1 GB).
+  - **Mac proofs store is v1.** Same boots log `Using on-disk storage for proofs history (v1)`. `historical-proofs/mdbx.dat` is 42,949,672,960 B (38 GB on disk); 66 GiB free on the volume.
+  - **Code matches.** `reth_profile_flags sequencer_faultproof` (`scripts/lib.sh` ~:1055) passes `--proofs-history` with no storage-version. `04-start-sequencer-sepolia.sh:102` and `start-op-reth-verifier.sh:269` run `op-reth proofs init … --proofs-history.skip-backfill` with no storage-version.
+  - **v2.6.1 already supports v2.** `bin/op-reth` (`2.6.1`, `e16bffa1`) `node --help` and `proofs init --help` both list `--proofs-history.storage-version` with `v1` "Default" and `v2`.
+  - **Window = 1,296,000 blocks (30 days).** The flag is unset, so the default applies. Head 2,883,770 against `pruning proof storage … to_block=1587770`.
+  - **No archive fallback below the window.** `eth_getProof(0x4200…0016, [], N)` on `:9545`: N=1,000,000 and N=1,587,700 return `-32603 no state found for block number N`; N=1,587,800 and N=2,883,000 return a proof.
+  - **The proposer path does not use the proofs store.** op-node `:9547` `optimism_outputAtBlock` returns an output root at block 1,000,000 (below the window) and at 2,883,000. Post-Isthmus the message-passer storage root comes from the header.
+  - **No other v2.8.0 breaking change applies.** None of the removed BAL flags, `--txpool.minimum-priority-fee`, `--txpool.max-batch-size`, `--rocksdb-block-cache-size` or `--p2p.sync.req-resp` appears in `scripts/`, `launchd/` or `.env.sepolia.example`. `--engine.persistence-threshold=2` and `--engine.memory-block-buffer-target=0` are pinned explicitly (D-0150), so the new 7 → 50 default does not reach us.
+  - **Replica:**  - **Replica:** `fortel2-replica` `entrypoint-reth.sh` runs no `--proofs-history`, so the proofs break does not apply. Main DB is v2: Render logs for `fortel2-replica-reth` (`srv-dagquc7qj5pc73fdnjsg`, workspace Supa Workspace) show `Loaded storage settings settings=StorageSettings { storage_v2: true } pruning_mode="archive"` on its boots of 2026-10-21 19:57Z, 2026-10-22 14:24Z and 2026-10-22 15:52Z (the most recent boot, the v2.6.1 deploy). Planner query 2026-10-28. No `migrate-v2` is needed there either.ps (operator choice, 2026-10-28):**
+  - v2.6.1 also defaults to v1. Rebuild the store as v2 under v2.8.0, roll back to v2.6.1 without an explicit flag, and v2.6.1 opens the store as v1, so the ExEx does not start.
+  - Making the v2 flag explicit everywhere, and rebuilding on the binary we already run, separates the storage change from the binary change. Each step then has its own rollback:
+    - Step 1 rollback: stop, move the v1 store back, revert T1, start.
+    - Step 2 rollback: repoint `bin/op-reth` to the v2.6.1 tree and restart; the flag keeps v2.6.1 on v2.
+  - v2.8.0 accepts `--proofs-history.storage-version=v2` as a no-op.
+- **Plan:**
+  - **T1** (worker, one PR, `scripts/lib.sh` is CODEOWNERS-privileged so it needs the operator's review):
+    - Pass `--proofs-history.storage-version=v2` explicitly in the `sequencer_faultproof` profile and in both `proofs init` call sites.
+    - Make the alert-watch ExEx fix-up text v2-correct.
+    - Strengthen the tests that encode these.
+    - Measure on a scratch datadir how v2.6.1 behaves for `proofs init v2` on a fresh store and on a v1-only store, and for `node --proofs-history.storage-version=v2` on a v1-only store.
+    - Add the operator runbook to README.
+  - **Step 1** (operator, after T1 merges and `~/fortel2-agents` is pulled):
+    - Stop the stack.
+    - `mv` `historical-proofs` to `historical-proofs.v1-pre-d0155`.
+    - Start, which runs the explicit v2 init at the tip.
+    - Confirm `Using on-disk storage for proofs history (v2)`, an `eth_getProof` at the head, and the head advancing.
+  - **T2** (later brief): pin bump to op-reth v2.8.0 per the D-0154 pattern: build tree, `check-el-pins.sh`, scratch G1, operator swap with an APFS clone. op-batcher and op-proposer stay unchanged.
+  - **Replica bump:** separate fortel2-replica work behind the D-0152 CI and canary gate.
+  - **Cleanup:** delete `historical-proofs.v1-pre-d0155` after a week on v2 with no ExEx alert.
+- **Not yet tested:**
+  - v2.8.0's new refusal to run `proofs init` from a state trie that lags the tip. Expected to pass with threshold 2 and a clean stop; G1 in T2 checks it.
+  - What v2.6.1 does when the store version and the flag disagree. T1 measures it.
+- **Decision:** two steps as above. Skip op-node v1.20.0 (`--network giwa-sepolia` support and removal of the req/resp P2P sync server, neither used here). The main-DB `migrate-v2` is not needed on the Mac.
+- **Consequence:**
+  - After Step 1, `eth_getProof` and `debug_executionWitness` (via the proofs overrides) serve only blocks from the re-init tip forward, growing back to 30 days by about 30 days after Step 1.
+  - op-challenger (stopped, D-0132) is the only consumer that needs the full window. Re-enabling it within 30 days of Step 1 means games whose blocks predate the re-init cannot be played.
+  - `resolve-games-sepolia.sh` and the proposer are unaffected (measured above).
+  - Any hand-run `op-reth proofs init` must pass `--proofs-history.storage-version=v2` from now on. Without it, v2.6.1 creates a v1 store again.
+- **T1 review (PR #266, head 0e89e54, 2026-10-28; changes requested, README only).**
+  - Gate re-run in a scratch clone: `test-helpers.sh` 769 PASS / 0 FAIL, matching the handoff. Base = main db25b09. Scope clean.
+  - **The head is never provable.** On live `:9545`, `eth_getProof` at `latest` returns `-32603 no state found`. The proofs ExEx trails the head by 1–3 blocks (three samples; head−3/−4 served). `safe` and `finalized` are served. The worker's README check used `latest`, which would read as a failure on a healthy node.
+  - Replacement check: `eth_getProof` at head−10 (via `cast to-hex`), run ≥1 min after start. Measured green on live; red at block 1,000,000.
+  - **An unmoved v1 store does not panic on the start-script path.** Scratch, v2.6.1: v1 `proofs init`, then v2 `proofs init` (exit 0, same `mdbx.dat`), then a v2 node gives `(v2)`, `ExEx started`, and serves proofs. The same store without the flag gives `(v1)` and also runs. The worker's "panics and stops the sequencer" holds only for a bare `op-reth node` with no init first.
+  - Consequence: if any start with T1 runs before Step 1's `mv` (including the 00:15 wake after `~/fortel2-agents` is pulled), v2 is written in place inside the 38 GB v1 file. The node keeps running and nothing alerts, but move-based rollback and the cleanup are lost. Step 1 must run in the same sitting as the merge and pull, before 23:45 PT.
+- **T1 re-review (PR #266, 8f933c0): approved.** README-only fix (+6/−4) applies both changes. CI is green on all 6 checks. Code is unchanged from the re-gated 0e89e54.
+- **Step 1 executed 2026-10-28 (planner, on operator go after #266 merged as `bc8632e`).**
+  - Ran from `~/fortel2-agents`, fast-forwarded 120437d → bc8632e. The shared `~/ForteL2` checkout was not touched.
+  - Pre-stop: latest 2885588, safe 2885505, finalized 2884875.
+  - `stop-all-sepolia.sh` 09:21:10–09:21:15 PDT. op-reth logged `Received SIGTERM` after block 2885592 (clean). No listeners on :9545/:9546/:9547/:9551.
+  - `mv historical-proofs historical-proofs.v1-pre-d0155`: the 42,949,672,960 B `mdbx.dat` kept, `lock` gone.
+  - `start-all-sepolia.sh` 09:21:27–09:21:57 PDT; challenger skipped (`SEPOLIA_START_CHALLENGER=0`).
+  - op-reth 16:21:32Z: `Starting op-reth version="2.6.1 (e16bffa1)"`, `Using on-disk storage for proofs history (v2)`, `Loaded storage settings … storage_v2: true`, `exex{id="proofs-history"}: ExEx started`, `Proofs-history RPC overrides installed`. No panic, crash or ParentHashMismatch since.
+  - New store 6.6 MB.
+  - README check at 09:22:24 PDT: head−10 `eth_getProof(0x4200…0016)` returned a proof object, exit 0. Block 2885580 (before the re-init) returned `-32603 no state found`, so the window starts at the re-init tip ≈2885592.
+  - Liveness, 30 s samples 09:22:40–09:27:11: latest 2885636 → 2885771, steady 2 s blocks. Safe re-derived from 2885325 after the restart, reaching 2885505 (the pre-stop value) at 09:23:10 and 2885666 (past the re-init tip, new batches) at 09:24:40. Finalized stayed 2884875; its age was 1427 s before the stop, so that is normal L1-finality lag.
+  - Sequencer gap ≈ 09:21:11 → 09:21:57 PDT.
+  - Delete `historical-proofs.v1-pre-d0155` (38 GB) after 2026-11-04 if no ExEx alert. Rollback until then is the README procedure.
+- **T2 briefed 2026-10-28 (branch `chore/op-reth-v2.8.0`, strong model, Mac mini, dispatch before 21:00 PT).**
+  - `op-reth/v2.8.0` is an annotated tag: object `b0763e57…` peels to commit `d6620202d4e563957830e688007a0cab29bd80f3`. Rust channel 1.95, the same as v2.6.1.
+  - Build tree `~/src/fortel2/optimism-op-reth-v2.8.0` (~3 GB; 62 GiB free).
+  - G1: scratch snapshot 811872, v2.6.1 → v2.8.0 → v2.6.1 on one datadir with a v2 proofs store, plus a flagless v2.8.0 case.
+  - G2: sidecar on QuickNode, pre-approved to the D-0154 cap (1000 L1 origins, ≈$0.005).
+  - Live swap: operator-run after merge.
+  - Measured: `eth_getLogs` with fromBlock > head returns `[]` today on :9545 and :9555 (v2.8.0: -32602). SettlementOS has no chain-852 log poller (its getLogs is an explorer fallback on 84532/80002).
+- **T2 returned and approved 2026-10-28 (PR #267, head 64959e9; planner review, PR comment 6476487440).**
+  - Worker evidence:
+    - Build: d6620202, Mach-O arm64, cargo 16:54–17:00Z; rustls-webpki 0.103.16 / webpki-roots 1.0.10.
+    - G1: v2.6.1 → v2.8.0 → v2.6.1 on one datadir with a v2 proofs store. Each run kept the 811872 hash `0x5af991c9…` and the ExEx started. v2.8.0 `proofs init` answered "already initialized". Verdict MAC-ROLLBACK-SAFE.
+    - Flagless fresh v2.8.0: the ExEx exits "Proofs storage not initialized". It neither creates a v1 store nor auto-initializes a v2 one.
+    - v2.8.0 logs `Using on-disk storage for proofs history` with no `(v2)`.
+    - G2: blocks 0–5 match, sidecar `op-reth/v2.8.0-d6620202/aarch64-macos`. 145 L1 origins = 5800 credits ≈ $0.0025.
+  - Planner re-ran (scratch clone, deleted):
+    - test-helpers: 774/0 on the branch and 769/0 on main bc8632e.
+    - check-el-pins: real v2.8.0 ec=0, real v2.6.1 ec=1.
+    - Tag peel b0763e57 → d6620202 checked.
+    - No script parses the `(v2)` line or the 2.6.1 version string.
+    - Spike datadir and temp dirs are gone.
+    - Live :9545 stayed on 2.6.1 at 2888317.
+  - Not re-run by the planner: G1 and G2 (hand-run by the worker).
+  - Next: operator merges #267, then the live swap (APFS clone of the datadir, repoint `bin/op-reth`, restart, check `Starting op-reth version="2.8.0 (d6620202)"` and that the head advances), then pulls `~/fortel2-agents`.
+- **Live swap done 2026-10-28 (planner on the operator's go, after #267 merged as edc8483).**
+  - Pulled `~/fortel2-agents` to edc8483 and stopped the stack at 10:58:48 PT (clean SIGTERM, head 2888516).
+  - APFS clone: `cp -c -R $DATA_DIR/l2/op-reth $DATA_DIR/l2/op-reth.pre-v2.8.0` — 776 files, 55,247,319,211 B, matching the source. Free space stayed 56 GiB.
+  - Repointed `bin/op-reth` in `~/ForteL2/bin` (the `.env.sepolia` BIN_DIR) and `~/fortel2-agents/bin` to the v2.8.0 tree.
+  - Started at 10:59 PT; `start-all-sepolia.sh` exited 0. Boot lines:
+    - `Proofs storage already initialized block_number=2885592`
+    - `Starting op-reth version="2.8.0 (d6620202)"`
+    - `Loaded storage settings … storage_v2: true`
+    - `exex{id="proofs-history"}: ExEx started`
+    - 0 ERROR lines. The RocksDB file-descriptor WARN predates the swap (it is on every boot since at least 2026-10-27).
+  - Verified after start:
+    - `web3_clientVersion` returns `op-reth/v2.8.0-d6620202/aarch64-macos`; `check-el-pins.sh` ec=0.
+    - Unsafe head 2888580 → 2888590 in 20 s. Safe moved 2888426 → 2888565.
+    - `eth_getProof(0x4200…0016)` served at head−10 (head 2888600).
+    - The batcher is creating channels.
+  - Rollback: repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.6.1` and restart. If the datadir is suspect, also restore from `op-reth.pre-v2.8.0`.
+  - Cleanup:
+    - Delete `op-reth.pre-v2.8.0` once v2.8.0 has run a week clean.
+    - Delete `historical-proofs.v1-pre-d0155` on or after 2026-11-04.
+    - The `op-reth.pre-v2.6.1` clone is still on disk.
+- Next free decision id is **D-0156**.
 
 ## Template
 
