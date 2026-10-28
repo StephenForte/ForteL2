@@ -1537,6 +1537,26 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
     - Live :9545 stayed on 2.6.1 at 2888317.
   - Not re-run by the planner: G1 and G2 (hand-run by the worker).
   - Next: operator merges #267, then the live swap (APFS clone of the datadir, repoint `bin/op-reth`, restart, check `Starting op-reth version="2.8.0 (d6620202)"` and that the head advances), then pulls `~/fortel2-agents`.
+- **Live swap done 2026-10-28 (planner on the operator's go, after #267 merged as edc8483).**
+  - Pulled `~/fortel2-agents` to edc8483 and stopped the stack at 10:58:48 PT (clean SIGTERM, head 2888516).
+  - APFS clone: `cp -c -R $DATA_DIR/l2/op-reth $DATA_DIR/l2/op-reth.pre-v2.8.0` — 776 files, 55,247,319,211 B, matching the source. Free space stayed 56 GiB.
+  - Repointed `bin/op-reth` in `~/ForteL2/bin` (the `.env.sepolia` BIN_DIR) and `~/fortel2-agents/bin` to the v2.8.0 tree.
+  - Started at 10:59 PT; `start-all-sepolia.sh` exited 0. Boot lines:
+    - `Proofs storage already initialized block_number=2885592`
+    - `Starting op-reth version="2.8.0 (d6620202)"`
+    - `Loaded storage settings … storage_v2: true`
+    - `exex{id="proofs-history"}: ExEx started`
+    - 0 ERROR lines. The RocksDB file-descriptor WARN predates the swap (it is on every boot since at least 2026-10-27).
+  - Verified after start:
+    - `web3_clientVersion` returns `op-reth/v2.8.0-d6620202/aarch64-macos`; `check-el-pins.sh` ec=0.
+    - Unsafe head 2888580 → 2888590 in 20 s. Safe moved 2888426 → 2888565.
+    - `eth_getProof(0x4200…0016)` served at head−10 (head 2888600).
+    - The batcher is creating channels.
+  - Rollback: repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.6.1` and restart. If the datadir is suspect, also restore from `op-reth.pre-v2.8.0`.
+  - Cleanup:
+    - Delete `op-reth.pre-v2.8.0` once v2.8.0 has run a week clean.
+    - Delete `historical-proofs.v1-pre-d0155` on or after 2026-11-04.
+    - The `op-reth.pre-v2.6.1` clone is still on disk.
 - Next free decision id is **D-0156**.
 
 ## Template
