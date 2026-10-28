@@ -116,7 +116,7 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | optimism monorepo (sequencer) | `op-node/v1.19.11` (commit `43c071cb…`, annotated tag object `4193077c…`) | `~/src/fortel2/optimism-v1.19.11` — op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (D-0154). `./bin` serves this tree since the 2026-10-22 09:08 PT swap; `~/src/fortel2/optimism-v1.19.9` (`da6d3252`) is the rollback |
 | optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
-| op-reth | tag `op-reth/v2.6.1` → reports `op-reth Version: 2.6.1` commit `e16bffa18420c86dbab693097bc33117f74a5f7d` | Clone `~/src/fortel2/optimism-op-reth-v2.6.1` (D-0154 pin for the Mac sequencer binary). `./bin/op-reth` serves it since the 2026-10-22 09:08 PT swap; `~/src/fortel2/optimism-op-reth-v2.6.0` is the rollback (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.6.1`). `~/src/fortel2/optimism-op-reth-v2.5.0` and `~/src/fortel2/optimism-op-reth` (v2.3.3) stay. The Render replica is already v2.6.1 (fortel2-replica R-0028), a separate bump. `./scripts/check-el-pins.sh` requires 2.6.1 and passes on the live symlinks. |
+| op-reth | annotated tag `op-reth/v2.8.0` (tag object `b0763e57…`, peels to `d6620202…`) → reports `op-reth Version: 2.8.0` commit `d6620202d4e563957830e688007a0cab29bd80f3` | Clone `~/src/fortel2/optimism-op-reth-v2.8.0` (D-0155 pin for the Mac sequencer binary). `./bin/op-reth` still serves `~/src/fortel2/optimism-op-reth-v2.6.1` until the operator swap after merge. Rollback is repoint `bin/op-reth` at that v2.6.1 tree and restart; the explicit `--proofs-history.storage-version=v2` flag keeps v2.6.1 on the v2 store. `~/src/fortel2/optimism-op-reth-v2.6.0` (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.6.1`), `optimism-op-reth-v2.5.0`, and `optimism-op-reth` (v2.3.3) stay. The Render replica stays v2.6.1 (fortel2-replica R-0028); its bump is separate. `./scripts/check-el-pins.sh` requires 2.8.0 and is red on the live v2.6.1 symlink until the swap. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
 | Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
 | kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
@@ -186,7 +186,7 @@ python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pi
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
-./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (commit 43c071cb; tag object 4193077c) + op-reth Version 2.6.1 / e16bffa18420c86dbab693097bc33117f74a5f7d (CI has no Mini binaries)
+./scripts/check-el-pins.sh         # Mini arm64: op-node v1.19.11, op-batcher v1.17.4, op-proposer untagged (commit 43c071cb; tag object 4193077c) + op-reth Version 2.8.0 / d6620202d4e563957830e688007a0cab29bd80f3 (annotated tag object b0763e57; CI has no Mini binaries)
 # Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL=reth (since 2026-09-02).
 # Local 901 still defaults geth (no 901 reth path). Task 5 already ran; there is no
 # geth rollback (Task 9 deleted the Render disk).
@@ -286,30 +286,34 @@ source "$HOME/.cargo/env"   # or open a new shell
 (cd ~/src/fortel2/optimism/rust && cargo build --release -p kona-host)
 ln -sfn ~/src/fortel2/optimism/rust/target/release/kona-host ~/src/fortel2/bin/kona-host
 
-# op-reth — clone at tag op-reth/v2.6.1 (D-0154). Do NOT `git checkout`
+# op-reth — clone at annotated tag op-reth/v2.8.0 (D-0155). The tag object
+# b0763e57 is not the commit; the clone detaches at d6620202. Do NOT `git checkout`
 # ~/src/fortel2/optimism (op-node/v1.19.2, da197e45): that tree still backs
 # cannon, op-challenger, and kona-host. Do NOT `git checkout`
-# ~/src/fortel2/optimism-op-reth (v2.3.3), optimism-op-reth-v2.5.0, or
-# optimism-op-reth-v2.6.0 (Mac rollback). The sequencer
+# ~/src/fortel2/optimism-op-reth (v2.3.3), optimism-op-reth-v2.5.0,
+# optimism-op-reth-v2.6.0, or optimism-op-reth-v2.6.1 (Mac rollback). The sequencer
 # op-node/op-batcher/op-proposer binaries are the v1.19.11 tree above.
 # Unset CARGO_TARGET_DIR so the binary lands in this clone, not a sandbox cache.
-git clone --depth 1 --branch op-reth/v2.6.1 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth-v2.6.1
-cd ~/src/fortel2/optimism-op-reth-v2.6.1
+# Rollback: repoint the symlink at optimism-op-reth-v2.6.1 and restart. The
+# explicit --proofs-history.storage-version=v2 flag keeps v2.6.1 on the v2 store.
+git clone --depth 1 --branch op-reth/v2.8.0 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth-v2.8.0
+cd ~/src/fortel2/optimism-op-reth-v2.8.0
 git submodule update --init --recursive
 just update-superchain-registry-submodule || true
-cd rust && unset CARGO_TARGET_DIR && GIT_VERSION=v2.6.1 \
+cd rust && unset CARGO_TARGET_DIR && GIT_VERSION=v2.8.0 \
   GIT_COMMIT="$(git rev-parse HEAD)" \
-  GIT_DATE=2026-10-21T21:58:34Z \
+  GIT_DATE=2026-10-22T12:59:28Z \
   BUILD_PROFILE=release \
   cargo build --release --locked --bin op-reth --manifest-path op-reth/bin/Cargo.toml
 # Binary lands at rust/target/release/op-reth.
 # Measured --version (tag string is not this line):
-#   op-reth Version: 2.6.1
-#   Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d
-ln -sfn ~/src/fortel2/optimism-op-reth-v2.6.1/rust/target/release/op-reth ~/src/fortel2/bin/op-reth
+#   op-reth Version: 2.8.0
+#   Commit SHA: d6620202d4e563957830e688007a0cab29bd80f3
+ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.0/rust/target/release/op-reth ~/src/fortel2/bin/op-reth
 # Mini .env BIN_DIR is this repo's ./bin. From the ForteL2 repo root:
-#   ln -sfn ~/src/fortel2/optimism-op-reth-v2.6.1/rust/target/release/op-reth ./bin/op-reth
+#   ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.0/rust/target/release/op-reth ./bin/op-reth
 #   ./scripts/check-el-pins.sh
+# eth_getLogs with fromBlock past the head is -32602 on v2.8.0 (v2.6.1 returned []).
 ```
 
 ## Endpoints
@@ -1060,7 +1064,7 @@ With Fjord active from genesis, op-node caps sequencer drift at a **constant 180
 |---|---|---|
 | Anvil | `data/logs/anvil.log` | `Listening on 127.0.0.1:8545` |
 | op-geth (not running since 2026-09-02; Render geth deleted 2026-09-14; not a rollback path) | `data/logs/op-geth.log` | `HTTP server started` / `Opened legacy database` |
-| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | Known-good since the D-0154 swap (2026-10-22): `Starting op-reth version="2.6.1 (e16bffa1)"`. The v2.6.0 rollback binary logs `Starting op-reth version="2.6.0 (da6d3252)"` / `Status … latest_block=`. The v2.5.0 binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
+| op-reth (**live EL** since 2026-09-02) | `data/logs/op-reth.log` | Live until the D-0155 operator swap: `Starting op-reth version="2.6.1 (e16bffa1)"`. After that swap the known-good line is `Starting op-reth version="2.8.0 (d6620202)"`. Rollback (repoint `bin/op-reth` at the v2.6.1 tree and restart) logs the 2.6.1 line again; the v2 proofs flag stays on. The v2.6.0 binary logs `Starting op-reth version="2.6.0 (da6d3252)"` / `Status … latest_block=`. The v2.5.0 binary logs `Starting op-reth version="2.5.0 (9f76a9d2)"`. The v2.3.3 binary logs `reth 2.3.0-dev (9384bc5) starting`. |
 | op-reth-verifier / op-reth-verifier-node (sidecar) | `data/logs/op-reth-verifier.log`, `op-reth-verifier-node.log` | `Starting JSON-RPC` / `derived` / `Forkchoice` (`--l2.enginekind=reth`) |
 | op-node | `data/logs/op-node.log` | `Created new L2 block` / `Sequencer` |
 
@@ -1076,13 +1080,13 @@ Start scripts run `scripts/rotate-logs.sh` against `$LOG_DIR` (`$DATA_DIR/logs`)
 
 ## Proofs-history v1 → v2 rebuild (D-0155)
 
-The live proofs store was created without `--proofs-history.storage-version`, so it is v1 (`Using on-disk storage for proofs history (v1)` on every boot). op-reth v2.8.0 refuses a proofs DB that holds only v1 data. This tree passes `--proofs-history.storage-version=v2` from `proofs_history_storage_version` in `scripts/lib.sh` on the `sequencer_faultproof` profile and both `proofs init` sites. The binary pin stays v2.6.1 until a later change. Run Step 1 below on that binary, after this change is on `main` and `~/fortel2-agents` has been pulled. Launchd sleep/wake/health jobs run from `~/fortel2-agents`; without that pull the next wake (00:15 PT) starts the old scripts and `proofs init` creates a v1 store again.
+The live proofs store was created without `--proofs-history.storage-version`, so it is v1 (`Using on-disk storage for proofs history (v1)` on every boot). op-reth v2.8.0 refuses a proofs DB that holds only v1 data. This tree passes `--proofs-history.storage-version=v2` from `proofs_history_storage_version` in `scripts/lib.sh` on the `sequencer_faultproof` profile and both `proofs init` sites. The repository binary pin is op-reth v2.8.0 (D-0155). Live `./bin/op-reth` stays the v2.6.1 tree until the operator swap after merge. Binary rollback is repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.6.1` and restart; the explicit v2 flag keeps that binary on the v2 store. `eth_getLogs` with `fromBlock` past the head returns `-32602` on v2.8.0; v2.6.1 returned `[]`. That rebuild's Step 1 already ran on the v2.6.1 binary (2026-10-28 09:22 PT); the live proofs store is v2. The commands below are the record. Do not run them again.
 
 After the rebuild, `eth_getProof` serves only blocks from the re-init tip forward. There is no archive fallback below the window (measured). The window stays the default 1,296,000 blocks and refills over about 30 days. A bare `op-reth node` with the v2 flag on a v1-only store logs `(v2)` and then exits on `Proofs storage not initialized`. The start script runs `proofs init` first, so that is not what an unmoved store does.
 
-Do not start the stack with this change — including the 00:15 launchd wake after ~/fortel2-agents is pulled — until the mv step has run. The start script would otherwise write v2 into the v1 store in place: the node keeps running, but move-based rollback and cleanup are lost.
+The mv already ran before the first v2 start. Starting before that mv would have written v2 into the v1 store in place: the node keeps running, but move-based rollback and cleanup are lost.
 
-Each block is one command. Run them from the repo root, in order. Do not run them across the 23:45–00:15 PT sleep window.
+Each block was one command, from the repo root, in order.
 
 ```bash
 git -C "$HOME/fortel2-agents" pull
@@ -1110,7 +1114,7 @@ cast rpc eth_getProof 0x4200000000000000000000000000000000000016 '[]' "$(cast to
 
 Run it at least one minute after the start. The proofs store trails the head by 1–3 blocks, so `latest` always returns `-32603` on a healthy node, and a fresh v2 store starts at the re-init tip. A proof object means that block is served. `-32603` on this call means it is not.
 
-Rollback is the reverse, and the flag has to come off before the v1 store is opened. Starting with the flag still set runs `proofs init` and writes v2 back into the restored file. Move the fresh store aside, put the v1 store back, revert this change, then start.
+The steps below restore the v1 proofs store. They are not the v2.8.0 binary rollback, which keeps the v2 flag. For a v1 restore, the flag has to come off before the v1 store is opened. Starting with the flag still set runs `proofs init` and writes v2 back into the restored file. Move the fresh store aside, put the v1 store back, revert the storage-version flag, then start.
 
 ```bash
 FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
