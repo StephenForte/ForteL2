@@ -1521,6 +1521,22 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - G2: sidecar on QuickNode, pre-approved to the D-0154 cap (1000 L1 origins, ≈$0.005).
   - Live swap: operator-run after merge.
   - Measured: `eth_getLogs` with fromBlock > head returns `[]` today on :9545 and :9555 (v2.8.0: -32602). SettlementOS has no chain-852 log poller (its getLogs is an explorer fallback on 84532/80002).
+- **T2 returned and approved 2026-10-28 (PR #267, head 64959e9; planner review, PR comment 6476487440).**
+  - Worker evidence:
+    - Build: d6620202, Mach-O arm64, cargo 16:54–17:00Z; rustls-webpki 0.103.16 / webpki-roots 1.0.10.
+    - G1: v2.6.1 → v2.8.0 → v2.6.1 on one datadir with a v2 proofs store. Each run kept the 811872 hash `0x5af991c9…` and the ExEx started. v2.8.0 `proofs init` answered "already initialized". Verdict MAC-ROLLBACK-SAFE.
+    - Flagless fresh v2.8.0: the ExEx exits "Proofs storage not initialized". It neither creates a v1 store nor auto-initializes a v2 one.
+    - v2.8.0 logs `Using on-disk storage for proofs history` with no `(v2)`.
+    - G2: blocks 0–5 match, sidecar `op-reth/v2.8.0-d6620202/aarch64-macos`. 145 L1 origins = 5800 credits ≈ $0.0025.
+  - Planner re-ran (scratch clone, deleted):
+    - test-helpers: 774/0 on the branch and 769/0 on main bc8632e.
+    - check-el-pins: real v2.8.0 ec=0, real v2.6.1 ec=1.
+    - Tag peel b0763e57 → d6620202 checked.
+    - No script parses the `(v2)` line or the 2.6.1 version string.
+    - Spike datadir and temp dirs are gone.
+    - Live :9545 stayed on 2.6.1 at 2888317.
+  - Not re-run by the planner: G1 and G2 (hand-run by the worker).
+  - Next: operator merges #267, then the live swap (APFS clone of the datadir, repoint `bin/op-reth`, restart, check `Starting op-reth version="2.8.0 (d6620202)"` and that the head advances), then pulls `~/fortel2-agents`.
 - Next free decision id is **D-0156**.
 
 ## Template
