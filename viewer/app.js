@@ -23,6 +23,8 @@ import {
   contiguousScanTip,
   filterBatchTxs,
   formatAge,
+  formatProposerSequence,
+  proposerSequenceKind,
   formatRate,
   nextBatcherScanRange,
   scanFromBlock,
@@ -302,7 +304,26 @@ async function refreshProposer(l1) {
   const proxy = game.proxy_ ?? game[2];
   els.propProxy.textContent = shortHex(String(proxy), 6, 4);
   els.propAge.textContent = formatAge(timestamp);
-  els.propType.textContent = String(gameType);
+  const kind = proposerSequenceKind(gameType);
+  let sequenceLabel = "—";
+  try {
+    const gameContract = new Contract(
+      String(proxy),
+      [
+        "function l2BlockNumber() view returns (uint256)",
+        "function l2SequenceNumber() view returns (uint256)",
+      ],
+      l1,
+    );
+    const sequence =
+      kind === "timestamp"
+        ? await gameContract.l2SequenceNumber()
+        : await gameContract.l2BlockNumber();
+    sequenceLabel = formatProposerSequence(gameType, sequence);
+  } catch {
+    sequenceLabel = kind === "timestamp" ? "timestamp unavailable" : "block unavailable";
+  }
+  els.propType.textContent = `${gameType} · ${sequenceLabel}`;
 }
 
 async function refreshAggregate(l2) {

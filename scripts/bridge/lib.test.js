@@ -20,7 +20,12 @@ import {
   mineBlocks,
   isRealClockL1,
   assertArtifactChainIds,
+  assertRemoteL1ChainId,
+  proofBlockForGame,
   readArtifactChainIds,
+  selectCoveringGame,
+  scanNewestCoveringGame,
+  cachedCoveringGame,
   classifyFinalizeReadiness,
   classifyProveReadiness,
   dryRunExitCode,
@@ -189,6 +194,12 @@ describe("refuseAnvilWarp", () => {
     process.env.SKIP_ANVIL_WARP = "1";
     process.env.L1_CHAIN_ID = "31337";
     assert.equal(refuseAnvilWarp(), true);
+  });
+
+  it("does not refuse warp on the 900852 fork by itself", () => {
+    delete process.env.SKIP_ANVIL_WARP;
+    process.env.L1_CHAIN_ID = "900852";
+    assert.equal(refuseAnvilWarp(), false);
   });
 
   it("increaseTime throws on Sepolia before any RPC", async () => {
@@ -520,6 +531,184 @@ describe("real-clock wait logic", () => {
           nowFn: () => now,
         }),
       /real-clock wait exceeded/,
+    );
+  });
+});
+
+describe("type-9 game selection and chain-id guard", () => {
+  const prevFlag = process.env.FORTEL2_ALLOW_FORK_PROVE;
+  const prevRpc = process.env.L1_RPC_URL;
+  after(() => {
+    if (prevFlag === undefined) delete process.env.FORTEL2_ALLOW_FORK_PROVE;
+    else process.env.FORTEL2_ALLOW_FORK_PROVE = prevFlag;
+    if (prevRpc === undefined) delete process.env.L1_RPC_URL;
+    else process.env.L1_RPC_URL = prevRpc;
+  });
+
+  const genesis = 1787433288n;
+  const blockTime = 2n;
+  const withdrawalTs = 1793297574n;
+  const withdrawalBlock = 2928420n;
+
+  it("does not select a type-9 game whose timestamp is before the withdrawal", () => {
+    const early = {
+      gameType: 9,
+      l2BlockNumber: withdrawalTs - 10n,
+      usesSuperRoots: true,
+    };
+    const selected = selectCoveringGame([early], {
+      gameType: 9,
+      withdrawalBlock,
+      withdrawalTimestamp: withdrawalTs,
+    });
+    assert.equal(selected, null);
+  });
+
+  it("selects a type-9 game at the withdrawal timestamp", () => {
+    const exact = {
+      gameType: 9,
+      l2BlockNumber: withdrawalTs,
+      usesSuperRoots: true,
+    };
+    const selected = selectCoveringGame([exact], {
+      gameType: 9,
+      withdrawalBlock,
+      withdrawalTimestamp: withdrawalTs,
+    });
+    assert.equal(selected, exact);
+  });
+
+  it("stops the newest-first scan at the first covering game", async () => {
+    const rows = [
+      { gameType: 9, proxy: "0xold", sequence: 50n },
+      { gameType: 8, proxy: "0xmid", sequence: 9n },
+      { gameType: 9, proxy: "0xnew", sequence: 100n },
+    ];
+    let indexes = 0;
+    let sequences = 0;
+    const found = await scanNewestCoveringGame({
+      gameCount: 3n,
+      gameType: 9,
+      covers: (sequence) => sequence >= 100n,
+      readGameAtIndex: async (index) => {
+        indexes += 1;
+        return rows[Number(index)];
+      },
+      readSequence: async (proxy) => {
+        sequences += 1;
+        return rows.find((row) => row.proxy === proxy).sequence;
+      },
+    });
+    assert.equal(indexes, 1);
+    assert.equal(sequences, 1);
+    assert.equal(found.game.l2BlockNumber, 100n);
+    assert.equal(found.examined, 1);
+  });
+
+  it("walks past a newer game that does not cover, then stops", async () => {
+    const rows = [
+      { gameType: 9, proxy: "0xolder", sequence: 1n },
+      { gameType: 9, proxy: "0xcover", sequence: 100n },
+      { gameType: 9, proxy: "0xearly", sequence: 90n },
+    ];
+    let indexes = 0;
+    const found = await scanNewestCoveringGame({
+      gameCount: 3n,
+      gameType: 9,
+      covers: (sequence) => sequence >= 100n,
+      readGameAtIndex: async (index) => {
+        indexes += 1;
+        return rows[Number(index)];
+      },
+      readSequence: async (proxy) => rows.find((row) => row.proxy === proxy).sequence,
+    });
+    assert.equal(indexes, 2);
+    assert.equal(found.game.l2BlockNumber, 100n);
+    assert.equal(found.examined, 2);
+  });
+
+  it("does not visit factory indexes outside the limit", async () => {
+    let indexes = 0;
+    const found = await scanNewestCoveringGame({
+      gameCount: 150n,
+      gameType: 9,
+      limit: 100,
+      covers: () => false,
+      readGameAtIndex: async () => {
+        indexes += 1;
+        return { gameType: 8, proxy: "0x" };
+      },
+      readSequence: async () => {
+        throw new Error("sequence must not be read for a different type");
+      },
+    });
+    assert.equal(found.game, null);
+    assert.equal(indexes, 100);
+    assert.equal(found.examined, 100);
+  });
+
+  it("reuses a cached miss until gameCount changes", () => {
+    const cache = { count: "12", respected: 9, game: null };
+    assert.equal(cachedCoveringGame(cache, { count: 12n, respected: 9 }), null);
+    assert.equal(cachedCoveringGame(cache, { count: 13n, respected: 9 }), undefined);
+    assert.equal(cachedCoveringGame(null, { count: 12n, respected: 9 }), undefined);
+  });
+
+  it("selects a type-8 game by block number even when the timestamp is larger", () => {
+    const game = { gameType: 8, l2BlockNumber: withdrawalBlock };
+    const selected = selectCoveringGame([game], {
+      gameType: 8,
+      withdrawalBlock,
+      withdrawalTimestamp: withdrawalTs,
+    });
+    assert.equal(selected, game);
+  });
+
+  it("builds the type-9 proof at the L2 block for the timestamp", () => {
+    const game = { gameType: 9, l2BlockNumber: withdrawalTs, usesSuperRoots: true };
+    const block = proofBlockForGame(game, { genesisTime: genesis, blockTime });
+    assert.equal(block, (withdrawalTs - genesis) / blockTime);
+    assert.notEqual(block, withdrawalTs);
+  });
+
+  it("keeps the type-8 proof block as the block number", () => {
+    const game = { gameType: 8, l2BlockNumber: withdrawalBlock };
+    assert.equal(
+      proofBlockForGame(game, { genesisTime: genesis, blockTime }),
+      withdrawalBlock,
+    );
+  });
+
+  it("refuses a non-loopback L1 whose chain id is not 11155111", () => {
+    assert.throws(
+      () => assertRemoteL1ChainId(1, "https://example.invalid"),
+      /refusing non-loopback L1/,
+    );
+  });
+
+  it("allows non-loopback Sepolia and loopback fork chain ids", () => {
+    assert.doesNotThrow(() => assertRemoteL1ChainId(11155111, "https://example.invalid"));
+    assert.doesNotThrow(() => assertRemoteL1ChainId(900852, "http://127.0.0.1:8545"));
+  });
+
+  it("allows a 11155111 artifact on loopback 900852 only with the fork flag", () => {
+    const artifact = { l1ChainId: 11155111, l2ChainId: 852 };
+    delete process.env.FORTEL2_ALLOW_FORK_PROVE;
+    assert.throws(
+      () => assertArtifactChainIds(artifact, 900852, 852, "http://127.0.0.1:8545"),
+      /artifact chain mismatch/,
+    );
+    process.env.FORTEL2_ALLOW_FORK_PROVE = "1";
+    assert.doesNotThrow(() =>
+      assertArtifactChainIds(artifact, 900852, 852, "http://127.0.0.1:8545"),
+    );
+    assert.throws(
+      () => assertArtifactChainIds(artifact, 900852, 852, "https://example.invalid"),
+      /artifact chain mismatch/,
+    );
+    assert.throws(
+      () => assertArtifactChainIds({ l1ChainId: 1, l2ChainId: 852 }, 900852, 852, "http://127.0.0.1:8545"),
+      /artifact chain mismatch/,
     );
   });
 });

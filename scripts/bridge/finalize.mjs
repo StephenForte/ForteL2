@@ -25,6 +25,7 @@ import {
   readProofTimestamp,
   parseBridgeArgs,
   assertArtifactChainIds,
+  assertRemoteL1ChainId,
   stampArtifactChainIds,
   classifyFinalizeReadiness,
   dryRunExitCode,
@@ -59,6 +60,7 @@ const deploymentsPath =
   path.resolve(here, '../../deployments/deployments.json')
 
 let artifact = readJson(artifactPath)
+assertRemoteL1ChainId(process.env.L1_CHAIN_ID, process.env.L1_RPC_URL)
 assertArtifactChainIds(artifact, process.env.L1_CHAIN_ID, process.env.L2_CHAIN_ID)
 if (!artifact.proveTxHash || !artifact.withdrawal) {
   console.error('ERROR: artifact incomplete — run withdraw-prove.sh first')

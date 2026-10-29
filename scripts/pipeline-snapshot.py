@@ -50,6 +50,12 @@ PROPOSER_VERDICT_UNKNOWN = "unknown"
 # generous without waiting a whole extra cycle.
 PROPOSER_OVERDUE_GRACE_SECS = 2 * 3600
 
+# SuperFaultDisputeGame. l2SequenceNumber is an L2 timestamp, not a block.
+SUPER_ROOT_GAME_TYPE = 9
+# l2BlockNumber() / l2SequenceNumber()
+_L2_BLOCK_NUMBER_SELECTOR = "0x8b85902b"
+_L2_SEQUENCE_NUMBER_SELECTOR = "0x99735e32"
+
 # Nightly dev-sleep window, America/Los_Angeles (D-0144). The installed
 # launchd jobs are the source of truth — sleep StartCalendarInterval is the
 # start, wake is the end — not these defaults. The defaults apply only when
@@ -407,6 +413,35 @@ def awake_seconds_between(lo: float, hi: float) -> float:
 # >>>DEV_SLEEP_READER
 
 
+def proposer_sequence_kind(game_type: int) -> str:
+    """Type 9 is a timestamp. Every other type is a block number."""
+    if int(game_type) == SUPER_ROOT_GAME_TYPE:
+        return "timestamp"
+    return "block"
+
+
+def classify_proposer_sequence(game_type: int, sequence: int | None) -> dict[str, Any]:
+    """Additive latest-game fields. Does not touch verdict inputs."""
+    kind = proposer_sequence_kind(game_type)
+    return {"sequence_number": sequence, "sequence_kind": kind if sequence is not None else None}
+
+
+def read_proposer_sequence(l1_url: str, proxy: str, game_type: int) -> dict[str, Any]:
+    """One eth_call. A failure leaves the sequence unset and does not raise.
+
+    Type 9 calls l2SequenceNumber(). Calling l2BlockNumber() on that game
+    reverts, and the value would be a timestamp if it did not.
+    """
+    kind = proposer_sequence_kind(game_type)
+    selector = _L2_SEQUENCE_NUMBER_SELECTOR if kind == "timestamp" else _L2_BLOCK_NUMBER_SELECTOR
+    try:
+        raw = rpc(l1_url, "eth_call", [{"to": proxy, "data": selector}, "latest"])
+        sequence = hex_to_int(raw)
+    except Exception:
+        sequence = None
+    return classify_proposer_sequence(game_type, sequence)
+
+
 def proposer_verdict(
     game_count: int,
     latest: dict[str, Any] | None,
@@ -596,6 +631,10 @@ def snapshot_proposer(l1_url: str, factory: str, interval_raw: str = "8h") -> di
         "age_sec": age_seconds(ts),
         "proxy": proxy,
     }
+    # Additive. timestamp above stays the L1 createdAt used by the verdict.
+    # sequence_number is the game's l2 sequence: a block number, or for type 9
+    # an L2 timestamp. A failed read leaves both new fields null.
+    out["latest"].update(read_proposer_sequence(l1_url, proxy, game_type))
     out["verdict"] = proposer_verdict(count, out["latest"], interval_secs)
     return out
 

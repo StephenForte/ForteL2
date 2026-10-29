@@ -18,6 +18,16 @@ export const MESSAGE_PASSER = '0x4200000000000000000000000000000000000016'
 /** Ethereum Sepolia L1. Real-clock prove/finalize — no Anvil warp or evm_mine. */
 export const SEPOLIA_L1_CHAIN_ID = 11155111
 
+/**
+ * Anvil fork chain id used by opu-u20-upgrade-sepolia.sh --fork (D-0159 route a).
+ * Allowed only on a loopback L1, and only when FORTEL2_ALLOW_FORK_PROVE=1 for
+ * an artifact that was initiated against live Sepolia (11155111).
+ */
+export const FORK_L1_CHAIN_ID = 900852
+
+/** SuperFaultDisputeGame / SuperCannonKona. l2SequenceNumber is an L2 timestamp. */
+export const SUPER_ROOT_GAME_TYPE = 9
+
 /** GameStatus: 0=IN_PROGRESS, 1=CHALLENGER_WINS, 2=DEFENDER_WINS */
 export const GAME_IN_PROGRESS = 0
 export const GAME_CHALLENGER_WINS = 1
@@ -145,6 +155,149 @@ export function isRealClockL1(chainId = process.env.L1_CHAIN_ID) {
   return String(chainId) === String(SEPOLIA_L1_CHAIN_ID)
 }
 
+/** Loopback only. A non-loopback URL is never treated as the fork. */
+export function isLoopbackRpcUrl(url) {
+  let parsed
+  try {
+    parsed = new URL(String(url || ''))
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+  return parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost'
+}
+
+/**
+ * Live (non-loopback) L1 must be Ethereum Sepolia. Loopback may be local
+ * Anvil or the 900852 fork. This does not allow 900852 on a public URL.
+ */
+export function assertRemoteL1ChainId(chainId, l1RpcUrl) {
+  if (isLoopbackRpcUrl(l1RpcUrl)) return
+  if (Number(chainId) === SEPOLIA_L1_CHAIN_ID) return
+  throw new Error(
+    `refusing non-loopback L1 chain id ${chainId}: live L1 must be ${SEPOLIA_L1_CHAIN_ID}`,
+  )
+}
+
+/**
+ * Prove/finalize a live Sepolia withdrawal (artifact L1 11155111) against the
+ * Anvil fork (env L1 900852). Explicit, loopback-only. Anything else is refused.
+ */
+export function allowForkProve({ artifactL1, envL1, l1RpcUrl }) {
+  return (
+    process.env.FORTEL2_ALLOW_FORK_PROVE === '1' &&
+    Number(envL1) === FORK_L1_CHAIN_ID &&
+    Number(artifactL1) === SEPOLIA_L1_CHAIN_ID &&
+    isLoopbackRpcUrl(l1RpcUrl)
+  )
+}
+
+/**
+ * L2 block for a super-root timestamp. blockTime and genesisTime come from
+ * rollup.json (genesis.l2_time, block_time), not a hardcoded 2.
+ */
+export function l2BlockForTimestamp(timestamp, genesisTime, blockTime) {
+  const ts = BigInt(timestamp)
+  const genesis = BigInt(genesisTime)
+  const step = BigInt(blockTime)
+  if (step <= 0n) throw new Error('L2 block time must be positive')
+  if (ts < genesis) throw new Error('timestamp predates L2 genesis')
+  if ((ts - genesis) % step !== 0n) {
+    throw new Error('timestamp is not aligned to the L2 block time')
+  }
+  return (ts - genesis) / step
+}
+
+export function readRollupBlockParams(rollup) {
+  const genesisTime = BigInt(rollup?.genesis?.l2_time ?? 0)
+  const blockTime = BigInt(rollup?.block_time ?? 0)
+  if (genesisTime <= 0n || blockTime <= 0n) {
+    throw new Error('rollup.json missing genesis.l2_time or block_time')
+  }
+  return { genesisTime, blockTime }
+}
+
+/**
+ * Pick a game that covers the withdrawal.
+ * Type 9 compares l2SequenceNumber (a timestamp) to the withdrawal block's
+ * timestamp. Any other type compares l2SequenceNumber to the L2 block number.
+ * Newest-first lists: the first covering game is the latest.
+ */
+export function selectCoveringGame(games, { gameType, withdrawalBlock, withdrawalTimestamp }) {
+  const want = Number(gameType)
+  const superGame = want === SUPER_ROOT_GAME_TYPE
+  const target = superGame ? BigInt(withdrawalTimestamp) : BigInt(withdrawalBlock)
+  const covering = (games || []).filter((game) => {
+    if (game?.gameType != null && Number(game.gameType) !== want) return false
+    return BigInt(game.l2BlockNumber) >= target
+  })
+  return covering.length ? covering[0] : null
+}
+
+/**
+ * Newest-first factory walk. Stops at the first game of gameType whose
+ * sequence satisfies covers(), so a covering game at the tip is one
+ * gameAtIndex plus one l2SequenceNumber. limit is how many factory indexes
+ * are visited, not how many matches are collected.
+ */
+export async function scanNewestCoveringGame({
+  gameCount,
+  readGameAtIndex,
+  readSequence,
+  gameType,
+  covers,
+  limit = 100,
+}) {
+  const count = BigInt(gameCount)
+  const window = BigInt(limit)
+  const start = count > window ? count - window : 0n
+  const want = Number(gameType)
+  let examined = 0
+  for (let i = count; i > start; i--) {
+    examined += 1
+    const index = i - 1n
+    const row = await readGameAtIndex(index)
+    const rowType = Number(row.gameType ?? row[0])
+    if (rowType !== want) continue
+    const sequence = await readSequence(row.proxy ?? row[2])
+    if (covers(sequence)) {
+      return {
+        game: {
+          index,
+          gameType: want,
+          l2BlockNumber: sequence,
+          usesSuperRoots: want === SUPER_ROOT_GAME_TYPE,
+        },
+        examined,
+        count,
+      }
+    }
+  }
+  return { game: null, examined, count }
+}
+
+/**
+ * undefined when the cache does not apply (caller must scan).
+ * null when this gameCount already had no covering game.
+ * Otherwise the cached game.
+ */
+export function cachedCoveringGame(cache, { count, respected }) {
+  if (!cache) return undefined
+  if (String(cache.count) !== String(count)) return undefined
+  if (Number(cache.respected) !== Number(respected)) return undefined
+  return cache.game ?? null
+}
+
+/** Block the output-root proof is built at. Type 9 converts the timestamp. */
+export function proofBlockForGame(game, { genesisTime, blockTime }) {
+  const superGame =
+    game?.usesSuperRoots === true || Number(game?.gameType) === SUPER_ROOT_GAME_TYPE
+  if (superGame) {
+    return l2BlockForTimestamp(game.l2BlockNumber, genesisTime, blockTime)
+  }
+  return BigInt(game.l2BlockNumber)
+}
+
 export function realClockMaxWaitMs() {
   return Number(process.env.FINALIZE_REAL_CLOCK_MAX_WAIT_MS || FINALIZE_REAL_CLOCK_MAX_WAIT_MS_DEFAULT)
 }
@@ -207,7 +360,7 @@ export function readArtifactChainIds(artifact) {
  * Refuse a 901 artifact on 852 and vice versa when the artifact carries chain ids.
  * Missing both ids is allowed (legacy Anvil artifacts). One-of-two is incomplete.
  */
-export function assertArtifactChainIds(artifact, envL1, envL2) {
+export function assertArtifactChainIds(artifact, envL1, envL2, l1RpcUrl = process.env.L1_RPC_URL) {
   const { l1, l2 } = readArtifactChainIds(artifact)
   const hasAny = l1 != null || l2 != null
   const hasBoth = l1 != null && l2 != null
@@ -215,6 +368,9 @@ export function assertArtifactChainIds(artifact, envL1, envL2) {
     throw new Error('artifact has incomplete chain ids (need l1ChainId and l2ChainId)')
   }
   if (hasBoth && (l1 !== Number(envL1) || l2 !== Number(envL2))) {
+    if (l2 === Number(envL2) && allowForkProve({ artifactL1: l1, envL1, l1RpcUrl })) {
+      return
+    }
     throw new Error(
       `artifact chain mismatch: artifact L1=${l1} L2=${l2} vs env L1=${envL1} L2=${envL2}`,
     )

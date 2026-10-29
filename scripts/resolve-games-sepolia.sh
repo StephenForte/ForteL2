@@ -3,6 +3,11 @@
 # on Sepolia L2 852. The filter reads AnchorStateRegistry.respectedGameType()
 # once per run (snapshot field respected_game_type); it does not hardcode 1 or 8.
 #
+# While respected is 8, selection is exact-match (today's run). After the U20
+# flip to 9, type-9 games are selected and type-8 games that were respected
+# when created (wasRespectedGameTypeWhenCreated) are still resolved and claimed.
+# Type 1 stays excluded. That extra read is only for type 8 while respected is 9.
+#
 # Automates the R-13 sequence per game, checking on-chain state before every
 # send so an interrupted run (the expected case — two mandatory waits) can be
 # resumed without re-sending:
@@ -39,8 +44,30 @@
 # integers). macOS bash 3.2 compatible.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Captured before lib.sh sources the env file. Fork rehearsal must not use the
+# live DATA_DIR watermark or the operator L1.
+_FORTEL2_ISOLATED_DATA_DIR="${FORTEL2_ISOLATED_DATA_DIR:-}"
+_FORTEL2_FORK_L1_RPC_URL="${FORTEL2_FORK_L1_RPC_URL:-}"
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+
+if [[ -n "$_FORTEL2_ISOLATED_DATA_DIR" ]]; then
+  restore_caller_data_dir "$_FORTEL2_ISOLATED_DATA_DIR"
+  case "$PID_DIR" in
+    "$_FORTEL2_ISOLATED_DATA_DIR"/*) ;;
+    *)
+      echo "ERROR: isolated PID_DIR=$PID_DIR is not under FORTEL2_ISOLATED_DATA_DIR" >&2
+      exit 1
+      ;;
+  esac
+  echo "isolated PID_DIR=$PID_DIR"
+fi
+if [[ -n "$_FORTEL2_FORK_L1_RPC_URL" ]]; then
+  assert_loopback_url "$_FORTEL2_FORK_L1_RPC_URL" "FORTEL2_FORK_L1_RPC_URL"
+  restore_caller_l1_rpc_url "$_FORTEL2_FORK_L1_RPC_URL"
+fi
 
 usage() {
   cat <<'EOF'
@@ -82,6 +109,8 @@ ANALYZE_ONLY=0
 EXECUTE=0
 FULL_SCAN=0
 MAX_GAMES=""
+READ_COUNT_A=""
+READ_COUNT_B=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -100,6 +129,15 @@ while [[ $# -gt 0 ]]; do
     --max-games=*)
       MAX_GAMES="${1#*=}"
       shift
+      ;;
+    --read-count)
+      if [[ $# -lt 3 ]]; then
+        echo "ERROR: --read-count requires respected and game_type" >&2
+        exit 1
+      fi
+      READ_COUNT_A="$2"
+      READ_COUNT_B="$3"
+      shift 3
       ;;
     -h|--help)
       usage
@@ -296,7 +334,15 @@ def decide_game(game, now, finality_delay, weth_delay, respected_game_type, init
             "actions": [],
             "ready_at": None,
         }
-    if game_type != respected_game_type:
+    # Exact match is today's path (respected 8 selects only 8; respected 1
+    # selects only 1). respected 9 also keeps pre-flip type-8 games whose
+    # wasRespectedGameTypeWhenCreated flag is true. Type 1 is never that case.
+    legacy_type8 = (
+        respected_game_type == 9
+        and game_type == 8
+        and game.get("was_respected_when_created") is True
+    )
+    if game_type != respected_game_type and not legacy_type8:
         return {
             "index": idx,
             "selected": False,
@@ -873,7 +919,7 @@ def fetch_snapshot(out_path, extra):
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             games = list(pool.map(
-                lambda i: fetch_one_game(rpc, factory, weth, recipient, i),
+                lambda i: fetch_one_game(rpc, factory, weth, recipient, i, respected),
                 range(scan_from, game_count),
             ))
 
@@ -908,7 +954,21 @@ def fetch_snapshot(out_path, extra):
     return 0
 
 
-def fetch_one_game(rpc, factory, weth, recipient, index):
+def per_game_l1_read_count(respected, game_type):
+    """cast_call count inside fetch_one_game.
+
+    Base is 8: gameAtIndex, status, resolvedAt, credit, claimDataLen,
+    maxClockDuration, resolvedSubgames, withdrawals.
+    Type 8 while respected is 9 adds wasRespectedGameTypeWhenCreated.
+    Type 9 and every game while respected is 8 stay at 8.
+    """
+    n = 8
+    if respected == 9 and game_type == 8:
+        n += 1
+    return n
+
+
+def fetch_one_game(rpc, factory, weth, recipient, index, respected=None):
     meta = cast_call(rpc, factory, "gameAtIndex(uint256)(uint32,uint64,address)", index)
     game_type = parse_uint(meta[0])
     created_at = parse_uint(meta[1])
@@ -922,7 +982,7 @@ def fetch_one_game(rpc, factory, weth, recipient, index):
     wd = cast_call(rpc, weth, "withdrawals(address,address)(uint256,uint256)", address, recipient)
     weth_amount = parse_uint(wd[0])
     weth_ts = parse_uint(wd[1]) if len(wd) > 1 else 0
-    return {
+    game = {
         "index": index,
         "address": address,
         "game_type": game_type,
@@ -936,6 +996,13 @@ def fetch_one_game(rpc, factory, weth, recipient, index):
         "weth_amount_wei": str(weth_amount),
         "weth_unlock_ts": weth_ts,
     }
+    # One extra L1 read, and only for a type-8 game after respected flipped to 9.
+    if respected == 9 and game_type == 8:
+        was = parse_bool(
+            cast_call(rpc, address, "wasRespectedGameTypeWhenCreated()(bool)")[0]
+        )
+        game["was_respected_when_created"] = was
+    return game
 
 
 def main(argv):
@@ -971,7 +1038,8 @@ def main(argv):
         factory = os.environ["RESOLVE_GAMES_FACTORY"]
         weth = os.environ["RESOLVE_GAMES_WETH"]
         recipient = os.environ["RESOLVE_GAMES_RECIPIENT"]
-        game = fetch_one_game(rpc, factory, weth, recipient, int(argv[2]))
+        respected = parse_optional_type(os.environ.get("RESOLVE_GAMES_RESPECTED_TYPE"))
+        game = fetch_one_game(rpc, factory, weth, recipient, int(argv[2]), respected)
         json.dump(game, sys.stdout)
         sys.stdout.write("\n")
         raise SystemExit(0)
@@ -988,6 +1056,15 @@ def main(argv):
         dec = decide_game(game, now, finality, weth_delay, respected, init_bond)
         json.dump(dec, sys.stdout)
         sys.stdout.write("\n")
+        raise SystemExit(0)
+    if cmd == "read-count":
+        if len(argv) < 4:
+            raise SystemExit("ERROR: read-count requires respected and game_type")
+        respected = parse_optional_type(argv[2])
+        game_type = parse_optional_type(argv[3])
+        if respected is None or game_type is None:
+            raise SystemExit("ERROR: read-count arguments must be integers")
+        print(per_game_l1_read_count(respected, game_type))
         raise SystemExit(0)
     raise SystemExit("ERROR: unknown python subcommand: %s" % cmd)
 
@@ -1287,6 +1364,18 @@ print("" if v is None else v)
       cost_sum="$(python3 -c 'import sys; print(int(sys.argv[1])+int(sys.argv[2]))' "$cost_sum" "${cost_wei:-0}")"
       game_json="$(resolve_games_fetch_one "$idx")"
       printf '%s\n' "$game_json" > "$game_file"
+      # A pre-upgrade type-8 game can have a zero root bond while initBonds(9)
+      # is non-zero. credit stays 0 after resolveClaim. That is success only
+      # when the bond locked in this game is 0. Not part of the hourly scan.
+      if [[ "$leg" == "resolveClaim" && -z "${RESOLVE_GAMES_MOCK_DIR:-}" ]]; then
+        credit_now="$(printf '%s' "$game_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("credit_wei","0"))')"
+        if [[ "$credit_now" == "0" ]]; then
+          bond_now="$(cast call "$game_addr" "claimData(uint256)(uint32,address,address,uint128,bytes32,uint128,uint128)" 0 --rpc-url "$L1_RPC_URL" | awk 'NR==4{print $1}')"
+          if [[ "$bond_now" == "0" ]]; then
+            expected_credit=0
+          fi
+        fi
+      fi
       confirm_leg_advanced "$game_file" "$leg" "$expected_credit"
     done
   done <<EOF
@@ -1335,6 +1424,12 @@ resolve_games_fetch_one() {
   fi
   resolve_games_py fetch-one "$idx"
 }
+
+# Offline read-count (test-helpers). No env, cast, or network.
+if [[ -n "$READ_COUNT_A" ]]; then
+  resolve_games_py read-count "$READ_COUNT_A" "$READ_COUNT_B"
+  exit 0
+fi
 
 # --- analyze-only (offline) ------------------------------------------------
 if [[ "$ANALYZE_ONLY" -eq 1 ]]; then
