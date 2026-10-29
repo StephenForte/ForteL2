@@ -1572,7 +1572,7 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - The new binaries were built and measured: `op-node version v1.20.0-d6620202-1792673968`; `op-proposer version v1.17.0-0130abb2-1793109963` in the new clone `~/src/fortel2/optimism-op-proposer-v1.17.0`.
   - Both accept every flag our start scripts pass.
   - The proposer's code is identical between `43c071cb` and `0130abb2`. The retired `op_proposer_rpc_server_*` metric strings were already absent from the da6d3252 and 43c071cb proposer binaries and present in 9f76a9d2. No dashboard, alert or script reads proposer metrics, and the live proposer exposes only `127.0.0.1:8560`.
-- **Consequence:** OPU-0 (T4 pin) and OPU-1 (interop prestate CI) are dispatchable now. OD-1…OD-4 in the PRD are open and gate the tasks named there. Nothing in this entry authorizes an L1 transaction.
+- **Consequence:** OPU-0 (T4 pin) and OPU-1 (interop prestate CI) are dispatchable now. OD-1, OD-3 and OD-4 in the PRD are open and gate the tasks named there. **OD-2 resolved (operator, 2026-10-29): port `proposer/` and `derivation/` to super roots as OPU-3b.** It is not a cutover gate. Nothing in this entry authorizes an L1 transaction.
 
 - Next free decision id is **D-0158**.
 
