@@ -220,8 +220,14 @@ record_gas_json() {
 }
 
 record_blocks_between() {
+  # On Sepolia the blocks between the bootstrap start and end contain other
+  # people's transactions. Count only receipts sent by the bootstrap key.
   local name_prefix="$1" start="$2" end="$3"
-  local n hash receipt used price bn txcount i
+  local n hash receipt used price bn txcount i from
+  if [[ -z "${BOOT_ADDR:-}" ]]; then
+    echo "ERROR: bootstrap sender is unset; refusing to attribute gas" >&2
+    exit 1
+  fi
   n=0
   bn="$start"
   while [[ "$(python3 -c "print(int('$bn') < int('$end'))")" == "True" ]]; do
@@ -231,11 +237,15 @@ record_blocks_between() {
     while [[ "$i" -lt "$txcount" ]]; do
       hash="$(cast block "$bn" --rpc-url "$RPC" --json | jq -r ".transactions[$i]")"
       receipt="$(cast receipt "$hash" --rpc-url "$RPC" --json)"
+      from="$(jq -r '.from // empty' <<<"$receipt")"
+      i=$((i + 1))
+      if [[ "$(lc "$from")" != "$(lc "$BOOT_ADDR")" ]]; then
+        continue
+      fi
       used="$(jq -r .gasUsed <<<"$receipt")"
       price="$(jq -r .effectiveGasPrice <<<"$receipt")"
       n=$((n + 1))
       record_gas_values "${name_prefix}-${n}" "$used" "$price" "$hash"
-      i=$((i + 1))
     done
   done
   echo "phase: recorded $n $name_prefix transactions"
@@ -263,6 +273,53 @@ auth_flag_send() {
   # sending it to ADMIN would execute the new code with empty calldata and revert.
   LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" --json "$@")"
   record_gas_json "$name" "$LAST_TX_JSON"
+}
+
+DELEGATED=0
+
+revoke_delegation() {
+  local why="$1" code
+  if [[ "$DELEGATED" != "1" ]]; then
+    return 0
+  fi
+  # Clear the flag before the send so a failed revoke cannot re-enter this
+  # function from the ERR trap. A later run clears a leftover 0xef0100 designator.
+  DELEGATED=0
+  echo "phase: revoke delegation ($why)"
+  auth_flag_send "eip7702-revoke" "0x0000000000000000000000000000000000000000" "$PROPOSER_ADDRESS" --value 0
+  code="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")"
+  if [[ "$code" != "0x" ]]; then
+    echo "ERROR: revoke left code on ADMIN" >&2
+    return 1
+  fi
+}
+
+on_upgrade_err() {
+  rc=$?
+  trap - ERR
+  if [[ "$DELEGATED" == "1" ]]; then
+    revoke_delegation "cleanup" || echo "ERROR: cleanup revoke failed" >&2
+  fi
+  exit "$rc"
+}
+
+clear_leftover_delegation() {
+  local code
+  code="$(lc "$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")")"
+  if [[ "$code" == "0x" ]]; then
+    return 0
+  fi
+  case "$code" in
+    0xef0100*) ;;
+    *)
+      echo "ERROR: ADMIN has non-delegation code; refusing" >&2
+      exit 1
+      ;;
+  esac
+  echo "phase: clearing leftover EIP-7702 delegation"
+  prepare_boot_key
+  DELEGATED=1
+  revoke_delegation "leftover"
 }
 
 build_upgrade_calldata() {
@@ -589,6 +646,7 @@ run_upgrade() {
   fi
   read_preserved_delays
   print_state
+  clear_leftover_delegation
   if assert_post_state_quiet; then
     echo "phase: already at U20 post-state; no-op"
     assert_post_state
@@ -624,6 +682,8 @@ run_upgrade() {
     echo "ERROR: EIP-7702 delegation did not install code on ADMIN" >&2
     exit 1
   fi
+  DELEGATED=1
+  trap on_upgrade_err ERR
   echo "state admin delegated codeBytes=$(((${#admin_code} - 2) / 2))"
   if [[ "${OPU_U20_REHEARSE_FAULTS:-}" == "1" ]]; then
     echo "phase: fault rehearsal"
@@ -653,8 +713,8 @@ run_upgrade() {
   else
     echo "phase: respected game type 9 was set by the upgrade override"
   fi
-  echo "phase: revoke delegation"
-  auth_flag_send "eip7702-revoke" "0x0000000000000000000000000000000000000000" "$PROPOSER_ADDRESS" --value 0
+  revoke_delegation "upgrade"
+  trap - ERR
   echo "phase: upgrade done"
   assert_post_state
   print_gas_total

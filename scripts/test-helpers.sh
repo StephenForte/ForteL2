@@ -14009,6 +14009,19 @@ else
   echo "FAIL U20 prestate and bond constants are not pinned" >&2
   fail=1
 fi
+# Removing the sender filter or the failure revoke makes this line FAIL.
+if awk '
+  $0 ~ /^record_blocks_between\(\)/ { p = 1 }
+  p { print }
+  p && /^}/ { exit }
+' "$OPU_U20" | grep -q 'BOOT_ADDR' \
+  && grep -q 'trap on_upgrade_err ERR' "$OPU_U20" \
+  && grep -q '0xef0100' "$OPU_U20"; then
+  echo "PASS U20 gas filter and delegation cleanup are present"
+else
+  echo "FAIL U20 gas filter or delegation cleanup is missing" >&2
+  fail=1
+fi
 unset OPU_U20 OPU_LIVE_RC OPU_LIVE_OUT OPU_FORK_RC OPU_FORK_OUT
 
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
