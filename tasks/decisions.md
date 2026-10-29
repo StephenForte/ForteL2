@@ -1574,7 +1574,19 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - The proposer's code is identical between `43c071cb` and `0130abb2`. The retired `op_proposer_rpc_server_*` metric strings were already absent from the da6d3252 and 43c071cb proposer binaries and present in 9f76a9d2. No dashboard, alert or script reads proposer metrics, and the live proposer exposes only `127.0.0.1:8560`.
 - **Consequence:** OPU-0 (T4 pin) and OPU-1 (interop prestate CI) are dispatchable now. OD-1, OD-3 and OD-4 in the PRD are open and gate the tasks named there. **OD-2 resolved (operator, 2026-10-29): port `proposer/` and `derivation/` to super roots as OPU-3b.** It is not a cutover gate. Nothing in this entry authorizes an L1 transaction.
 
-- Next free decision id is **D-0158**.
+### D-0158 — **OPU-0 done: op-node v1.20.0 (`d6620202`) and op-proposer v1.17.0 (`0130abb2`) on the Mini since 2026-10-29 10:13 PT.** Behaviour-neutral for us (D-0157). The sequencer pin is now two commits: `d6620202` (op-node, op-batcher, op-reth) and `0130abb2` (op-proposer).
+- **Pin (T4, #272, merged as `62995c9`):** `check-el-pins.sh` matches `v1.20.0-d6620202` and `v1.17.0-0130abb2`, each as one regex. Planner review on the Mini with `.env`: 786 PASS / 0 FAIL against 778 / 0 on main. Real binaries: the new pair exits 0. The live pair, either mixed pair, and main's script with the new pair all exit 1. `untagged-0130abb2` is refused, so an untagged build at the right commit cannot pass. Codex P1 (README pin text) was answered by this docs change.
+- **Live swap (planner, 2026-10-29):**
+  - `bin/op-node` → `~/src/fortel2/optimism-op-reth-v2.8.0/op-node/bin/op-node` and `bin/op-proposer` → `~/src/fortel2/optimism-op-proposer-v1.17.0/op-proposer/bin/op-proposer`, in both `~/ForteL2` and `~/fortel2-agents`.
+  - Restarted with `dev-sleep.sh sleep` then `wake` (the nightly launchd path), not `04-start-sequencer-sepolia.sh` alone. With op-reth live, 04 would re-run `03-init-l2.sh` and `op-reth proofs init` against the live datadir.
+  - Stop at 17:13:33Z, wake complete at 17:14:13Z. The L2 head went from 2930354 before the stop to 2930382 at wake, so the outage was under a minute.
+  - op-node logged `Initializing rollup node version=v1.20.0`. op-proposer logged `Connected to DisputeGameFactory … version=1.6.1` and `Proposer started`.
+  - `check-el-pins.sh` (`FORTEL2_EL=reth`) → exit 0, with all four `ok` lines.
+  - Safe head reached 2930433 (past the pre-restart tip) 90 s after the wake. 0 `eror`/`crit` lines from op-node or op-proposer since the restart; the warn lines are the normal re-derivation ones ("Dropping past span batch", one stale build attempt).
+- **Not yet observed:** a proposal from v1.17.0. The interval is 8 h and the last proposal confirmed at 09:13 PT, so the next is due about 17:13 PT on 2026-10-29. `gameCount` was 609 before the swap.
+- **Consequence:** the rollback for either binary is repoint it at `~/src/fortel2/optimism-v1.19.11` and run sleep/wake. The pin check stays red until #272 is reverted. The Render replica's op-node stays v1.19.11 (OD-3 open). Pulling `~/fortel2-agents` brings the new pin script; no launchd job runs it (D-0156).
+
+- Next free decision id is **D-0159**.
 
 ## Template
 
