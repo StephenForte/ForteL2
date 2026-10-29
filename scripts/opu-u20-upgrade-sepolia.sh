@@ -220,6 +220,35 @@ print(f"{p.scheme}://{netloc}{path}")
 PY
 }
 
+# Anvil's log repeats --fork-url, query token included. Print the last lines
+# with every URL reduced to scheme and host. A missing file is not an error.
+redact_log_tail() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  python3 - "$file" << 'PY'
+import re, sys, urllib.parse
+path = sys.argv[1]
+try:
+    lines = open(path, errors="replace").read().splitlines()
+except OSError:
+    raise SystemExit(0)
+url_re = re.compile(r"https?://[^\s\"'<>]+")
+
+def red(match):
+    raw = match.group(0).rstrip(".,);]")
+    parsed = urllib.parse.urlparse(raw)
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    if not host:
+        return "[redacted-url]"
+    return f"{parsed.scheme}://{host}"
+
+for line in lines[-20:]:
+    sys.stdout.write(url_re.sub(red, line) + "\n")
+PY
+}
+
 if [[ "$MODE" == "fork" ]]; then
   case "$FORK_RPC" in
     http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*)
@@ -938,7 +967,7 @@ start_dry_fork() {
   DRY_PID=$!
   if ! wait_for_rpc "$url" "u20-dry-fork" 180; then
     echo "ERROR: dry-run fork failed to start" >&2
-    tail -n 20 "$DRY_DIR/anvil.log" >&2 || true
+    redact_log_tail "$DRY_DIR/anvil.log" >&2 || true
     exit 1
   fi
   set +e
@@ -1102,7 +1131,7 @@ PY
   FEE_URL="http://127.0.0.1:${port}"
   if ! wait_for_rpc "$FEE_URL" "u20-fee-proxy" 30; then
     echo "ERROR: fee proxy failed to start" >&2
-    tail -n 20 "$FEE_DIR/proxy.log" >&2 || true
+    redact_log_tail "$FEE_DIR/proxy.log" >&2 || true
     exit 1
   fi
   echo "phase: live fee proxy $FEE_URL cap=$cap"

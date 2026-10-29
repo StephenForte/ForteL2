@@ -14109,6 +14109,34 @@ else
   echo "FAIL U20 dry fork directory is not removed on exit" >&2
   fail=1
 fi
+# Red case: a raw tail of the Anvil log would print the fork URL's query token.
+if grep -E '(^|[[:space:]])tail[[:space:]].*(anvil|proxy)\.log' "$OPU_U20" >/dev/null; then
+  echo "FAIL U20 failure path tails a raw Anvil or proxy log" >&2
+  fail=1
+else
+  OPU_REDACT_FN="$(mktemp "${TMPDIR:-/tmp}/fortel2-opu20-redact.XXXXXX")"
+  OPU_REDACT_LOG="$(mktemp "${TMPDIR:-/tmp}/fortel2-opu20-redactlog.XXXXXX")"
+  awk '
+    $0 ~ /^redact_log_tail\(\)/ { p = 1 }
+    p { print }
+    p && /^}/ { exit }
+  ' "$OPU_U20" > "$OPU_REDACT_FN"
+  printf '%s\n' 'fork error https://example.invalid/x?apikey=opu2-leak-token more' > "$OPU_REDACT_LOG"
+  OPU_REDACT_OUT="$(bash -c "source '$OPU_REDACT_FN'; redact_log_tail '$OPU_REDACT_LOG'")"
+  if printf '%s\n' "$OPU_REDACT_OUT" | grep -q 'opu2-leak-token'; then
+    echo "FAIL U20 log redaction left a query token" >&2
+    printf '%s\n' "$OPU_REDACT_OUT" >&2
+    fail=1
+  elif printf '%s\n' "$OPU_REDACT_OUT" | grep -q 'https://example.invalid'; then
+    echo "PASS U20 failure logs redact RPC query tokens"
+  else
+    echo "FAIL U20 log redaction dropped the line (rc output empty)" >&2
+    printf '%s\n' "$OPU_REDACT_OUT" >&2
+    fail=1
+  fi
+  rm -f "$OPU_REDACT_FN" "$OPU_REDACT_LOG"
+  unset OPU_REDACT_FN OPU_REDACT_LOG OPU_REDACT_OUT
+fi
 # Live cast sends attach the cap only when SIGN_MODE=live. SIGN_MODE=key
 # would pass a string search for --gas-price and still broadcast uncapped.
 if grep -q 'SIGN_MODE=live' "$OPU_U20" \
