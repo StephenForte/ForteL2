@@ -258,6 +258,14 @@ def main() -> None:
 
     chain_list, configs = generate(rollup)
 
+    if args.interop:
+        # v1.7.0 ChainConfig rejects this obsolete metadata field
+        # (genesis/src/chain/config.rs:37-38,293-297). The type-8 schema
+        # still accepts it; keep default output byte-for-byte unchanged.
+        for superchain in configs["superchains"]:
+            for chain in superchain["chains"]:
+                chain.pop("SuperchainLevel")
+
     args.out.mkdir(parents=True, exist_ok=True)
     chain_path = args.out / "chainList.json"
     configs_path = args.out / "configs.json"

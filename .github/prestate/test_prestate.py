@@ -53,8 +53,13 @@ class PrestateGates(unittest.TestCase):
                                 "--rollup", str(ROOT / "deployments/sepolia/rollup.json"),
                                 "--out", str(path), *flags], check=True, capture_output=True)
             self.assertEqual(sorted(p.name for p in default.iterdir()), ["chainList.json", "configs.json"])
-            for name in ("chainList.json", "configs.json"):
-                self.assertEqual((default / name).read_bytes(), (interop / name).read_bytes())
+            self.assertEqual((default / "chainList.json").read_bytes(),
+                             (interop / "chainList.json").read_bytes())
+            old = json.loads((default / "configs.json").read_text())
+            new = json.loads((interop / "configs.json").read_text())
+            self.assertEqual(old["superchains"][0]["chains"][0].pop("SuperchainLevel"), 0)
+            self.assertNotIn("SuperchainLevel", new["superchains"][0]["chains"][0])
+            self.assertEqual(old, new)
             self.assertEqual(json.loads((interop / "depsets.json").read_text()), [{
                 "dependencies": {"852": {}}, "overrideMessageExpiryWindow": None,
             }])
