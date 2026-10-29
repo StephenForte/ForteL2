@@ -4,6 +4,7 @@ go 1.26.10
 
 require (
 	github.com/StephenForte/ForteL2/batcher v0.0.0-00010101000000-000000000000
+	github.com/StephenForte/ForteL2/proposer v0.0.0
 	github.com/ethereum/go-ethereum v1.17.5
 	github.com/holiman/uint256 v1.3.2
 )
@@ -97,3 +98,5 @@ require (
 )
 
 replace github.com/StephenForte/ForteL2/batcher => ../batcher
+
+replace github.com/StephenForte/ForteL2/proposer => ../proposer

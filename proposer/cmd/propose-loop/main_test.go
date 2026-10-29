@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestReceiptConfirmed(t *testing.T) {
@@ -101,7 +102,7 @@ func TestShouldClearPending(t *testing.T) {
 			wantReason: "reverted",
 		},
 		{
-			name: "unconfirmed failed timeout keeps",
+			name:    "unconfirmed failed timeout keeps",
 			waitErr: errors.New("timeout waiting for 2 confirmations of failed tx 0xabc (receipt block 10)"),
 			l1: &fakeL1TxTracker{
 				byHashErr: ethereum.NotFound,
@@ -270,5 +271,20 @@ func TestWaitReceiptConfirmedFailedReorgKeepsSoft(t *testing.T) {
 	}, hash, err)
 	if clear || reason != "still-pending" {
 		t.Fatalf("reorged failed tip should keep pending, got clear=%v reason=%q", clear, reason)
+	}
+}
+
+func TestSignPathRefusesLoopbackSepolia(t *testing.T) {
+	t.Parallel()
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := types.NewTransaction(1, common.Address{1}, big.NewInt(0), 21000, big.NewInt(1), nil)
+	if _, err := signTx("http://127.0.0.1:8545", big.NewInt(11155111), tx, key); err == nil {
+		t.Fatal("signTx must refuse chain id 11155111 on loopback")
+	}
+	if _, err := signTx("http://127.0.0.1:8545", big.NewInt(900852), tx, key); err != nil {
+		t.Fatal(err)
 	}
 }

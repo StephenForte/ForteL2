@@ -91,6 +91,19 @@ wait_for_opnode_rpc "$L2_NODE_RPC_URL" "op-node"
 
 echo "WARN: stop stock op-proposer first (shared PROPOSER_PRIVATE_KEY nonce). See proposer/README.md US-074." >&2
 
+# OPU-3b: a loopback L1 that reports Sepolia's chain id must not be signed.
+# A port-forward to Sepolia would otherwise produce a Sepolia-valid false claim.
+# The fork rehearsal is loopback with chain id 900852 and is allowed.
+case "$L1_RPC_URL" in
+  http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*)
+    _opu3b_cid="$(cast chain-id --rpc-url "$L1_RPC_URL")"
+    if [[ "$_opu3b_cid" == "11155111" ]]; then
+      echo "ERROR: refusing to sign: loopback L1 reports chain id 11155111" >&2
+      exit 1
+    fi
+    ;;
+esac
+
 # -block first (allowlisted); guarded endpoints last so they cannot be overridden.
 # bash 3.2 + set -u: empty "${FORWARD[@]}" is unbound (D-0083). Use the unquoted
 # ${arr[@]+"${arr[@]}"} idiom: outer quotes on bash 4.4+ can yield a single

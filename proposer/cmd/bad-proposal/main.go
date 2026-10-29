@@ -121,6 +121,13 @@ func main() {
 	}
 
 	realRoot := out.OutputRoot
+	if gt == proposer.GameTypeSuperCannonKona {
+		if err := runSuperRootBadProposal(ctx, l1, *l1RPC, *rollupRPC, priv, from, factoryAddr, gt, blockNum, realRoot, *confirmFlag, *receiptTimeout); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	badRoot := corruptRoot(realRoot)
 	if badRoot == realRoot {
 		fmt.Fprintln(os.Stderr, "internal error: corruptRoot did not change the claim")
@@ -160,7 +167,7 @@ func main() {
 	}
 
 	fmt.Printf("broadcasting false claim from=%s factory=%s l2=%d\n", from.Hex(), factoryAddr.Hex(), blockNum)
-	txHash, err := sendCreate(ctx, l1, priv, from, factoryAddr, calldata, bond)
+	txHash, err := sendCreate(ctx, l1, *l1RPC, priv, from, factoryAddr, calldata, bond)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "send: %v\n", err)
 		os.Exit(1)
@@ -205,6 +212,127 @@ func corruptRoot(real common.Hash) common.Hash {
 	return out
 }
 
+// signTx is the only signer. Tests fail if this stops refusing Sepolia-on-loopback.
+var signTx = proposer.SignLegacyTx
+
+// buildType9FalseClaim corrupts the output root inside the super-root preimage
+// and returns keccak(preimage) as the claim. initialize() requires that
+// equality, so a flipped hash with an honest preimage would revert BadExtraData.
+func buildType9FalseClaim(timestamp, chainID uint64, real common.Hash) (extra []byte, claim, badOutput common.Hash, err error) {
+	badOutput = corruptRoot(real)
+	if badOutput == real {
+		return nil, common.Hash{}, common.Hash{}, errors.New("internal error: corruptRoot did not change the output root")
+	}
+	sr, err := proposer.EncodeSuperRoot(timestamp, []proposer.ChainOutput{{
+		ChainID:    chainID,
+		OutputRoot: badOutput,
+	}})
+	if err != nil {
+		return nil, common.Hash{}, common.Hash{}, err
+	}
+	if sr.Hash == real {
+		return nil, common.Hash{}, common.Hash{}, errors.New("internal error: super root hash collided with the honest output root")
+	}
+	if crypto.Keccak256Hash(sr.Preimage) != sr.Hash {
+		return nil, common.Hash{}, common.Hash{}, errors.New("internal error: super root hash is not keccak(preimage)")
+	}
+	return append([]byte(nil), sr.Preimage...), sr.Hash, badOutput, nil
+}
+
+func runSuperRootBadProposal(ctx context.Context, l1 *ethclient.Client, l1RPC, rollupRPC string, priv *ecdsa.PrivateKey, from, factory common.Address, gt uint32, blockNum uint64, realRoot common.Hash, confirmFlag bool, receiptTimeout time.Duration) error {
+	clock, err := proposer.FetchRollupClock(ctx, rollupRPC)
+	if err != nil {
+		return fmt.Errorf("rollup clock: %w", err)
+	}
+	ts, err := proposer.TimestampForL2Block(clock.GenesisTime, clock.BlockTime, blockNum)
+	if err != nil {
+		return err
+	}
+	impl, err := proposer.GameImpl(ctx, l1, factory, gt)
+	if err != nil {
+		return fmt.Errorf("gameImpls(%d): %w", gt, err)
+	}
+	if impl == (common.Address{}) {
+		return fmt.Errorf("refusing game type %d: DisputeGameFactory.gameImpls(%d) is zero", gt, gt)
+	}
+	extra, claim, badOutput, err := buildType9FalseClaim(ts, clock.L2ChainID, realRoot)
+	if err != nil {
+		return err
+	}
+	bond, err := proposer.InitBond(ctx, l1, factory, gt)
+	if err != nil {
+		return fmt.Errorf("initBonds: %w", err)
+	}
+
+	fmt.Printf("from=%s (proposer role — not challenger)\n", from.Hex())
+	fmt.Printf("factory=%s\n", factory.Hex())
+	fmt.Printf("gameType=%d\n", gt)
+	fmt.Printf("block=%d\n", blockNum)
+	fmt.Printf("timestamp=%d\n", ts)
+	fmt.Printf("chainId=%d\n", clock.L2ChainID)
+	fmt.Printf("real_output_root=%s\n", realRoot.Hex())
+	fmt.Printf("corrupted_output_root=%s (XOR last byte with 0xFF)\n", badOutput.Hex())
+	fmt.Printf("superRoot=%s\n", claim.Hex())
+	fmt.Printf("bond=%s wei\n", bond.String())
+
+	if !confirmRequested(confirmFlag, os.Getenv(confirmEnvName)) {
+		return errors.New("refusing to broadcast: pass -i-understand-this-posts-a-false-claim=true")
+	}
+
+	calldata, err := proposer.EncodeCreate(gt, claim, extra)
+	if err != nil {
+		return fmt.Errorf("encode create: %w", err)
+	}
+	beforeCount, err := proposer.GameCount(ctx, l1, factory)
+	if err != nil {
+		return fmt.Errorf("gameCount: %w", err)
+	}
+	fmt.Printf("broadcasting false claim from=%s factory=%s timestamp=%d\n", from.Hex(), factory.Hex(), ts)
+	txHash, err := sendCreate(ctx, l1, l1RPC, priv, from, factory, calldata, bond)
+	if err != nil {
+		return fmt.Errorf("send: %w", err)
+	}
+	fmt.Printf("broadcast l1_tx=%s\n", txHash.Hex())
+	rcpt, err := waitMinedReceipt(ctx, l1, txHash, receiptTimeout)
+	if err != nil {
+		return fmt.Errorf("receipt: %w", err)
+	}
+	if rcpt.Status != types.ReceiptStatusSuccessful {
+		return fmt.Errorf("create tx reverted: tx=%s status=%d", txHash.Hex(), rcpt.Status)
+	}
+	fmt.Printf("mined status=%d block=%s\n", rcpt.Status, rcpt.BlockNumber.String())
+
+	g, err := findNewGameWithRoot(ctx, l1, factory, beforeCount, claim, ts)
+	if err != nil {
+		return fmt.Errorf("self-check: %w (tx=%s)", err, txHash.Hex())
+	}
+	if g.RootClaim != claim {
+		return fmt.Errorf("self-check failed: on-chain rootClaim=%s want %s", g.RootClaim.Hex(), claim.Hex())
+	}
+	if crypto.Keccak256Hash(g.ExtraData) != g.RootClaim {
+		return fmt.Errorf("self-check failed: keccak(extraData) != rootClaim (tx=%s)", txHash.Hex())
+	}
+	byChain, err := proposer.RootClaimByChainID(ctx, l1, g.Proxy, clock.L2ChainID)
+	if err != nil {
+		return fmt.Errorf("rootClaimByChainId(%d): %w", clock.L2ChainID, err)
+	}
+	if byChain == realRoot {
+		return fmt.Errorf("self-check failed: rootClaimByChainId(%d)=%s equals the real output root", clock.L2ChainID, byChain.Hex())
+	}
+	if byChain != badOutput {
+		return fmt.Errorf("self-check failed: rootClaimByChainId(%d)=%s want corrupted output %s", clock.L2ChainID, byChain.Hex(), badOutput.Hex())
+	}
+
+	fmt.Printf("index=%d\n", g.Index)
+	fmt.Printf("proxy=%s\n", g.Proxy.Hex())
+	fmt.Printf("tx=%s\n", txHash.Hex())
+	fmt.Printf("rootClaim=%s\n", g.RootClaim.Hex())
+	fmt.Printf("rootClaimByChainId(%d)=%s (differs from real output root)\n", clock.L2ChainID, byChain.Hex())
+	fmt.Printf("keccak(extraData)==rootClaim\n")
+	fmt.Println("done")
+	return nil
+}
+
 // confirmRequested is the broadcast gate. The flag or the exact env value
 // "true" (trimmed) is required; "1" / "yes" do not count.
 func confirmRequested(flagVal bool, env string) bool {
@@ -218,7 +346,11 @@ func confirmRequested(flagVal bool, env string) bool {
 // PendingNonceAt, SuggestGasPrice, EstimateGas + 20% headroom, legacy
 // types.NewTransaction, SignTx with LatestSignerForChainID. Not factored
 // into proposer/rpc.go — that file and propose-loop are reuse-only for US-074.
-func sendCreate(ctx context.Context, l1 *ethclient.Client, priv *ecdsa.PrivateKey, from, factory common.Address, data []byte, value *big.Int) (common.Hash, error) {
+func sendCreate(ctx context.Context, l1 *ethclient.Client, l1RPC string, priv *ecdsa.PrivateKey, from, factory common.Address, data []byte, value *big.Int) (common.Hash, error) {
+	chainID, err := l1.ChainID(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
 	nonce, err := l1.PendingNonceAt(ctx, from)
 	if err != nil {
 		return common.Hash{}, err
@@ -233,12 +365,8 @@ func sendCreate(ctx context.Context, l1 *ethclient.Client, priv *ecdsa.PrivateKe
 		return common.Hash{}, fmt.Errorf("estimate gas: %w", err)
 	}
 	gas = gas + gas/5 // headroom
-	chainID, err := l1.ChainID(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
 	tx := types.NewTransaction(nonce, factory, value, gas, gasPrice, data)
-	signed, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), priv)
+	signed, err := signTx(l1RPC, chainID, tx, priv)
 	if err != nil {
 		return common.Hash{}, err
 	}

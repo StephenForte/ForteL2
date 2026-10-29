@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 
+	"github.com/StephenForte/ForteL2/proposer"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -45,6 +47,7 @@ type ProposalResult struct {
 	StatusName  string         `json:"statusName"`
 	GameType    uint32         `json:"gameType"`
 	L2Block     uint64         `json:"l2Block"`
+	L2Timestamp uint64         `json:"l2Timestamp,omitempty"`
 	DerivedRoot common.Hash    `json:"derivedRoot,omitempty"`
 	ClaimedRoot common.Hash    `json:"claimedRoot"`
 	Result      string         `json:"result"`
@@ -59,6 +62,9 @@ func inWindow(height, start, end uint64) bool {
 // compute is only invoked for in-window heights; a compute error is a hard error
 // (proof failure), not SKIPPED.
 func EvaluateProposal(p Proposal, windowStart, windowEnd uint64, compute func(height uint64) (common.Hash, error)) (ProposalResult, error) {
+	if p.GameType == proposer.GameTypeSuperCannonKona {
+		return ProposalResult{}, fmt.Errorf("proposal index=%d game=%s is type 9 (timestamp %d); compare it as a super root, not an output root", p.Index, p.Game, p.L2Timestamp)
+	}
 	r := ProposalResult{
 		Index:       p.Index,
 		Game:        p.Game,
@@ -87,10 +93,99 @@ func EvaluateProposal(p Proposal, windowStart, windowEnd uint64, compute func(he
 	return r, nil
 }
 
+// EvaluateSuperRootProposal compares a type-9 game. The window test uses the
+// L2 block for the game's timestamp (genesis and block time from rollup
+// config), never the timestamp itself. compute must be OutputRootV0At.
+func EvaluateSuperRootProposal(p Proposal, windowStart, windowEnd, genesisTime, blockTime uint64, compute func(height uint64) (common.Hash, error)) (ProposalResult, error) {
+	block, err := proposer.L2BlockForTimestamp(genesisTime, blockTime, p.L2Timestamp)
+	if err != nil {
+		return ProposalResult{}, fmt.Errorf("proposal index=%d game=%s timestamp %d: %w", p.Index, p.Game, p.L2Timestamp, err)
+	}
+	r := ProposalResult{
+		Index:       p.Index,
+		Game:        p.Game,
+		CreatedAt:   p.CreatedAt,
+		Status:      p.Status,
+		StatusName:  GameStatusName(p.Status),
+		GameType:    p.GameType,
+		L2Block:     block,
+		L2Timestamp: p.L2Timestamp,
+		ClaimedRoot: p.RootClaim,
+	}
+	if !inWindow(block, windowStart, windowEnd) {
+		r.Result = ProposalSkipped
+		r.SkipReason = fmt.Sprintf("height outside window %d–%d", windowStart, windowEnd)
+		return r, nil
+	}
+	output, err := compute(block)
+	if err != nil {
+		return r, fmt.Errorf("proposal index=%d game=%s l2=%d timestamp=%d: %w", p.Index, p.Game, block, p.L2Timestamp, err)
+	}
+	decoded, err := proposer.DecodeSuperRoot(p.ExtraData)
+	if err != nil {
+		return r, fmt.Errorf("proposal index=%d game=%s extraData: %w", p.Index, p.Game, err)
+	}
+	if len(decoded.Chains) != 1 {
+		return r, fmt.Errorf("proposal index=%d game=%s: super root has %d chains; this verifier derives one chain", p.Index, p.Game, len(decoded.Chains))
+	}
+	built, err := proposer.EncodeSuperRoot(decoded.Timestamp, []proposer.ChainOutput{{
+		ChainID:    decoded.Chains[0].ChainID,
+		OutputRoot: output,
+	}})
+	if err != nil {
+		return r, err
+	}
+	r.DerivedRoot = built.Hash
+	if built.Hash == p.RootClaim {
+		r.Result = ProposalMatch
+		return r, nil
+	}
+	r.Result = ProposalMismatch
+	return r, nil
+}
+
+// ProposalGameTypes is the factory walk for one verify run. Type 8 and type 9
+// are both included when either is selected, because both exist after the
+// super-root upgrade. Any other selected type is unchanged.
+func ProposalGameTypes(selected uint32) []uint32 {
+	switch selected {
+	case 8:
+		return []uint32{8, proposer.GameTypeSuperCannonKona}
+	case proposer.GameTypeSuperCannonKona:
+		return []uint32{proposer.GameTypeSuperCannonKona, 8}
+	default:
+		return []uint32{selected}
+	}
+}
+
+// ClassifyProposals reports MATCH, MISMATCH, or SKIPPED for a mixed game list.
+func ClassifyProposals(proposals []Proposal, windowStart, windowEnd, genesisTime, blockTime uint64, compute func(height uint64) (common.Hash, error)) ([]ProposalResult, error) {
+	out := make([]ProposalResult, 0, len(proposals))
+	for _, p := range proposals {
+		var (
+			pr  ProposalResult
+			err error
+		)
+		if p.GameType == proposer.GameTypeSuperCannonKona {
+			pr, err = EvaluateSuperRootProposal(p, windowStart, windowEnd, genesisTime, blockTime, compute)
+		} else {
+			pr, err = EvaluateProposal(p, windowStart, windowEnd, compute)
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, pr)
+	}
+	return out, nil
+}
+
 // FormatProposalLine is the human-readable per-game report line.
 func FormatProposalLine(r ProposalResult) string {
 	base := fmt.Sprintf("  proposal index=%d game=%s l2=%d created=%d status=%s type=%d",
 		r.Index, r.Game, r.L2Block, r.CreatedAt, r.StatusName, r.GameType)
+	if r.GameType == proposer.GameTypeSuperCannonKona && r.L2Timestamp != 0 {
+		base = fmt.Sprintf("%s timestamp=%d", base, r.L2Timestamp)
+	}
 	switch r.Result {
 	case ProposalSkipped:
 		return fmt.Sprintf("%s %s (%s)", base, ProposalSkipped, r.SkipReason)
@@ -211,66 +306,83 @@ func verifyAgainstProposals(ctx context.Context, opts VerifyOptions, sealer *Sea
 		ProposalSkipped:    &skipped,
 	}
 
-	if opts.ResumeL1Bound {
-		if err := resolveResumeInboxScan(ctx, sealer, cfg, &opts); err != nil {
+	if opts.ProposalsEL == "" {
+		if sealer == nil {
+			return nil, fmt.Errorf("proposal mode: sealing EL is required unless -proposals-el is set")
+		}
+		if opts.ResumeL1Bound {
+			if err := resolveResumeInboxScan(ctx, sealer, cfg, &opts); err != nil {
+				return report, err
+			}
+		} else if err := resolveFromL1BlockSeal(ctx, sealer, &opts); err != nil {
 			return report, err
 		}
-	} else if err := resolveFromL1BlockSeal(ctx, sealer, &opts); err != nil {
-		return report, err
-	}
 
-	blocks, err := deriveBlockInputs(ctx, cfg, l1, opts)
-	if err != nil {
-		return report, err
-	}
-
-	st, err := initDerivationStateFromSeal(ctx, cfg, sealer, opts.StartL2)
-	if err != nil {
-		return report, fmt.Errorf("derivation state from sealing EL: %w", err)
-	}
-	if opts.AnchoredHead {
-		if err := sealer.SyncHeadFromLatest(ctx); err != nil {
-			return report, fmt.Errorf("sealing EL head sync: %w", err)
-		}
-	}
-
-	byNumber := map[uint64]BlockInput{}
-	for _, b := range blocks {
-		byNumber[b.Number] = b
-	}
-
-	for n := opts.StartL2; n <= opts.EndL2; n++ {
-		in, ok := byNumber[n]
-		if !ok {
-			return report, fmt.Errorf("missing derived block %d in window (have %d batches)", n, len(blocks))
-		}
-		attrs, err := BuildPayloadAttributes(ctx, cfg, l1, &st, in)
+		blocks, err := deriveBlockInputs(ctx, cfg, l1, opts)
 		if err != nil {
-			return report, fmt.Errorf("block %d attrs: %w", n, err)
+			return report, err
 		}
-		derived, err := sealer.SealBlock(ctx, attrs)
+
+		st, err := initDerivationStateFromSeal(ctx, cfg, sealer, opts.StartL2)
 		if err != nil {
-			return report, fmt.Errorf("block %d seal: %w", n, err)
+			return report, fmt.Errorf("derivation state from sealing EL: %w", err)
 		}
-		st.ParentHash = derived
-		st.ParentTime = in.Timestamp
+		if opts.AnchoredHead {
+			if err := sealer.SyncHeadFromLatest(ctx); err != nil {
+				return report, fmt.Errorf("sealing EL head sync: %w", err)
+			}
+		}
+
+		byNumber := map[uint64]BlockInput{}
+		for _, b := range blocks {
+			byNumber[b.Number] = b
+		}
+
+		for n := opts.StartL2; n <= opts.EndL2; n++ {
+			in, ok := byNumber[n]
+			if !ok {
+				return report, fmt.Errorf("missing derived block %d in window (have %d batches)", n, len(blocks))
+			}
+			attrs, err := BuildPayloadAttributes(ctx, cfg, l1, &st, in)
+			if err != nil {
+				return report, fmt.Errorf("block %d attrs: %w", n, err)
+			}
+			derived, err := sealer.SealBlock(ctx, attrs)
+			if err != nil {
+				return report, fmt.Errorf("block %d seal: %w", n, err)
+			}
+			st.ParentHash = derived
+			st.ParentTime = in.Timestamp
+		}
 	}
 
-	proposals, err := EnumerateProposals(ctx, l1RPC, opts.Factory, gameType)
-	if err != nil {
-		return report, err
+	var proposals []Proposal
+	for _, gtWalk := range ProposalGameTypes(gameType) {
+		part, err := EnumerateProposals(ctx, l1RPC, opts.Factory, gtWalk)
+		if err != nil {
+			return report, err
+		}
+		proposals = append(proposals, part...)
 	}
+	sort.Slice(proposals, func(i, j int) bool { return proposals[i].Index < proposals[j].Index })
 
+	var outputEL *SealingEL
+	if opts.ProposalsEL != "" {
+		outputEL = NewReadOnlyEL(opts.ProposalsEL)
+	} else {
+		outputEL = sealer
+	}
 	compute := func(height uint64) (common.Hash, error) {
-		return sealer.OutputRootV0At(ctx, height)
+		return outputEL.OutputRootV0At(ctx, height)
 	}
 
+	results, err := ClassifyProposals(proposals, opts.StartL2, opts.EndL2, cfg.Genesis.L2Time, cfg.BlockTime, compute)
+	if err != nil {
+		report.Proposals = results
+		return report, err
+	}
 	var mismatch error
-	for _, p := range proposals {
-		pr, err := EvaluateProposal(p, opts.StartL2, opts.EndL2, compute)
-		if err != nil {
-			return report, err
-		}
+	for _, pr := range results {
 		report.Proposals = append(report.Proposals, pr)
 		switch pr.Result {
 		case ProposalMatch:
@@ -280,8 +392,12 @@ func verifyAgainstProposals(ctx context.Context, opts VerifyOptions, sealer *Sea
 		case ProposalMismatch:
 			*report.ProposalMismatched++
 			if mismatch == nil {
-				mismatch = fmt.Errorf("output-root mismatch at game %s index=%d l2=%d: derived %s claimed %s",
-					pr.Game, pr.Index, pr.L2Block, pr.DerivedRoot, pr.ClaimedRoot)
+				kind := "output-root"
+				if pr.GameType == proposer.GameTypeSuperCannonKona {
+					kind = "super-root"
+				}
+				mismatch = fmt.Errorf("%s mismatch at game %s index=%d l2=%d: derived %s claimed %s",
+					kind, pr.Game, pr.Index, pr.L2Block, pr.DerivedRoot, pr.ClaimedRoot)
 			}
 		}
 	}

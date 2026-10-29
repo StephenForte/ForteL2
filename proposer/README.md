@@ -20,6 +20,8 @@ Minimal OP Stack proposer rebuild targeting the DisputeGameFactory (not L2Output
 
 **Output root note:** v1 **fetches** `optimism_outputAtBlock` from op-node. Recomputing the hash locally is a documented follow-up, not required for Phase 5 acceptance.
 
+**Type 9 (super root):** `-game-type 9` builds the super-root preimage (`0x01 ‖ uint64 timestamp ‖ uint256 chainId ‖ bytes32 outputRoot`, chains sorted by id) in `superroot.go`. `extraData` is that preimage and `rootClaim` is `keccak256(extraData)`. The game's `l2SequenceNumber` is the L2 timestamp, not the block number. The block is `(timestamp − genesis l2_time) / block_time` from `optimism_rollupConfig`. The tool refuses type 9 when `gameImpls(9)` is the zero address. Type 8 and every other output-root type keep the 32-byte `extraData` and the same log lines. `bad-proposal` at type 9 corrupts the output root inside the preimage (a flipped `rootClaim` with an honest preimage reverts `BadExtraData`). Signing tools refuse chain id 11155111 when `-l1` is loopback.
+
 Stock `op-proposer` remains the **default** via `scripts/06-start-proposer*.sh`.
 
 ## Layout

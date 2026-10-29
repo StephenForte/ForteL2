@@ -1,9 +1,13 @@
 package main
 
 import (
+	"math/big"
 	"testing"
 
+	"github.com/StephenForte/ForteL2/proposer"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestCorruptRoot(t *testing.T) {
@@ -138,5 +142,45 @@ func TestResolveGameType(t *testing.T) {
 				t.Fatalf("resolveGameType(%q, %q)=%d want %d", tc.flag, tc.env, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestType9FalseClaimKeepsInitInvariant(t *testing.T) {
+	t.Parallel()
+	real := common.HexToHash("0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	extra, claim, badOut, err := buildType9FalseClaim(1793305916, 852, real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crypto.Keccak256Hash(extra) != claim {
+		t.Fatal("keccak(extraData) must equal the posted rootClaim")
+	}
+	sr, err := proposer.DecodeSuperRoot(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sr.Chains[0].OutputRoot == real {
+		t.Fatal("embedded output root must differ from the real one")
+	}
+	if sr.Chains[0].OutputRoot != badOut {
+		t.Fatalf("embedded %s want %s", sr.Chains[0].OutputRoot.Hex(), badOut.Hex())
+	}
+	if claim == real {
+		t.Fatal("rootClaim must not be the honest output root")
+	}
+}
+
+func TestSignPathRefusesLoopbackSepolia(t *testing.T) {
+	t.Parallel()
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := types.NewTransaction(1, common.Address{1}, big.NewInt(0), 21000, big.NewInt(1), nil)
+	if _, err := signTx("http://127.0.0.1:8545", big.NewInt(11155111), tx, key); err == nil {
+		t.Fatal("signTx must refuse chain id 11155111 on loopback")
+	}
+	if _, err := signTx("http://127.0.0.1:8545", big.NewInt(900852), tx, key); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -14152,6 +14152,80 @@ unset OPU_U20 OPU_LIVE_RC OPU_LIVE_OUT OPU_FORK_RC OPU_FORK_OUT OPU_LEAK_RC OPU_
 unset OPU_FUND_RC OPU_FUND_OUT OPU_FUND_OK_RC OPU_FUND_OK_OUT
 unset OPU_ANVIL_DIR OPU_ANVIL_PORT OPU_ANVIL_PID OPU_ANVIL_UP OPU_SIGN_RC OPU_SIGN_OUT
 
+# OPU-3b: loopback L1 that reports Sepolia chain id 11155111 must not reach go run.
+# Chain id 900852 (the fork) must still reach go run. Removing the case in
+# create-bad-proposal-sepolia.sh turns the refusal green.
+OPU3B_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu3b.XXXXXX")"
+register_tmp "$OPU3B_FIX"
+cleanup_opu3b_fix() { rm -rf "$OPU3B_FIX"; }
+register_cleanup cleanup_opu3b_fix
+mkdir -p "$OPU3B_FIX/proposer" "$OPU3B_FIX/data" "$OPU3B_FIX/deployments/sepolia/.deployer"
+printf '%s\n' '{"DisputeGameFactoryProxy":"0x0000000000000000000000000000000000000001"}' \
+  > "$OPU3B_FIX/deployments/sepolia/deployments.json"
+cat > "$OPU3B_FIX/.env.sepolia" <<EOF
+FORTEL2_ROOT=$OPU3B_FIX
+DATA_DIR=$OPU3B_FIX/data
+DEPLOY_DIR=$OPU3B_FIX/deployments/sepolia/.deployer
+L1_CHAIN_ID=11155111
+L2_CHAIN_ID=852
+L1_RPC_URL=http://127.0.0.1:9
+L2_RPC_URL=http://127.0.0.1:9545
+L2_NODE_RPC_URL=http://127.0.0.1:9547
+PROPOSER_PRIVATE_KEY=0x1111111111111111111111111111111111111111111111111111111111111111
+PROPOSER_GAME_TYPE=9
+EOF
+cat > "$OPU3B_FIX/bashenv.sh" <<'EOS'
+go() {
+  printf '%s\n' "$@" > "$OPU3B_STUB_DIR/go-args"
+  return 0
+}
+cast() {
+  case "${1:-}" in
+    block-number) echo 1 ;;
+    rpc) echo '{"current_l1":{"number":1}}' ;;
+    chain-id) echo "${OPU3B_CHAIN_ID:-0}" ;;
+    *) echo 0 ;;
+  esac
+  return 0
+}
+jq() { echo '{}'; return 0; }
+EOS
+_opu3b_run() {
+  local cid="$1"
+  rm -f "$OPU3B_FIX/go-args"
+  env -u I_UNDERSTAND_THIS_POSTS_A_FALSE_CLAIM \
+    OPU3B_STUB_DIR="$OPU3B_FIX" \
+    OPU3B_CHAIN_ID="$cid" \
+    BASH_ENV="$OPU3B_FIX/bashenv.sh" \
+    FORTEL2_ENV="$OPU3B_FIX/.env.sepolia" \
+    FORTEL2_ROOT="$OPU3B_FIX" \
+    CONFIRM_BAD_PROPOSAL_SEPOLIA=1 \
+    "$SCRIPT_DIR/create-bad-proposal-sepolia.sh"
+}
+OPU3B_REFUSE_OUT="$(_opu3b_run 11155111 2>&1)" && OPU3B_REFUSE_EC=0 || OPU3B_REFUSE_EC=$?
+if [[ "$OPU3B_REFUSE_EC" -ne 0 ]] \
+  && [[ ! -f "$OPU3B_FIX/go-args" ]] \
+  && echo "$OPU3B_REFUSE_OUT" | grep -q 'loopback L1 reports chain id 11155111'; then
+  echo "PASS OPU-3b wrapper refuses loopback chain id 11155111 before go run"
+else
+  echo "FAIL OPU-3b wrapper must refuse loopback chain id 11155111 before go run (ec=$OPU3B_REFUSE_EC)" >&2
+  echo "$OPU3B_REFUSE_OUT" >&2
+  fail=1
+fi
+OPU3B_FORK_OUT="$(_opu3b_run 900852 2>&1)" && OPU3B_FORK_EC=0 || OPU3B_FORK_EC=$?
+if [[ "$OPU3B_FORK_EC" -eq 0 ]] \
+  && [[ -f "$OPU3B_FIX/go-args" ]] \
+  && grep -qx -- '-game-type' "$OPU3B_FIX/go-args" \
+  && grep -qx -- '9' "$OPU3B_FIX/go-args"; then
+  echo "PASS OPU-3b wrapper still runs type 9 on loopback chain id 900852"
+else
+  echo "FAIL OPU-3b wrapper must reach go run for loopback chain id 900852 (ec=$OPU3B_FORK_EC)" >&2
+  echo "$OPU3B_FORK_OUT" >&2
+  fail=1
+fi
+cleanup_opu3b_fix
+unset OPU3B_FIX OPU3B_REFUSE_OUT OPU3B_REFUSE_EC OPU3B_FORK_OUT OPU3B_FORK_EC
+
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
 # `trap … EXIT` — bash replaces the handler and would drop every previously
