@@ -96,7 +96,10 @@ func EvaluateProposal(p Proposal, windowStart, windowEnd uint64, compute func(he
 // EvaluateSuperRootProposal compares a type-9 game. The window test uses the
 // L2 block for the game's timestamp (genesis and block time from rollup
 // config), never the timestamp itself. compute must be OutputRootV0At.
-func EvaluateSuperRootProposal(p Proposal, windowStart, windowEnd, genesisTime, blockTime uint64, compute func(height uint64) (common.Hash, error)) (ProposalResult, error) {
+// l2ChainID is the rollup's chain id. The rebuilt super root uses that id,
+// not the chain id named in extraData: a preimage that attaches this chain's
+// output root to some other chain id is not a claim about this rollup.
+func EvaluateSuperRootProposal(p Proposal, windowStart, windowEnd, genesisTime, blockTime, l2ChainID uint64, compute func(height uint64) (common.Hash, error)) (ProposalResult, error) {
 	block, err := proposer.L2BlockForTimestamp(genesisTime, blockTime, p.L2Timestamp)
 	if err != nil {
 		return ProposalResult{}, fmt.Errorf("proposal index=%d game=%s timestamp %d: %w", p.Index, p.Game, p.L2Timestamp, err)
@@ -128,8 +131,11 @@ func EvaluateSuperRootProposal(p Proposal, windowStart, windowEnd, genesisTime, 
 	if len(decoded.Chains) != 1 {
 		return r, fmt.Errorf("proposal index=%d game=%s: super root has %d chains; this verifier derives one chain", p.Index, p.Game, len(decoded.Chains))
 	}
+	if l2ChainID == 0 {
+		return r, fmt.Errorf("proposal index=%d game=%s: rollup l2_chain_id is zero", p.Index, p.Game)
+	}
 	built, err := proposer.EncodeSuperRoot(decoded.Timestamp, []proposer.ChainOutput{{
-		ChainID:    decoded.Chains[0].ChainID,
+		ChainID:    l2ChainID,
 		OutputRoot: output,
 	}})
 	if err != nil {
@@ -159,7 +165,8 @@ func ProposalGameTypes(selected uint32) []uint32 {
 }
 
 // ClassifyProposals reports MATCH, MISMATCH, or SKIPPED for a mixed game list.
-func ClassifyProposals(proposals []Proposal, windowStart, windowEnd, genesisTime, blockTime uint64, compute func(height uint64) (common.Hash, error)) ([]ProposalResult, error) {
+// l2ChainID is the rollup chain id used to rebuild type-9 super roots.
+func ClassifyProposals(proposals []Proposal, windowStart, windowEnd, genesisTime, blockTime, l2ChainID uint64, compute func(height uint64) (common.Hash, error)) ([]ProposalResult, error) {
 	out := make([]ProposalResult, 0, len(proposals))
 	for _, p := range proposals {
 		var (
@@ -167,7 +174,7 @@ func ClassifyProposals(proposals []Proposal, windowStart, windowEnd, genesisTime
 			err error
 		)
 		if p.GameType == proposer.GameTypeSuperCannonKona {
-			pr, err = EvaluateSuperRootProposal(p, windowStart, windowEnd, genesisTime, blockTime, compute)
+			pr, err = EvaluateSuperRootProposal(p, windowStart, windowEnd, genesisTime, blockTime, l2ChainID, compute)
 		} else {
 			pr, err = EvaluateProposal(p, windowStart, windowEnd, compute)
 		}
@@ -376,7 +383,7 @@ func verifyAgainstProposals(ctx context.Context, opts VerifyOptions, sealer *Sea
 		return outputEL.OutputRootV0At(ctx, height)
 	}
 
-	results, err := ClassifyProposals(proposals, opts.StartL2, opts.EndL2, cfg.Genesis.L2Time, cfg.BlockTime, compute)
+	results, err := ClassifyProposals(proposals, opts.StartL2, opts.EndL2, cfg.Genesis.L2Time, cfg.BlockTime, cfg.L2ChainID, compute)
 	if err != nil {
 		report.Proposals = results
 		return report, err

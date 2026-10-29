@@ -184,7 +184,7 @@ func TestSuperRootWindowUsesBlockNotTimestamp(t *testing.T) {
 		Status:      0,
 	}
 	var saw uint64
-	r, err := EvaluateSuperRootProposal(p, 1, 20, genesis, blockTime, func(h uint64) (common.Hash, error) {
+	r, err := EvaluateSuperRootProposal(p, 1, 20, genesis, blockTime, 852, func(h uint64) (common.Hash, error) {
 		saw = h
 		if h == ts {
 			t.Fatalf("compute was called with the timestamp %d", h)
@@ -226,7 +226,7 @@ func TestMixedProposalList(t *testing.T) {
 		{Index: 3, Game: common.HexToAddress("0x3333333333333333333333333333333333333333"), GameType: 8, L2Block: 100, RootClaim: output10, Status: 0},
 		{Index: 4, Game: common.HexToAddress("0x4444444444444444444444444444444444444444"), GameType: proposer.GameTypeSuperCannonKona, L2Timestamp: 1100, ExtraData: outside.Preimage, RootClaim: outside.Hash, Status: 0},
 	}
-	got, err := ClassifyProposals(proposals, 1, 20, genesis, blockTime, func(h uint64) (common.Hash, error) {
+	got, err := ClassifyProposals(proposals, 1, 20, genesis, blockTime, 852, func(h uint64) (common.Hash, error) {
 		switch h {
 		case 10:
 			return output10, nil
@@ -274,5 +274,35 @@ func TestType9ExtraDataRejectedOnOutputRootCompare(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestForeignChainIDIsNotAMatch(t *testing.T) {
+	const genesis, blockTime = uint64(1000), uint64(2)
+	const ts = uint64(1020)
+	output := common.HexToHash("0x" + strings.Repeat("ab", 32))
+	foreign, err := proposer.EncodeSuperRoot(ts, []proposer.ChainOutput{{ChainID: 999, OutputRoot: output}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Proposal{
+		Index:       7,
+		Game:        common.HexToAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+		GameType:    proposer.GameTypeSuperCannonKona,
+		L2Timestamp: ts,
+		ExtraData:   foreign.Preimage,
+		RootClaim:   foreign.Hash,
+	}
+	r, err := EvaluateSuperRootProposal(p, 1, 20, genesis, blockTime, 852, func(h uint64) (common.Hash, error) {
+		if h != 10 {
+			t.Fatalf("compute height %d", h)
+		}
+		return output, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Result != ProposalMismatch {
+		t.Fatalf("a preimage that names chain 999 must not MATCH this rollup, got %s", r.Result)
 	}
 }
