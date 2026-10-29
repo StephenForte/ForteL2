@@ -3369,13 +3369,15 @@ if python3 - "$SCRIPT_DIR/test-helpers.sh" << 'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 # Frozen set: two pre-existing Foundry-tripwire fixtures (not secrets) plus
-# the F7-6 public prestate hashes. A new 0x+64-hex literal fails this check.
+# the F7-6 public prestate hashes and the U20 type-9 prestate (OPU-1).
+# A new 0x+64-hex literal fails this check.
 allowed = {
     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
     "0x1111111111111111111111111111111111111111111111111111111111111111",
     "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "0x038512e02c4c3f7bdaec27d00edf55b7155e0905301e1a88083e4e0a6764d54c",
     "0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d",
+    "0x03284f1b70ad7525bcda6090685bc068e38f74c572132a0535ae5059b5d14792",
     "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 }
 bad = []
@@ -13967,6 +13969,47 @@ fi
 unset SQG_FIX SQG_LIVE SQG_FRESH SQG_FIRST SQG_CROSS SQG_CROSSB SQG_RUN
 unset SQG_RC SQG_RC2 SQG_OUT SQG_OUT2 SQG_ORDER
 unset -f cleanup_sqg sqg_live_tree sqg_call 2>/dev/null || true
+
+# OPU-2: static guards on the U20 upgrade script. Each invocation below is the
+# red case (the script must exit non-zero). A guard that is removed fails the
+# corresponding PASS line.
+OPU_U20="$SCRIPT_DIR/opu-u20-upgrade-sepolia.sh"
+OPU_LIVE_RC=0
+OPU_LIVE_OUT="$(
+  env -u CONFIRM_U20_LIVE -u FORTEL2_ENV "$OPU_U20" --live 2>&1
+)" || OPU_LIVE_RC=$?
+if [[ "$OPU_LIVE_RC" -ne 0 ]] && printf '%s\n' "$OPU_LIVE_OUT" | grep -q 'CONFIRM_U20_LIVE'; then
+  echo "PASS --live refused without CONFIRM_U20_LIVE"
+else
+  echo "FAIL --live must refuse without CONFIRM_U20_LIVE (rc=$OPU_LIVE_RC)" >&2
+  printf '%s\n' "$OPU_LIVE_OUT" >&2
+  fail=1
+fi
+OPU_FORK_RC=0
+OPU_FORK_OUT="$(
+  env -u CONFIRM_U20_LIVE -u FORTEL2_ENV "$OPU_U20" --fork https://ethereum-sepolia-rpc.publicnode.com 2>&1
+)" || OPU_FORK_RC=$?
+if [[ "$OPU_FORK_RC" -ne 0 ]] && printf '%s\n' "$OPU_FORK_OUT" | grep -q 'loopback'; then
+  echo "PASS non-loopback --fork refused"
+else
+  echo "FAIL non-loopback --fork must be refused (rc=$OPU_FORK_RC)" >&2
+  printf '%s\n' "$OPU_FORK_OUT" >&2
+  fail=1
+fi
+if grep -q 'U20_TYPE9_PRESTATE=0x03284f1b70ad7525bcda6090685bc068e38f74c572132a0535ae5059b5d14792' "$OPU_U20" \
+  && grep -q 'U20_TYPE8_PRESTATE=0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE1_WEI=80000000000000000' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE8_WEI=1000000000000000' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE9_WEI=1000000000000000' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE5_WEI=0' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE0_WEI=0' "$OPU_U20" \
+  && grep -q 'U20_BOND_ZK_WEI=0' "$OPU_U20"; then
+  echo "PASS U20 prestate and bond constants pinned"
+else
+  echo "FAIL U20 prestate and bond constants are not pinned" >&2
+  fail=1
+fi
+unset OPU_U20 OPU_LIVE_RC OPU_LIVE_OUT OPU_FORK_RC OPU_FORK_OUT
 
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
