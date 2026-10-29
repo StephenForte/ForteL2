@@ -80,7 +80,7 @@ Neither bump changes behaviour for us. Neither is required by U20; U20's minimum
   - (b) demonstrate on the OPU-2 fork only;
   - (c) skip the demonstration.
 - ~~**OD-2**~~ **Resolved (operator, 2026-10-29): port** `proposer/` and `derivation/` to super roots. This is task OPU-3b.
-- **OD-3:** the Render replica's op-node (v1.19.11, fortel2-replica R-0029). Bump it to v1.20.0 or leave it? U20 needs nothing from the replica; it derives the same L2.
+- ~~**OD-3**~~ **Resolved 2026-10-29 (D-0160):** the replica's op-node was bumped to v1.20.0 (`d6620202`) in fortel2-replica R-0031 (#90; deploy record #91), live since 11:29 PT, with no canary by operator decision.
 - **OD-4 (before OPU-4):** the cutover window and the SOS notice wording.
 - ~~**OD-5**~~ **Resolved 2026-10-29 (D-0159): keep ForteL2's delays.** Bootstrap our own v8 implementations and OPCM rather than using OP's (which would set 7-day proof maturity, 3.5-day finality and a 3.5-day max clock).
 - ~~**OD-6**~~ **Resolved (D-0159): EIP-7702.** ADMIN gets a temporary, self-only delegatecall executor for the upgrade window and revokes it afterwards. No ownership changes.
