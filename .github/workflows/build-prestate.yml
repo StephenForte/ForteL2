@@ -3,11 +3,12 @@
 # workflow_dispatch only — this is an expensive, operator-initiated build.
 # Firing it on push would be a defect (D-0059).
 #
-# Two lifetimes, one path: inputs.rollup_config defaults to
+# Type-8 Phase 7 builds have two lifetimes, one path: inputs.rollup_config defaults to
 # deployments/sepolia/rollup.json. A dispatch at step 0b uses the *current*
 # (pre-wipe) config as an end-to-end smoke test; that commitment is thrown
 # away. At step 8b the operator replaces the file with the post-wipe config
-# and re-runs for the real prestate. Do not treat a smoke-test hash as the
+# and re-runs for the real prestate. U20 interop uses the current live config.
+# Do not treat a type-8 smoke-test hash as the
 # value to pin in the type-8 game.
 #
 # Check 2 (F7-9 / D-0062): a second, stock-config build is the negative
@@ -23,6 +24,14 @@ name: build prestate
 on:
   workflow_dispatch:
     inputs:
+      prestate_profile:
+        description: Pinned program and VM build (default preserves the type-8 prestate)
+        required: false
+        default: type8
+        type: choice
+        options:
+          - type8
+          - u20-interop
       rollup_config:
         description: >-
           Path to rollup.json relative to the repo root. Default is the
@@ -42,13 +51,15 @@ jobs:
     # Native amd64: do not add QEMU/binfmt — that would silently emulate.
     # 180 minutes: two Docker prestates (custom + stock negative control)
     # plus a native `cannon` rebuild for the witness check. The
-    # cannon-builder image is digest-pinned and prebuilt (D-0062: ~4 min
-    # each); the happy path is ~10 min. 180 is hang-detection not a target.
+    # type-8 builder is prebuilt (D-0062: ~4 min each). U20 builds
+    # both variants and its toolchains from the v1.7.0 checkout. 180 is hang-detection not a target.
     timeout-minutes: 180
 
     env:
       # Pinned monorepo SHA (D-0059) — use the SHA, not a tag.
-      OP_MONOREPO_SHA: da197e45ed44b9fca258b3b0d0709e8dfca1c7cd
+      OP_MONOREPO_SHA: ${{ inputs.prestate_profile == 'u20-interop' && '64b043ea5bbca9bc6e57e0f1c8df0404b4cf5f68' || 'da197e45ed44b9fca258b3b0d0709e8dfca1c7cd' }}
+      PRESTATE_PROFILE: ${{ inputs.prestate_profile || 'type8' }}
+      PRESTATE_OUTPUT: ${{ inputs.prestate_profile == 'u20-interop' && 'prestate-artifacts-cannon-interop' || 'prestate-artifacts-cannon' }}
       STANDARD_PRESTATES_URL: https://raw.githubusercontent.com/ethereum-optimism/superchain-registry/refs/heads/main/validation/standard/standard-prestates.toml
 
     steps:
@@ -59,7 +70,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ethereum-optimism/optimism
-          ref: da197e45ed44b9fca258b3b0d0709e8dfca1c7cd
+          ref: ${{ env.OP_MONOREPO_SHA }}
           path: optimism
 
       - name: Require rollup config
@@ -86,12 +97,19 @@ jobs:
           # only for the native `cannon witness` self-check.
           cache: false
 
+      - name: Test prestate gates and config generation
+        run: python3 -m unittest discover -s .github/prestate -p 'test_*.py' -v
+
       - name: Generate Kona custom configs (Route A)
         env:
           ROLLUP_CONFIG: ${{ inputs.rollup_config }}
         run: |
           set -euo pipefail
-          python3 .github/prestate/gen-kona-custom-configs.py \
+          EXTRA_ARGS=()
+          if [[ "${PRESTATE_PROFILE}" == "u20-interop" ]]; then
+            EXTRA_ARGS+=(--interop)
+          fi
+          python3 .github/prestate/gen-kona-custom-configs.py "${EXTRA_ARGS[@]}" \
             --rollup "${ROLLUP_CONFIG}" \
             --out "${RUNNER_TEMP}/kona-custom-configs"
           echo "CUSTOM_CONFIGS_DIR=${RUNNER_TEMP}/kona-custom-configs" >> "${GITHUB_ENV}"
@@ -103,15 +121,18 @@ jobs:
         working-directory: optimism/rust
         run: |
           set -euo pipefail
-          # Variant kona-client / prestate-artifacts-cannon only.
-          # Do not build kona-client-int — we have no interop depset and it
-          # doubles the runtime.
-          just build-kona-reproducible-prestate-variant kona-client prestate-artifacts-cannon
+          if [[ "${PRESTATE_PROFILE}" == "u20-interop" ]]; then
+            # v1.7.0 removed the per-variant recipe. Its replacement builds
+            # both variants once; select only the interop output below.
+            just build-kona-reproducible-prestate
+          else
+            just build-kona-reproducible-prestate-variant kona-client prestate-artifacts-cannon
+          fi
           # Both builds write to the same justfile OUTPUT. Copy immediately
           # so the upload/summary cannot pick up the stock overwrite (a
           # stock prestate pinned into the type-8 game cannot be corrected
           # through op-deployer — D-0063 Finding 5).
-          SRC="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon"
+          SRC="${GITHUB_WORKSPACE}/optimism/rust/kona/${PRESTATE_OUTPUT}"
           DST="${GITHUB_WORKSPACE}/prestate-custom"
           PROOF="${SRC}/prestate-proof.json"
           HASH="$(jq -r .pre "${PROOF}")"
@@ -126,12 +147,7 @@ jobs:
         id: check1
         run: |
           set -euo pipefail
-          # The pinned multicannon embeds only cannon-8 (VersionMultiThreaded64_v5).
-          # `cannon witness --input` reading the file at all *is* the
-          # stateVersion-8 proof: any other version errors `unknown version: N`.
-          # This check says nothing about which chain the program can prove
-          # (that is check 2 / D-0061). Conflating the two is the defect
-          # that produced D-0059's correction.
+          # Parsing is not a state-version assertion: check the number below.
           cd optimism/cannon
           just cannon
           PRESTATE="${GITHUB_WORKSPACE}/prestate-custom/prestate.bin.gz"
@@ -148,7 +164,9 @@ jobs:
             echo "check 1 FAIL: witnessHash ${WITNESS_HASH} != prestate-proof.json .pre ${PRE}" >&2
             exit 1
           fi
-          echo "check 1 PASS: witnessHash matches .pre (file parsed, so stateVersion is 8)"
+          python3 "${GITHUB_WORKSPACE}/.github/prestate/check-prestate.py" witness \
+            --proof "${PROOF}" --witness <(echo "${WITNESS_JSON}")
+          echo "check 1 PASS: witnessHash matches .pre and stateVersion == 8"
           {
             echo "commitment=${PRE}"
             echo "check1=pass"
@@ -166,8 +184,12 @@ jobs:
           # with DIR still set would still inject. CUSTOM_CONFIGS_DIR on
           # GITHUB_ENV is a different name and must not be forwarded.
           unset KONA_CUSTOM_CONFIGS KONA_CUSTOM_CONFIGS_DIR
-          just build-kona-reproducible-prestate-variant kona-client prestate-artifacts-cannon
-          SRC="${GITHUB_WORKSPACE}/optimism/rust/kona/prestate-artifacts-cannon"
+          if [[ "${PRESTATE_PROFILE}" == "u20-interop" ]]; then
+            just build-kona-reproducible-prestate
+          else
+            just build-kona-reproducible-prestate-variant kona-client prestate-artifacts-cannon
+          fi
+          SRC="${GITHUB_WORKSPACE}/optimism/rust/kona/${PRESTATE_OUTPUT}"
           DST="${GITHUB_WORKSPACE}/prestate-stock"
           PROOF="${SRC}/prestate-proof.json"
           HASH="$(jq -r .pre "${PROOF}")"
@@ -178,7 +200,15 @@ jobs:
           echo "STOCK_PRESTATE_DIR=${DST}" >> "${GITHUB_ENV}"
           echo "preserved stock prestate ${HASH} at ${DST}"
 
-      - name: Check 2 — custom commitment differs from stock (negative control)
+      - name: Check 2 — stock interop matches the published U20 commitment
+        id: stock_control
+        if: env.PRESTATE_PROFILE == 'u20-interop'
+        run: |
+          set -euo pipefail
+          python3 .github/prestate/check-prestate.py stock \
+            --proof prestate-stock/prestate-proof.json
+
+      - name: Check 3 — custom commitment differs from stock (negative control)
         id: check2
         run: |
           set -euo pipefail
@@ -186,18 +216,18 @@ jobs:
             local value="$1"
             local label="$2"
             if [[ ! "${value}" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-              echo "check 2 FAIL: ${label} commitment is not a 32-byte hex hash: ${value}" >&2
+              echo "check 3 FAIL: ${label} commitment is not a 32-byte hex hash: ${value}" >&2
               exit 1
             fi
           }
           CUSTOM_PROOF="${GITHUB_WORKSPACE}/prestate-custom/prestate-proof.json"
           STOCK_PROOF="${GITHUB_WORKSPACE}/prestate-stock/prestate-proof.json"
           if [[ ! -f "${CUSTOM_PROOF}" ]]; then
-            echo "check 2 FAIL: missing custom prestate-proof.json at ${CUSTOM_PROOF}" >&2
+            echo "check 3 FAIL: missing custom prestate-proof.json at ${CUSTOM_PROOF}" >&2
             exit 1
           fi
           if [[ ! -f "${STOCK_PROOF}" ]]; then
-            echo "check 2 FAIL: missing stock prestate-proof.json at ${STOCK_PROOF}" >&2
+            echo "check 3 FAIL: missing stock prestate-proof.json at ${STOCK_PROOF}" >&2
             exit 1
           fi
           CUSTOM_PRE="$(jq -r .pre "${CUSTOM_PROOF}")"
@@ -208,16 +238,18 @@ jobs:
           echo "stock_commitment=${STOCK_PRE}" >> "${GITHUB_OUTPUT}"
           CHECK1="${{ steps.check1.outputs.commitment }}"
           if [[ "${CUSTOM_PRE}" != "${CHECK1}" ]]; then
-            echo "check 2 FAIL: preserved custom .pre ${CUSTOM_PRE} != check 1 commitment ${CHECK1}" >&2
+            echo "check 3 FAIL: preserved custom .pre ${CUSTOM_PRE} != check 1 commitment ${CHECK1}" >&2
             echo "check2=fail" >> "${GITHUB_OUTPUT}"
             exit 1
           fi
+          python3 .github/prestate/check-prestate.py distinct \
+            --proof "${CUSTOM_PROOF}" --stock "${STOCK_PROOF}"
           if [[ "${CUSTOM_PRE}" == "${STOCK_PRE}" ]]; then
-            echo "check 2 FAIL: custom and stock commitments are identical (${CUSTOM_PRE}); custom configs did not land" >&2
+            echo "check 3 FAIL: custom and stock commitments are identical (${CUSTOM_PRE}); custom configs did not land" >&2
             echo "check2=fail" >> "${GITHUB_OUTPUT}"
             exit 1
           fi
-          echo "check 2 PASS: custom ${CUSTOM_PRE} != stock ${STOCK_PRE}"
+          echo "check 3 PASS: custom ${CUSTOM_PRE} != stock ${STOCK_PRE}"
           echo "check2=pass" >> "${GITHUB_OUTPUT}"
 
       - name: Report registry comparison (informational, must not fail the job)
@@ -247,6 +279,14 @@ jobs:
           echo "note=${NOTE}" >> "${GITHUB_OUTPUT}"
           echo "registry comparison: ${MATCH} — ${NOTE}"
 
+      - name: Record artifact checksums and build inputs
+        run: |
+          set -euo pipefail
+          cp -R "${CUSTOM_CONFIGS_DIR}" prestate-custom/custom-configs
+          cp .github/prestate/check-prestate.py prestate-custom/
+          printf '%s\n' "${OP_MONOREPO_SHA}" > prestate-custom/monorepo-sha.txt
+          (cd prestate-custom && sha256sum prestate.bin.gz 0x*.bin.gz > SHA256SUMS)
+
       - name: Assert upload source is the custom prestate
         run: |
           set -euo pipefail
@@ -271,17 +311,19 @@ jobs:
           ARTIFACT_DIR="${GITHUB_WORKSPACE}/prestate-custom"
           HASH_FILE="$(find "${ARTIFACT_DIR}" -maxdepth 1 -name '0x*.bin.gz' -print -quit || true)"
           {
-            echo "## Kona absolute prestate (F7-7 / F7-9)"
+            echo "## Kona absolute prestate (${PRESTATE_PROFILE})"
             echo
-            echo "A dispatch against the *current* \`deployments/sepolia/rollup.json\` is a **smoke test**; throw that commitment away. The real prestate is built at step **8b** after the post-wipe config replaces that file."
+            echo "Type-8 Phase 7 only: a dispatch against the *current* \`deployments/sepolia/rollup.json\` is a **smoke test**; throw that commitment away. The real prestate is built at step **8b** after the post-wipe config replaces that file."
             echo
             echo "| | |"
             echo "| --- | --- |"
             echo "| commitment (\`.pre\`) | \`${{ steps.check1.outputs.commitment }}\` |"
             echo "| stock commitment (negative control; not for pinning) | \`${{ steps.check2.outputs.stock_commitment }}\` |"
             echo "| check 1 (witnessHash == .pre / stateVersion 8) | ${{ steps.check1.outputs.check1 }} |"
-            echo "| check 2 (custom ≠ stock commitment) | ${{ steps.check2.outputs.check2 }} |"
+            echo "| check 2 (stock == published U20; interop only) | ${{ env.PRESTATE_PROFILE == 'u20-interop' && steps.stock_control.outcome || 'N/A (type8)' }} |"
+            echo "| check 3 (custom ≠ stock commitment) | ${{ steps.check2.outputs.check2 }} |"
             echo "| registry comparison | ${{ steps.registry.outputs.match }} — ${{ steps.registry.outputs.note }} |"
+            echo "| profile | \`${PRESTATE_PROFILE}\` |"
             echo "| monorepo SHA | \`${OP_MONOREPO_SHA}\` |"
             echo "| rollup config | \`${ROLLUP_CONFIG}\` |"
             echo "| hash-named artifact | \`${HASH_FILE##*/}\` |"
@@ -290,9 +332,13 @@ jobs:
       - name: Upload prestate artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: kona-prestate-cannon
+          name: ${{ inputs.prestate_profile == 'u20-interop' && 'kona-prestate-cannon-interop-v1.7.0-chain852' || 'kona-prestate-cannon' }}
           path: |
             prestate-custom/prestate.bin.gz
             prestate-custom/prestate-proof.json
             prestate-custom/0x*.bin.gz
+            prestate-custom/SHA256SUMS
+            prestate-custom/monorepo-sha.txt
+            prestate-custom/custom-configs/
+            prestate-custom/check-prestate.py
           if-no-files-found: error
