@@ -1586,7 +1586,20 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
 - **Not yet observed:** a proposal from v1.17.0. The interval is 8 h and the last proposal confirmed at 09:13 PT, so the next is due about 17:13 PT on 2026-10-29. `gameCount` was 609 before the swap.
 - **Consequence:** the rollback for either binary is repoint it at `~/src/fortel2/optimism-v1.19.11` and run sleep/wake. The pin check stays red until #272 is reverted. The Render replica's op-node stays v1.19.11 (OD-3 open). Pulling `~/fortel2-agents` brings the new pin script; no launchd job runs it (D-0156).
 
-- Next free decision id is **D-0159**.
+### D-0159 — **U20 path corrected: no `op-deployer upgrade`, OP's OPCM would reset our delays, and the owner is an EOA. Operator chose our own v8 OPCM with today's delays, an EIP-7702 temporary executor, and a 0.001 ETH bond.** Planner findings while writing the OPU-2 brief, 2026-10-29.
+- **Finding 1 — the plan named the wrong tool.** op-deployer's own notice (`docs/public-docs/notices/archive/op-deployer-upgrade-deprecation.mdx` at `op-deployer/v0.8.1`) says `upgrade` "does not support upgrading from op-contracts/v5.0.0 to op-contracts/v6.0.0. For upgrades beyond v5.0.0, use the OPCM directly". The PRD's OPU-2 row named `op-deployer v0.8.1 upgrade`; that was the planner's error, corrected in the PRD.
+- **Finding 2 — OPCM v8 must be delegatecalled from the owner.** `OPContractsManagerV2.upgrade` and `upgradeSuperchain` start with `_onlyDelegateCall()`. ProxyAdmin `0x2f6b90b7…`, DisputeGameFactory, SystemConfig and portal `proxyAdminOwner()` are all ADMIN `0xBB3E1981…`, an EOA. OP's `UpgradeOPChain.s.sol` simulates with `vm.etch` of `DummyCaller` and is not a live path. op-e2e's `DelegateCallProxy` has no access control on `executeDelegateCall` and must never be used live.
+- **Finding 3 — OP's deployed OPCM would replace our delays.** It is at `0x6abfabbc…`, 8.0.1, dev-feature bitmap 0. Our portal impl `0x3f5507d6…` has `proofMaturityDelaySeconds` 1800; the v7 and v8 standard portal impls have 604800. The v8 standard ASR has finality 302400, ours 1800. The registry's standard max clock is 302400 with extension 10800; our type 8 is 7200 / 600 (`maxGameDepth` 73, `splitDepth` 30). These are implementation immutables (`PROOF_MATURITY_DELAY_SECONDS` is `immutable` in v8 `OptimismPortal2.sol`). op-deployer v0.8.1 `bootstrap implementations` takes `--proof-maturity-delay-seconds`, `--dispute-game-finality-delay-seconds`, `--dispute-max-clock-duration`, `--dispute-clock-extension`, `--dispute-max-game-depth` and `--dispute-split-depth`.
+- **Finding 4 — our SuperchainConfig is ours.** `0x9901d9eD…` is version 2.4.2; its ProxyAdmin `0x41d44c7a…` and its guardian are ADMIN. The v8 standard is 2.4.3, so `upgradeSuperchain` runs first.
+- **Finding 5 — the game configs.** v8 requires all six game-type configs in order (0, 1, 8, 5, 9, ZK). An enabled permissionless game needs a non-zero bond, and SUPER_PERMISSIONED needs a zero one. `initBonds(8)` is 0 today and `initBonds(1)` is 0.08 ETH. The respected type is loaded from ASR (8 today) unless `overrides.cfg.startingRespectedGameType` is passed.
+- **Decision (operator, 2026-10-29):**
+  - Keep the short delays: our own v8 implementations and OPCM with 1800 / 1800 / 7200 / 600 / 73 / 30.
+  - EIP-7702 temporary self-only executor on ADMIN, revoked after the window.
+  - Init bond 0.001 ETH for types 8 and 9; type 1 unchanged at 0.08 ETH.
+  - The "8 hours" in the operator's question is the proposer interval (`SEPOLIA_PROPOSER_INTERVAL=8h`), not the game clock.
+- **Consequence:** the OPU-2 brief rehearses exactly this path on a fork. OPU-4 runs the same script live. The live step deploys extra implementation contracts from ADMIN (1.92 ETH on Sepolia at 2026-10-29); the cost is measured by OPU-2.
+
+- Next free decision id is **D-0160**.
 
 ## Template
 
