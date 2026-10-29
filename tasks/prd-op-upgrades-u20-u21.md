@@ -57,8 +57,9 @@ Neither bump changes behaviour for us. Neither is required by U20; U20's minimum
 | **OPU-0** | Pin op-node v1.20.0 @ d6620202 and op-proposer v1.17.0 @ 0130abb2 in `check-el-pins.sh`. The planner does the live swap after merge. | worker (T4) → planner | now, parallel with OPU-1 |
 | **OPU-1** | `build-prestate.yml`: add a kona-client v1.7.0 **interop** variant build with our custom configs, plus the stock interop negative control (must equal `0x031ac6f1…`). Run it, then the operator downloads and re-verifies the artifact. | worker | now, parallel with OPU-0 |
 | **OPU-2** | **Fork rehearsal, no spend.** Use an Anvil fork of Sepolia at head.<br>• Impersonate the L1 ProxyAdmin owner (ADMIN) and run op-deployer v0.8.1 `upgrade` v7 → v8 through OPCM 8.0.1, with our OPU-1 prestate for game type 9.<br>• Assert the post-state: SystemConfig 4.0.0, `gameImpls(9)` set, its `gameArgs` prestate = ours, the respected type, and type-8 games still resolvable.<br>• Run op-proposer v1.17.0 in super-root mode against the fork plus the live op-node, and create one type-9 game.<br>• Resolve it on the fork after warping time.<br>• Prove and finalize one withdrawal with viem ≥ 2.51 using `l2Timestamp`. | worker | after OPU-1 artifact |
-| **OPU-3** | Tooling for type 9:<br>• `06-start-proposer-sepolia.sh` super-root mode (`--superroot-rpcs`, `OP_PROPOSER_GAME_TYPE=9`, switchable at cutover)<br>• `resolve-games-sepolia.sh` for types 8 and 9<br>• `scripts/bridge` viem bump + `l2Timestamp`<br>• viewer / `pipeline-snapshot.py` proposer panel (`proposed_sequence_number` is a timestamp for super roots)<br>• `create-bad-proposal-sepolia.sh` and `09-start-challenger-sepolia.sh` for `super-cannon-kona` | worker(s) | after OPU-2 findings |
-| **OPU-4** | **Live U20 cutover** (operator window):<br>• challenger/config staged first<br>• `OPCM.upgrade()` from ADMIN<br>• proposer switched in the same window<br>• verify on chain<br>• SOS notice before and after | operator + planner | after OPU-2 green and OPU-3 merged |
+| **OPU-3a** | Tooling for type 9:<br>• `06-start-proposer-sepolia.sh` super-root mode (`--superroot-rpcs`, `OP_PROPOSER_GAME_TYPE=9`, switchable at cutover)<br>• `resolve-games-sepolia.sh` for types 8 and 9<br>• `scripts/bridge` viem bump + `l2Timestamp`<br>• viewer / `pipeline-snapshot.py` proposer panel (`proposed_sequence_number` is a timestamp for super roots)<br>• `create-bad-proposal-sepolia.sh` and `09-start-challenger-sepolia.sh` for `super-cannon-kona` | worker | after OPU-2 findings |
+| **OPU-3b** | **Port `proposer/` and `derivation/` to super roots (OD-2).**<br>• Phase 5 custom proposer: build the super root, propose a type-9 game; keep type-8 inspection for old games.<br>• `bad-proposal` / `inspect-game`: support type 9 (`rootClaimByChainId`).<br>• Phase 6 `derivation/proposal_compare*`: compare type-9 claims.<br>The super root it builds must equal op-node `superroot_atTimestamp` for the same timestamp. | worker | after OPU-2 findings; parallel with OPU-3a (disjoint files) |
+| **OPU-4** | **Live U20 cutover** (operator window):<br>• challenger/config staged first<br>• `OPCM.upgrade()` from ADMIN<br>• proposer switched in the same window<br>• verify on chain<br>• SOS notice before and after | operator + planner | after OPU-2 green and OPU-3a merged (OPU-3b is not a cutover gate) |
 | **OPU-5** | Re-prove on type 9: one withdrawal end-to-end; bad-proposal + challenge demonstration (see OD-1). | operator + planner | after OPU-4 |
 | **OPU-6** | **U21** (v8 → v9): ETHLockbox migration, kona-client v1.9.0 prestate, op-challenger v1.11.0, pause/balance tooling to the lockbox. Same rehearse-then-cutover shape. | — | **not before** `op-contracts/v9.0.0` is tagged **and** OP's governed Sepolia execution (target 2026-11-09) has happened |
 
@@ -67,7 +68,7 @@ Neither bump changes behaviour for us. Neither is required by U20; U20's minimum
 - **OPU-4 does not run** unless all of these hold:
   - OPU-2 passed on a fork of the exact contracts it will touch.
   - The prestate passed OPU-1's independent re-verification.
-  - OPU-3 is merged.
+  - OPU-3a is merged.
   - `~/fortel2-agents` is pulled.
 - The upgrade transaction is irreversible. Rollback is not a supported recovery. Old type-8 games still resolve under their own impl after the upgrade (U20 notice), and that is the only "rollback" property relied on.
 - **Proposer cutover:** switch at the upgrade or immediately after it, never with a deliberate gap. Proposals fail against type 9 until the proposer is switched (U20 notice § Update order).
@@ -78,7 +79,7 @@ Neither bump changes behaviour for us. Neither is required by U20; U20's minimum
   - (a) run it for a bounded window with a measured cost cap;
   - (b) demonstrate on the OPU-2 fork only;
   - (c) skip the demonstration.
-- **OD-2 (before OPU-3):** the Phase 5 custom proposer (`proposer/`) and Phase 6 `derivation/proposal_compare*` speak output-root type 8. Freeze them as output-root learning artifacts, or port them to super roots?
+- ~~**OD-2**~~ **Resolved (operator, 2026-10-29): port** `proposer/` and `derivation/` to super roots. This is task OPU-3b.
 - **OD-3:** the Render replica's op-node (v1.19.11, fortel2-replica R-0029). Bump it to v1.20.0 or leave it? U20 needs nothing from the replica; it derives the same L2.
 - **OD-4 (before OPU-4):** the cutover window and the SOS notice wording.
 
