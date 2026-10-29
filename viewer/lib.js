@@ -2,6 +2,27 @@
  * Pure helpers for the Phase 1c/1d pipeline viewer (unit-tested; no RPC I/O).
  */
 
+/** Super-root games (type 9). l2SequenceNumber is an L2 timestamp, not a block. */
+export const SUPER_ROOT_GAME_TYPE = 9;
+
+/** "timestamp" for type 9, "block" for every other game type. */
+export function proposerSequenceKind(gameType) {
+  return Number(gameType) === SUPER_ROOT_GAME_TYPE ? "timestamp" : "block";
+}
+
+/**
+ * Label a proposer sequence value. Type 9 is never labeled as a block number.
+ * @param {number|bigint|string} gameType
+ * @param {number|bigint|string|null|undefined} sequence
+ */
+export function formatProposerSequence(gameType, sequence) {
+  if (sequence == null || sequence === "") return "—";
+  const kind = proposerSequenceKind(gameType);
+  const value = typeof sequence === "bigint" ? sequence.toString() : String(sequence);
+  if (!/^\d+$/.test(value)) return "—";
+  return `${kind} ${value}`;
+}
+
 /** @param {number|bigint|string|null|undefined} tsSeconds unix seconds */
 export function formatAge(tsSeconds, nowMs = Date.now()) {
   const n = Number(tsSeconds);

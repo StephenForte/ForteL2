@@ -562,6 +562,32 @@ class ProposerSnapshotAdditiveKeysTests(unittest.TestCase):
         verdict = pipeline_snapshot.proposer_verdict(1, latest, 8 * 3600, now=now)
         self.assertEqual(verdict, pipeline_snapshot.PROPOSER_VERDICT_HEALTHY)
 
+    def test_type9_sequence_is_a_timestamp_and_frozen_keys_stay(self) -> None:
+        timestamp = 1793297574
+        classified = pipeline_snapshot.classify_proposer_sequence(9, timestamp)
+        self.assertEqual(classified["sequence_kind"], "timestamp")
+        self.assertEqual(classified["sequence_number"], timestamp)
+        self.assertNotEqual(classified["sequence_kind"], "block")
+        blockish = pipeline_snapshot.classify_proposer_sequence(8, 2928420)
+        self.assertEqual(blockish["sequence_kind"], "block")
+        # Verdict still keys off the L1 createdAt, not the sequence value.
+        latest = {
+            "index": 1,
+            "game_type": 9,
+            "timestamp": 1_700_000_000,
+            "age_sec": 10,
+            "proxy": "0x" + "22" * 20,
+            "sequence_number": timestamp,
+            "sequence_kind": "timestamp",
+        }
+        for key, typ in _PROPOSER_LATEST_FROZEN_KEYS.items():
+            self.assertIn(key, latest)
+            self.assertIsInstance(latest[key], typ)
+        self.assertEqual(
+            pipeline_snapshot.proposer_verdict(1, latest, 8 * 3600, now=1_700_000_010),
+            pipeline_snapshot.PROPOSER_VERDICT_HEALTHY,
+        )
+
 
 class UnknownProposerPanelTests(unittest.TestCase):
     """D-0143: a raised snapshot_proposer() (L1 timeout, JSON-RPC error,

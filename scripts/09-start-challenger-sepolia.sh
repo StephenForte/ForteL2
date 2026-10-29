@@ -4,8 +4,63 @@
 # Signs with CHALLENGER_PRIVATE_KEY (the factory challenger role), never PROPOSER_PRIVATE_KEY.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Captured before lib.sh sources the env file. Fork rehearsal must not use the
+# live DATA_DIR pidfile or the operator QuickNode L1/beacon.
+_FORTEL2_ISOLATED_DATA_DIR="${FORTEL2_ISOLATED_DATA_DIR:-}"
+_FORTEL2_FORK_L1_RPC_URL="${FORTEL2_FORK_L1_RPC_URL:-}"
+_FORTEL2_FORK_L1_BEACON="${FORTEL2_FORK_L1_BEACON:-}"
+_FORTEL2_CHALLENGER_TRACE_TYPE="${FORTEL2_CHALLENGER_TRACE_TYPE:-}"
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+
+if [[ -n "$_FORTEL2_ISOLATED_DATA_DIR" ]]; then
+  restore_caller_data_dir "$_FORTEL2_ISOLATED_DATA_DIR"
+  case "$PID_DIR" in
+    "$_FORTEL2_ISOLATED_DATA_DIR"/*) ;;
+    *)
+      echo "ERROR: isolated PID_DIR=$PID_DIR is not under FORTEL2_ISOLATED_DATA_DIR" >&2
+      exit 1
+      ;;
+  esac
+  echo "isolated PID_DIR=$PID_DIR"
+fi
+if [[ -n "$_FORTEL2_FORK_L1_RPC_URL" ]]; then
+  assert_loopback_url "$_FORTEL2_FORK_L1_RPC_URL" "FORTEL2_FORK_L1_RPC_URL"
+  restore_caller_l1_rpc_url "$_FORTEL2_FORK_L1_RPC_URL"
+  if [[ -z "$_FORTEL2_FORK_L1_BEACON" ]]; then
+    echo "ERROR: fork challenger start refuses the operator L1 beacon." >&2
+    echo "  Set FORTEL2_FORK_L1_BEACON to a non-metered URL. Do not use QuickNode." >&2
+    exit 1
+  fi
+  case "$_FORTEL2_FORK_L1_BEACON" in
+    *quiknode*|*quicknode*)
+      echo "ERROR: FORTEL2_FORK_L1_BEACON must not be a QuickNode URL" >&2
+      exit 1
+      ;;
+  esac
+  L1_BEACON_URL="$_FORTEL2_FORK_L1_BEACON"
+  CHALLENGER_L1_RPC_URL="$_FORTEL2_FORK_L1_RPC_URL"
+  export L1_BEACON_URL CHALLENGER_L1_RPC_URL
+fi
+if [[ -n "$_FORTEL2_CHALLENGER_TRACE_TYPE" ]]; then
+  CHALLENGER_TRACE_TYPE="$_FORTEL2_CHALLENGER_TRACE_TYPE"
+  export CHALLENGER_TRACE_TYPE
+fi
+# Rehearsal only. The default remains the op-challenger on PATH (BIN_DIR).
+# The stopped live binary predates --superroot-rpc; d6620202 defines it.
+if [[ -n "${FORTEL2_OP_CHALLENGER_BIN:-}" ]]; then
+  if [[ ! -x "$FORTEL2_OP_CHALLENGER_BIN" ]]; then
+    echo "ERROR: FORTEL2_OP_CHALLENGER_BIN is not executable" >&2
+    exit 1
+  fi
+  if [[ "$(basename "$FORTEL2_OP_CHALLENGER_BIN")" != "op-challenger" ]]; then
+    echo "ERROR: FORTEL2_OP_CHALLENGER_BIN must be named op-challenger" >&2
+    exit 1
+  fi
+  export PATH="$(dirname "$FORTEL2_OP_CHALLENGER_BIN"):$PATH"
+fi
 
 usage() {
   echo "usage: 09-start-challenger-sepolia.sh"
@@ -81,10 +136,10 @@ needs_cannon_rollup_genesis() {
   esac
 }
 
-# CheckCannonKonaFlags wants --cannon-kona-rollup-config + --cannon-kona-l2-genesis.
+# CheckCannonKonaFlags / CheckSuperCannonKonaFlags want the kona rollup + genesis.
 needs_kona_rollup_genesis() {
   case "$1" in
-    cannon-kona) return 0 ;;
+    cannon-kona|super-cannon-kona) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -97,23 +152,25 @@ needs_cannon_server() {
   esac
 }
 
-# CheckCannonKonaFlags requires --cannon-kona-server. super-cannon-kona is
-# refused outright (supernode + depset); do not extend this to it (D-0054).
+# CheckCannonKonaFlags and CheckSuperCannonKonaFlags both require
+# --cannon-kona-server. super-cannon-kona (type 9) is included (OPU-3a).
 needs_kona_server() {
   case "$1" in
-    cannon-kona) return 0 ;;
+    cannon-kona|super-cannon-kona) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 # gameImpls(uint32) mapping we will look up. Anything else is skipped, not guessed.
-# cannon-kona=8 is on-chain fact post step 8b (D-0077). Local optimism tree also
-# has super-cannon-kona=9, fast=254, alphabet=255, zk=10 — not applied here.
+# cannon-kona=8 is on-chain fact post step 8b (D-0077).
+# super-cannon-kona=9 is the U20 respected type (OPU-3a). fast=254, alphabet=255,
+# zk=10 stay unmapped.
 game_impls_type_number() {
   case "$1" in
     cannon) echo 0 ;;
     permissioned) echo 1 ;;
     cannon-kona) echo 8 ;;
+    super-cannon-kona) echo 9 ;;
     *) echo "" ;;
   esac
 }
@@ -156,16 +213,6 @@ case "$TRACE_TYPE" in
     ;;
 esac
 
-# CheckSuperCannonKonaFlags also requires --supernode-rpc and --cannon-kona-depset-config.
-# ForteL2 has neither; do not guess a mapping (D-0053 / F7-2b).
-if [[ "$TRACE_TYPE" == "super-cannon-kona" ]]; then
-  echo "ERROR: CHALLENGER_TRACE_TYPE=super-cannon-kona is not supported by this wrapper" >&2
-  echo "  This build's CheckSuperCannonKonaFlags requires --supernode-rpc and --cannon-kona-depset-config." >&2
-  echo "  ForteL2 has no supernode and no interop depset to map; refusing to guess." >&2
-  echo "  Set CHALLENGER_TRACE_TYPE from the post-wipe factory to a type this script can start." >&2
-  exit 1
-fi
-
 # CheckCannonFlags / CheckCannonKonaFlags require a pre-image oracle server.
 # start_bg returns 0 whether the daemon survives, so an unset server would
 # print "started" and die on CheckRequired (D-0054). Gate here, before any RPC wait.
@@ -186,7 +233,7 @@ if needs_cannon_server "$TRACE_TYPE"; then
   fi
 elif needs_kona_server "$TRACE_TYPE"; then
   if [[ -z "${CHALLENGER_KONA_SERVER:-}" ]]; then
-    echo "ERROR: CHALLENGER_TRACE_TYPE=cannon-kona is not startable without --cannon-kona-server" >&2
+    echo "ERROR: CHALLENGER_TRACE_TYPE=$TRACE_TYPE is not startable without --cannon-kona-server" >&2
     echo "  This build's CheckCannonKonaFlags requires --cannon-kona-server (set CHALLENGER_KONA_SERVER)." >&2
     echo "  No pre-image server binary exists on this host today (D-0052 / D-0054); refusing to start a daemon that would die on CheckRequired." >&2
     echo "  Set CHALLENGER_TRACE_TYPE from the post-wipe factory to a type this script can start, or supply CHALLENGER_KONA_SERVER." >&2
@@ -335,7 +382,7 @@ run_preflight() {
   local type_num impl vm_addr prestate args args_hex preflight_source
   type_num="$(game_impls_type_number "$TRACE_TYPE")"
   if [[ -z "$type_num" ]]; then
-    echo "Preflight: no confident gameImpls(uint32) mapping for CHALLENGER_TRACE_TYPE=$TRACE_TYPE (mapped: cannon=0, permissioned=1, cannon-kona=8); skipping factory lookup."
+    echo "Preflight: no confident gameImpls(uint32) mapping for CHALLENGER_TRACE_TYPE=$TRACE_TYPE (mapped: cannon=0, permissioned=1, cannon-kona=8, super-cannon-kona=9); skipping factory lookup."
     return 0
   fi
   echo "Preflight: DisputeGameFactory.gameImpls($type_num) for CHALLENGER_TRACE_TYPE=$TRACE_TYPE"
@@ -478,6 +525,35 @@ challenger_args=(
 )
 if [[ -n "$GAME_WINDOW" ]]; then
   challenger_args+=(--game-window="$GAME_WINDOW")
+fi
+
+# CheckSuperCannonKonaFlags (op-challenger at d6620202): --superroot-rpc plus
+# the kona rollup, genesis, depset, server, prestate, and cannon bin.
+# The depset is one chain (L2_CHAIN_ID). A caller file overrides the generated one.
+SUPER_DEPSET=""
+if [[ "$TRACE_TYPE" == "super-cannon-kona" ]]; then
+  if [[ -n "${CHALLENGER_DEPSET_CONFIG:-}" ]]; then
+    SUPER_DEPSET="$(canonical_abs_path "$CHALLENGER_DEPSET_CONFIG")"
+    if [[ ! -f "$SUPER_DEPSET" ]]; then
+      echo "ERROR: CHALLENGER_DEPSET_CONFIG is missing (resolved): $SUPER_DEPSET" >&2
+      exit 1
+    fi
+  else
+    SUPER_DEPSET="$CHALLENGER_DATADIR/super-cannon-kona-depset.json"
+    python3 - "$L2_CHAIN_ID" "$SUPER_DEPSET" <<'PY'
+import json, sys
+chain, path = sys.argv[1], sys.argv[2]
+if not chain.isdigit() or int(chain) <= 0:
+    raise SystemExit("L2_CHAIN_ID is not a positive integer")
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump({"dependencies": {chain: {}}}, fh)
+    fh.write("\n")
+PY
+  fi
+  challenger_args+=(
+    --superroot-rpc="$L2_NODE_RPC_URL"
+    --cannon-kona-depset-config="$SUPER_DEPSET"
+  )
 fi
 
 if needs_cannon_bin "$TRACE_TYPE"; then

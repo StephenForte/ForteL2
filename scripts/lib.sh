@@ -979,6 +979,31 @@ restore_caller_data_dir() {
   fi
 }
 
+# Prove or finalize a live Sepolia withdrawal (artifact L1 11155111) on the
+# Anvil fork (env L1 900852). Explicit and loopback-only. A matching pair
+# returns 0 without this flag. A mismatch that is not this fork pair returns 1.
+# The L1 URL is not printed.
+allow_fork_artifact_l1() {
+  local art_l1="${1:-}"
+  local art_l2="${2:-}"
+  if [[ -z "$art_l1" || "$art_l1" == "${L1_CHAIN_ID:-}" ]]; then
+    return 0
+  fi
+  if [[ "${FORTEL2_ALLOW_FORK_PROVE:-}" == "1" \
+    && "${L1_CHAIN_ID:-}" == "900852" \
+    && "$art_l1" == "11155111" \
+    && "$art_l2" == "${L2_CHAIN_ID:-}" ]]; then
+    case "${L1_RPC_URL:-}" in
+      http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*)
+        return 0
+        ;;
+    esac
+    echo "ERROR: FORTEL2_ALLOW_FORK_PROVE requires a loopback L1_RPC_URL" >&2
+    return 1
+  fi
+  return 1
+}
+
 # Read KEY=value from an env file without sourcing it. Use this to snapshot
 # Sepolia DATA_DIR (or L1_RPC_URL) before `source lib.sh` so Phase 1 .env
 # cannot clobber the saved value.

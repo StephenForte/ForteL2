@@ -2,7 +2,9 @@
 
 Node ESM helpers for OP Stack **prove** / **finalize** using `viem` op-stack actions.
 
-**Always invoke `node` from this directory** (`cd scripts/bridge && node …`). `viem` resolves from this package’s `package.json` (`"type": "module"`, viem 2.31.7). Running `node scripts/bridge/finalize.mjs` from the repo root fails with `ERR_MODULE_NOT_FOUND: viem`.
+**Always invoke `node` from this directory** (`cd scripts/bridge && node …`). `viem` resolves from this package’s `package.json` (`"type": "module"`, viem 2.51.0). Running `node scripts/bridge/finalize.mjs` from the repo root fails with `ERR_MODULE_NOT_FOUND: viem`.
+
+viem 2.51.0 is the lowest release whose `getGames` / `buildProveWithdrawal` source treats game types 4, 5, 7 and 9 as super-root games: `l2SequenceNumber` is kept as a timestamp (`usesSuperRoots`) and the output-root proof is built at the L2 block for that timestamp. 2.50.4 reads `l2SequenceNumber` but still proves at that value as a block number.
 
 ## Local Anvil (L2 901)
 
@@ -14,8 +16,11 @@ Node ESM helpers for OP Stack **prove** / **finalize** using `viem` op-stack act
 
 Remote L1 is required. The Anvil wrappers refuse it (`assert_local_rpc_urls`). Use:
 
+- `../withdraw-initiate-sepolia.sh` → L2 `initiateWithdrawal` (loopback L2, remote Sepolia L1, no Foundry default keys)
 - `../withdraw-prove-sepolia.sh` → `prove.mjs` (`assert_sepolia_rpc_urls`)
 - `../withdraw-finalize-sepolia.sh` → `finalize.mjs` real-clock mode
+
+A type-9 game is selected by L2 timestamp (`l2SequenceNumber`), and the proof is built at `(timestamp − genesis.l2_time) / block_time` from `rollup.json`. Type 8 still uses the L2 block number. `FORTEL2_ALLOW_FORK_PROVE=1` accepts an artifact stamped `l1ChainId=11155111` only when the env L1 is `900852` and `L1_RPC_URL` is loopback. A non-loopback L1 whose chain id is not 11155111 is refused.
 
 Both wrappers:
 
