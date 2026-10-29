@@ -12,6 +12,8 @@ import {
   contiguousScanTip,
   filterBatchTxs,
   formatAge,
+  formatProposerSequence,
+  proposerSequenceKind,
   formatRate,
   httpOriginsInText,
   nextBatcherScanRange,
@@ -698,5 +700,35 @@ describe("recent tx links stay navigation-only", () => {
     const end = src.indexOf("async function refreshRecentTxs");
     assert.ok(start >= 0 && end > start);
     assert.match(src.slice(start, end), /getBlock\(\s*n\s*,\s*true\s*\)/);
+  });
+});
+
+describe("proposer sequence", () => {
+  it("labels a type-9 sequence as a timestamp, not a block number", () => {
+    const timestamp = 1793297574;
+    const label = formatProposerSequence(9, timestamp);
+    assert.equal(label, `timestamp ${timestamp}`);
+    assert.equal(label.includes("block"), false);
+    assert.equal(proposerSequenceKind(9), "timestamp");
+    assert.notEqual(label, formatProposerSequence(8, timestamp));
+  });
+
+  it("labels a type-8 sequence as a block number", () => {
+    assert.equal(formatProposerSequence(8, 2928420), "block 2928420");
+    assert.equal(proposerSequenceKind(8), "block");
+  });
+
+  it("refreshProposer reads l2SequenceNumber for type 9 and l2BlockNumber otherwise", () => {
+    const src = readFileSync(join(viewerDir, "app.js"), "utf8");
+    const start = src.indexOf("async function refreshProposer");
+    const end = src.indexOf("async function refreshAggregate");
+    assert.ok(start >= 0 && end > start);
+    const fn = src.slice(start, end);
+    assert.match(fn, /proposerSequenceKind\(gameType\)/);
+    assert.match(
+      fn,
+      /kind === "timestamp"\s*\?\s*await gameContract\.l2SequenceNumber\(\)\s*:\s*await gameContract\.l2BlockNumber\(\)/,
+    );
+    assert.match(fn, /formatProposerSequence\(gameType, sequence\)/);
   });
 });

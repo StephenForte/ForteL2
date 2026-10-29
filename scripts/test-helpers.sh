@@ -14226,6 +14226,436 @@ fi
 cleanup_opu3b_fix
 unset OPU3B_FIX OPU3B_REFUSE_OUT OPU3B_REFUSE_EC OPU3B_FORK_OUT OPU3B_FORK_EC
 
+# --- OPU-3a: type-9 (super-root) operator tooling ---------------------------
+# Proposer start, resolver selection and read count, challenger flags,
+# fork chain-id allowance. Offline. No live RPC and no live pidfile.
+OPU3A_PROP="$SCRIPT_DIR/06-start-proposer-sepolia.sh"
+OPU3A_RES="$SCRIPT_DIR/resolve-games-sepolia.sh"
+OPU3A_CHAL="$SCRIPT_DIR/09-start-challenger-sepolia.sh"
+OPU3A_INIT="$SCRIPT_DIR/withdraw-initiate-sepolia.sh"
+OPU3A_FIX="$(mktemp -d)"
+register_tmp "$OPU3A_FIX"
+
+awk '/^refuse_custom_proposer_type9\(\)/,/^# Copy-then-truncate/' "$OPU3A_PROP" > "$OPU3A_FIX/proposer-fns.sh"
+
+OPU3A_RC=0
+OPU3A_OUT="$(
+  PROPOSER_GAME_TYPE=9 USE_CUSTOM_PROPOSER=1 \
+    bash -c "source '$OPU3A_FIX/proposer-fns.sh'; refuse_custom_proposer_type9" 2>&1
+)" || OPU3A_RC=$?
+if [[ "$OPU3A_RC" -ne 0 ]] && printf '%s\n' "$OPU3A_OUT" | grep -q 'OPU-3b'; then
+  echo "PASS OPU-3a custom proposer refuses type 9 and names OPU-3b"
+else
+  echo "FAIL OPU-3a custom proposer must refuse type 9 with OPU-3b (rc=$OPU3A_RC)" >&2
+  fail=1
+fi
+
+OPU3A_RC=0
+OPU3A_OUT="$(
+  PROPOSER_GAME_TYPE=9 PROPOSER_ROLLUP_RPC=http://127.0.0.1:9547 \
+    bash -c "source '$OPU3A_FIX/proposer-fns.sh'; refuse_type9_rollup_rpc" 2>&1
+)" || OPU3A_RC=$?
+if [[ "$OPU3A_RC" -ne 0 ]] && printf '%s\n' "$OPU3A_OUT" | grep -q 'refuses a rollup RPC'; then
+  echo "PASS OPU-3a type 9 refuses a rollup RPC"
+else
+  echo "FAIL OPU-3a type 9 with a rollup RPC must exit non-zero (rc=$OPU3A_RC)" >&2
+  fail=1
+fi
+
+OPU3A_RC=0
+PROPOSER_GAME_TYPE=8 PROPOSER_ROLLUP_RPC=http://127.0.0.1:9547 \
+  bash -c "source '$OPU3A_FIX/proposer-fns.sh'; refuse_type9_rollup_rpc" || OPU3A_RC=$?
+if [[ "$OPU3A_RC" -eq 0 ]]; then
+  echo "PASS OPU-3a type 8 ignores PROPOSER_ROLLUP_RPC"
+else
+  echo "FAIL OPU-3a type 8 must not refuse PROPOSER_ROLLUP_RPC" >&2
+  fail=1
+fi
+
+cat > "$OPU3A_FIX/cast" <<'EOF'
+#!/bin/bash
+if [[ "${CAST_EXIT:-0}" -ne 0 ]]; then
+  echo called >> "${CAST_MARKER:?}"
+  exit 1
+fi
+printf '%s\n' "${CAST_IMPL:?}"
+EOF
+chmod +x "$OPU3A_FIX/cast"
+
+OPU3A_RC=0
+OPU3A_OUT="$(
+  PATH="$OPU3A_FIX:$PATH" CAST_IMPL=0x0000000000000000000000000000000000000000 PROPOSER_GAME_TYPE=9 \
+    bash -c "source '$OPU3A_FIX/proposer-fns.sh'; assert_game_impl_for_type9 0x1111111111111111111111111111111111111111 http://127.0.0.1:1" 2>&1
+)" || OPU3A_RC=$?
+if [[ "$OPU3A_RC" -ne 0 ]] && printf '%s\n' "$OPU3A_OUT" | grep -q 'gameImpls(9) is the zero address'; then
+  echo "PASS OPU-3a type 9 refuses a zero gameImpls(9)"
+else
+  echo "FAIL OPU-3a type 9 must refuse zero gameImpls(9) (rc=$OPU3A_RC)" >&2
+  fail=1
+fi
+
+OPU3A_RC=0
+PATH="$OPU3A_FIX:$PATH" CAST_IMPL=0x2222222222222222222222222222222222222222 PROPOSER_GAME_TYPE=9 \
+  bash -c "source '$OPU3A_FIX/proposer-fns.sh'; assert_game_impl_for_type9 0x1111111111111111111111111111111111111111 http://127.0.0.1:1" || OPU3A_RC=$?
+if [[ "$OPU3A_RC" -eq 0 ]]; then
+  echo "PASS OPU-3a type 9 accepts a non-zero gameImpls(9)"
+else
+  echo "FAIL OPU-3a type 9 must accept a non-zero gameImpls(9)" >&2
+  fail=1
+fi
+
+OPU3A_RC=0
+CAST_MARKER="$OPU3A_FIX/cast-called" CAST_EXIT=1 PROPOSER_GAME_TYPE=8 \
+  PATH="$OPU3A_FIX:$PATH" \
+  bash -c "source '$OPU3A_FIX/proposer-fns.sh'; assert_game_impl_for_type9 0x1111111111111111111111111111111111111111 http://127.0.0.1:1" || OPU3A_RC=$?
+if [[ "$OPU3A_RC" -eq 0 && ! -f "$OPU3A_FIX/cast-called" ]]; then
+  echo "PASS OPU-3a type 8 does not read gameImpls(9)"
+else
+  echo "FAIL OPU-3a type 8 must not call cast for gameImpls(9)" >&2
+  fail=1
+fi
+
+OPU3A_ARGV="$(
+  PROPOSER_GAME_TYPE=9 \
+  L1_RPC_URL=http://127.0.0.1:1 \
+  L2_NODE_RPC_URL=http://127.0.0.1:9547 \
+  PROPOSER_PRIVATE_KEY=0x1111111111111111111111111111111111111111111111111111111111111111 \
+  PROPOSER_INTERVAL=8h PROPOSER_POLL=120s PROPOSER_RESUBMISSION=72s \
+  PROPOSER_RECEIPT_QUERY=36s PROPOSER_REBROADCAST=36s PROPOSER_RPC_PORT=18560 \
+    bash -c "source '$OPU3A_FIX/proposer-fns.sh'; build_stock_proposer_cmd 0x3333333333333333333333333333333333333333; printf '%s\n' \"\${proposer_cmd[@]}\""
+)"
+if printf '%s\n' "$OPU3A_ARGV" | grep -q -- '--superroot-rpcs=http://127.0.0.1:9547' \
+  && ! printf '%s\n' "$OPU3A_ARGV" | grep -q -- '--rollup-rpc='; then
+  echo "PASS OPU-3a type 9 argv is --superroot-rpcs without --rollup-rpc"
+else
+  echo "FAIL OPU-3a type 9 argv must use --superroot-rpcs and omit --rollup-rpc" >&2
+  fail=1
+fi
+
+OPU3A_ARGV8="$(
+  PROPOSER_GAME_TYPE=8 \
+  L1_RPC_URL=http://127.0.0.1:1 \
+  L2_NODE_RPC_URL=http://127.0.0.1:9547 \
+  PROPOSER_PRIVATE_KEY=0x1111111111111111111111111111111111111111111111111111111111111111 \
+  PROPOSER_INTERVAL=8h PROPOSER_POLL=120s PROPOSER_RESUBMISSION=72s \
+  PROPOSER_RECEIPT_QUERY=36s PROPOSER_REBROADCAST=36s PROPOSER_RPC_PORT=8560 \
+    bash -c "source '$OPU3A_FIX/proposer-fns.sh'; build_stock_proposer_cmd 0x3333333333333333333333333333333333333333; printf '%s\n' \"\${proposer_cmd[@]}\""
+)"
+if printf '%s\n' "$OPU3A_ARGV8" | grep -q -- '--rollup-rpc=http://127.0.0.1:9547' \
+  && ! printf '%s\n' "$OPU3A_ARGV8" | grep -q -- '--superroot-rpcs=' \
+  && printf '%s\n' "$OPU3A_ARGV8" | grep -q -- '--game-type=8'; then
+  echo "PASS OPU-3a type 8 argv is unchanged"
+else
+  echo "FAIL OPU-3a type 8 argv must keep --rollup-rpc and omit --superroot-rpcs" >&2
+  fail=1
+fi
+
+if awk '
+  /^refuse_custom_proposer_type9$/ { call = NR }
+  /stop_bg op-proposer/ { stop = NR }
+  END { exit !(call && stop && call < stop) }
+' "$OPU3A_PROP"; then
+  echo "PASS OPU-3a type 9 custom refusal is before stop_bg"
+else
+  echo "FAIL OPU-3a custom type-9 refusal must run before stop_bg op-proposer" >&2
+  fail=1
+fi
+
+if awk '
+  /isolated PID_DIR=/ { echo_pid = NR }
+  /stop_bg op-proposer/ { stop = NR }
+  END { exit !(echo_pid && stop && echo_pid < stop) }
+' "$OPU3A_PROP"; then
+  echo "PASS OPU-3a proposer isolation check is before stop_bg"
+else
+  echo "FAIL OPU-3a proposer PID_DIR isolation must run before stop_bg" >&2
+  fail=1
+fi
+
+OPU3A_READS_88="$("$OPU3A_RES" --read-count 8 8)"
+OPU3A_READS_98="$("$OPU3A_RES" --read-count 9 8)"
+OPU3A_READS_99="$("$OPU3A_RES" --read-count 9 9)"
+OPU3A_READS_91="$("$OPU3A_RES" --read-count 9 1)"
+if [[ "$OPU3A_READS_88" == "8" && "$OPU3A_READS_98" == "9" && "$OPU3A_READS_99" == "8" && "$OPU3A_READS_91" == "8" ]]; then
+  echo "PASS OPU-3a resolver read count is 8, plus one only for type 8 while respected is 9"
+else
+  echo "FAIL OPU-3a resolver read counts got respected8/type8=$OPU3A_READS_88 respected9/type8=$OPU3A_READS_98 respected9/type9=$OPU3A_READS_99 respected9/type1=$OPU3A_READS_91" >&2
+  fail=1
+fi
+
+python3 - "$OPU3A_RES" <<'PY' || fail=1
+import pathlib, sys
+src = pathlib.Path(sys.argv[1]).read_text()
+start = src.find("def parse_uint(s):")
+end = src.find('if __name__ == "__main__":')
+if start < 0 or end < start:
+    print("FAIL OPU-3a could not extract resolver python", file=sys.stderr)
+    sys.exit(1)
+ns = {"__name__": "opu3a_test"}
+exec(src[start:end], ns)
+calls = []
+kind = {"type": "8"}
+
+def cast_call(rpc, addr, sig, *args):
+    calls.append(sig)
+    if sig.startswith("gameAtIndex"):
+        return [kind["type"], "1", "0x" + "11" * 20]
+    if sig.startswith("withdrawals"):
+        return ["0", "0"]
+    if sig.startswith("resolvedSubgames") or sig.startswith("wasRespected"):
+        return ["true"]
+    return ["0"]
+
+ns["cast_call"] = cast_call
+fn = ns["fetch_one_game"]
+
+def run(respected, game_type):
+    calls.clear()
+    kind["type"] = str(game_type)
+    game = fn("rpc", "factory", "weth", "recip", 1, respected)
+    return game, list(calls)
+
+game, seen = run(9, 8)
+if len(seen) != 9 or not any(s.startswith("wasRespected") for s in seen) or game.get("was_respected_when_created") is not True:
+    print("FAIL OPU-3a type 8 while respected is 9 must add one wasRespected read", file=sys.stderr)
+    sys.exit(1)
+_, seen = run(9, 9)
+if len(seen) != 8 or any(s.startswith("wasRespected") for s in seen):
+    print("FAIL OPU-3a type 9 must stay at 8 L1 reads", file=sys.stderr)
+    sys.exit(1)
+_, seen = run(8, 8)
+if len(seen) != 8 or any(s.startswith("wasRespected") for s in seen):
+    print("FAIL OPU-3a respected 8 must stay at 8 L1 reads", file=sys.stderr)
+    sys.exit(1)
+_, seen = run(9, 1)
+if len(seen) != 8 or any(s.startswith("wasRespected") for s in seen):
+    print("FAIL OPU-3a type 1 must not take the legacy read", file=sys.stderr)
+    sys.exit(1)
+print("PASS OPU-3a fetch_one_game read count matches the type-9 guard")
+PY
+
+cat > "$OPU3A_FIX/respected9.json" <<'EOF'
+{
+  "now": 1000000,
+  "mode": "dry-run",
+  "finality_delay": 1800,
+  "weth_delay": 3600,
+  "init_bond_wei": "1000000000000000",
+  "respected_game_type": 9,
+  "games": [
+    {
+      "index": 1,
+      "game_type": 8,
+      "was_respected_when_created": true,
+      "address": "0x0000000000000000000000000000000000000008",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    },
+    {
+      "index": 2,
+      "game_type": 8,
+      "was_respected_when_created": false,
+      "address": "0x0000000000000000000000000000000000000009",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    },
+    {
+      "index": 3,
+      "game_type": 1,
+      "was_respected_when_created": true,
+      "address": "0x0000000000000000000000000000000000000001",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    },
+    {
+      "index": 4,
+      "game_type": 9,
+      "address": "0x000000000000000000000000000000000000000a",
+      "created_at": 990000,
+      "max_clock_duration": 7200,
+      "status": 0,
+      "resolved_at": 0,
+      "credit_wei": "0",
+      "claim_data_len": 1,
+      "weth_amount_wei": "0",
+      "weth_unlock_ts": 0
+    }
+  ]
+}
+EOF
+OPU3A_RES_OUT="$(
+  env -u FORTEL2_ENV RESOLVE_GAMES_SNAPSHOT="$OPU3A_FIX/respected9.json" \
+    "$OPU3A_RES" --analyze-only 2>&1
+)" || OPU3A_RES_EC=$?
+OPU3A_RES_EC="${OPU3A_RES_EC:-0}"
+if [[ "$OPU3A_RES_EC" -eq 0 ]] \
+  && printf '%s\n' "$OPU3A_RES_OUT" | grep -q 'game 1 ACTION' \
+  && printf '%s\n' "$OPU3A_RES_OUT" | grep -q 'game 2 SKIP not_respected_type' \
+  && printf '%s\n' "$OPU3A_RES_OUT" | grep -q 'game 3 SKIP not_respected_type' \
+  && printf '%s\n' "$OPU3A_RES_OUT" | grep -q 'game 4 ACTION' \
+  && printf '%s\n' "$OPU3A_RES_OUT" | grep -q 'selected_indexes=1,4'; then
+  echo "PASS OPU-3a respected 9 selects legacy type 8 and type 9, not type 1"
+else
+  echo "FAIL OPU-3a respected 9 selection (ec=$OPU3A_RES_EC)" >&2
+  printf '%s\n' "$OPU3A_RES_OUT" >&2
+  fail=1
+fi
+
+if awk '/super-cannon-kona\) echo 9/ { found = 1 } END { exit !found }' "$OPU3A_CHAL" \
+  && grep -q -- '--superroot-rpc="$L2_NODE_RPC_URL"' "$OPU3A_CHAL" \
+  && grep -q -- '--cannon-kona-depset-config="$SUPER_DEPSET"' "$OPU3A_CHAL"; then
+  echo "PASS OPU-3a super-cannon-kona maps to type 9 and passes superroot plus depset"
+else
+  echo "FAIL OPU-3a challenger must map super-cannon-kona to 9 and pass --superroot-rpc and --cannon-kona-depset-config" >&2
+  fail=1
+fi
+
+awk '/^game_impls_type_number\(\)/,/^}/' "$OPU3A_CHAL" > "$OPU3A_FIX/game-impls.sh"
+OPU3A_TYPE9="$(bash -c "source '$OPU3A_FIX/game-impls.sh'; game_impls_type_number super-cannon-kona")"
+OPU3A_TYPE8="$(bash -c "source '$OPU3A_FIX/game-impls.sh'; game_impls_type_number cannon-kona")"
+if [[ "$OPU3A_TYPE9" == "9" && "$OPU3A_TYPE8" == "8" ]]; then
+  echo "PASS OPU-3a game_impls_type_number maps super-cannon-kona to 9 and cannon-kona to 8"
+else
+  echo "FAIL OPU-3a game type map got super=$OPU3A_TYPE9 cannon-kona=$OPU3A_TYPE8" >&2
+  fail=1
+fi
+
+OPU3A_ISO="$(mktemp -d)"
+register_tmp "$OPU3A_ISO"
+OPU3A_ISO_RC=0
+OPU3A_ISO_OUT="$(
+  FORTEL2_ISOLATED_DATA_DIR="$OPU3A_ISO" \
+  FORTEL2_FORK_L1_RPC_URL=http://127.0.0.1:19999 \
+  FORTEL2_FORK_L1_BEACON='https://example.quiknode.pro/token' \
+    bash "$OPU3A_CHAL" 2>&1
+)" || OPU3A_ISO_RC=$?
+if [[ "$OPU3A_ISO_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU3A_ISO_OUT" | grep -q "isolated PID_DIR=$OPU3A_ISO/pids" \
+  && printf '%s\n' "$OPU3A_ISO_OUT" | grep -q 'must not be a QuickNode URL' \
+  && ! printf '%s\n' "$OPU3A_ISO_OUT" | grep -q 'example.quiknode.pro/token'; then
+  echo "PASS OPU-3a fork challenger isolates PID_DIR and refuses a QuickNode beacon"
+else
+  echo "FAIL OPU-3a fork challenger isolation or beacon refusal (rc=$OPU3A_ISO_RC)" >&2
+  printf '%s\n' "$OPU3A_ISO_OUT" >&2
+  fail=1
+fi
+
+OPU3A_SAVED_L1="${L1_CHAIN_ID:-}"
+OPU3A_SAVED_L2="${L2_CHAIN_ID:-}"
+OPU3A_SAVED_RPC="${L1_RPC_URL:-}"
+OPU3A_SAVED_FLAG="${FORTEL2_ALLOW_FORK_PROVE:-}"
+L1_CHAIN_ID=900852
+L2_CHAIN_ID=852
+L1_RPC_URL=http://127.0.0.1:8545
+unset FORTEL2_ALLOW_FORK_PROVE
+OPU3A_ALLOW_RC=0
+allow_fork_artifact_l1 11155111 852 || OPU3A_ALLOW_RC=$?
+if [[ "$OPU3A_ALLOW_RC" -ne 0 ]]; then
+  echo "PASS OPU-3a fork prove without the flag refuses a 11155111 artifact"
+else
+  echo "FAIL OPU-3a fork prove must refuse a 11155111 artifact unless FORTEL2_ALLOW_FORK_PROVE=1" >&2
+  fail=1
+fi
+FORTEL2_ALLOW_FORK_PROVE=1
+OPU3A_ALLOW_RC=0
+allow_fork_artifact_l1 11155111 852 || OPU3A_ALLOW_RC=$?
+if [[ "$OPU3A_ALLOW_RC" -eq 0 ]]; then
+  echo "PASS OPU-3a fork prove allows a 11155111 artifact on loopback 900852"
+else
+  echo "FAIL OPU-3a fork prove allowance should accept loopback 900852" >&2
+  fail=1
+fi
+L1_RPC_URL=https://example.invalid
+OPU3A_ALLOW_RC=0
+allow_fork_artifact_l1 11155111 852 || OPU3A_ALLOW_RC=$?
+if [[ "$OPU3A_ALLOW_RC" -ne 0 ]]; then
+  echo "PASS OPU-3a fork prove allowance refuses a non-loopback L1"
+else
+  echo "FAIL OPU-3a fork prove allowance must refuse a non-loopback L1" >&2
+  fail=1
+fi
+L1_CHAIN_ID="$OPU3A_SAVED_L1"
+L2_CHAIN_ID="$OPU3A_SAVED_L2"
+L1_RPC_URL="$OPU3A_SAVED_RPC"
+if [[ -n "$OPU3A_SAVED_FLAG" ]]; then
+  FORTEL2_ALLOW_FORK_PROVE="$OPU3A_SAVED_FLAG"
+else
+  unset FORTEL2_ALLOW_FORK_PROVE
+fi
+
+if grep -q 'assert_l2_loopback_urls' "$OPU3A_INIT" \
+  && grep -q 'assert_sepolia_rpc_urls' "$OPU3A_INIT" \
+  && grep -q 'refuse_foundry_defaults_unless_local_l2' "$OPU3A_INIT" \
+  && ! grep -q 'assert_local_rpc_urls' "$OPU3A_INIT" \
+  && grep -q 'PROPOSER_GAME_TYPE=8' "$SCRIPT_DIR/../.env.sepolia.example" \
+  && grep -q 'OPU-4 sets this to 9' "$SCRIPT_DIR/../.env.sepolia.example"; then
+  echo "PASS OPU-3a Sepolia initiate wrapper and PROPOSER_GAME_TYPE=8 template"
+else
+  echo "FAIL OPU-3a initiate wrapper or .env.sepolia.example proposer type" >&2
+  fail=1
+fi
+
+OPU3A_PROVE_RC=0
+OPU3A_PROVE_OUT="$(
+  FORTEL2_FORK_L1_RPC_URL=https://example.invalid \
+  FORTEL2_FORK_L1_CHAIN_ID=900852 \
+    bash "$SCRIPT_DIR/withdraw-prove-sepolia.sh" 2>&1
+)" || OPU3A_PROVE_RC=$?
+if [[ "$OPU3A_PROVE_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU3A_PROVE_OUT" | grep -q 'must be loopback'; then
+  echo "PASS OPU-3a fork prove refuses a non-loopback L1 URL"
+else
+  echo "FAIL OPU-3a fork prove must refuse a non-loopback FORTEL2_FORK_L1_RPC_URL (rc=$OPU3A_PROVE_RC)" >&2
+  fail=1
+fi
+
+OPU3A_BRIDGE="$(mktemp -d)"
+printf '%s\n' '{"dependencies":{"viem":"2.51.0"}}' > "$OPU3A_BRIDGE/package.json"
+mkdir -p "$OPU3A_BRIDGE/node_modules/viem"
+printf '%s\n' '{"version":"2.31.7"}' > "$OPU3A_BRIDGE/node_modules/viem/package.json"
+OPU3A_STALE=0
+bridge_viem_is_current "$OPU3A_BRIDGE" || OPU3A_STALE=1
+printf '%s\n' '{"version":"2.51.0"}' > "$OPU3A_BRIDGE/node_modules/viem/package.json"
+OPU3A_MATCH=0
+bridge_viem_is_current "$OPU3A_BRIDGE" && OPU3A_MATCH=1
+rm -rf "$OPU3A_BRIDGE/node_modules"
+OPU3A_ABSENT=0
+bridge_viem_is_current "$OPU3A_BRIDGE" || OPU3A_ABSENT=1
+rm -rf "$OPU3A_BRIDGE"
+if [[ "$OPU3A_STALE" -eq 1 && "$OPU3A_MATCH" -eq 1 && "$OPU3A_ABSENT" -eq 1 ]] \
+  && grep -q 'ensure_bridge_deps' "$SCRIPT_DIR/withdraw-prove-sepolia.sh" \
+  && grep -q 'ensure_bridge_deps' "$SCRIPT_DIR/withdraw-finalize-sepolia.sh" \
+  && ! grep -q 'node_modules/viem' "$SCRIPT_DIR/withdraw-prove-sepolia.sh" \
+  && ! grep -q 'node_modules/viem' "$SCRIPT_DIR/withdraw-finalize-sepolia.sh"; then
+  echo "PASS OPU-3a bridge deps refresh when the installed viem pin differs"
+else
+  echo "FAIL OPU-3a bridge deps must refresh a stale viem (stale=$OPU3A_STALE match=$OPU3A_MATCH absent=$OPU3A_ABSENT)" >&2
+  fail=1
+fi
+
+unset OPU3A_PROP OPU3A_RES OPU3A_CHAL OPU3A_INIT OPU3A_FIX OPU3A_RC OPU3A_OUT OPU3A_PROVE_RC OPU3A_PROVE_OUT
+unset OPU3A_ARGV OPU3A_ARGV8 OPU3A_READS_88 OPU3A_READS_98 OPU3A_READS_99 OPU3A_READS_91
+unset OPU3A_RES_OUT OPU3A_RES_EC OPU3A_TYPE9 OPU3A_TYPE8 OPU3A_ISO OPU3A_ISO_RC OPU3A_ISO_OUT
+unset OPU3A_SAVED_L1 OPU3A_SAVED_L2 OPU3A_SAVED_RPC OPU3A_SAVED_FLAG OPU3A_ALLOW_RC
+
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
 # `trap … EXIT` — bash replaces the handler and would drop every previously

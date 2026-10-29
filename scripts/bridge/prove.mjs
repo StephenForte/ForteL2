@@ -16,7 +16,11 @@ import {
   resolveGameProxy,
   parseBridgeArgs,
   assertArtifactChainIds,
+  assertRemoteL1ChainId,
   stampArtifactChainIds,
+  scanNewestCoveringGame,
+  cachedCoveringGame,
+  SUPER_ROOT_GAME_TYPE,
   classifyProveReadiness,
   classifyFinalizeReadiness,
   dryRunExitCode,
@@ -26,11 +30,11 @@ import {
 } from './lib.mjs'
 import {
   buildProveWithdrawal,
-  getGame,
   getWithdrawals,
   proveWithdrawal,
 } from 'viem/op-stack'
-import { getTransactionReceipt, readContract } from 'viem/actions'
+import { getBlock, getTransactionReceipt, readContract } from 'viem/actions'
+import { parseAbi } from 'viem'
 
 loadEnvFromShell()
 
@@ -46,6 +50,7 @@ const deploymentsPath =
   path.resolve(here, '../../deployments/deployments.json')
 
 const artifact = readJson(artifactPath)
+assertRemoteL1ChainId(process.env.L1_CHAIN_ID, process.env.L1_RPC_URL)
 assertArtifactChainIds(artifact, process.env.L1_CHAIN_ID, process.env.L2_CHAIN_ID)
 const { portal, factory } = loadDeployments(deploymentsPath)
 const chains = makeChains({ portal, factory })
@@ -53,6 +58,101 @@ const { account, publicL1, publicL2, walletL1 } = makeClients(chains)
 
 const l2Tx = artifact.l2TxHash
 if (!l2Tx) throw new Error('withdrawal artifact missing l2TxHash')
+
+const respectedGameTypeAbi = parseAbi([
+  'function respectedGameType() view returns (uint32)',
+])
+const factoryScanAbi = parseAbi([
+  'function gameCount() view returns (uint256)',
+  'function gameAtIndex(uint256) view returns (uint32 gameType, uint64 timestamp, address proxy)',
+])
+const sequenceAbi = parseAbi([
+  'function l2SequenceNumber() view returns (uint256)',
+])
+
+async function readRespectedGameType() {
+  try {
+    const value = await readContract(publicL1, {
+      address: portal,
+      abi: respectedGameTypeAbi,
+      functionName: 'respectedGameType',
+    })
+    return Number(value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Type 9: timestamp >= the withdrawal block's timestamp. The proof is built
+ * at the L2 block for that timestamp (usesSuperRoots). Any other respected
+ * type uses the strict-greater block comparison viem getGame uses.
+ * A repeated poll with the same gameCount reuses the previous result.
+ */
+let coveringCache = null
+
+async function findCoveringGame(receipt) {
+  const respected = await readRespectedGameType()
+  if (respected == null) throw new Error('could not read portal.respectedGameType')
+  const count = await readContract(publicL1, {
+    address: factory,
+    abi: factoryScanAbi,
+    functionName: 'gameCount',
+  })
+  const cached = cachedCoveringGame(coveringCache, { count, respected })
+  if (cached !== undefined) {
+    if (cached == null) {
+      const err = new Error(
+        respected === SUPER_ROOT_GAME_TYPE
+          ? 'no type-9 game covers the withdrawal timestamp'
+          : 'no dispute game covers the withdrawal block',
+      )
+      err.name = 'GameNotFoundError'
+      throw err
+    }
+    return cached
+  }
+  let covers
+  if (respected === SUPER_ROOT_GAME_TYPE) {
+    const block = await getBlock(publicL2, { blockNumber: receipt.blockNumber })
+    const target = BigInt(block.timestamp)
+    covers = (sequence) => BigInt(sequence) >= target
+  } else {
+    const target = BigInt(receipt.blockNumber)
+    covers = (sequence) => BigInt(sequence) > target
+  }
+  const found = await scanNewestCoveringGame({
+    gameCount: count,
+    gameType: respected,
+    covers,
+    readGameAtIndex: async (index) => {
+      const row = await readContract(publicL1, {
+        address: factory,
+        abi: factoryScanAbi,
+        functionName: 'gameAtIndex',
+        args: [index],
+      })
+      return { gameType: Number(row[0]), proxy: row[2] }
+    },
+    readSequence: async (proxy) =>
+      readContract(publicL1, {
+        address: proxy,
+        abi: sequenceAbi,
+        functionName: 'l2SequenceNumber',
+      }),
+  })
+  coveringCache = { count: count.toString(), respected, game: found.game }
+  if (!found.game) {
+    const err = new Error(
+      respected === SUPER_ROOT_GAME_TYPE
+        ? 'no type-9 game covers the withdrawal timestamp'
+        : 'no dispute game covers the withdrawal block',
+    )
+    err.name = 'GameNotFoundError'
+    throw err
+  }
+  return found.game
+}
 
 const receipt = await getTransactionReceipt(publicL2, { hash: l2Tx })
 const withdrawals = getWithdrawals({ logs: receipt.logs })
@@ -124,14 +224,7 @@ if (dryRun) {
     }
   }
   try {
-    const game = await getGame(publicL1, {
-      l2BlockNumber: receipt.blockNumber,
-      limit: 200,
-      portalAddress: portal,
-      disputeGameFactoryAddress: factory,
-      targetChain: chains.l2,
-      strategy: 'latest',
-    })
+    const game = await findCoveringGame(receipt)
     const proveArgs = await buildProveWithdrawal(publicL2, {
       account,
       game,
@@ -205,23 +298,19 @@ console.log('Waiting for dispute game after L2 block', receipt.blockNumber.toStr
 
 const deadline = Date.now() + Number(process.env.PROVE_WAIT_MS || 180_000)
 let game
+let lastGameError = ''
 while (Date.now() < deadline) {
   try {
-    game = await getGame(publicL1, {
-      l2BlockNumber: receipt.blockNumber,
-      limit: 200,
-      portalAddress: portal,
-      disputeGameFactoryAddress: factory,
-      targetChain: chains.l2,
-      strategy: 'latest',
-    })
+    game = await findCoveringGame(receipt)
     break
-  } catch {
+  } catch (err) {
+    lastGameError = err?.shortMessage || err?.message || String(err)
     await sleep(3000)
   }
 }
 if (!game) {
   console.error('ERROR: timed out waiting for dispute game (is op-proposer running?)')
+  if (lastGameError) console.error(lastGameError)
   process.exit(1)
 }
 
@@ -230,7 +319,7 @@ const gameProxy = await resolveGameProxy(publicL1, factory, game.index)
 console.log(
   'game index',
   game.index.toString(),
-  'l2Block',
+  game.usesSuperRoots ? 'l2Timestamp' : 'l2Block',
   game.l2BlockNumber.toString(),
   'proxy',
   gameProxy,

@@ -1,10 +1,61 @@
 #!/usr/bin/env bash
 # Phase 2c: op-proposer against Sepolia DisputeGameFactory.
 # Default: stock op-proposer. Optional US-054 demo: USE_CUSTOM_PROPOSER=1 + CONFIRM_CUSTOM_PROPOSER_SEPOLIA=1.
+#
+# PROPOSER_GAME_TYPE=8 (today): --rollup-rpc, no --superroot-rpcs. Unchanged argv.
+# PROPOSER_GAME_TYPE=9 (OPU-4 cutover, one variable in .env.sepolia): --superroot-rpcs
+# set to the loopback op-node and no --rollup-rpc. op-proposer v1.17.0 accepts
+# the pair for type 9 (it is not in postInteropGameTypes) and would post an
+# output root as rootClaim; SuperFaultDisputeGame.initialize then reverts
+# BadExtraData. This script is the guard.
+# The custom proposer (USE_CUSTOM_PROPOSER=1) refuses type 9; that port is OPU-3b.
+#
+# Fork rehearsal only (never edit .env.sepolia):
+#   FORTEL2_ISOLATED_DATA_DIR  pid/log dir; must stay off the live DATA_DIR
+#   FORTEL2_FORK_L1_RPC_URL    loopback Anvil fork; replaces L1_RPC_URL after source
+#   FORTEL2_PROPOSER_GAME_TYPE / FORTEL2_PROPOSER_INTERVAL / FORTEL2_PROPOSER_RPC_PORT
+#     override the env-file values after source
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Captured before lib.sh sources the env file, which assigns DATA_DIR and L1_RPC_URL.
+_FORTEL2_ISOLATED_DATA_DIR="${FORTEL2_ISOLATED_DATA_DIR:-}"
+_FORTEL2_FORK_L1_RPC_URL="${FORTEL2_FORK_L1_RPC_URL:-}"
+_FORTEL2_PROPOSER_GAME_TYPE="${FORTEL2_PROPOSER_GAME_TYPE:-}"
+_FORTEL2_PROPOSER_INTERVAL="${FORTEL2_PROPOSER_INTERVAL:-}"
+_FORTEL2_PROPOSER_POLL="${FORTEL2_PROPOSER_POLL:-}"
+_FORTEL2_PROPOSER_RPC_PORT="${FORTEL2_PROPOSER_RPC_PORT:-}"
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
+
+if [[ -n "$_FORTEL2_ISOLATED_DATA_DIR" ]]; then
+  restore_caller_data_dir "$_FORTEL2_ISOLATED_DATA_DIR"
+  case "$PID_DIR" in
+    "$_FORTEL2_ISOLATED_DATA_DIR"/*) ;;
+    *)
+      echo "ERROR: isolated PID_DIR=$PID_DIR is not under FORTEL2_ISOLATED_DATA_DIR" >&2
+      exit 1
+      ;;
+  esac
+  echo "isolated PID_DIR=$PID_DIR"
+fi
+if [[ -n "$_FORTEL2_FORK_L1_RPC_URL" ]]; then
+  assert_loopback_url "$_FORTEL2_FORK_L1_RPC_URL" "FORTEL2_FORK_L1_RPC_URL"
+  restore_caller_l1_rpc_url "$_FORTEL2_FORK_L1_RPC_URL"
+fi
+if [[ -n "$_FORTEL2_PROPOSER_GAME_TYPE" ]]; then
+  PROPOSER_GAME_TYPE="$_FORTEL2_PROPOSER_GAME_TYPE"
+fi
+if [[ -n "$_FORTEL2_PROPOSER_INTERVAL" ]]; then
+  SEPOLIA_PROPOSER_INTERVAL="$_FORTEL2_PROPOSER_INTERVAL"
+fi
+if [[ -n "$_FORTEL2_PROPOSER_POLL" ]]; then
+  SEPOLIA_PROPOSER_POLL_INTERVAL="$_FORTEL2_PROPOSER_POLL"
+fi
+if [[ -n "$_FORTEL2_PROPOSER_RPC_PORT" ]]; then
+  PROPOSER_RPC_PORT="$_FORTEL2_PROPOSER_RPC_PORT"
+fi
 
 require_bin jq
 require_sepolia_env
@@ -138,9 +189,98 @@ start_proposer_with_retry() {
   return 1
 }
 
+# Custom proposer has no super-root proposal path. Refuse before stop_bg:
+# the custom branch stops whatever pidfile it sees, which on the live DATA_DIR
+# is the live proposer.
+refuse_custom_proposer_type9() {
+  if [[ "${USE_CUSTOM_PROPOSER:-0}" == "1" && "${PROPOSER_GAME_TYPE:-}" == "9" ]]; then
+    echo "ERROR: USE_CUSTOM_PROPOSER=1 cannot start PROPOSER_GAME_TYPE=9 (super-root)." >&2
+    echo "  Type 9 is ported in OPU-3b, not in this stock start script." >&2
+    echo "  Leave USE_CUSTOM_PROPOSER unset and set PROPOSER_GAME_TYPE=9 for stock op-proposer." >&2
+    return 1
+  fi
+}
+
+# PROPOSER_ROLLUP_RPC is not a type-8 input. It exists so a type-9 start that
+# would also pass a rollup RPC fails closed. op-proposer v1.17.0 would accept it.
+refuse_type9_rollup_rpc() {
+  if [[ "${PROPOSER_GAME_TYPE:-}" != "9" ]]; then
+    return 0
+  fi
+  if [[ -n "${PROPOSER_ROLLUP_RPC:-}" ]]; then
+    echo "ERROR: PROPOSER_GAME_TYPE=9 refuses a rollup RPC (PROPOSER_ROLLUP_RPC is set)." >&2
+    echo "  Type 9 must start with --superroot-rpcs only. A rollup RPC posts an output root as rootClaim." >&2
+    return 1
+  fi
+}
+
+# Zero gameImpls(9) means U20 has not registered the super-root game. Type 8
+# does not call this.
+assert_game_impl_for_type9() {
+  local factory="$1"
+  local rpc="$2"
+  local impl h
+  if [[ "${PROPOSER_GAME_TYPE:-}" != "9" ]]; then
+    return 0
+  fi
+  impl="$(cast call "$factory" "gameImpls(uint32)(address)" 9 --rpc-url "$rpc" | awk 'NR==1{print $1}')"
+  h="$(printf '%s' "$impl" | tr '[:upper:]' '[:lower:]')"
+  if [[ -z "$h" || "$h" == "0x" || "$h" =~ ^0x0+$ ]]; then
+    echo "ERROR: refusing PROPOSER_GAME_TYPE=9: DisputeGameFactory.gameImpls(9) is the zero address (U20 has not registered type 9)." >&2
+    return 1
+  fi
+}
+
+# Sets proposer_cmd. Type 8 matches the pre-OPU-3a argv. Type 9 swaps
+# --rollup-rpc for --superroot-rpcs and changes nothing else.
+build_stock_proposer_cmd() {
+  local factory="$1"
+  if [[ "${PROPOSER_GAME_TYPE}" == "9" ]]; then
+    proposer_cmd=(
+      op-proposer
+      --l1-eth-rpc="$L1_RPC_URL"
+      --superroot-rpcs="$L2_NODE_RPC_URL"
+      --private-key="${PROPOSER_PRIVATE_KEY}"
+      --game-factory-address="$factory"
+      --game-type="${PROPOSER_GAME_TYPE}"
+      --proposal-interval="${PROPOSER_INTERVAL}"
+      --allow-non-finalized=true
+      --poll-interval="${PROPOSER_POLL}"
+      --resubmission-timeout="${PROPOSER_RESUBMISSION}"
+      --txmgr.receipt-query-interval="${PROPOSER_RECEIPT_QUERY}"
+      --txmgr.rebroadcast-interval="${PROPOSER_REBROADCAST}"
+      --rpc.addr=127.0.0.1
+      --rpc.port="${PROPOSER_RPC_PORT}"
+      --log.level=info
+    )
+  else
+    proposer_cmd=(
+      op-proposer
+      --l1-eth-rpc="$L1_RPC_URL"
+      --rollup-rpc="$L2_NODE_RPC_URL"
+      --private-key="${PROPOSER_PRIVATE_KEY}"
+      --game-factory-address="$factory"
+      --game-type="${PROPOSER_GAME_TYPE}"
+      --proposal-interval="${PROPOSER_INTERVAL}"
+      --allow-non-finalized=true
+      --poll-interval="${PROPOSER_POLL}"
+      --resubmission-timeout="${PROPOSER_RESUBMISSION}"
+      --txmgr.receipt-query-interval="${PROPOSER_RECEIPT_QUERY}"
+      --txmgr.rebroadcast-interval="${PROPOSER_REBROADCAST}"
+      --rpc.addr=127.0.0.1
+      --rpc.port="${PROPOSER_RPC_PORT}"
+      --log.level=info
+    )
+  fi
+}
+
 # Copy-then-truncate $LOG_DIR/*.log before this process holds the fd.
 # `mv` of a live log does not reclaim disk (D-0138). Failure must not block start.
 "$SCRIPT_DIR/rotate-logs.sh" --dir "$LOG_DIR" || echo "WARN: log rotation failed for $LOG_DIR — continuing" >&2
+
+refuse_custom_proposer_type9
+refuse_type9_rollup_rpc
+assert_game_impl_for_type9 "$GAME_FACTORY" "$L1_RPC_URL"
 
 if [[ "${USE_CUSTOM_PROPOSER:-0}" == "1" ]]; then
   if [[ "${CONFIRM_CUSTOM_PROPOSER_SEPOLIA:-}" != "1" ]]; then
@@ -188,23 +328,7 @@ if [[ "${USE_CUSTOM_PROPOSER:-0}" == "1" ]]; then
   echo "Custom Sepolia proposer started (poll=${CUSTOM_POLL}, interval=${CUSTOM_INTERVAL}, confirmations=${CUSTOM_CONFS}). Revert: stop pid, then stock 06-start-proposer-sepolia.sh"
 else
   require_bin op-proposer
-  proposer_cmd=(
-    op-proposer
-    --l1-eth-rpc="$L1_RPC_URL"
-    --rollup-rpc="$L2_NODE_RPC_URL"
-    --private-key="${PROPOSER_PRIVATE_KEY}"
-    --game-factory-address="$GAME_FACTORY"
-    --game-type="${PROPOSER_GAME_TYPE}"
-    --proposal-interval="${PROPOSER_INTERVAL}"
-    --allow-non-finalized=true
-    --poll-interval="${PROPOSER_POLL}"
-    --resubmission-timeout="${PROPOSER_RESUBMISSION}"
-    --txmgr.receipt-query-interval="${PROPOSER_RECEIPT_QUERY}"
-    --txmgr.rebroadcast-interval="${PROPOSER_REBROADCAST}"
-    --rpc.addr=127.0.0.1
-    --rpc.port="${PROPOSER_RPC_PORT}"
-    --log.level=info
-  )
+  build_stock_proposer_cmd "$GAME_FACTORY"
   start_proposer_with_retry
 
   echo "Sepolia proposer started against DisputeGameFactory=$GAME_FACTORY game-type=$PROPOSER_GAME_TYPE interval=${PROPOSER_INTERVAL} poll=${PROPOSER_POLL} txmgr receipt/rebroadcast=${PROPOSER_RECEIPT_QUERY}/${PROPOSER_REBROADCAST}"
