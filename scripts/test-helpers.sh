@@ -3369,13 +3369,15 @@ if python3 - "$SCRIPT_DIR/test-helpers.sh" << 'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 # Frozen set: two pre-existing Foundry-tripwire fixtures (not secrets) plus
-# the F7-6 public prestate hashes. A new 0x+64-hex literal fails this check.
+# the F7-6 public prestate hashes and the U20 type-9 prestate (OPU-1).
+# A new 0x+64-hex literal fails this check.
 allowed = {
     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
     "0x1111111111111111111111111111111111111111111111111111111111111111",
     "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "0x038512e02c4c3f7bdaec27d00edf55b7155e0905301e1a88083e4e0a6764d54c",
     "0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d",
+    "0x03284f1b70ad7525bcda6090685bc068e38f74c572132a0535ae5059b5d14792",
     "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 }
 bad = []
@@ -13967,6 +13969,188 @@ fi
 unset SQG_FIX SQG_LIVE SQG_FRESH SQG_FIRST SQG_CROSS SQG_CROSSB SQG_RUN
 unset SQG_RC SQG_RC2 SQG_OUT SQG_OUT2 SQG_ORDER
 unset -f cleanup_sqg sqg_live_tree sqg_call 2>/dev/null || true
+
+# OPU-2: static guards on the U20 upgrade script. Each invocation below is the
+# red case (the script must exit non-zero). A guard that is removed fails the
+# corresponding PASS line.
+OPU_U20="$SCRIPT_DIR/opu-u20-upgrade-sepolia.sh"
+OPU_LIVE_RC=0
+OPU_LIVE_OUT="$(
+  env -u CONFIRM_U20_LIVE -u FORTEL2_ENV "$OPU_U20" --live 2>&1
+)" || OPU_LIVE_RC=$?
+if [[ "$OPU_LIVE_RC" -ne 0 ]] && printf '%s\n' "$OPU_LIVE_OUT" | grep -q 'CONFIRM_U20_LIVE'; then
+  echo "PASS --live refused without CONFIRM_U20_LIVE"
+else
+  echo "FAIL --live must refuse without CONFIRM_U20_LIVE (rc=$OPU_LIVE_RC)" >&2
+  printf '%s\n' "$OPU_LIVE_OUT" >&2
+  fail=1
+fi
+OPU_FORK_RC=0
+OPU_FORK_OUT="$(
+  env -u CONFIRM_U20_LIVE -u FORTEL2_ENV "$OPU_U20" --fork https://ethereum-sepolia-rpc.publicnode.com 2>&1
+)" || OPU_FORK_RC=$?
+if [[ "$OPU_FORK_RC" -ne 0 ]] && printf '%s\n' "$OPU_FORK_OUT" | grep -q 'loopback'; then
+  echo "PASS non-loopback --fork refused"
+else
+  echo "FAIL non-loopback --fork must be refused (rc=$OPU_FORK_RC)" >&2
+  printf '%s\n' "$OPU_FORK_OUT" >&2
+  fail=1
+fi
+OPU_LEAK_RC=0
+OPU_LEAK_OUT="$(
+  env -u CONFIRM_U20_LIVE -u FORTEL2_ENV "$OPU_U20" --fork 'https://example.invalid/x?apikey=opu2-leak-token' 2>&1
+)" || OPU_LEAK_RC=$?
+if [[ "$OPU_LEAK_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU_LEAK_OUT" | grep -q 'loopback' \
+  && ! printf '%s\n' "$OPU_LEAK_OUT" | grep -q 'opu2-leak-token' \
+  && grep -q 'partial U20 state on $(redact_rpc_url' "$OPU_U20"; then
+  echo "PASS U20 RPC errors do not print a query token"
+else
+  echo "FAIL U20 RPC error printed a query token or dropped redaction (rc=$OPU_LEAK_RC)" >&2
+  printf '%s\n' "$OPU_LEAK_OUT" >&2
+  fail=1
+fi
+if grep -q 'U20_TYPE9_PRESTATE=0x03284f1b70ad7525bcda6090685bc068e38f74c572132a0535ae5059b5d14792' "$OPU_U20" \
+  && grep -q 'U20_TYPE8_PRESTATE=0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE1_WEI=80000000000000000' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE8_WEI=1000000000000000' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE9_WEI=1000000000000000' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE5_WEI=0' "$OPU_U20" \
+  && grep -q 'U20_BOND_TYPE0_WEI=0' "$OPU_U20" \
+  && grep -q 'U20_BOND_ZK_WEI=0' "$OPU_U20"; then
+  echo "PASS U20 prestate and bond constants pinned"
+else
+  echo "FAIL U20 prestate and bond constants are not pinned" >&2
+  fail=1
+fi
+# Removing the sender filter or the failure revoke makes this line FAIL.
+if awk '
+  $0 ~ /^record_blocks_between\(\)/ { p = 1 }
+  p { print }
+  p && /^}/ { exit }
+' "$OPU_U20" | grep -q 'BOOT_ADDR' \
+  && grep -q 'trap on_upgrade_err ERR' "$OPU_U20" \
+  && grep -q '0xef0100' "$OPU_U20"; then
+  echo "PASS U20 gas filter and delegation cleanup are present"
+else
+  echo "FAIL U20 gas filter or delegation cleanup is missing" >&2
+  fail=1
+fi
+# Red case: balance below 2x gas*maxFee. Removing the refusal makes this FAIL.
+OPU_FUND_RC=0
+OPU_FUND_OUT="$(
+  "$OPU_U20" --check-funding 1000 3000000000 1000 2>&1
+)" || OPU_FUND_RC=$?
+if [[ "$OPU_FUND_RC" -ne 0 ]] && printf '%s\n' "$OPU_FUND_OUT" | grep -q '2x projected'; then
+  echo "PASS U20 live funding guard refuses an insufficient balance"
+else
+  echo "FAIL U20 live funding guard did not refuse an insufficient balance (rc=$OPU_FUND_RC)" >&2
+  printf '%s\n' "$OPU_FUND_OUT" >&2
+  fail=1
+fi
+OPU_FUND_OK_RC=0
+OPU_FUND_OK_OUT="$(
+  "$OPU_U20" --check-funding 1000 3000000000 999999999999999 2>&1
+)" || OPU_FUND_OK_RC=$?
+if [[ "$OPU_FUND_OK_RC" -eq 0 ]] && printf '%s\n' "$OPU_FUND_OK_OUT" | grep -q 'funding ok'; then
+  echo "PASS U20 live funding guard accepts a balance of at least 2x"
+else
+  echo "FAIL U20 live funding guard rejected a sufficient balance (rc=$OPU_FUND_OK_RC)" >&2
+  printf '%s\n' "$OPU_FUND_OK_OUT" >&2
+  fail=1
+fi
+# Red case: fork RPC reports chain id 11155111. The script must refuse before signing.
+OPU_ANVIL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu20-helper.XXXXXX")"
+OPU_ANVIL_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+anvil --port "$OPU_ANVIL_PORT" --chain-id 11155111 --silent >"$OPU_ANVIL_DIR/anvil.log" 2>&1 &
+OPU_ANVIL_PID=$!
+OPU_ANVIL_UP=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  if cast chain-id --rpc-url "http://127.0.0.1:${OPU_ANVIL_PORT}" >/dev/null 2>&1; then
+    OPU_ANVIL_UP=1
+    break
+  fi
+  sleep 0.2
+done
+OPU_SIGN_RC=0
+OPU_SIGN_OUT=""
+if [[ "$OPU_ANVIL_UP" -eq 1 ]]; then
+  OPU_SIGN_OUT="$(
+    env -u CONFIRM_U20_LIVE -u FORTEL2_ENV -u ADMIN_PRIVATE_KEY \
+      "$OPU_U20" --fork "http://127.0.0.1:${OPU_ANVIL_PORT}" 2>&1
+  )" || OPU_SIGN_RC=$?
+else
+  OPU_SIGN_RC=1
+  OPU_SIGN_OUT="anvil did not start"
+fi
+kill "$OPU_ANVIL_PID" >/dev/null 2>&1 || true
+wait "$OPU_ANVIL_PID" >/dev/null 2>&1 || true
+rm -rf "$OPU_ANVIL_DIR"
+if [[ "$OPU_SIGN_RC" -ne 0 ]] && printf '%s\n' "$OPU_SIGN_OUT" | grep -q 'refuses chain id 11155111'; then
+  echo "PASS U20 fork refuses to sign at chain id 11155111"
+else
+  echo "FAIL U20 fork would sign at chain id 11155111 (rc=$OPU_SIGN_RC)" >&2
+  printf '%s\n' "$OPU_SIGN_OUT" >&2
+  fail=1
+fi
+if awk '
+  $0 ~ /^[[:space:]]*anvil[[:space:]]*\\$/ { p = 1 }
+  p { print }
+  p && />/ { exit }
+' "$OPU_U20" | grep -q -- '--state'; then
+  echo "FAIL U20 dry fork passes anvil --state" >&2
+  fail=1
+else
+  echo "PASS U20 dry fork does not pass anvil --state"
+fi
+if grep -q 'cleanup_u20_temps' "$OPU_U20" && grep -q 'rm -rf "$DRY_DIR"' "$OPU_U20"; then
+  echo "PASS U20 dry fork directory is removed on exit"
+else
+  echo "FAIL U20 dry fork directory is not removed on exit" >&2
+  fail=1
+fi
+# Red case: a raw tail of the Anvil log would print the fork URL's query token.
+if grep -E '(^|[[:space:]])tail[[:space:]].*(anvil|proxy)\.log' "$OPU_U20" >/dev/null; then
+  echo "FAIL U20 failure path tails a raw Anvil or proxy log" >&2
+  fail=1
+else
+  OPU_REDACT_FN="$(mktemp "${TMPDIR:-/tmp}/fortel2-opu20-redact.XXXXXX")"
+  OPU_REDACT_LOG="$(mktemp "${TMPDIR:-/tmp}/fortel2-opu20-redactlog.XXXXXX")"
+  awk '
+    $0 ~ /^redact_log_tail\(\)/ { p = 1 }
+    p { print }
+    p && /^}/ { exit }
+  ' "$OPU_U20" > "$OPU_REDACT_FN"
+  printf '%s\n' 'fork error https://example.invalid/x?apikey=opu2-leak-token more' > "$OPU_REDACT_LOG"
+  OPU_REDACT_OUT="$(bash -c "source '$OPU_REDACT_FN'; redact_log_tail '$OPU_REDACT_LOG'")"
+  if printf '%s\n' "$OPU_REDACT_OUT" | grep -q 'opu2-leak-token'; then
+    echo "FAIL U20 log redaction left a query token" >&2
+    printf '%s\n' "$OPU_REDACT_OUT" >&2
+    fail=1
+  elif printf '%s\n' "$OPU_REDACT_OUT" | grep -q 'https://example.invalid'; then
+    echo "PASS U20 failure logs redact RPC query tokens"
+  else
+    echo "FAIL U20 log redaction dropped the line (rc output empty)" >&2
+    printf '%s\n' "$OPU_REDACT_OUT" >&2
+    fail=1
+  fi
+  rm -f "$OPU_REDACT_FN" "$OPU_REDACT_LOG"
+  unset OPU_REDACT_FN OPU_REDACT_LOG OPU_REDACT_OUT
+fi
+# Live cast sends attach the cap only when SIGN_MODE=live. SIGN_MODE=key
+# would pass a string search for --gas-price and still broadcast uncapped.
+if grep -q 'SIGN_MODE=live' "$OPU_U20" \
+  && ! grep -q 'SIGN_MODE=key' "$OPU_U20" \
+  && [[ "$(grep -c -- '--gas-price "$U20_LIVE_MAX_FEE_PER_GAS"' "$OPU_U20")" -eq 3 ]] \
+  && [[ "$(grep -c 'SIGN_MODE" == "live"' "$OPU_U20")" -eq 3 ]]; then
+  echo "PASS U20 live sends use the explicit maxFeePerGas cap"
+else
+  echo "FAIL U20 live sends are not all capped at U20_LIVE_MAX_FEE_PER_GAS" >&2
+  fail=1
+fi
+unset OPU_U20 OPU_LIVE_RC OPU_LIVE_OUT OPU_FORK_RC OPU_FORK_OUT OPU_LEAK_RC OPU_LEAK_OUT
+unset OPU_FUND_RC OPU_FUND_OUT OPU_FUND_OK_RC OPU_FUND_OK_OUT
+unset OPU_ANVIL_DIR OPU_ANVIL_PORT OPU_ANVIL_PID OPU_ANVIL_UP OPU_SIGN_RC OPU_SIGN_OUT
 
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
