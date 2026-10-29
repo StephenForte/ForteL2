@@ -1599,7 +1599,15 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - The "8 hours" in the operator's question is the proposer interval (`SEPOLIA_PROPOSER_INTERVAL=8h`), not the game clock.
 - **Consequence:** the OPU-2 brief rehearses exactly this path on a fork. OPU-4 runs the same script live. The live step deploys extra implementation contracts from ADMIN (1.92 ETH on Sepolia at 2026-10-29); the cost is measured by OPU-2.
 
-- Next free decision id is **D-0160**.
+### D-0160 — **OD-3 closed: the Render replica runs op-node v1.20.0 (`d6620202`) since 2026-10-29 11:29 PT (fortel2-replica R-0031).** Sequencer and replica now run the same op-node and op-reth.
+- **Evidence (replica planner report, planner-checked 2026-10-29):**
+  - fortel2-replica `DECISIONS.md` has `## R-0031 — replica op-node v1.20.0`.
+  - `Dockerfile.reth` on main pins `op-node:v1.20.0@sha256:47436354176f58444c78df3ca8f48c3bab8104e201e6f0fefa42d5d4fa1726ea`; PR #90 merged 2026-10-29T18:23:22Z. The deploy-record PR #91 was still open at this entry.
+  - The replica planner reports the boot log `op-node pin ok: v1.20.0 commit d6620202` plus op-reth v2.8.0 pin-ok, derivation at the L1 tip, and the public head advancing.
+- **Decision (operator):** no D-0152 canary for this op-node-only bump. The reasoning is in R-0031, not repeated here.
+- **Consequence:** README :933, AGENTS.md and `tasks/prd-op-reth-migration.md` name op-node v1.20.0 for the replica. OD-3 is closed in the OPU PRD.
+
+- Next free decision id is **D-0161**.
 
 ## Template
 
