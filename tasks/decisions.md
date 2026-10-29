@@ -1484,7 +1484,7 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
     - Start, which runs the explicit v2 init at the tip.
     - Confirm `Using on-disk storage for proofs history (v2)`, an `eth_getProof` at the head, and the head advancing.
   - **T2** (later brief): pin bump to op-reth v2.8.0 per the D-0154 pattern: build tree, `check-el-pins.sh`, scratch G1, operator swap with an APFS clone. op-batcher and op-proposer stay unchanged.
-  - **Replica bump:** separate fortel2-replica work behind the D-0152 CI and canary gate.
+  - **Replica bump:** separate fortel2-replica work behind the D-0152 CI and canary gate. *Update 2026-10-29:* done as fortel2-replica R-0030 (#89, merged 2026-10-28T19:42Z; canary `fortel2-replica-canary-v280` passed the 811872 hash and restart checks). Public read `web3_clientVersion` 2026-10-29T14:11Z: `op-reth/v2.8.0-d6620202/x86_64-linux`, head 2924805, age 210 s. Replica op-node is v1.19.11 (R-0029).
   - **Cleanup:** delete `historical-proofs.v1-pre-d0155` after a week on v2 with no ExEx alert.
 - **Not yet tested:**
   - v2.8.0's new refusal to run `proofs init` from a state trie that lags the tip. Expected to pass with threshold 2 and a clean stop; G1 in T2 checks it.
