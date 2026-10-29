@@ -240,6 +240,10 @@ def main() -> None:
         type=Path,
         help="directory to write chainList.json and configs.json",
     )
+    parser.add_argument(
+        "--interop", action="store_true",
+        help="also embed chain 852's self-only dependency set (Kona v1.7.0)",
+    )
     args = parser.parse_args()
 
     if not args.rollup.is_file():
@@ -261,6 +265,16 @@ def main() -> None:
     configs_path.write_text(json.dumps(configs, indent=2) + "\n")
     print(f"wrote {chain_path}")
     print(f"wrote {configs_path}")
+    if args.interop:
+        # kona-client/v1.7.0 (64b043ea): registry/build.rs:401-426 merges
+        # this optional file; proof-interop/src/boot.rs:264-292 looks it up
+        # before the insecure oracle fallback. Schema: genesis/src/interop/depset.rs.
+        depsets_path = args.out / "depsets.json"
+        depsets_path.write_text(json.dumps([{
+            "dependencies": {str(REQUIRED_L2_CHAIN_ID): {}},
+            "overrideMessageExpiryWindow": None,
+        }], indent=2) + "\n")
+        print(f"wrote {depsets_path}")
     genesis_hash = rollup["genesis"]["l2"]["hash"]
     print(f"l2_genesis_hash {genesis_hash}")
     print(f"l2_chain_id {REQUIRED_L2_CHAIN_ID}")
