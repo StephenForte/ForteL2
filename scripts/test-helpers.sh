@@ -14036,7 +14036,93 @@ else
   echo "FAIL U20 gas filter or delegation cleanup is missing" >&2
   fail=1
 fi
+# Red case: balance below 2x gas*maxFee. Removing the refusal makes this FAIL.
+OPU_FUND_RC=0
+OPU_FUND_OUT="$(
+  "$OPU_U20" --check-funding 1000 3000000000 1000 2>&1
+)" || OPU_FUND_RC=$?
+if [[ "$OPU_FUND_RC" -ne 0 ]] && printf '%s\n' "$OPU_FUND_OUT" | grep -q '2x projected'; then
+  echo "PASS U20 live funding guard refuses an insufficient balance"
+else
+  echo "FAIL U20 live funding guard did not refuse an insufficient balance (rc=$OPU_FUND_RC)" >&2
+  printf '%s\n' "$OPU_FUND_OUT" >&2
+  fail=1
+fi
+OPU_FUND_OK_RC=0
+OPU_FUND_OK_OUT="$(
+  "$OPU_U20" --check-funding 1000 3000000000 999999999999999 2>&1
+)" || OPU_FUND_OK_RC=$?
+if [[ "$OPU_FUND_OK_RC" -eq 0 ]] && printf '%s\n' "$OPU_FUND_OK_OUT" | grep -q 'funding ok'; then
+  echo "PASS U20 live funding guard accepts a balance of at least 2x"
+else
+  echo "FAIL U20 live funding guard rejected a sufficient balance (rc=$OPU_FUND_OK_RC)" >&2
+  printf '%s\n' "$OPU_FUND_OK_OUT" >&2
+  fail=1
+fi
+# Red case: fork RPC reports chain id 11155111. The script must refuse before signing.
+OPU_ANVIL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu20-helper.XXXXXX")"
+OPU_ANVIL_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+anvil --port "$OPU_ANVIL_PORT" --chain-id 11155111 --silent >"$OPU_ANVIL_DIR/anvil.log" 2>&1 &
+OPU_ANVIL_PID=$!
+OPU_ANVIL_UP=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  if cast chain-id --rpc-url "http://127.0.0.1:${OPU_ANVIL_PORT}" >/dev/null 2>&1; then
+    OPU_ANVIL_UP=1
+    break
+  fi
+  sleep 0.2
+done
+OPU_SIGN_RC=0
+OPU_SIGN_OUT=""
+if [[ "$OPU_ANVIL_UP" -eq 1 ]]; then
+  OPU_SIGN_OUT="$(
+    env -u CONFIRM_U20_LIVE -u FORTEL2_ENV -u ADMIN_PRIVATE_KEY \
+      "$OPU_U20" --fork "http://127.0.0.1:${OPU_ANVIL_PORT}" 2>&1
+  )" || OPU_SIGN_RC=$?
+else
+  OPU_SIGN_RC=1
+  OPU_SIGN_OUT="anvil did not start"
+fi
+kill "$OPU_ANVIL_PID" >/dev/null 2>&1 || true
+wait "$OPU_ANVIL_PID" >/dev/null 2>&1 || true
+rm -rf "$OPU_ANVIL_DIR"
+if [[ "$OPU_SIGN_RC" -ne 0 ]] && printf '%s\n' "$OPU_SIGN_OUT" | grep -q 'refuses chain id 11155111'; then
+  echo "PASS U20 fork refuses to sign at chain id 11155111"
+else
+  echo "FAIL U20 fork would sign at chain id 11155111 (rc=$OPU_SIGN_RC)" >&2
+  printf '%s\n' "$OPU_SIGN_OUT" >&2
+  fail=1
+fi
+if awk '
+  $0 ~ /^[[:space:]]*anvil[[:space:]]*\\$/ { p = 1 }
+  p { print }
+  p && />/ { exit }
+' "$OPU_U20" | grep -q -- '--state'; then
+  echo "FAIL U20 dry fork passes anvil --state" >&2
+  fail=1
+else
+  echo "PASS U20 dry fork does not pass anvil --state"
+fi
+if grep -q 'cleanup_u20_temps' "$OPU_U20" && grep -q 'rm -rf "$DRY_DIR"' "$OPU_U20"; then
+  echo "PASS U20 dry fork directory is removed on exit"
+else
+  echo "FAIL U20 dry fork directory is not removed on exit" >&2
+  fail=1
+fi
+# Live cast sends attach the cap only when SIGN_MODE=live. SIGN_MODE=key
+# would pass a string search for --gas-price and still broadcast uncapped.
+if grep -q 'SIGN_MODE=live' "$OPU_U20" \
+  && ! grep -q 'SIGN_MODE=key' "$OPU_U20" \
+  && [[ "$(grep -c -- '--gas-price "$U20_LIVE_MAX_FEE_PER_GAS"' "$OPU_U20")" -eq 3 ]] \
+  && [[ "$(grep -c 'SIGN_MODE" == "live"' "$OPU_U20")" -eq 3 ]]; then
+  echo "PASS U20 live sends use the explicit maxFeePerGas cap"
+else
+  echo "FAIL U20 live sends are not all capped at U20_LIVE_MAX_FEE_PER_GAS" >&2
+  fail=1
+fi
 unset OPU_U20 OPU_LIVE_RC OPU_LIVE_OUT OPU_FORK_RC OPU_FORK_OUT OPU_LEAK_RC OPU_LEAK_OUT
+unset OPU_FUND_RC OPU_FUND_OUT OPU_FUND_OK_RC OPU_FUND_OK_OUT
+unset OPU_ANVIL_DIR OPU_ANVIL_PORT OPU_ANVIL_PID OPU_ANVIL_UP OPU_SIGN_RC OPU_SIGN_OUT
 
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not

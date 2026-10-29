@@ -10,9 +10,29 @@
 # Caller is a temporary EIP-7702 delegation to U20DelegateExecutor, then a
 # revoke (authorize address(0)). The executor has no storage layout: under
 # 7702 its code runs in ADMIN's context, and the OPCM delegatecall stays there.
-# cast 1.7.1 signs the authorization locally, so an impersonated account cannot
-# produce a type-4 signature. Fork mode therefore uses the same ADMIN signature
-# as --live, and refuses any RPC that is not loopback.
+#
+# Signing route (a). op-deployer v0.8.1 signs with PrivateKeySignerFn bound to
+# eth_chainId (bootstrap/implementations.go). It has no unsigned mode, so a
+# throwaway key would still produce signatures that are valid on 11155111.
+# --fork and the --live dry pass therefore run Anvil at U20_FORK_CHAIN_ID
+# (900852) and refuse eth_chainId 11155111 before any signature. EIP-155 and
+# EIP-7702 both commit to that chain id, so a rehearsal transcript cannot be
+# broadcast to Sepolia. Real authorization signing happens only under --live,
+# after the dry pass, and only against L1. The dry pass never passes --state
+# to Anvil, and its directory is removed on every exit path.
+#
+# resolveSP1Verifier (implementations.go:134-152) runs only when the ZK
+# dispute-game dev feature is on. This script leaves the dev bitmap at 0, and
+# Check() rejects --sp1-verifier-address in that case (lines 128-129). The
+# fork chain id does not take that flag.
+#
+# --live requires U20_LIVE_MAX_FEE_PER_GAS. Before the first live transaction
+# the dry-pass gas total is multiplied by that cap. The script refuses unless
+# ADMIN's balance is at least twice the product. cast sends use the cap as
+# maxFeePerGas. op-deployer has no fee flag; its txmgr bids tip+2*base with a
+# 1 gwei floor on each (3 gwei minimum). A loopback proxy rewrites the latest
+# base fee so that bid stays within the cap, and it rejects any raw transaction
+# whose maxFeePerGas is above the cap.
 set -euo pipefail
 
 # Pinned by D-0159. test-helpers.sh greps these literals.
@@ -32,6 +52,10 @@ U20_MAX_DEPTH=73
 U20_SPLIT_DEPTH=30
 U20_CONFIRM_PHRASE=I-UNDERSTAND-THIS-IS-IRREVERSIBLE
 U20_INVALID_GAME_CONFIGS=0x7c165cd6
+# Not Sepolia. Fork signatures are EIP-155 / EIP-7702 for this id only.
+U20_FORK_CHAIN_ID=900852
+# op-deployer floors tip and base at 1 gwei, then fee cap = tip + 2*base.
+U20_DEPLOYER_MIN_FEE=3000000000
 
 usage() {
   cat <<'EOF'
@@ -40,16 +64,28 @@ Usage:
   CONFIRM_U20_LIVE=I-UNDERSTAND-THIS-IS-IRREVERSIBLE FORTEL2_ENV=.env.sepolia \
     opu-u20-upgrade-sepolia.sh --live
 
---fork signs with ADMIN against a loopback Anvil (cast cannot sign a type-4
-authorization for an impersonated account). --live refuses without the confirm
-string and FORTEL2_ENV=.env.sepolia, runs a fresh --fork dry pass first, and
-only then signs against L1. Set OP_DEPLOYER_BIN to op-deployer v0.8.1.
+--fork signs with ADMIN only after eth_chainId is 900852. Chain id 11155111
+is refused before any signature. --live refuses without the confirm string,
+FORTEL2_ENV=.env.sepolia, and U20_LIVE_MAX_FEE_PER_GAS (wei, at least 3000000000).
+It runs a fresh --fork dry pass first, refuses unless ADMIN holds twice
+dry-pass gas times that cap, then signs against L1 with the cap on every tx.
+Set OP_DEPLOYER_BIN to op-deployer v0.8.1.
 EOF
 }
 
 # Guards run before lib.sh so a missing env file cannot hide a refusal.
 MODE=""
 FORK_RPC=""
+FUND_GAS=""
+FUND_FEE=""
+FUND_BAL=""
+DRY_DIR=""
+DRY_PID=""
+FEE_DIR=""
+FEE_PID=""
+DRY_GAS=""
+WORK=""
+WORK_OWNED=0
 if [[ $# -eq 0 ]]; then
   usage >&2
   exit 1
@@ -64,6 +100,17 @@ while [[ $# -gt 0 ]]; do
     --live)
       MODE=live
       shift
+      ;;
+    --check-funding)
+      if [[ $# -lt 4 ]]; then
+        echo "ERROR: --check-funding needs gas maxFeePerGas balance" >&2
+        exit 1
+      fi
+      MODE=check-funding
+      FUND_GAS="$2"
+      FUND_FEE="$3"
+      FUND_BAL="$4"
+      shift 4
       ;;
     -h|--help)
       usage
@@ -86,7 +133,74 @@ if [[ "$MODE" == "live" ]]; then
     echo "ERROR: --live requires FORTEL2_ENV=.env.sepolia" >&2
     exit 1
   fi
+  if [[ ! "${U20_LIVE_MAX_FEE_PER_GAS:-}" =~ ^[0-9]+$ || "${U20_LIVE_MAX_FEE_PER_GAS}" == "0" ]]; then
+    echo "ERROR: --live requires U20_LIVE_MAX_FEE_PER_GAS as a non-zero decimal wei value" >&2
+    exit 1
+  fi
+  if [[ "$U20_LIVE_MAX_FEE_PER_GAS" -lt "$U20_DEPLOYER_MIN_FEE" ]]; then
+    echo "ERROR: U20_LIVE_MAX_FEE_PER_GAS is below op-deployer's 3 gwei floor ($U20_DEPLOYER_MIN_FEE)" >&2
+    exit 1
+  fi
 fi
+
+assert_live_funding() {
+  local gas="$1" maxfee="$2" balance="$3" projected twice below
+  if [[ ! "$gas" =~ ^[0-9]+$ || ! "$maxfee" =~ ^[0-9]+$ || ! "$balance" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: funding check needs decimal gas, maxFeePerGas, and balance" >&2
+    exit 1
+  fi
+  if [[ "$maxfee" == "0" || "$maxfee" -lt "$U20_DEPLOYER_MIN_FEE" ]]; then
+    echo "ERROR: U20_LIVE_MAX_FEE_PER_GAS is below op-deployer's 3 gwei floor ($U20_DEPLOYER_MIN_FEE)" >&2
+    exit 1
+  fi
+  projected="$(python3 -c "print(int('$gas')*int('$maxfee'))")"
+  twice="$(python3 -c "print(int('$projected')*2)")"
+  below="$(python3 -c "print('yes' if int('$balance') < int('$twice') else 'no')")"
+  if [[ "$below" == "yes" ]]; then
+    echo "ERROR: ADMIN balance $balance wei is below 2x projected live cost $twice wei (gas $gas * maxFeePerGas $maxfee)" >&2
+    exit 1
+  fi
+  echo "funding ok balance=$balance projected=$projected twice=$twice maxFeePerGas=$maxfee"
+}
+
+if [[ "$MODE" == "check-funding" ]]; then
+  assert_live_funding "$FUND_GAS" "$FUND_FEE" "$FUND_BAL"
+  exit 0
+fi
+
+cleanup_u20_temps() {
+  if [[ -n "${DRY_PID:-}" ]]; then
+    kill "$DRY_PID" >/dev/null 2>&1 || true
+    wait "$DRY_PID" >/dev/null 2>&1 || true
+    DRY_PID=""
+  fi
+  if [[ -n "${FEE_PID:-}" ]]; then
+    kill "$FEE_PID" >/dev/null 2>&1 || true
+    wait "$FEE_PID" >/dev/null 2>&1 || true
+    FEE_PID=""
+  fi
+  if [[ -n "${DRY_DIR:-}" && -d "${DRY_DIR}" ]]; then
+    rm -rf "$DRY_DIR"
+    DRY_DIR=""
+  fi
+  if [[ -n "${FEE_DIR:-}" && -d "${FEE_DIR}" ]]; then
+    rm -rf "$FEE_DIR"
+    FEE_DIR=""
+  fi
+}
+# Exit path also removes a work dir this process created. An operator-supplied
+# OPU_U20_WORK is kept. start_dry_fork calls cleanup_u20_temps on purpose so
+# the dry Anvil is gone before the funding check, and that call must not
+# delete the parent work dir.
+cleanup_u20_exit() {
+  cleanup_u20_temps
+  if [[ "${WORK_OWNED:-0}" == "1" && -n "${WORK:-}" && -d "${WORK}" ]]; then
+    rm -rf "$WORK"
+    WORK=""
+    WORK_OWNED=0
+  fi
+}
+trap cleanup_u20_exit EXIT
 
 # Same redaction as lib.sh. This check runs before source, so the function
 # cannot be the shared one yet. lib.sh replaces it after source.
@@ -115,6 +229,15 @@ if [[ "$MODE" == "fork" ]]; then
       exit 1
       ;;
   esac
+  if ! command -v cast >/dev/null 2>&1; then
+    echo "ERROR: cast is required to read the fork chain id before signing" >&2
+    exit 1
+  fi
+  fork_cid="$(cast chain-id --rpc-url "$FORK_RPC")"
+  if [[ "$fork_cid" == "11155111" ]]; then
+    echo "ERROR: --fork refuses chain id 11155111; refusing to sign with ADMIN_PRIVATE_KEY" >&2
+    exit 1
+  fi
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -200,11 +323,18 @@ case "$DEPLOYER_VERSION" in
 esac
 export OP_DEPLOYER_BIN
 
-WORK="${OPU_U20_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu20.XXXXXX")}"
+if [[ -n "${OPU_U20_WORK:-}" ]]; then
+  WORK="$OPU_U20_WORK"
+  WORK_OWNED=0
+else
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu20.XXXXXX")"
+  WORK_OWNED=1
+fi
 mkdir -p "$WORK"
 GAS_LOG="$WORK/gas.tsv"
 : > "$GAS_LOG"
 TOTAL_WEI=0
+TOTAL_GAS=0
 LAST_TX_JSON=""
 SIGN_MODE=""
 RPC=""
@@ -224,6 +354,7 @@ record_gas_values() {
   wei="$(python3 -c "print(int('$used')*int('$price'))")"
   eth="$(python3 -c "print(format(int('$wei')/1e18, '.12f'))")"
   TOTAL_WEI="$(python3 -c "print(int('$TOTAL_WEI')+int('$wei'))")"
+  TOTAL_GAS="$(python3 -c "print(int('$TOTAL_GAS')+int('$used'))")"
   echo "GAS $name hash=$hash gasUsed=$used gasPrice=$price wei=$wei eth=$eth"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$hash" "$used" "$price" "$wei" "$eth" >> "$GAS_LOG"
 }
@@ -272,14 +403,24 @@ record_blocks_between() {
 send_from_admin() {
   local name="$1"
   shift
-  LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --rpc-url "$RPC" --json "$@")"
+  if [[ "$SIGN_MODE" == "live" ]]; then
+    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --rpc-url "$RPC" \
+      --gas-price "$U20_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")"
+  else
+    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --rpc-url "$RPC" --json "$@")"
+  fi
   record_gas_json "$name" "$LAST_TX_JSON"
 }
 
 send_from_boot() {
   local name="$1"
   shift
-  LAST_TX_JSON="$(cast send --private-key "$BOOT_KEY" --rpc-url "$RPC" --json "$@")"
+  if [[ "$SIGN_MODE" == "live" ]]; then
+    LAST_TX_JSON="$(cast send --private-key "$BOOT_KEY" --rpc-url "$RPC" \
+      --gas-price "$U20_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")"
+  else
+    LAST_TX_JSON="$(cast send --private-key "$BOOT_KEY" --rpc-url "$RPC" --json "$@")"
+  fi
   record_gas_json "$name" "$LAST_TX_JSON"
 }
 
@@ -289,7 +430,12 @@ auth_flag_send() {
   shift 2
   # `to` must be an EOA. A type-4 tx applies the delegation before the call, so
   # sending it to ADMIN would execute the new code with empty calldata and revert.
-  LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" --json "$@")"
+  if [[ "$SIGN_MODE" == "live" ]]; then
+    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" \
+      --gas-price "$U20_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")"
+  else
+    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" --json "$@")"
+  fi
   record_gas_json "$name" "$LAST_TX_JSON"
 }
 
@@ -655,8 +801,17 @@ bootstrap_impls() {
 run_upgrade() {
   local cid pre1 prop chal map inner super_inner respected
   cid="$(cast chain-id --rpc-url "$RPC")"
-  if [[ "$cid" != "11155111" ]]; then
-    echo "ERROR: RPC chain id is $cid, want Sepolia 11155111" >&2
+  if [[ "$SIGN_MODE" == "fork" ]]; then
+    if [[ "$cid" == "11155111" ]]; then
+      echo "ERROR: --fork refuses chain id 11155111; refusing to sign with ADMIN_PRIVATE_KEY" >&2
+      exit 1
+    fi
+    if [[ "$cid" != "$U20_FORK_CHAIN_ID" ]]; then
+      echo "ERROR: --fork chain id is $cid, want $U20_FORK_CHAIN_ID" >&2
+      exit 1
+    fi
+  elif [[ "$cid" != "11155111" ]]; then
+    echo "ERROR: --live chain id is $cid, want Sepolia 11155111" >&2
     exit 1
   fi
   if [[ "$SIGN_MODE" == "fork" ]]; then
@@ -756,11 +911,11 @@ assert_post_state_quiet() {
 print_gas_total() {
   local eth
   eth="$(python3 -c "print(format(int('$TOTAL_WEI')/1e18, '.12f'))")"
-  echo "GAS total wei=$TOTAL_WEI eth=$eth"
+  echo "GAS total gas=$TOTAL_GAS wei=$TOTAL_WEI eth=$eth"
 }
 
 start_dry_fork() {
-  local port dir upstream url pid
+  local port upstream url rc child_out
   require_bin anvil
   upstream="${OPU_U20_FORK_UPSTREAM:-https://ethereum-sepolia-rpc.publicnode.com}"
   case "$upstream" in
@@ -769,46 +924,206 @@ start_dry_fork() {
       exit 1
       ;;
   esac
-  dir="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu20-anvil.XXXXXX")"
+  DRY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu20-anvil.XXXXXX")"
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
   url="http://127.0.0.1:${port}"
-  echo "phase: --live dry fork $url"
+  echo "phase: --live dry fork $url chain-id $U20_FORK_CHAIN_ID"
+  # never pass --state. The temp dir is removed on every exit path.
   anvil \
     --fork-url "$upstream" \
     --port "$port" \
-    --chain-id 11155111 \
-    --block-time 2 \
-    --auto-impersonate \
-    --cache-path "$dir/cache" \
-    --state "$dir/state.json" \
-    >"$dir/anvil.log" 2>&1 &
-  pid=$!
+    --chain-id "$U20_FORK_CHAIN_ID" \
+    --cache-path "$DRY_DIR/cache" \
+    >"$DRY_DIR/anvil.log" 2>&1 &
+  DRY_PID=$!
   if ! wait_for_rpc "$url" "u20-dry-fork" 180; then
-    kill "$pid" >/dev/null 2>&1 || true
-    echo "ERROR: dry-run fork failed to start; see $dir/anvil.log" >&2
+    echo "ERROR: dry-run fork failed to start" >&2
+    tail -n 20 "$DRY_DIR/anvil.log" >&2 || true
     exit 1
   fi
   set +e
-  FORTEL2_ENV=".env.sepolia" \
-    OP_DEPLOYER_BIN="$OP_DEPLOYER_BIN" \
-    OPU_U20_REHEARSE_FAULTS="${OPU_U20_REHEARSE_FAULTS:-}" \
-    "$0" --fork "$url"
-  local rc=$?
+  child_out="$(
+    FORTEL2_ENV=".env.sepolia" \
+      OP_DEPLOYER_BIN="$OP_DEPLOYER_BIN" \
+      OPU_U20_REHEARSE_FAULTS="${OPU_U20_REHEARSE_FAULTS:-}" \
+      "$0" --fork "$url" 2>&1
+  )"
+  rc=$?
   set -e
-  kill "$pid" >/dev/null 2>&1 || true
-  wait "$pid" >/dev/null 2>&1 || true
+  printf '%s\n' "$child_out"
+  cleanup_u20_temps
   if [[ "$rc" -ne 0 ]]; then
     echo "ERROR: --live dry fork failed; not sending a live transaction" >&2
     exit 1
   fi
-  echo "dry-run anvil dir: $dir"
+  DRY_GAS="$(printf '%s\n' "$child_out" | sed -n 's/^GAS total gas=\([0-9][0-9]*\).*/\1/p' | tail -1)"
+  if [[ -z "${DRY_GAS}" || "$DRY_GAS" == "0" ]]; then
+    echo "ERROR: dry pass did not report a gas total; not sending a live transaction" >&2
+    exit 1
+  fi
+  echo "phase: dry pass gas=$DRY_GAS"
+}
+
+start_fee_proxy() {
+  local upstream="$1" cap="$2" port
+  FEE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu20-fee.XXXXXX")"
+  printf '%s\n' "$upstream" > "$FEE_DIR/upstream"
+  chmod 600 "$FEE_DIR/upstream"
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+  cat > "$FEE_DIR/proxy.py" << 'PY'
+import json, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.request import Request, urlopen
+
+upstream = open(sys.argv[1], "r", encoding="utf-8").read().strip()
+port = int(sys.argv[2])
+cap = int(sys.argv[3])
+GWEI = 10 ** 9
+
+def rlp_decode(b, i=0):
+    if i >= len(b):
+        raise ValueError("short rlp")
+    p = b[i]
+    if p <= 0x7F:
+        return b[i:i + 1], i + 1
+    if p <= 0xB7:
+        n = p - 0x80
+        return b[i + 1:i + 1 + n], i + 1 + n
+    if p <= 0xBF:
+        ln = p - 0xB7
+        n = int.from_bytes(b[i + 1:i + 1 + ln], "big")
+        start = i + 1 + ln
+        return b[start:start + n], start + n
+    if p <= 0xF7:
+        n = p - 0xC0
+        return decode_list(b, i + 1, i + 1 + n)
+    ln = p - 0xF7
+    n = int.from_bytes(b[i + 1:i + 1 + ln], "big")
+    start = i + 1 + ln
+    return decode_list(b, start, start + n)
+
+def decode_list(b, start, end):
+    out = []
+    i = start
+    while i < end:
+        item, i = rlp_decode(b, i)
+        out.append(item)
+    if i != end:
+        raise ValueError("list overrun")
+    return out, end
+
+def max_fee(raw_hex):
+    h = raw_hex[2:] if raw_hex.startswith("0x") else raw_hex
+    buf = bytes.fromhex(h)
+    if not buf or buf[0] not in (2, 4):
+        raise ValueError("unsupported tx type")
+    items, _ = rlp_decode(buf[1:], 0)
+    if not isinstance(items, list) or len(items) < 4 or isinstance(items[3], list):
+        raise ValueError("short typed tx")
+    fee_b = items[3]
+    return int.from_bytes(fee_b, "big") if fee_b else 0
+
+def estimator_fee(base):
+    padded_base = base + base // 2
+    base_for = padded_base if padded_base > GWEI else GWEI
+    return GWEI + 2 * base_for
+
+def clamp_base(cap_wei):
+    lo, hi, best = 0, cap_wei, 0
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        padded = mid + mid // 2
+        base_for = padded if padded > GWEI else GWEI
+        fee = GWEI + 2 * base_for
+        if fee <= cap_wei:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+def forward(payload):
+    req = Request(upstream, data=json.dumps(payload).encode(), headers={"content-type": "application/json"})
+    try:
+        with urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read().decode())
+    except Exception:
+        return {"jsonrpc": "2.0", "id": payload.get("id") if isinstance(payload, dict) else None,
+                "error": {"code": -32000, "message": "upstream request failed"}}
+
+def handle(msg):
+    method = msg.get("method")
+    if method == "eth_sendRawTransaction":
+        try:
+            fee = max_fee(msg["params"][0])
+        except Exception as exc:
+            return {"jsonrpc": "2.0", "id": msg.get("id"), "error": {"code": -32000, "message": "refusing raw tx: %s" % exc}}
+        if fee > cap:
+            return {"jsonrpc": "2.0", "id": msg.get("id"), "error": {"code": -32000, "message": "maxFeePerGas exceeds cap"}}
+        return forward(msg)
+    if method == "eth_maxPriorityFeePerGas":
+        return {"jsonrpc": "2.0", "id": msg.get("id"), "result": "0x1"}
+    if method == "eth_getBlockByNumber":
+        resp = forward(msg)
+        params = msg.get("params") or []
+        tag = params[0] if params else None
+        result = resp.get("result") if isinstance(resp, dict) else None
+        if tag in ("latest", "pending") and isinstance(result, dict) and result.get("baseFeePerGas"):
+            real = int(result["baseFeePerGas"], 16)
+            if estimator_fee(real) > cap:
+                result["baseFeePerGas"] = hex(clamp_base(cap))
+                resp["result"] = result
+        return resp
+    return forward(msg)
+
+class H(BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("content-length", "0"))
+        try:
+            payload = json.loads(self.rfile.read(n).decode())
+        except Exception:
+            self.send_error(400)
+            return
+        out = [handle(x) for x in payload] if isinstance(payload, list) else handle(payload)
+        raw = json.dumps(out).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def log_message(self, fmt, *args):
+        return
+
+ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+  python3 "$FEE_DIR/proxy.py" "$FEE_DIR/upstream" "$port" "$cap" >"$FEE_DIR/proxy.log" 2>&1 &
+  FEE_PID=$!
+  FEE_URL="http://127.0.0.1:${port}"
+  if ! wait_for_rpc "$FEE_URL" "u20-fee-proxy" 30; then
+    echo "ERROR: fee proxy failed to start" >&2
+    tail -n 20 "$FEE_DIR/proxy.log" >&2 || true
+    exit 1
+  fi
+  echo "phase: live fee proxy $FEE_URL cap=$cap"
 }
 
 if [[ "$MODE" == "live" ]]; then
   start_dry_fork
-  SIGN_MODE=key
   RPC="${L1_RPC_URL:-}"
   assert_remote_l1_rpc_url "$RPC" "L1_RPC_URL"
+  base_fee="$(cast base-fee --rpc-url "$RPC")"
+  if [[ "$(python3 -c "print('yes' if int('$U20_LIVE_MAX_FEE_PER_GAS') < int('$base_fee') else 'no')")" == "yes" ]]; then
+    echo "ERROR: U20_LIVE_MAX_FEE_PER_GAS is below the current L1 base fee; a capped transaction cannot be included" >&2
+    exit 1
+  fi
+  admin_bal="$(cast balance "$ADMIN_ADDRESS" --rpc-url "$RPC")"
+  assert_live_funding "$DRY_GAS" "$U20_LIVE_MAX_FEE_PER_GAS" "$admin_bal"
+  start_fee_proxy "$RPC" "$U20_LIVE_MAX_FEE_PER_GAS"
+  # "live", not a third mode: the three cast send sites attach the fee cap
+  # only when SIGN_MODE is live. A different value would broadcast uncapped.
+  SIGN_MODE=live
+  RPC="$FEE_URL"
   echo "phase: live upgrade against L1"
   run_upgrade
 else
