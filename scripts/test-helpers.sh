@@ -13996,6 +13996,20 @@ else
   printf '%s\n' "$OPU_FORK_OUT" >&2
   fail=1
 fi
+OPU_LEAK_RC=0
+OPU_LEAK_OUT="$(
+  env -u CONFIRM_U20_LIVE -u FORTEL2_ENV "$OPU_U20" --fork 'https://example.invalid/x?apikey=opu2-leak-token' 2>&1
+)" || OPU_LEAK_RC=$?
+if [[ "$OPU_LEAK_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU_LEAK_OUT" | grep -q 'loopback' \
+  && ! printf '%s\n' "$OPU_LEAK_OUT" | grep -q 'opu2-leak-token' \
+  && grep -q 'partial U20 state on $(redact_rpc_url' "$OPU_U20"; then
+  echo "PASS U20 RPC errors do not print a query token"
+else
+  echo "FAIL U20 RPC error printed a query token or dropped redaction (rc=$OPU_LEAK_RC)" >&2
+  printf '%s\n' "$OPU_LEAK_OUT" >&2
+  fail=1
+fi
 if grep -q 'U20_TYPE9_PRESTATE=0x03284f1b70ad7525bcda6090685bc068e38f74c572132a0535ae5059b5d14792' "$OPU_U20" \
   && grep -q 'U20_TYPE8_PRESTATE=0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d' "$OPU_U20" \
   && grep -q 'U20_BOND_TYPE1_WEI=80000000000000000' "$OPU_U20" \
@@ -14022,7 +14036,7 @@ else
   echo "FAIL U20 gas filter or delegation cleanup is missing" >&2
   fail=1
 fi
-unset OPU_U20 OPU_LIVE_RC OPU_LIVE_OUT OPU_FORK_RC OPU_FORK_OUT
+unset OPU_U20 OPU_LIVE_RC OPU_LIVE_OUT OPU_FORK_RC OPU_FORK_OUT OPU_LEAK_RC OPU_LEAK_OUT
 
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not

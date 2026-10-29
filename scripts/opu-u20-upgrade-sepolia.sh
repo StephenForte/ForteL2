@@ -88,12 +88,30 @@ if [[ "$MODE" == "live" ]]; then
   fi
 fi
 
+# Same redaction as lib.sh. This check runs before source, so the function
+# cannot be the shared one yet. lib.sh replaces it after source.
+redact_rpc_url() {
+  python3 - <<'PY' "${1:-}"
+import sys, urllib.parse
+u = sys.argv[1]
+if not u:
+    print("<empty>")
+    raise SystemExit
+p = urllib.parse.urlparse(u)
+netloc = p.hostname or ""
+if p.port:
+    netloc = f"{netloc}:{p.port}"
+path = "/…" if p.path and p.path != "/" else ""
+print(f"{p.scheme}://{netloc}{path}")
+PY
+}
+
 if [[ "$MODE" == "fork" ]]; then
   case "$FORK_RPC" in
     http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*)
       ;;
     *)
-      echo "ERROR: --fork RPC must be loopback (127.0.0.1/localhost), got: ${FORK_RPC:-<empty>}" >&2
+      echo "ERROR: --fork RPC must be loopback (127.0.0.1/localhost), got: $(redact_rpc_url "${FORK_RPC:-}")" >&2
       exit 1
       ;;
   esac
@@ -654,7 +672,7 @@ run_upgrade() {
     exit 0
   fi
   if upgrade_markers_present; then
-    echo "ERROR: partial U20 state on $RPC; refusing to continue" >&2
+    echo "ERROR: partial U20 state on $(redact_rpc_url "$RPC"); refusing to continue" >&2
     print_state
     exit 1
   fi
