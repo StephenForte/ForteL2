@@ -3,36 +3,20 @@
 # Mini-only for a green live run (darwin/arm64 builds). CI covers the red
 # path via stubs in scripts/test-helpers.sh — GitHub runners have no pin.
 #
-# Live sequencer pin. Each binary is matched to its own commit. Three
-# commits are named, not two: the previous header treated the Go binaries
-# as one commit (43c071cb) and op-reth as the other (d6620202). op-batcher
-# left that Go commit.
-#   op-node     43c071cbff8ad7512581561aa2d43c990544b650
-#   op-proposer 43c071cbff8ad7512581561aa2d43c990544b650
-#   op-batcher  d6620202d4e563957830e688007a0cab29bd80f3
-# op-node and op-proposer stay on 43c071cb. op-batcher is on d6620202
-# with op-reth. Sharing a hash does not make them one pin.
-#   op-node/v1.19.11 is an annotated tag. The tag object is
-#   4193077c6f5620fb0105a23757af1fce2369445b; it peels to commit
-#   43c071cbff8ad7512581561aa2d43c990544b650. --version prints the commit,
-#   so the op-node pin is 43c071cb, not the tag object.
-#   op-batcher/v1.18.0 is an annotated tag. The tag object is 04a6c0f9;
-#   it peels to commit d6620202d4e563957830e688007a0cab29bd80f3, the same
-#   commit as op-reth/v2.8.0. --version prints v1.18.0-d6620202-<unix>,
-#   not the tag object. v1.18.0-rc.1 is a different tag on that same
-#   commit, so a v1.18.0 prefix plus a separate commit grep would accept
-#   it. The match is v1.18.0 immediately followed by d6620202.
-#   op-proposer has no tag on 43c071cb. --version prints untagged-43c071cb-….
-#   op-reth/v2.8.0 is an annotated tag. The tag object is
-#   b0763e5798fa9a63d25a31a63afccdc18ae62b1c; it peels to commit
-#   d6620202d4e563957830e688007a0cab29bd80f3. --version prints the commit,
-#   so the op-reth pin is d6620202, not the tag object. Pinning b0763e57
-#   would go red on the real binary.
-#   op-node     v1.19.11-43c071cb-…
-#   op-batcher  v1.18.0-d6620202-…
-#   op-proposer untagged-43c071cb-…
-# A green op-node with a v1.17.4 batcher, or a v1.18.0 batcher at
-# 43c071cb, is a failure.
+# Sequencer pins span two commits:
+#   d6620202d4e563957830e688007a0cab29bd80f3: op-node, op-batcher, op-reth
+#   0130abb2f07230ce01c904ba2fbb5d6338ba549f: op-proposer
+# op-node/v1.20.0 and op-batcher/v1.18.0 report v1.20.0-d6620202-<unix>
+# and v1.18.0-d6620202-<unix>, respectively. Their rc.1 tags share the
+# release commit, so each version must immediately precede its commit.
+# op-proposer/v1.17.0 is a tag-to-tag-to-commit peel: tag object bbaa87bf
+# points to rc tag object d9285d4f, which points to commit 0130abb2.
+# --version reports v1.17.0-0130abb2-<unix>, not either tag object.
+# The rc.1 tag and an untagged build at 0130abb2 must still fail.
+# op-reth/v2.8.0 tag object b0763e5798fa9a63d25a31a63afccdc18ae62b1c
+# peels to d6620202d4e563957830e688007a0cab29bd80f3. Pin the commit,
+# not the tag object. The old op-node v1.19.11-43c071cb and op-proposer
+# untagged-43c071cb accept paths are now required failures.
 # op-reth reports the whole line "op-reth Version: 2.8.0" and
 # "Commit SHA: d6620202d4e563957830e688007a0cab29bd80f3".
 # The tag string is not the --version line. Do not grep a bare "2.8"
@@ -50,16 +34,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
-# Pin tokens as measured. Tag object 4193077c ≠ the op-node commit
-# --version prints. Tag object 04a6c0f9 peels to d6620202; --version
-# prints v1.18.0-d6620202, not 04a6c0f9. Annotated tag object b0763e57
-# ≠ commit d6620202. Tag op-reth/v2.8.0 ≠ the reported version line.
-PIN_OP_NODE_VERSION='v1.19.11'
-PIN_OP_NODE_COMMIT='43c071cb'
+# Pin measured version/commit pairs, not annotated tag objects.
+PIN_OP_NODE_VERSION='v1.20.0'
+PIN_OP_NODE_COMMIT='d6620202'
 PIN_OP_BATCHER_VERSION='v1.18.0'
 PIN_OP_BATCHER_COMMIT='d6620202'
-PIN_OP_PROPOSER_VERSION='untagged'
-PIN_OP_PROPOSER_COMMIT='43c071cb'
+PIN_OP_PROPOSER_VERSION='v1.17.0'
+PIN_OP_PROPOSER_COMMIT='0130abb2'
 PIN_RETH_VERSION='2.8.0'
 PIN_RETH_COMMIT='d6620202d4e563957830e688007a0cab29bd80f3'
 
@@ -154,11 +135,9 @@ if [[ "$FORTEL2_EL" == "reth" ]] && looks_like_geth "$RETH_VER" "$OP_RETH_BIN"; 
     "op-geth binary ($OP_RETH_BIN): $(oneline "$RETH_VER")"
 fi
 
-# v1.19.11 not v1.19.110: next char must be non-digit (or end).
-# Proposer --version says "untagged" because no op-proposer tag is on
-# 43c071cb. The commit is what distinguishes it from da6d3252 and 9f76a9d2.
-if ! echo "$NODE_VER" | grep -qE "v1\\.19\\.11([^0-9]|\$)" \
-  || ! echo "$NODE_VER" | grep -q "$PIN_OP_NODE_COMMIT"; then
+# Match version immediately followed by commit, then a non-alphanumeric
+# boundary (or end). Separate greps would accept the rc tag at this commit.
+if ! echo "$NODE_VER" | grep -qE "v1\\.20\\.0-${PIN_OP_NODE_COMMIT}([^0-9A-Za-z]|\$)"; then
   fail_mismatch "op-node" \
     "${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})" \
     "$(oneline "$NODE_VER")"
@@ -173,8 +152,8 @@ if ! echo "$BATCHER_VER" | grep -qE "v1\\.18\\.0-${PIN_OP_BATCHER_COMMIT}([^0-9A
     "$(oneline "$BATCHER_VER")"
 fi
 
-if ! echo "$PROPOSER_VER" | grep -qE "(^|[^A-Za-z])untagged([^A-Za-z]|$)" \
-  || ! echo "$PROPOSER_VER" | grep -q "$PIN_OP_PROPOSER_COMMIT"; then
+# The release tag must immediately precede the commit; no untagged or rc build.
+if ! echo "$PROPOSER_VER" | grep -qE "v1\\.17\\.0-${PIN_OP_PROPOSER_COMMIT}([^0-9A-Za-z]|\$)"; then
   fail_mismatch "op-proposer" \
     "${PIN_OP_PROPOSER_VERSION} (${PIN_OP_PROPOSER_COMMIT})" \
     "$(oneline "$PROPOSER_VER")"
