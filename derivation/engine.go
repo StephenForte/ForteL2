@@ -21,6 +21,12 @@ type SealingEL struct {
 	head    common.Hash
 }
 
+// NewReadOnlyEL is an EL client for OutputRootV0At. It does not dial the
+// Engine API and cannot seal.
+func NewReadOnlyEL(httpURL string) *SealingEL {
+	return &SealingEL{httpRPC: NewRPCClient(httpURL)}
+}
+
 func StartSealingEL(ctx context.Context, authURL string, jwtPath string, httpURL string) (*SealingEL, error) {
 	secret, err := os.ReadFile(jwtPath)
 	if err != nil {

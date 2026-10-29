@@ -198,6 +198,34 @@ func GameAtIndex(ctx context.Context, client *ethclient.Client, factory common.A
 	return DecodeGameAtIndex(raw)
 }
 
+// GameImpl reads DisputeGameFactory.gameImpls(gameType). The zero address
+// means that game type is not registered.
+func GameImpl(ctx context.Context, client *ethclient.Client, factory common.Address, gameType uint32) (common.Address, error) {
+	data, err := EncodeGameImpls(gameType)
+	if err != nil {
+		return common.Address{}, err
+	}
+	raw, err := EthCall(ctx, client, factory, data)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return DecodeGameImpls(raw)
+}
+
+// RootClaimByChainID reads SuperFaultDisputeGame.rootClaimByChainId(chainID).
+// Output-root games do not implement this method.
+func RootClaimByChainID(ctx context.Context, client *ethclient.Client, game common.Address, chainID uint64) (common.Hash, error) {
+	data, err := EncodeRootClaimByChainID(ChainIDArg(chainID))
+	if err != nil {
+		return common.Hash{}, err
+	}
+	raw, err := EthCall(ctx, client, game, data)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return DecodeRootClaimByChainID(raw)
+}
+
 // InitBond reads DisputeGameFactory.initBonds(gameType).
 func InitBond(ctx context.Context, client *ethclient.Client, factory common.Address, gameType uint32) (*big.Int, error) {
 	data, err := EncodeInitBonds(gameType)

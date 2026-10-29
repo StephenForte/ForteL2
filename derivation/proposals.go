@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/StephenForte/ForteL2/proposer"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -60,14 +61,15 @@ func init() {
 
 // Proposal is one DisputeGameFactory game of the respected (or overridden) type.
 type Proposal struct {
-	Index     uint64
-	GameType  uint32
-	CreatedAt uint64
-	Game      common.Address
-	RootClaim common.Hash
-	ExtraData []byte
-	L2Block   uint64
-	Status    uint8
+	Index       uint64
+	GameType    uint32
+	CreatedAt   uint64
+	Game        common.Address
+	RootClaim   common.Hash
+	ExtraData   []byte
+	L2Block     uint64
+	L2Timestamp uint64 // type 9 sequence number; 0 on output-root games
+	Status      uint8
 }
 
 // ParseGameTypeFlag parses -game-type. Empty means "resolve on-chain" (nil).
@@ -228,20 +230,29 @@ func EnumerateProposals(ctx context.Context, l1 *RPCClient, factory common.Addre
 		if err != nil {
 			return nil, fmt.Errorf("game %s (index %d): %w", meta.proxy, i, err)
 		}
-		l2, err := DecodeL2BlockNumber(extra)
-		if err != nil {
-			return nil, fmt.Errorf("game %s (index %d) extraData: %w", meta.proxy, i, err)
-		}
-		out = append(out, Proposal{
+		p := Proposal{
 			Index:     i,
 			GameType:  meta.gameType,
 			CreatedAt: meta.timestamp,
 			Game:      meta.proxy,
 			RootClaim: claim,
 			ExtraData: extra,
-			L2Block:   l2,
 			Status:    status,
-		})
+		}
+		if meta.gameType == proposer.GameTypeSuperCannonKona {
+			sr, err := proposer.DecodeSuperRoot(extra)
+			if err != nil {
+				return nil, fmt.Errorf("game %s (index %d) extraData: %w", meta.proxy, i, err)
+			}
+			p.L2Timestamp = sr.Timestamp
+		} else {
+			l2, err := DecodeL2BlockNumber(extra)
+			if err != nil {
+				return nil, fmt.Errorf("game %s (index %d) extraData: %w", meta.proxy, i, err)
+			}
+			p.L2Block = l2
+		}
+		out = append(out, p)
 	}
 	return out, nil
 }

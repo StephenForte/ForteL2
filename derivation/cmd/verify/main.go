@@ -38,13 +38,14 @@ func main() {
 	asr := flag.String("asr", "", "AnchorStateRegistry address (overrides -deploy-state)")
 	deployState := flag.String("deploy-state", "", "op-deployer state.json or deployments.json with factory/ASR proxies")
 	gameType := flag.String("game-type", "", "override respected game type; empty resolves AnchorStateRegistry.respectedGameType() (no default)")
+	proposalsEL := flag.String("proposals-el", "", "read-only EL HTTP for OutputRootV0At when -compare proposals (no Engine API; skips sealing)")
 	flag.Parse()
 
 	if *rollup == "" {
 		fmt.Fprintln(os.Stderr, "usage: verify -rollup $DEPLOY_DIR/rollup.json [flags]")
 		os.Exit(2)
 	}
-	if *jwt == "" {
+	if *jwt == "" && !(*compare == derivation.CompareProposals && *proposalsEL != "") {
 		fmt.Fprintln(os.Stderr, "error: -jwt required (separate sealing EL)")
 		os.Exit(2)
 	}
@@ -83,16 +84,21 @@ func main() {
 			fatal(err)
 		}
 		opts.GameTypeOverride = gt
+		opts.ProposalsEL = *proposalsEL
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	sealer, err := derivation.StartSealingEL(ctx, *sealAuth, *jwt, *sealHTTP)
-	if err != nil {
-		fatal(err)
+	var sealer *derivation.SealingEL
+	if opts.ProposalsEL == "" {
+		var err error
+		sealer, err = derivation.StartSealingEL(ctx, *sealAuth, *jwt, *sealHTTP)
+		if err != nil {
+			fatal(err)
+		}
+		defer sealer.Close()
 	}
-	defer sealer.Close()
 
 	report, err := derivation.Verify(ctx, opts, sealer)
 	// With -json, stdout carries ONLY the JSON report (fixture-capture safe);

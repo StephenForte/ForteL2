@@ -19,6 +19,7 @@ const disputeGameFactoryABIJSON = `[
     {"name":"proxy_","type":"address"}
   ]},
   {"type":"function","name":"initBonds","stateMutability":"view","inputs":[{"name":"_gameType","type":"uint32"}],"outputs":[{"name":"bond_","type":"uint256"}]},
+  {"type":"function","name":"gameImpls","stateMutability":"view","inputs":[{"name":"_gameType","type":"uint32"}],"outputs":[{"name":"impl_","type":"address"}]},
   {"type":"function","name":"create","stateMutability":"payable","inputs":[
     {"name":"_gameType","type":"uint32"},
     {"name":"_rootClaim","type":"bytes32"},
@@ -41,7 +42,8 @@ const disputeGameABIJSON = `[
   {"type":"function","name":"gameType","stateMutability":"view","inputs":[],"outputs":[{"name":"gameType_","type":"uint32"}]},
   {"type":"function","name":"status","stateMutability":"view","inputs":[],"outputs":[{"name":"status_","type":"uint8"}]},
   {"type":"function","name":"createdAt","stateMutability":"view","inputs":[],"outputs":[{"name":"createdAt_","type":"uint64"}]},
-  {"type":"function","name":"gameCreator","stateMutability":"pure","inputs":[],"outputs":[{"name":"creator_","type":"address"}]}
+  {"type":"function","name":"gameCreator","stateMutability":"pure","inputs":[],"outputs":[{"name":"creator_","type":"address"}]},
+  {"type":"function","name":"rootClaimByChainId","stateMutability":"pure","inputs":[{"name":"_chainId","type":"uint256"}],"outputs":[{"name":"outputRootClaim_","type":"bytes32"}]}
 ]`
 
 var (
@@ -87,6 +89,16 @@ func EncodeInitBonds(gameType uint32) ([]byte, error) {
 	return factoryABI.Pack("initBonds", gameType)
 }
 
+// EncodeGameImpls packs gameImpls(gameType) calldata.
+func EncodeGameImpls(gameType uint32) ([]byte, error) {
+	return factoryABI.Pack("gameImpls", gameType)
+}
+
+// EncodeRootClaimByChainID packs rootClaimByChainId(chainId) calldata.
+func EncodeRootClaimByChainID(chainID *big.Int) ([]byte, error) {
+	return gameABI.Pack("rootClaimByChainId", chainID)
+}
+
 // EncodeGames packs games(gameType, rootClaim, extraData) calldata.
 func EncodeGames(gameType uint32, rootClaim common.Hash, extraData []byte) ([]byte, error) {
 	return factoryABI.Pack("games", gameType, rootClaim, extraData)
@@ -128,4 +140,22 @@ func DecodeInitBonds(data []byte) (*big.Int, error) {
 		return nil, err
 	}
 	return out[0].(*big.Int), nil
+}
+
+// DecodeGameImpls unpacks a gameImpls eth_call result.
+func DecodeGameImpls(data []byte) (common.Address, error) {
+	out, err := factoryABI.Unpack("gameImpls", data)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return out[0].(common.Address), nil
+}
+
+// DecodeRootClaimByChainID unpacks a rootClaimByChainId eth_call result.
+func DecodeRootClaimByChainID(data []byte) (common.Hash, error) {
+	out, err := gameABI.Unpack("rootClaimByChainId", data)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return asHash(out[0]), nil
 }

@@ -82,6 +82,27 @@ func main() {
 	fmt.Println("pending safeguard: after broadcast, keep waiting the same L1 tx — advance lastProposedL2 only after confirmations")
 	fmt.Println("output root: fetched via optimism_outputAtBlock (not recomputed locally)")
 
+	var clock proposer.RollupClock
+	if gt == proposer.GameTypeSuperCannonKona {
+		impl, err := proposer.GameImpl(ctx, l1, factoryAddr, gt)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gameImpls(%d): %v\n", gt, err)
+			os.Exit(1)
+		}
+		if impl == (common.Address{}) {
+			fmt.Fprintf(os.Stderr, "refusing game type %d: DisputeGameFactory.gameImpls(%d) is zero\n", gt, gt)
+			os.Exit(1)
+		}
+		clock, err = proposer.FetchRollupClock(ctx, *rollupRPC)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "rollup clock: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("super root: extraData is the preimage, rootClaim is keccak256(extraData), sequence is the L2 timestamp\n")
+		fmt.Printf("rollup clock genesis=%d blockTime=%d l2ChainId=%d gameImpl=%s\n",
+			clock.GenesisTime, clock.BlockTime, clock.L2ChainID, impl.Hex())
+	}
+
 	var (
 		lastProposedL2   uint64
 		lastProposalTime time.Time
@@ -98,7 +119,11 @@ func main() {
 		}
 
 		if havePending {
-			fmt.Printf("awaiting pending l1_tx=%s (l2=%d)\n", pendingHash.Hex(), pendingL2)
+			if gt == proposer.GameTypeSuperCannonKona {
+				fmt.Printf("awaiting pending l1_tx=%s (timestamp=%d)\n", pendingHash.Hex(), pendingL2)
+			} else {
+				fmt.Printf("awaiting pending l1_tx=%s (l2=%d)\n", pendingHash.Hex(), pendingL2)
+			}
 			if err := waitReceiptConfirmed(ctx, l1, pendingHash, *confirmations, *receiptTimeout); err != nil {
 				clear, reason := shouldClearPending(ctx, l1, pendingHash, err)
 				if clear {
@@ -121,7 +146,11 @@ func main() {
 			havePending = false
 			pendingHash = common.Hash{}
 			pendingL2 = 0
-			fmt.Printf("proposed ok lastProposedL2=%d\n", lastProposedL2)
+			if gt == proposer.GameTypeSuperCannonKona {
+				fmt.Printf("proposed ok lastProposedTimestamp=%d\n", lastProposedL2)
+			} else {
+				fmt.Printf("proposed ok lastProposedL2=%d\n", lastProposedL2)
+			}
 			if *once {
 				return
 			}
@@ -145,8 +174,13 @@ func main() {
 			if ok {
 				lastProposedL2 = g.L2Sequence
 				lastProposalTime = time.Unix(int64(g.CreatedAt), 0)
-				fmt.Printf("initialized from factory index=%d l2=%d createdAt=%s root=%s\n",
-					g.Index, g.L2Sequence, lastProposalTime.UTC().Format(time.RFC3339), g.RootClaim.Hex())
+				if gt == proposer.GameTypeSuperCannonKona {
+					fmt.Printf("initialized from factory index=%d timestamp=%d createdAt=%s root=%s\n",
+						g.Index, g.L2Sequence, lastProposalTime.UTC().Format(time.RFC3339), g.RootClaim.Hex())
+				} else {
+					fmt.Printf("initialized from factory index=%d l2=%d createdAt=%s root=%s\n",
+						g.Index, g.L2Sequence, lastProposalTime.UTC().Format(time.RFC3339), g.RootClaim.Hex())
+				}
 			} else {
 				fmt.Println("initialized: no prior games of this type")
 			}
@@ -180,6 +214,32 @@ func main() {
 			if sleepCtx(ctx, *poll) != nil {
 				return
 			}
+			continue
+		}
+		if gt == proposer.GameTypeSuperCannonKona {
+			txHash, seq, err := proposeSuperRootOnce(ctx, l1, *l1RPC, *rollupRPC, priv, from, factoryAddr, gt, blockNum, heads.UnsafeL2, lastProposedL2, clock)
+			if errors.Is(err, errSkipProposal) {
+				if *once {
+					return
+				}
+				if sleepCtx(ctx, *poll) != nil {
+					return
+				}
+				continue
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "super-root propose: %v\n", err)
+				if *once {
+					os.Exit(1)
+				}
+				if sleepCtx(ctx, *poll) != nil {
+					return
+				}
+				continue
+			}
+			pendingHash = txHash
+			pendingL2 = seq
+			havePending = true
 			continue
 		}
 		if blockNum <= lastProposedL2 {
@@ -225,7 +285,7 @@ func main() {
 		}
 
 		fmt.Printf("proposing l2=%d root=%s bond=%s wei\n", blockNum, out.OutputRoot.Hex(), bond.String())
-		txHash, err := sendCreate(ctx, l1, priv, from, factoryAddr, calldata, bond)
+		txHash, err := sendCreate(ctx, l1, *l1RPC, priv, from, factoryAddr, calldata, bond)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "send: %v\n", err)
 			if *once {
@@ -245,7 +305,55 @@ func main() {
 	}
 }
 
-func sendCreate(ctx context.Context, l1 *ethclient.Client, priv *ecdsa.PrivateKey, from, factory common.Address, data []byte, value *big.Int) (common.Hash, error) {
+// signTx is the only signer. Tests fail if this stops refusing Sepolia-on-loopback.
+var signTx = proposer.SignLegacyTx
+
+var errSkipProposal = errors.New("no new super-root timestamp")
+
+func proposeSuperRootOnce(ctx context.Context, l1 *ethclient.Client, l1RPC, rollupRPC string, priv *ecdsa.PrivateKey, from, factory common.Address, gt uint32, blockNum, unsafeHead, lastProposed uint64, clock proposer.RollupClock) (common.Hash, uint64, error) {
+	ts, err := proposer.TimestampForL2Block(clock.GenesisTime, clock.BlockTime, blockNum)
+	if err != nil {
+		return common.Hash{}, 0, err
+	}
+	if ts <= lastProposed {
+		fmt.Printf("no new safe timestamp (timestamp=%d lastProposed=%d)\n", ts, lastProposed)
+		return common.Hash{}, ts, errSkipProposal
+	}
+	sr, err := proposer.SuperRootForBlock(ctx, rollupRPC, clock, blockNum, unsafeHead)
+	if err != nil {
+		return common.Hash{}, ts, err
+	}
+	nodeSR, err := proposer.FetchSuperRootAtTimestamp(ctx, rollupRPC, ts)
+	if err != nil {
+		return common.Hash{}, ts, err
+	}
+	if nodeSR != sr.Hash {
+		return common.Hash{}, ts, fmt.Errorf("super root %s != op-node superroot_atTimestamp %s at timestamp %d", sr.Hash.Hex(), nodeSR.Hex(), ts)
+	}
+	bond, err := proposer.InitBond(ctx, l1, factory, gt)
+	if err != nil {
+		return common.Hash{}, ts, fmt.Errorf("initBonds: %w", err)
+	}
+	calldata, err := proposer.EncodeCreate(gt, sr.Hash, sr.Preimage)
+	if err != nil {
+		return common.Hash{}, ts, fmt.Errorf("encode create: %w", err)
+	}
+	output := sr.Chains[0].OutputRoot
+	fmt.Printf("proposing l2=%d timestamp=%d outputRoot=%s superRoot=%s bond=%s wei\n",
+		blockNum, ts, output.Hex(), sr.Hash.Hex(), bond.String())
+	txHash, err := sendCreate(ctx, l1, l1RPC, priv, from, factory, calldata, bond)
+	if err != nil {
+		return common.Hash{}, ts, err
+	}
+	fmt.Printf("broadcast l1_tx=%s\n", txHash.Hex())
+	return txHash, ts, nil
+}
+
+func sendCreate(ctx context.Context, l1 *ethclient.Client, l1RPC string, priv *ecdsa.PrivateKey, from, factory common.Address, data []byte, value *big.Int) (common.Hash, error) {
+	chainID, err := l1.ChainID(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
 	nonce, err := l1.PendingNonceAt(ctx, from)
 	if err != nil {
 		return common.Hash{}, err
@@ -260,12 +368,8 @@ func sendCreate(ctx context.Context, l1 *ethclient.Client, priv *ecdsa.PrivateKe
 		return common.Hash{}, fmt.Errorf("estimate gas: %w", err)
 	}
 	gas = gas + gas/5 // headroom
-	chainID, err := l1.ChainID(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
 	tx := types.NewTransaction(nonce, factory, value, gas, gasPrice, data)
-	signed, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), priv)
+	signed, err := signTx(l1RPC, chainID, tx, priv)
 	if err != nil {
 		return common.Hash{}, err
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/StephenForte/ForteL2/proposer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
@@ -222,6 +223,77 @@ func TestEnumerateProposalsMalformedExtraData(t *testing.T) {
 	_, err := EnumerateProposals(context.Background(), client, factory, 8)
 	if err == nil || !strings.Contains(err.Error(), "extraData") {
 		t.Fatalf("malformed extraData must error, not skip: %v", err)
+	}
+}
+
+func TestDecodeL2BlockNumberRejectsSuperRootLength(t *testing.T) {
+	pre, err := proposer.EncodeSuperRoot(1020, []proposer.ChainOutput{{
+		ChainID:    852,
+		OutputRoot: common.HexToHash("0x" + strings.Repeat("ab", 32)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeL2BlockNumber(pre.Preimage); err == nil {
+		t.Fatal("73-byte super-root extraData must error on a type-8 decode")
+	}
+}
+
+func TestEnumerateType9RoundTripAndRejectsOutputExtra(t *testing.T) {
+	factory := common.HexToAddress("0x67f9e427c716586ecc0dc0b62baa8cd05e43262f")
+	game := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	output := common.HexToHash("0x" + strings.Repeat("cd", 32))
+	sr, err := proposer.EncodeSuperRoot(1020, []proposer.ChainOutput{{ChainID: 852, OutputRoot: output}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := sr.Hash
+	client := mockRPC(t, func(method string, params []any) (any, error) {
+		obj := params[0].(map[string]any)
+		data := obj["data"].(string)
+		switch {
+		case strings.HasPrefix(data, selector("gameCount")):
+			return encodeABIUint256(1), nil
+		case strings.HasPrefix(data, selector("gameAtIndex")):
+			return encodeGameAtIndex(proposer.GameTypeSuperCannonKona, 1, game), nil
+		case strings.HasPrefix(data, selector("rootClaim")):
+			return hexutil.Encode(claim[:]), nil
+		case strings.HasPrefix(data, selector("extraData")):
+			return encodeABIBytes(sr.Preimage), nil
+		case strings.HasPrefix(data, selector("status")):
+			return encodeABIUint8(0), nil
+		default:
+			return nil, fmt.Errorf("unexpected call")
+		}
+	})
+	got, err := EnumerateProposals(context.Background(), client, factory, proposer.GameTypeSuperCannonKona)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].L2Timestamp != 1020 || got[0].L2Block != 0 || got[0].RootClaim != claim {
+		t.Fatalf("%+v", got)
+	}
+
+	bad := mockRPC(t, func(method string, params []any) (any, error) {
+		obj := params[0].(map[string]any)
+		data := obj["data"].(string)
+		switch {
+		case strings.HasPrefix(data, selector("gameCount")):
+			return encodeABIUint256(1), nil
+		case strings.HasPrefix(data, selector("gameAtIndex")):
+			return encodeGameAtIndex(proposer.GameTypeSuperCannonKona, 1, game), nil
+		case strings.HasPrefix(data, selector("rootClaim")):
+			return hexutil.Encode(claim[:]), nil
+		case strings.HasPrefix(data, selector("extraData")):
+			return encodeABIBytes(PackExtraDataUint256(20)), nil
+		case strings.HasPrefix(data, selector("status")):
+			return encodeABIUint8(0), nil
+		default:
+			return nil, fmt.Errorf("unexpected call")
+		}
+	})
+	if _, err := EnumerateProposals(context.Background(), bad, factory, proposer.GameTypeSuperCannonKona); err == nil {
+		t.Fatal("32-byte extraData on a type-9 game must error")
 	}
 }
 

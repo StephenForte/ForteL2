@@ -88,6 +88,9 @@ Proposal-compare flags (`-compare proposals` only; legacy `reference` mode is un
 | `-deploy-state` | (none) | op-deployer `state.json` or `deployments.json` with factory/ASR proxies. Required unless both address flags are set. |
 | `-factory` / `-asr` | (none) | Override artifact addresses. Refuse to run with neither artifacts nor flags. |
 | `-game-type` | (none) | Override `AnchorStateRegistry.respectedGameType()`. **No numeric default** (D-0063 3c / D-0083). |
+| `-proposals-el` | (none) | Read-only EL HTTP. Proposal compare calls `OutputRootV0At` there (`eth_getBlockByNumber` + `eth_getProof` only) and does not dial the Engine API. Unset, the sealing EL path is unchanged. |
+
+Type 9 games carry a super-root preimage. Verify turns the timestamp into an L2 block with the rollup genesis time and block time, derives the output root with `OutputRootV0At`, rebuilds the super root with the rollup `l2_chain_id`, and compares that hash to `rootClaim`. A preimage that names a different chain id does not match. A type-8 game in the same run is still compared as an output root. Selecting type 8 or type 9 also walks the other of those two types; any other selected type stays a single-type walk.
 
 ```bash
 # Proposal audit: derived output root vs staked claim. No -ref-l2.

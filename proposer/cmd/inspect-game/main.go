@@ -97,13 +97,46 @@ func main() {
 	fmt.Printf("rootClaim=%s\n", g.RootClaim.Hex())
 	fmt.Printf("extraData=0x%s\n", hex.EncodeToString(g.ExtraData))
 	fmt.Printf("l2SequenceNumber=%d\n", g.L2Sequence)
-	if extraErr == nil {
+	if g.GameType == proposer.GameTypeSuperCannonKona || g.FactoryGameType == proposer.GameTypeSuperCannonKona {
+		if err := printSuperRootGame(ctx, client, g); err != nil {
+			fmt.Fprintf(os.Stderr, "super root: %v\n", err)
+			os.Exit(1)
+		}
+	} else if extraErr == nil {
 		fmt.Printf("extraData_sequence=%d\n", seqFromExtra)
 	} else {
 		fmt.Printf("extraData_sequence=<unpack error: %v>\n", extraErr)
 	}
 	fmt.Printf("gameType=%d status=%d createdAt=%d creator=%s\n",
 		g.GameType, g.Status, g.CreatedAt, g.Creator.Hex())
+}
+
+func printSuperRootGame(ctx context.Context, client *ethclient.Client, g proposer.InspectedGame) error {
+	sr, err := proposer.DecodeSuperRoot(g.ExtraData)
+	if err != nil {
+		return fmt.Errorf("type %d extraData: %w", proposer.GameTypeSuperCannonKona, err)
+	}
+	fmt.Printf("timestamp=%d\n", sr.Timestamp)
+	if g.L2Sequence != sr.Timestamp {
+		return fmt.Errorf("l2SequenceNumber %d != extraData timestamp %d", g.L2Sequence, sr.Timestamp)
+	}
+	fmt.Printf("timestamp_check=ok\n")
+	if sr.Hash == g.RootClaim {
+		fmt.Printf("superRootCheck=ok keccak(extraData)==rootClaim\n")
+	} else {
+		return fmt.Errorf("superRootCheck=MISMATCH keccak(extraData)=%s rootClaim=%s", sr.Hash.Hex(), g.RootClaim.Hex())
+	}
+	for _, c := range sr.Chains {
+		onChain, err := proposer.RootClaimByChainID(ctx, client, g.Proxy, c.ChainID)
+		if err != nil {
+			return fmt.Errorf("rootClaimByChainId(%d): %w", c.ChainID, err)
+		}
+		fmt.Printf("rootClaimByChainId(%d)=%s\n", c.ChainID, onChain.Hex())
+		if onChain != c.OutputRoot {
+			return fmt.Errorf("rootClaimByChainId(%d)=%s != preimage output %s", c.ChainID, onChain.Hex(), c.OutputRoot.Hex())
+		}
+	}
+	return nil
 }
 
 func resolveFactory(flagVal, deploymentsPath string) (common.Address, error) {

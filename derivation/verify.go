@@ -35,6 +35,10 @@ type VerifyOptions struct {
 	Factory          common.Address
 	ASR              common.Address
 	GameTypeOverride *uint32 // nil = AnchorStateRegistry.respectedGameType(); never a silent default
+	// ProposalsEL is a read-only EL (eth_getBlockByNumber + eth_getProof only).
+	// When set, proposal compare skips Engine API sealing and computes
+	// OutputRootV0 against this URL. Empty keeps the sealing-EL path.
+	ProposalsEL string
 }
 
 // Verify runs the derivation pipeline and compares sealed hashes to reference EL.
