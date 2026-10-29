@@ -207,7 +207,6 @@ jobs:
           set -euo pipefail
           python3 .github/prestate/check-prestate.py stock \
             --proof prestate-stock/prestate-proof.json
-          echo "result=pass" >> "${GITHUB_OUTPUT}"
 
       - name: Check 3 — custom commitment differs from stock (negative control)
         id: check2
@@ -321,7 +320,7 @@ jobs:
             echo "| commitment (\`.pre\`) | \`${{ steps.check1.outputs.commitment }}\` |"
             echo "| stock commitment (negative control; not for pinning) | \`${{ steps.check2.outputs.stock_commitment }}\` |"
             echo "| check 1 (witnessHash == .pre / stateVersion 8) | ${{ steps.check1.outputs.check1 }} |"
-            echo "| check 2 (stock == published U20; interop only) | ${{ steps.stock_control.outputs.result || 'N/A (type8)' }} |"
+            echo "| check 2 (stock == published U20; interop only) | ${{ env.PRESTATE_PROFILE == 'u20-interop' && steps.stock_control.outcome || 'N/A (type8)' }} |"
             echo "| check 3 (custom ≠ stock commitment) | ${{ steps.check2.outputs.check2 }} |"
             echo "| registry comparison | ${{ steps.registry.outputs.match }} — ${{ steps.registry.outputs.note }} |"
             echo "| profile | \`${PRESTATE_PROFILE}\` |"
