@@ -24,6 +24,8 @@ import {
   proofBlockForGame,
   readArtifactChainIds,
   selectCoveringGame,
+  scanNewestCoveringGame,
+  cachedCoveringGame,
   classifyFinalizeReadiness,
   classifyProveReadiness,
   dryRunExitCode,
@@ -574,6 +576,82 @@ describe("type-9 game selection and chain-id guard", () => {
       withdrawalTimestamp: withdrawalTs,
     });
     assert.equal(selected, exact);
+  });
+
+  it("stops the newest-first scan at the first covering game", async () => {
+    const rows = [
+      { gameType: 9, proxy: "0xold", sequence: 50n },
+      { gameType: 8, proxy: "0xmid", sequence: 9n },
+      { gameType: 9, proxy: "0xnew", sequence: 100n },
+    ];
+    let indexes = 0;
+    let sequences = 0;
+    const found = await scanNewestCoveringGame({
+      gameCount: 3n,
+      gameType: 9,
+      covers: (sequence) => sequence >= 100n,
+      readGameAtIndex: async (index) => {
+        indexes += 1;
+        return rows[Number(index)];
+      },
+      readSequence: async (proxy) => {
+        sequences += 1;
+        return rows.find((row) => row.proxy === proxy).sequence;
+      },
+    });
+    assert.equal(indexes, 1);
+    assert.equal(sequences, 1);
+    assert.equal(found.game.l2BlockNumber, 100n);
+    assert.equal(found.examined, 1);
+  });
+
+  it("walks past a newer game that does not cover, then stops", async () => {
+    const rows = [
+      { gameType: 9, proxy: "0xolder", sequence: 1n },
+      { gameType: 9, proxy: "0xcover", sequence: 100n },
+      { gameType: 9, proxy: "0xearly", sequence: 90n },
+    ];
+    let indexes = 0;
+    const found = await scanNewestCoveringGame({
+      gameCount: 3n,
+      gameType: 9,
+      covers: (sequence) => sequence >= 100n,
+      readGameAtIndex: async (index) => {
+        indexes += 1;
+        return rows[Number(index)];
+      },
+      readSequence: async (proxy) => rows.find((row) => row.proxy === proxy).sequence,
+    });
+    assert.equal(indexes, 2);
+    assert.equal(found.game.l2BlockNumber, 100n);
+    assert.equal(found.examined, 2);
+  });
+
+  it("does not visit factory indexes outside the limit", async () => {
+    let indexes = 0;
+    const found = await scanNewestCoveringGame({
+      gameCount: 150n,
+      gameType: 9,
+      limit: 100,
+      covers: () => false,
+      readGameAtIndex: async () => {
+        indexes += 1;
+        return { gameType: 8, proxy: "0x" };
+      },
+      readSequence: async () => {
+        throw new Error("sequence must not be read for a different type");
+      },
+    });
+    assert.equal(found.game, null);
+    assert.equal(indexes, 100);
+    assert.equal(found.examined, 100);
+  });
+
+  it("reuses a cached miss until gameCount changes", () => {
+    const cache = { count: "12", respected: 9, game: null };
+    assert.equal(cachedCoveringGame(cache, { count: 12n, respected: 9 }), null);
+    assert.equal(cachedCoveringGame(cache, { count: 13n, respected: 9 }), undefined);
+    assert.equal(cachedCoveringGame(null, { count: 12n, respected: 9 }), undefined);
   });
 
   it("selects a type-8 game by block number even when the timestamp is larger", () => {

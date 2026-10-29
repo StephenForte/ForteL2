@@ -1004,6 +1004,40 @@ allow_fork_artifact_l1() {
   return 1
 }
 
+# 0 when scripts/bridge/node_modules/viem matches package.json. A present
+# directory is not enough: 2.31.7 ignores usesSuperRoots and asks L2 for the
+# type-9 timestamp as a block number.
+bridge_viem_is_current() {
+  local bridge_dir="${1:-}"
+  local wanted="" installed=""
+  if [[ ! -f "$bridge_dir/package.json" ]]; then
+    return 1
+  fi
+  wanted="$(node -e 'const p=require(process.argv[1]); process.stdout.write(String((p.dependencies&&p.dependencies.viem)||""))' "$bridge_dir/package.json")"
+  if [[ -z "$wanted" ]]; then
+    return 1
+  fi
+  if [[ ! -f "$bridge_dir/node_modules/viem/package.json" ]]; then
+    return 1
+  fi
+  installed="$(node -e 'const p=require(process.argv[1]); process.stdout.write(String(p.version||""))' "$bridge_dir/node_modules/viem/package.json")"
+  [[ "$installed" == "$wanted" ]]
+}
+
+# npm ci when the installed viem pin does not match. Prints nothing on a match.
+ensure_bridge_deps() {
+  local bridge_dir="${1:-}"
+  if bridge_viem_is_current "$bridge_dir"; then
+    return 0
+  fi
+  local wanted="unknown"
+  if [[ -f "$bridge_dir/package.json" ]]; then
+    wanted="$(node -e 'const p=require(process.argv[1]); process.stdout.write(String((p.dependencies&&p.dependencies.viem)||"unknown"))' "$bridge_dir/package.json")"
+  fi
+  echo "bridge viem does not match package.json (${wanted}); running npm ci" >&2
+  (cd "$bridge_dir" && npm ci --omit=dev)
+}
+
 # Read KEY=value from an env file without sourcing it. Use this to snapshot
 # Sepolia DATA_DIR (or L1_RPC_URL) before `source lib.sh` so Phase 1 .env
 # cannot clobber the saved value.

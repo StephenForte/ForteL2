@@ -234,6 +234,60 @@ export function selectCoveringGame(games, { gameType, withdrawalBlock, withdrawa
   return covering.length ? covering[0] : null
 }
 
+/**
+ * Newest-first factory walk. Stops at the first game of gameType whose
+ * sequence satisfies covers(), so a covering game at the tip is one
+ * gameAtIndex plus one l2SequenceNumber. limit is how many factory indexes
+ * are visited, not how many matches are collected.
+ */
+export async function scanNewestCoveringGame({
+  gameCount,
+  readGameAtIndex,
+  readSequence,
+  gameType,
+  covers,
+  limit = 100,
+}) {
+  const count = BigInt(gameCount)
+  const window = BigInt(limit)
+  const start = count > window ? count - window : 0n
+  const want = Number(gameType)
+  let examined = 0
+  for (let i = count; i > start; i--) {
+    examined += 1
+    const index = i - 1n
+    const row = await readGameAtIndex(index)
+    const rowType = Number(row.gameType ?? row[0])
+    if (rowType !== want) continue
+    const sequence = await readSequence(row.proxy ?? row[2])
+    if (covers(sequence)) {
+      return {
+        game: {
+          index,
+          gameType: want,
+          l2BlockNumber: sequence,
+          usesSuperRoots: want === SUPER_ROOT_GAME_TYPE,
+        },
+        examined,
+        count,
+      }
+    }
+  }
+  return { game: null, examined, count }
+}
+
+/**
+ * undefined when the cache does not apply (caller must scan).
+ * null when this gameCount already had no covering game.
+ * Otherwise the cached game.
+ */
+export function cachedCoveringGame(cache, { count, respected }) {
+  if (!cache) return undefined
+  if (String(cache.count) !== String(count)) return undefined
+  if (Number(cache.respected) !== Number(respected)) return undefined
+  return cache.game ?? null
+}
+
 /** Block the output-root proof is built at. Type 9 converts the timestamp. */
 export function proofBlockForGame(game, { genesisTime, blockTime }) {
   const superGame =

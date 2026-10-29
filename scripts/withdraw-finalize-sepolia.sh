@@ -86,10 +86,7 @@ if ! allow_fork_artifact_l1 "$ART_L1" "$ART_L2"; then
   exit 1
 fi
 
-if [[ ! -d "$BRIDGE_DIR/node_modules/viem" ]]; then
-  echo "Installing bridge helper deps (viem) ..."
-  (cd "$BRIDGE_DIR" && npm ci --omit=dev)
-fi
+ensure_bridge_deps "$BRIDGE_DIR"
 
 wait_for_rpc "$L1_RPC_URL" "L1"
 

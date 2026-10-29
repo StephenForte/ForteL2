@@ -14553,6 +14553,30 @@ else
   fail=1
 fi
 
+OPU3A_BRIDGE="$(mktemp -d)"
+printf '%s\n' '{"dependencies":{"viem":"2.51.0"}}' > "$OPU3A_BRIDGE/package.json"
+mkdir -p "$OPU3A_BRIDGE/node_modules/viem"
+printf '%s\n' '{"version":"2.31.7"}' > "$OPU3A_BRIDGE/node_modules/viem/package.json"
+OPU3A_STALE=0
+bridge_viem_is_current "$OPU3A_BRIDGE" || OPU3A_STALE=1
+printf '%s\n' '{"version":"2.51.0"}' > "$OPU3A_BRIDGE/node_modules/viem/package.json"
+OPU3A_MATCH=0
+bridge_viem_is_current "$OPU3A_BRIDGE" && OPU3A_MATCH=1
+rm -rf "$OPU3A_BRIDGE/node_modules"
+OPU3A_ABSENT=0
+bridge_viem_is_current "$OPU3A_BRIDGE" || OPU3A_ABSENT=1
+rm -rf "$OPU3A_BRIDGE"
+if [[ "$OPU3A_STALE" -eq 1 && "$OPU3A_MATCH" -eq 1 && "$OPU3A_ABSENT" -eq 1 ]] \
+  && grep -q 'ensure_bridge_deps' "$SCRIPT_DIR/withdraw-prove-sepolia.sh" \
+  && grep -q 'ensure_bridge_deps' "$SCRIPT_DIR/withdraw-finalize-sepolia.sh" \
+  && ! grep -q 'node_modules/viem' "$SCRIPT_DIR/withdraw-prove-sepolia.sh" \
+  && ! grep -q 'node_modules/viem' "$SCRIPT_DIR/withdraw-finalize-sepolia.sh"; then
+  echo "PASS OPU-3a bridge deps refresh when the installed viem pin differs"
+else
+  echo "FAIL OPU-3a bridge deps must refresh a stale viem (stale=$OPU3A_STALE match=$OPU3A_MATCH absent=$OPU3A_ABSENT)" >&2
+  fail=1
+fi
+
 unset OPU3A_PROP OPU3A_RES OPU3A_CHAL OPU3A_INIT OPU3A_FIX OPU3A_RC OPU3A_OUT OPU3A_PROVE_RC OPU3A_PROVE_OUT
 unset OPU3A_ARGV OPU3A_ARGV8 OPU3A_READS_88 OPU3A_READS_98 OPU3A_READS_99 OPU3A_READS_91
 unset OPU3A_RES_OUT OPU3A_RES_EC OPU3A_TYPE9 OPU3A_TYPE8 OPU3A_ISO OPU3A_ISO_RC OPU3A_ISO_OUT

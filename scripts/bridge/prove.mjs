@@ -18,7 +18,8 @@ import {
   assertArtifactChainIds,
   assertRemoteL1ChainId,
   stampArtifactChainIds,
-  selectCoveringGame,
+  scanNewestCoveringGame,
+  cachedCoveringGame,
   SUPER_ROOT_GAME_TYPE,
   classifyProveReadiness,
   classifyFinalizeReadiness,
@@ -69,42 +70,6 @@ const sequenceAbi = parseAbi([
   'function l2SequenceNumber() view returns (uint256)',
 ])
 
-/**
- * Newest-first games of one type. eth_call only: viem getGames multicalls,
- * and our chain object does not advertise multicall3.
- */
-async function listRecentGames(gameType, limit = 100) {
-  const count = await readContract(publicL1, {
-    address: factory,
-    abi: factoryScanAbi,
-    functionName: 'gameCount',
-  })
-  const games = []
-  const start = count > BigInt(limit) ? count - BigInt(limit) : 0n
-  for (let i = count; i > start; i--) {
-    const index = i - 1n
-    const row = await readContract(publicL1, {
-      address: factory,
-      abi: factoryScanAbi,
-      functionName: 'gameAtIndex',
-      args: [index],
-    })
-    if (Number(row[0]) !== gameType) continue
-    const sequence = await readContract(publicL1, {
-      address: row[2],
-      abi: sequenceAbi,
-      functionName: 'l2SequenceNumber',
-    })
-    games.push({
-      index,
-      gameType,
-      l2BlockNumber: sequence,
-      usesSuperRoots: gameType === SUPER_ROOT_GAME_TYPE,
-    })
-  }
-  return games
-}
-
 async function readRespectedGameType() {
   try {
     const value = await readContract(publicL1, {
@@ -119,36 +84,74 @@ async function readRespectedGameType() {
 }
 
 /**
- * Type 9: compare the game timestamp to the withdrawal block's timestamp and
- * let viem build the proof at the L2 block for that timestamp (usesSuperRoots).
- * Any other respected type uses the same strict-greater block comparison as viem getGame.
+ * Type 9: timestamp >= the withdrawal block's timestamp. The proof is built
+ * at the L2 block for that timestamp (usesSuperRoots). Any other respected
+ * type uses the strict-greater block comparison viem getGame uses.
+ * A repeated poll with the same gameCount reuses the previous result.
  */
+let coveringCache = null
+
 async function findCoveringGame(receipt) {
   const respected = await readRespectedGameType()
   if (respected == null) throw new Error('could not read portal.respectedGameType')
-  if (respected !== SUPER_ROOT_GAME_TYPE) {
-    const games = await listRecentGames(respected)
-    const game = games.find((item) => item.l2BlockNumber > receipt.blockNumber)
-    if (!game) {
-      const err = new Error('no dispute game covers the withdrawal block')
+  const count = await readContract(publicL1, {
+    address: factory,
+    abi: factoryScanAbi,
+    functionName: 'gameCount',
+  })
+  const cached = cachedCoveringGame(coveringCache, { count, respected })
+  if (cached !== undefined) {
+    if (cached == null) {
+      const err = new Error(
+        respected === SUPER_ROOT_GAME_TYPE
+          ? 'no type-9 game covers the withdrawal timestamp'
+          : 'no dispute game covers the withdrawal block',
+      )
       err.name = 'GameNotFoundError'
       throw err
     }
-    return game
+    return cached
   }
-  const block = await getBlock(publicL2, { blockNumber: receipt.blockNumber })
-  const games = await listRecentGames(SUPER_ROOT_GAME_TYPE)
-  const game = selectCoveringGame(games, {
-    gameType: SUPER_ROOT_GAME_TYPE,
-    withdrawalBlock: receipt.blockNumber,
-    withdrawalTimestamp: block.timestamp,
+  let covers
+  if (respected === SUPER_ROOT_GAME_TYPE) {
+    const block = await getBlock(publicL2, { blockNumber: receipt.blockNumber })
+    const target = BigInt(block.timestamp)
+    covers = (sequence) => BigInt(sequence) >= target
+  } else {
+    const target = BigInt(receipt.blockNumber)
+    covers = (sequence) => BigInt(sequence) > target
+  }
+  const found = await scanNewestCoveringGame({
+    gameCount: count,
+    gameType: respected,
+    covers,
+    readGameAtIndex: async (index) => {
+      const row = await readContract(publicL1, {
+        address: factory,
+        abi: factoryScanAbi,
+        functionName: 'gameAtIndex',
+        args: [index],
+      })
+      return { gameType: Number(row[0]), proxy: row[2] }
+    },
+    readSequence: async (proxy) =>
+      readContract(publicL1, {
+        address: proxy,
+        abi: sequenceAbi,
+        functionName: 'l2SequenceNumber',
+      }),
   })
-  if (!game) {
-    const err = new Error('no type-9 game covers the withdrawal timestamp')
+  coveringCache = { count: count.toString(), respected, game: found.game }
+  if (!found.game) {
+    const err = new Error(
+      respected === SUPER_ROOT_GAME_TYPE
+        ? 'no type-9 game covers the withdrawal timestamp'
+        : 'no dispute game covers the withdrawal block',
+    )
     err.name = 'GameNotFoundError'
     throw err
   }
-  return game
+  return found.game
 }
 
 const receipt = await getTransactionReceipt(publicL2, { hash: l2Tx })
