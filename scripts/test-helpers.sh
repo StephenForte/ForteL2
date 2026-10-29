@@ -14656,6 +14656,288 @@ unset OPU3A_ARGV OPU3A_ARGV8 OPU3A_READS_88 OPU3A_READS_98 OPU3A_READS_99 OPU3A_
 unset OPU3A_RES_OUT OPU3A_RES_EC OPU3A_TYPE9 OPU3A_TYPE8 OPU3A_ISO OPU3A_ISO_RC OPU3A_ISO_OUT
 unset OPU3A_SAVED_L1 OPU3A_SAVED_L2 OPU3A_SAVED_RPC OPU3A_SAVED_FLAG OPU3A_ALLOW_RC
 
+# --- OPU-5d: fork challenge demo guards and type-9 preflight ---------------
+# Each refusal is executed. Removing the guard (loopback, chain id 900852,
+# PID_DIR prefix, anchor sequence vs rollup genesis l2_time, or the prestate
+# witness mismatch exit) turns the matching check red.
+OPU5D_DEMO="$SCRIPT_DIR/opu5-fork-challenge-demo.sh"
+OPU5D_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu5d.XXXXXX")"
+register_tmp "$OPU5D_FIX"
+OPU5D_ROOT="$OPU5D_FIX/root"
+mkdir -p "$OPU5D_ROOT"
+
+opu5d_run() {
+  local rc out a pid_dir
+  local args=()
+  rc=0
+  pid_dir="$OPU5D_ROOT/data/pids"
+  for a in "$@"; do
+    case "$a" in
+      OPU5_PID_DIR=*) pid_dir="${a#OPU5_PID_DIR=}" ;;
+      *) args+=("$a") ;;
+    esac
+  done
+  out="$(
+    env OPU5_DRY_GUARD=1 OPU5_TEMP_ROOT="$OPU5D_ROOT" OPU5_PID_DIR="$pid_dir" \
+      ${args[@]+"${args[@]}"} bash "$OPU5D_DEMO" 2>&1
+  )" || rc=$?
+  printf '%s\n' "$out"
+  return "$rc"
+}
+
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_run OPU5_L1_RPC_URL=https://example.invalid/not-loopback)" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'refusing to sign: L1 is not loopback' \
+  && ! printf '%s\n' "$OPU5D_OUT" | grep -q 'phase: anvil' \
+  && ! printf '%s\n' "$OPU5D_OUT" | grep -q 'phase: dry-guard ok'; then
+  echo "PASS OPU-5d demo refuses a non-loopback L1 before starting anything"
+else
+  echo "FAIL OPU-5d demo must refuse a non-loopback L1 (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+
+OPU5D_MOCK="$OPU5D_FIX/mock.py"
+cat > "$OPU5D_MOCK" <<'PY'
+import json, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+result = sys.argv[1]
+port = int(sys.argv[2])
+
+class H(BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("content-length", "0"))
+        raw = self.rfile.read(n)
+        try:
+            payload = json.loads(raw.decode())
+        except Exception:
+            payload = {"id": 1}
+        def one(msg):
+            mid = msg.get("id") if isinstance(msg, dict) else 1
+            return {"jsonrpc": "2.0", "id": mid, "result": result}
+        body = [one(x) for x in payload] if isinstance(payload, list) else one(payload)
+        data = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+    def log_message(self, fmt, *args):
+        return
+
+ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+OPU5D_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+python3 "$OPU5D_MOCK" 0xaa36a7 "$OPU5D_PORT" >/dev/null 2>&1 &
+OPU5D_MOCK_PID=$!
+cleanup_opu5d_mock() { kill "$OPU5D_MOCK_PID" >/dev/null 2>&1 || true; }
+register_cleanup cleanup_opu5d_mock
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if cast chain-id --rpc-url "http://127.0.0.1:${OPU5D_PORT}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_run OPU5_L1_RPC_URL="http://127.0.0.1:${OPU5D_PORT}")" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'loopback L1 reports chain id 11155111' \
+  && ! printf '%s\n' "$OPU5D_OUT" | grep -q 'phase: anvil'; then
+  echo "PASS OPU-5d demo refuses loopback chain id 11155111"
+else
+  echo "FAIL OPU-5d demo must refuse loopback chain id 11155111 (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+kill "$OPU5D_MOCK_PID" >/dev/null 2>&1 || true
+wait "$OPU5D_MOCK_PID" 2>/dev/null || true
+
+OPU5D_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+python3 "$OPU5D_MOCK" 0xdbef4 "$OPU5D_PORT" >/dev/null 2>&1 &
+OPU5D_MOCK_PID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if cast chain-id --rpc-url "http://127.0.0.1:${OPU5D_PORT}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_run OPU5_L1_RPC_URL="http://127.0.0.1:${OPU5D_PORT}")" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -eq 0 ]] && printf '%s\n' "$OPU5D_OUT" | grep -q 'phase: dry-guard ok'; then
+  echo "PASS OPU-5d demo accepts loopback chain id 900852"
+else
+  echo "FAIL OPU-5d demo must accept loopback chain id 900852 (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+kill "$OPU5D_MOCK_PID" >/dev/null 2>&1 || true
+wait "$OPU5D_MOCK_PID" 2>/dev/null || true
+
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_run OPU5_PID_DIR=/tmp/opu5d-not-under-temp)" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'isolated PID_DIR=/tmp/opu5d-not-under-temp' \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'resolved PID_DIR is not under the temp dir' \
+  && ! printf '%s\n' "$OPU5D_OUT" | grep -q 'phase: anvil' \
+  && ! printf '%s\n' "$OPU5D_OUT" | grep -q 'phase: dry-guard ok'; then
+  echo "PASS OPU-5d demo refuses a PID_DIR outside its temp dir"
+else
+  echo "FAIL OPU-5d demo must refuse a PID_DIR outside its temp dir (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+
+OPU5D_ROLLUP="$OPU5D_FIX/rollup.json"
+python3 -c 'import json,sys; json.dump({"genesis":{"l2_time":5000000000}}, open(sys.argv[1],"w"))' "$OPU5D_ROLLUP"
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_run OPU5_ANCHOR_SEQUENCE=4999999999 OPU5_ROLLUP_JSON="$OPU5D_ROLLUP")" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'anchor sequence 4999999999 is before L2 genesis timestamp 5000000000' \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'refusing Phase B'; then
+  echo "PASS OPU-5d demo refuses Phase B when the anchor sequence is before rollup genesis"
+else
+  echo "FAIL OPU-5d demo must refuse Phase B when the anchor sequence is before rollup l2_time (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_run OPU5_ANCHOR_SEQUENCE=5000000000 OPU5_ROLLUP_JSON="$OPU5D_ROLLUP")" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -eq 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'anchor sequence 5000000000 is at or after L2 genesis timestamp 5000000000'; then
+  echo "PASS OPU-5d demo allows Phase B when the anchor sequence equals rollup genesis"
+else
+  echo "FAIL OPU-5d demo must read l2_time from the rollup file, not a constant (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_run OPU5_BEACON='https://example.quiknode.pro/SECRETTOKEN')" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'metered URL is not allowed' \
+  && ! printf '%s\n' "$OPU5D_OUT" | grep -q 'SECRETTOKEN'; then
+  echo "PASS OPU-5d demo refuses a metered beacon without printing it"
+else
+  echo "FAIL OPU-5d demo must refuse a metered beacon and must not print it (rc=$OPU5D_RC)" >&2
+  fail=1
+fi
+
+if ! grep -q 'SEPOLIA_CHALLENGER_GAME_WINDOW' "$OPU5D_DEMO"; then
+  echo "PASS OPU-5d demo does not set the Sepolia challenger game window"
+else
+  echo "FAIL OPU-5d demo must not contain SEPOLIA_CHALLENGER_GAME_WINDOW" >&2
+  fail=1
+fi
+
+# Type 9 preflight: matching witness is accepted; a type-8 witness against a
+# type-9 gameArgs prestate is refused. Deleting the mismatch exit leaves the
+# second case green and this check red.
+OPU5D_TYPE9=0x03284f1b70ad7525bcda6090685bc068e38f74c572132a0535ae5059b5d14792
+OPU5D_TYPE8=0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d
+OPU5D_VM=71b4b694a5f522f8ecc6e4f7ac2e966a8ead0f73
+OPU5D_FN="$(
+  awk '
+    /^is_zero_hex\(\)/ { fn = 1 }
+    /^game_impls_type_number\(\)/ { fn = 1 }
+    /^run_preflight\(\)/ { fn = 1 }
+    fn { print }
+    fn && /^}/ { fn = 0 }
+  ' "$SCRIPT_DIR/09-start-challenger-sepolia.sh"
+)"
+OPU5D_PRE_DIR="$OPU5D_FIX/preflight"
+mkdir -p "$OPU5D_PRE_DIR"
+cat > "$OPU5D_PRE_DIR/cast" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" != "call" ]]; then
+  echo "mock cast: expected call, got \${1:-}" >&2
+  exit 1
+fi
+case "\${3:-}" in
+  "gameImpls(uint32)(address)")
+    if [[ "\${4:-}" == "9" ]]; then
+      echo "0x84c0889A10E2f120F9fE6a27cEE8c6Cf735A8584"
+    else
+      echo "0x0000000000000000000000000000000000000000"
+    fi
+    ;;
+  "gameArgs(uint32)(bytes)")
+    if [[ "\${4:-}" == "9" ]]; then
+      echo "0x${OPU5D_TYPE9#0x}${OPU5D_VM}0000000000000000000000000000000000000000"
+    else
+      echo "0x"
+    fi
+    ;;
+  *)
+    echo "mock cast: unexpected \${3:-}" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$OPU5D_PRE_DIR/cast"
+opu5d_witness() {
+  local hash="$1"
+  cat > "$OPU5D_PRE_DIR/cannon" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '{"witnessHash":"%s"}\n' "$hash"
+EOF
+  chmod +x "$OPU5D_PRE_DIR/cannon"
+}
+opu5d_preflight() {
+  local hash="$1"
+  local runner rc out
+  opu5d_witness "$hash"
+  touch "$OPU5D_PRE_DIR/prestate.bin"
+  runner="$OPU5D_PRE_DIR/run.sh"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'set -euo pipefail'
+    printf '%s\n' "$OPU5D_FN"
+    cat << RUNEOF
+TRACE_TYPE='super-cannon-kona'
+GAME_FACTORY='0x1234567890123456789012345678901234567890'
+L1_RPC_URL='http://127.0.0.1:8545'
+CHALLENGER_L1_RPC_URL="\$L1_RPC_URL"
+PRESTATE_PATH='$OPU5D_PRE_DIR/prestate.bin'
+CANNON_BIN='$OPU5D_PRE_DIR/cannon'
+run_preflight
+RUNEOF
+  } > "$runner"
+  chmod +x "$runner"
+  rc=0
+  out="$(PATH="${OPU5D_PRE_DIR}:$PATH" bash "$runner" 2>&1)" || rc=$?
+  printf '%s\n' "$out"
+  return "$rc"
+}
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_preflight "$OPU5D_TYPE9")" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -eq 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'witness hash matches on-chain absolutePrestate' \
+  && printf '%s\n' "$OPU5D_OUT" | grep -Fq "$OPU5D_TYPE9"; then
+  echo "PASS OPU-5d preflight accepts the type-9 prestate for type 9"
+else
+  echo "FAIL OPU-5d preflight must accept a type-9 witness for a type-9 game (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+OPU5D_RC=0
+OPU5D_OUT="$(opu5d_preflight "$OPU5D_TYPE8")" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -ne 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'witness hash does not match' \
+  && printf '%s\n' "$OPU5D_OUT" | grep -Fq "$OPU5D_TYPE9" \
+  && printf '%s\n' "$OPU5D_OUT" | grep -Fq "$OPU5D_TYPE8"; then
+  echo "PASS OPU-5d preflight refuses a type-8 prestate against a type-9 game"
+else
+  echo "FAIL OPU-5d preflight must refuse a type-8 witness against a type-9 game (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+
+unset OPU5D_DEMO OPU5D_FIX OPU5D_ROOT OPU5D_RC OPU5D_OUT OPU5D_MOCK OPU5D_PORT OPU5D_MOCK_PID
+unset OPU5D_ROLLUP OPU5D_TYPE9 OPU5D_TYPE8 OPU5D_VM OPU5D_FN OPU5D_PRE_DIR
+
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
 # `trap … EXIT` — bash replaces the handler and would drop every previously
