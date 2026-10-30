@@ -86,11 +86,13 @@ opu5_assert_fork_chain() {
 BEACON="${OPU5_BEACON:-https://ethereum-sepolia-beacon-api.publicnode.com}"
 UPSTREAM="${OPU5_UPSTREAM:-https://ethereum-sepolia-rpc.publicnode.com}"
 
+OPU5_TEMP_OWNED=0
 if [[ -n "${OPU5_TEMP_ROOT:-}" ]]; then
   TEMP_ROOT="$OPU5_TEMP_ROOT"
   mkdir -p "$TEMP_ROOT"
 else
   TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu5d.XXXXXX")"
+  OPU5_TEMP_OWNED=1
 fi
 DATA_DIR="$TEMP_ROOT/data"
 PID_DIR="${OPU5_PID_DIR:-$DATA_DIR/pids}"
@@ -106,8 +108,51 @@ if [[ -n "${OPU5_ANCHOR_SEQUENCE:-}" ]]; then
   opu5_assert_anchor_timestamp "$OPU5_ANCHOR_SEQUENCE" \
     "${OPU5_ROLLUP_JSON:-$REPO_ROOT/deployments/sepolia/rollup.json}"
 fi
+STARTED_PIDS=()
+opu5_track() {
+  STARTED_PIDS+=("$1")
+}
+
+# fork.env is a copy of the Sepolia env, including keys. Remove it on every
+# exit. A temp dir this script created goes with it. A caller-supplied
+# OPU5_TEMP_ROOT is kept so its logs can be read, minus the key file.
+opu5_cleanup() {
+  local pid
+  if [[ -n "${PID_DIR:-}" && -f "$PID_DIR/op-challenger.pid" ]]; then
+    pid="$(tr -d '[:space:]' < "$PID_DIR/op-challenger.pid" || true)"
+    if [[ -n "$pid" ]]; then
+      pkill -P "$pid" >/dev/null 2>&1 || true
+      kill "$pid" >/dev/null 2>&1 || true
+    fi
+  fi
+  if [[ -n "${STARTED_PIDS+x}" && ${#STARTED_PIDS[@]} -gt 0 ]]; then
+    for pid in "${STARTED_PIDS[@]}"; do
+      pkill -P "$pid" >/dev/null 2>&1 || true
+      kill "$pid" >/dev/null 2>&1 || true
+    done
+  fi
+  case "${TEMP_ROOT:-}" in
+    ""|/|.) ;;
+    *)
+      rm -f "$TEMP_ROOT/fork.env"
+      if [[ "${OPU5_TEMP_OWNED:-0}" == "1" ]]; then
+        rm -rf "$TEMP_ROOT"
+      fi
+      ;;
+  esac
+}
+trap opu5_cleanup EXIT
+
 if [[ "${OPU5_DRY_GUARD:-}" == "1" ]]; then
   opu5_phase "dry-guard ok"
+  exit 0
+fi
+
+if [[ "${OPU5_DRY_CLEANUP:-}" == "1" ]]; then
+  printf 'sentinel-not-a-key\n' > "$TEMP_ROOT/fork.env"
+  chmod 600 "$TEMP_ROOT/fork.env"
+  echo "phase: dry-cleanup wrote fork.env"
+  echo "phase: dry-cleanup temp $TEMP_ROOT"
   exit 0
 fi
 
@@ -120,29 +165,6 @@ source "$SCRIPT_DIR/lib.sh"
 DATA_DIR="$_OPU5_DATA"
 PID_DIR="$DATA_DIR/pids"
 LOG_DIR="$DATA_DIR/logs"
-
-STARTED_PIDS=()
-opu5_track() {
-  STARTED_PIDS+=("$1")
-}
-
-opu5_cleanup() {
-  local pid
-  if [[ -n "${PID_DIR:-}" && -f "$PID_DIR/op-challenger.pid" ]]; then
-    pid="$(tr -d '[:space:]' < "$PID_DIR/op-challenger.pid" || true)"
-    if [[ -n "$pid" ]]; then
-      pkill -P "$pid" >/dev/null 2>&1 || true
-      kill "$pid" >/dev/null 2>&1 || true
-    fi
-  fi
-  if [[ ${#STARTED_PIDS[@]} -gt 0 ]]; then
-    for pid in "${STARTED_PIDS[@]}"; do
-      pkill -P "$pid" >/dev/null 2>&1 || true
-      kill "$pid" >/dev/null 2>&1 || true
-    done
-  fi
-}
-trap opu5_cleanup EXIT
 
 RUN_START=$SECONDS
 NOTES="$TEMP_ROOT/notes"

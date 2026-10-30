@@ -14830,6 +14830,39 @@ else
   fail=1
 fi
 
+# The EXIT trap must delete fork.env. A caller-owned temp dir stays so logs
+# can be read; a dir the script created is removed entirely. Removing the
+# rm in opu5_cleanup leaves fork.env behind and turns this check red.
+OPU5D_CLEAN="$(mktemp -d)"
+register_tmp "$OPU5D_CLEAN"
+OPU5D_RC=0
+OPU5D_OUT="$(
+  env OPU5_DRY_CLEANUP=1 OPU5_TEMP_ROOT="$OPU5D_CLEAN" bash "$OPU5D_DEMO" 2>&1
+)" || OPU5D_RC=$?
+if [[ "$OPU5D_RC" -eq 0 ]] \
+  && printf '%s\n' "$OPU5D_OUT" | grep -q 'dry-cleanup wrote fork.env' \
+  && [[ ! -e "$OPU5D_CLEAN/fork.env" ]] \
+  && [[ -d "$OPU5D_CLEAN" ]]; then
+  echo "PASS OPU-5d cleanup deletes fork.env and keeps a caller-owned temp dir"
+else
+  echo "FAIL OPU-5d fork.env survived the EXIT trap or the caller-owned dir was removed (rc=$OPU5D_RC)" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+OPU5D_RC=0
+OPU5D_OUT="$(env OPU5_DRY_CLEANUP=1 bash "$OPU5D_DEMO" 2>&1)" || OPU5D_RC=$?
+OPU5D_OWNED="$(printf '%s\n' "$OPU5D_OUT" | sed -n 's/^phase: dry-cleanup temp //p' | tail -1)"
+if [[ -n "$OPU5D_OWNED" && -e "$OPU5D_OWNED" ]]; then
+  register_tmp "$OPU5D_OWNED"
+fi
+if [[ "$OPU5D_RC" -eq 0 && -n "$OPU5D_OWNED" && ! -e "$OPU5D_OWNED" ]]; then
+  echo "PASS OPU-5d cleanup removes a temp dir the script created"
+else
+  echo "FAIL OPU-5d a script-created temp dir survived the EXIT trap (rc=$OPU5D_RC path=${OPU5D_OWNED:-missing})" >&2
+  printf '%s\n' "$OPU5D_OUT" >&2
+  fail=1
+fi
+
 # Type 9 preflight: matching witness is accepted; a type-8 witness against a
 # type-9 gameArgs prestate is refused. Deleting the mismatch exit leaves the
 # second case green and this check red.
@@ -14937,6 +14970,7 @@ fi
 
 unset OPU5D_DEMO OPU5D_FIX OPU5D_ROOT OPU5D_RC OPU5D_OUT OPU5D_MOCK OPU5D_PORT OPU5D_MOCK_PID
 unset OPU5D_ROLLUP OPU5D_TYPE9 OPU5D_TYPE8 OPU5D_VM OPU5D_FN OPU5D_PRE_DIR
+unset OPU5D_CLEAN OPU5D_OWNED
 
 # New fixture blocks go above this check. After mktemp, define cleanup_foo and
 # call register_cleanup cleanup_foo; also register_tmp "$FOO_FIX". Do not
