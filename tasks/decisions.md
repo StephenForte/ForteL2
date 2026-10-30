@@ -1607,7 +1607,44 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
 - **Decision (operator):** no D-0152 canary for this op-node-only bump. The reasoning is in R-0031, not repeated here.
 - **Consequence:** README :933, AGENTS.md and `tasks/prd-op-reth-migration.md` name op-node v1.20.0 for the replica. OD-3 is closed in the OPU PRD.
 
-- Next free decision id is **D-0161**.
+### D-0161 — **OPU-3 done (#277, #276); OD-1 = fork-only challenge demo; OD-8 = accept the post-U20 anchor self-heal.** Planner reviews and operator decisions, 2026-10-29.
+- **OPU-3a (#277, merged 15:18 PT, `a1402a7`).** The planner re-ran the gate on the Mac mini (helpers 820 PASS, viewer/dapp/blocks 95, snapshot OK, bridge 50 on viem 2.51.0) and probed the following:
+  - Mutating the type-9 argv to `--rollup-rpc`, and dropping the resolver's legacy-type-8 selection, each turned its test red.
+  - The resolver reads 8 L1 values per game, plus `wasRespectedGameTypeWhenCreated` only for type 8 while respected is 9.
+  - Live `initBonds(8)` is 0, so pre-flip type-8 games end `zero_credit`.
+  - viem 2.51.0 `buildProveWithdrawal` maps a super-root timestamp to its L2 block and checks they match.
+  - The one authorized live write: L2 withdrawal `0x40ab60bd…f398`, block 2937967, 0.0001 ETH from ADMIN. It is kept for OPU-5.
+- **OPU-3b (#276, merged 15:29 PT, `59bbb8c`).**
+  - The planner pushed merge commit `8a362e9` to resolve the `scripts/test-helpers.sh` append conflict with #277, keeping both blocks and changing nothing else. The merged tree gives 822 PASS.
+  - Independent super-root recompute at ts 1793306816 (block 2936764) equals `superroot_atTimestamp` (`0x9f38eb…f9db`).
+  - Mutating the loopback-Sepolia signing refusal, the block-boundary check, and the bad-proposal corruption each turned tests red.
+  - `create-bad-proposal-sepolia.sh` moved from OPU-3a to OPU-3b (planner decision at dispatch), because it wraps the 3b-owned `bad-proposal` tool.
+- **OD-1 (operator): (b), fork only.** The challenge demonstration runs on an Anvil fork (chain id 900852) as OPU-5d. The live challenger stays stopped (D-0132/D-0145). Reasons:
+  - A live false claim with a challenger that fails would finalize after 7200 s + 1800 s, and could become the anchor.
+  - Live challenger cost is unmeasured.
+- **Finding (OPU-5d first attempt, run 331b7963, blocked; confirmed by the planner in op-contracts v8.0.0 source):**
+  - U20 sets respected type 9 but leaves the AnchorStateRegistry anchor on the last type-8 game. On that fork the anchor was `0x5998…a302` with `l2SequenceNumber` 1915395, an L2 block number.
+  - `SuperFaultDisputeGame.initialize` copies `getAnchorRoot()` into `startingProposal`, so a type-9 game created before the anchor moves treats that block number as a timestamp.
+  - op-challenger then fails with "did not reach genesis time", and no type-9 game can be disputed (or defended) correctly.
+  - OPCM v8 has an `overrides.cfg.startingAnchorRoot` override for this, but it is only allowed under the `SUPER_ROOT_GAMES_MIGRATION` dev feature, which our U20 script does not use.
+- **OD-8 (operator): accept the self-heal; U20 is not changed.**
+  - `closeGame` (called by `claimCredit`) calls `setAnchorState` in a try/catch.
+  - `setAnchorState` accepts a game that `isGameClaimValid` (proper, respected, finalized, DEFENDER_WINS) and whose sequence is greater than the anchor's. A type-9 timestamp (~1.79e9) exceeds 1915395.
+  - So the first honest type-9 game that is finalized and closed moves the anchor to a super root at a timestamp.
+  - OPU-5d was re-dispatched with that heal as Phase A. Its evidence is required before OPU-4.
+- **Consequence:**
+  - **OPU-4 runbook:** for roughly 7200 s + 1800 s after the first type-9 proposal, plus up to one hourly resolver cycle, no type-9 game can be disputed. That is no worse than today, because the live challenger is stopped.
+  - The runbook must confirm `anchorGame()` moved to a type-9 game after the first claim.
+  - A type-9 game created before the heal stays undisputable for its whole life.
+  - OD-4 is the only open OPU-4 decision. Nothing in this entry authorizes an L1 transaction.
+
+- **OPU-5d verdict (#279, merged 2026-10-29, `24d797b`): the anchor heal and the type-9 challenge loop work on a fork.** Worker run 23bb7f4f, Anvil fork of Sepolia block 12022900 at chain id 900852, 263 s wall time.
+  - Anchor heal (Phase A): before, `0x5998…a302`, sequence 1915395 (an L2 block number). The planner read the same values from live Sepolia via PublicNode. After one honest type-9 game (`0x6e91…73B0`) was resolved DEFENDER_WINS, finalized and closed, the anchor moved to that game at L2 timestamp 1793317556. Its root `0x3816…a353` equals `superroot_atTimestamp(1793317556)` on the live :9547, recomputed by the planner.
+  - Challenge (Phase B): op-challenger (scratch build at `d6620202`, prestate `0x0328…4792`) posted one output-root attack on the false game, which resolved CHALLENGER_WINS. The honest game kept `claimDataLen` 1 and resolved DEFENDER_WINS. `isGameClaimValid(false)` stayed false, the anchor never became the false game, and both `claimCredit` calls succeeded after the 3600 s DelayedWETH delay. No cannon or kona step was needed.
+  - Review blocker, fixed before merge (`354eba7`): the script copied `.env.sepolia`, including all seven private keys, into `$TMPDIR/…/fork.env` and never deleted it. The cleanup trap now removes it on every exit, and the temp dir too when the script created it. Planner re-ran helpers at 834 PASS / 0 FAIL; removing the deletes turns two checks red. The worker's own run left no copy, and no `fork.env` remains on the host.
+  - Collateral (planner brief error): the brief's step 0 had a relative `cp .env.example .env`. The worker reports it ran in `~/ForteL2` and overwrote the operator's `.env` with `.env.example`. No backup exists. Impact: the local chain-901 config only. `.env.sepolia` and every launchd job (`FORTEL2_ENV=.env.sepolia`) are unaffected. Briefs now use absolute clone paths with `cp -n`.
+  - CI does not run the fork demo. The evidence is that one run. OPU-5d is done, which clears its gate on OPU-4. OPU-4 still waits on OD-4.
+- Next free decision id is **D-0162**.
 
 ## Template
 
