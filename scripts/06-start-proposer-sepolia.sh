@@ -2,8 +2,8 @@
 # Phase 2c: op-proposer against Sepolia DisputeGameFactory.
 # Default: stock op-proposer. Optional US-054 demo: USE_CUSTOM_PROPOSER=1 + CONFIRM_CUSTOM_PROPOSER_SEPOLIA=1.
 #
-# PROPOSER_GAME_TYPE=8 (today): --rollup-rpc, no --superroot-rpcs. Unchanged argv.
-# PROPOSER_GAME_TYPE=9 (OPU-4 cutover, one variable in .env.sepolia): --superroot-rpcs
+# PROPOSER_GAME_TYPE=8 (pre-U20 only): --rollup-rpc, no --superroot-rpcs. Unchanged argv.
+# PROPOSER_GAME_TYPE=9 (live since the U20 cutover): --superroot-rpcs
 # set to the loopback op-node and no --rollup-rpc. op-proposer v1.17.0 accepts
 # the pair for type 9 (it is not in postInteropGameTypes) and would post an
 # output root as rootClaim; SuperFaultDisputeGame.initialize then reverts

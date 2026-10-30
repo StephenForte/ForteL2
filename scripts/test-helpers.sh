@@ -14605,11 +14605,12 @@ if grep -q 'assert_l2_loopback_urls' "$OPU3A_INIT" \
   && grep -q 'assert_sepolia_rpc_urls' "$OPU3A_INIT" \
   && grep -q 'refuse_foundry_defaults_unless_local_l2' "$OPU3A_INIT" \
   && ! grep -q 'assert_local_rpc_urls' "$OPU3A_INIT" \
-  && grep -q 'PROPOSER_GAME_TYPE=8' "$SCRIPT_DIR/../.env.sepolia.example" \
-  && grep -q 'OPU-4 sets this to 9' "$SCRIPT_DIR/../.env.sepolia.example"; then
-  echo "PASS OPU-3a Sepolia initiate wrapper and PROPOSER_GAME_TYPE=8 template"
+  && grep -Eq '^PROPOSER_GAME_TYPE=9$' "$SCRIPT_DIR/../.env.sepolia.example" \
+  && ! grep -Eq '^PROPOSER_GAME_TYPE=8$' "$SCRIPT_DIR/../.env.sepolia.example" \
+  && grep -q 'since the U20 cutover' "$SCRIPT_DIR/../.env.sepolia.example"; then
+  echo "PASS OPU-3a Sepolia initiate wrapper and PROPOSER_GAME_TYPE=9 template"
 else
-  echo "FAIL OPU-3a initiate wrapper or .env.sepolia.example proposer type" >&2
+  echo "FAIL OPU-3a initiate wrapper or .env.sepolia.example PROPOSER_GAME_TYPE=9 template" >&2
   fail=1
 fi
 
