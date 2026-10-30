@@ -1217,6 +1217,16 @@ FORTEL2_ENV=.env.sepolia ./scripts/stop-all-sepolia.sh
 
 Spec: [`tasks/prd-phase-7-fault-proofs.md`](tasks/prd-phase-7-fault-proofs.md) US-073.
 
+## Fork challenge demo (type 9)
+
+`scripts/opu5-fork-challenge-demo.sh` is a fork-only rehearsal of the type-9 challenge loop. It starts an Anvil fork of public Sepolia at chain id 900852, runs `opu-u20-upgrade-sepolia.sh --fork`, and then does two phases. Phase A posts one honest type-9 game (`propose-loop -once`), warps past the 7200s clock, resolves it `DEFENDER_WINS`, warps past the 1800s finality delay, and closes it. That close is what moves `AnchorStateRegistry` off the last type-8 anchor. Phase B, only after that new anchor is on chain, starts `op-challenger` and posts one more honest type-9 game plus one false one (`create-bad-proposal-sepolia.sh`). The challenger must move on the false game and not on the honest one. After another clock warp the false game resolves `CHALLENGER_WINS` and the honest one `DEFENDER_WINS`. The false game never becomes the anchor, and `isGameClaimValid` stays false for it. Bonds are claimed with `claimCredit`.
+
+The script refuses to sign unless its L1 is loopback and reports chain id 900852. Pids and logs stay under a temp `DATA_DIR`. On exit it deletes the key copy (`fork.env`). When the script created that temp dir itself, it deletes the dir too. It does not edit `.env.sepolia`, does not read a QuickNode URL, and does not stop or start the live stack. The live challenger stays stopped (D-0132 / D-0145). Operator decision OD-1 is fork only.
+
+After the U20 upgrade the anchor stays on the old type-8 game until the first honest type-9 game is finalized and closed. A type-9 game copies that anchor when it is created, so no type-9 game can be disputed before the heal: the old sequence is an L2 block number, and the challenger treats it as a timestamp that is still before L2 genesis.
+
+Measured wall time on this Mac: 4.5 minutes (263 seconds, 2026-10-29). Phase B waits if the safe head has not moved past the phase-A timestamp; that wait is capped at 25 minutes.
+
 ## Fault proofs: what this proved, and what I still trust (US-075)
 
 On 2026-08-24 I ran both halves of a fault-proof dispute against the live chain 852 and watched them resolve the way the design says they should.
