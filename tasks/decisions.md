@@ -1638,6 +1638,12 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - A type-9 game created before the heal stays undisputable for its whole life.
   - OD-4 is the only open OPU-4 decision. Nothing in this entry authorizes an L1 transaction.
 
+- **OPU-5d verdict (#279, merged 2026-10-29, `24d797b`): the anchor heal and the type-9 challenge loop work on a fork.** Worker run 23bb7f4f, Anvil fork of Sepolia block 12022900 at chain id 900852, 263 s wall time.
+  - Anchor heal (Phase A): before, `0x5998…a302`, sequence 1915395 (an L2 block number). The planner read the same values from live Sepolia via PublicNode. After one honest type-9 game (`0x6e91…73B0`) was resolved DEFENDER_WINS, finalized and closed, the anchor moved to that game at L2 timestamp 1793317556. Its root `0x3816…a353` equals `superroot_atTimestamp(1793317556)` on the live :9547, recomputed by the planner.
+  - Challenge (Phase B): op-challenger (scratch build at `d6620202`, prestate `0x0328…4792`) posted one output-root attack on the false game, which resolved CHALLENGER_WINS. The honest game kept `claimDataLen` 1 and resolved DEFENDER_WINS. `isGameClaimValid(false)` stayed false, the anchor never became the false game, and both `claimCredit` calls succeeded after the 3600 s DelayedWETH delay. No cannon or kona step was needed.
+  - Review blocker, fixed before merge (`354eba7`): the script copied `.env.sepolia`, including all seven private keys, into `$TMPDIR/…/fork.env` and never deleted it. The cleanup trap now removes it on every exit, and the temp dir too when the script created it. Planner re-ran helpers at 834 PASS / 0 FAIL; removing the deletes turns two checks red. The worker's own run left no copy, and no `fork.env` remains on the host.
+  - Collateral (planner brief error): the brief's step 0 had a relative `cp .env.example .env`. The worker reports it ran in `~/ForteL2` and overwrote the operator's `.env` with `.env.example`. No backup exists. Impact: the local chain-901 config only. `.env.sepolia` and every launchd job (`FORTEL2_ENV=.env.sepolia`) are unaffected. Briefs now use absolute clone paths with `cp -n`.
+  - CI does not run the fork demo. The evidence is that one run. OPU-5d is done, which clears its gate on OPU-4. OPU-4 still waits on OD-4.
 - Next free decision id is **D-0162**.
 
 ## Template
