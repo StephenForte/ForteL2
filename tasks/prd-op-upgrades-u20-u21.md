@@ -42,7 +42,7 @@ ForteL2 is not superchain-governed, so nothing forces either upgrade. But U21 (o
 |---|---|---|---|
 | op-node | v1.19.11 `43c071cb` | **v1.20.0 `d6620202`** | built 2026-10-29 in `~/src/fortel2/optimism-op-reth-v2.8.0` → `op-node version v1.20.0-d6620202-1792673968` |
 | op-proposer | untagged `43c071cb` | **v1.17.0 `0130abb2`** | new clone `~/src/fortel2/optimism-op-proposer-v1.17.0` (tag object `bbaa87bf` → rc tag `d9285d4f` → commit `0130abb2`), built → `op-proposer version v1.17.0-0130abb2-1793109963` |
-| op-batcher | v1.18.0 `d6620202` | unchanged | D-0156 |
+| op-batcher | v1.18.0 `d6620202` | unchanged by OPU; **v1.18.1 `f73158e5`** since 2026-11-06 | D-0156, D-0163 |
 | op-reth | 2.8.0 `d6620202` | unchanged | D-0155 |
 | op-challenger + kona-host | `da197e45` tree, stopped (D-0132) | v1.11.0 + kona-host v1.9.0, **only when OPU-5/OPU-6 need it** | — |
 
