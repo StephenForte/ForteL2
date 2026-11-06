@@ -3,12 +3,21 @@
 # Mini-only for a green live run (darwin/arm64 builds). CI covers the red
 # path via stubs in scripts/test-helpers.sh — GitHub runners have no pin.
 #
-# Sequencer pins span two commits:
-#   d6620202d4e563957830e688007a0cab29bd80f3: op-node, op-batcher, op-reth
+# Sequencer pins span three commits:
+#   d6620202d4e563957830e688007a0cab29bd80f3: op-node, op-reth
+#   f73158e5e2437f879801cdc21c63a2baccdc28e7: op-batcher
 #   0130abb2f07230ce01c904ba2fbb5d6338ba549f: op-proposer
-# op-node/v1.20.0 and op-batcher/v1.18.0 report v1.20.0-d6620202-<unix>
-# and v1.18.0-d6620202-<unix>, respectively. Their rc.1 tags share the
-# release commit, so each version must immediately precede its commit.
+# op-node/v1.20.0 reports v1.20.0-d6620202-<unix>. Its rc.1 tag shares
+# that release commit, so the version must immediately precede the commit.
+# op-batcher/v1.18.1 reports v1.18.1-f73158e5-<unix>. It is a
+# tag-to-tag-to-commit peel: tag object 0610ae13 points to rc tag object
+# f453c3d7, which points to commit f73158e5. --version reports the commit,
+# not either tag object. Pin the commit. The rc.1 tag sits on the release
+# commit, so the version must immediately precede f73158e5.
+# v1.18.1-rc.1-f73158e5 fails. The previous accept path v1.18.0-d6620202
+# is now a required failure. Do not move op-node or op-reth onto f73158e5
+# (op-node/v1.20.1 and op-reth/v2.8.1-rc.1 are tagged there; they are not
+# this pin).
 # op-proposer/v1.17.0 is a tag-to-tag-to-commit peel: tag object bbaa87bf
 # points to rc tag object d9285d4f, which points to commit 0130abb2.
 # --version reports v1.17.0-0130abb2-<unix>, not either tag object.
@@ -37,8 +46,8 @@ source "$SCRIPT_DIR/lib.sh"
 # Pin measured version/commit pairs, not annotated tag objects.
 PIN_OP_NODE_VERSION='v1.20.0'
 PIN_OP_NODE_COMMIT='d6620202'
-PIN_OP_BATCHER_VERSION='v1.18.0'
-PIN_OP_BATCHER_COMMIT='d6620202'
+PIN_OP_BATCHER_VERSION='v1.18.1'
+PIN_OP_BATCHER_COMMIT='f73158e5'
 PIN_OP_PROPOSER_VERSION='v1.17.0'
 PIN_OP_PROPOSER_COMMIT='0130abb2'
 PIN_RETH_VERSION='2.8.0'
@@ -143,10 +152,12 @@ if ! echo "$NODE_VER" | grep -qE "v1\\.20\\.0-${PIN_OP_NODE_COMMIT}([^0-9A-Za-z]
     "$(oneline "$NODE_VER")"
 fi
 
-# v1.18.0-<commit>, not v1.18.00 and not v1.18.0-rc.1. The rc tag is on
-# d6620202, so a version prefix plus a separate commit grep would accept
-# "v1.18.0-rc.1-d6620202-…". The measured line is v1.18.0-d6620202-<unix>.
-if ! echo "$BATCHER_VER" | grep -qE "v1\\.18\\.0-${PIN_OP_BATCHER_COMMIT}([^0-9A-Za-z]|\$)"; then
+# v1.18.1-<commit> as one adjacent match, not v1.18.10 and not v1.18.1-rc.1.
+# The rc tag is on f73158e5, so a version prefix plus a separate commit grep
+# would accept "v1.18.1-rc.1-f73158e5-…". The measured line is
+# v1.18.1-f73158e5-<unix>. The version is written here, next to the commit,
+# because PIN_OP_BATCHER_VERSION alone does not drive this match.
+if ! echo "$BATCHER_VER" | grep -qE "v1\\.18\\.1-${PIN_OP_BATCHER_COMMIT}([^0-9A-Za-z]|\$)"; then
   fail_mismatch "op-batcher" \
     "${PIN_OP_BATCHER_VERSION} (${PIN_OP_BATCHER_COMMIT})" \
     "$(oneline "$BATCHER_VER")"
