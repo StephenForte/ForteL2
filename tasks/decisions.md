@@ -1651,7 +1651,23 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
 - **First type-9 game and anchor heal.** Game 611, `0xd7CC…9Ad0`, created 08:26:36 PT (no prior type-9 game, so no 8 h wait). `rootClaim` `0x281e…c5fb` equals `superroot_atTimestamp(1793373918)` on :9547. The hourly resolver (`~/fortel2-agents`, pulled to `d6248da` before the window) resolved it DEFENDER_WINS at 11:01 and claimed/closed it at 12:00; `AnchorStateRegistry.anchorGame()` (`0x8f98…F480`) then returned game 611, anchor root `0x281e…c5fb` at 1793373918. The 0.001 ETH bond withdrawal follows the 3600 s DelayedWETH delay. OD-8 is satisfied: type-9 games are disputable from here.
 - **OPU-5.** L2 withdrawal `0x40ab60bd…f398` (block 2937967, 0.0001 ETH, withdrawalHash `0xb070…3563`) proven against game 611 at 12:12 PT (`0xd4c572f2…9d95`) and finalized at 12:44 PT (`0xdf4c733c…c7cd`, receipt status 1). Artifact `data-sepolia/bridge/opu5-withdrawal.json`. Run by the planner from `~/fortel2-agents`; no worker.
 - **Not done:** SOS notices (deferred, OD-4). The live challenger stays stopped (D-0132/D-0145). OPU-6 (U21) is next on the roadmap and is not authorized by this entry.
-- Next free decision id is **D-0163**.
+### D-0163 — **op-batcher v1.18.1 (`f73158e5`) on the Mini since 2026-11-06 11:21 PT. No behaviour change for us; the sequencer pin is now three commits.**
+- **Context:** OP published `op-batcher/v1.18.1` on 2026-11-05 as an optional release: brotli v1.2.7, built-in Holesky config removed. Tag object `0610ae13` → rc tag object `f453c3d7` → commit `f73158e5e2437f879801cdc21c63a2baccdc28e7`. `op-node/v1.20.1` and `op-reth/v2.8.1-rc.1` are tagged on the same commit and were not taken.
+- **Decision (operator, 2026-11-06):** take it.
+- **Checks before the pin (planner, against the live `d6620202` tree):**
+  - `op-batcher/` is identical (`diff -rq`, excluding `bin`). `go list -deps ./op-batcher/cmd` gives the same 73 in-repo packages.
+  - Of those, non-test changes are: `txmgr/cli.go` (one flag's usage text), `op-service/eth/config.go` and `op-node/rollup/types.go` (Holesky removal), `op-core/types` (an added `UserReceipts` helper), `op-core/predeploys` (a `ChainConfig` constant), `op-core/params` (comments), `op-core/nuts/fork_lock.toml` (hash and commit), and `op-alt-da` (DA-server side; we run calldata). The diffs inside `op-alt-da` were listed, not read.
+  - Third-party modules: brotli v1.2.2 → v1.2.7, `x/crypto`, `x/sync`, `x/sys`, `x/term`, `x/text` minor bumps. These bumps were not read line by line.
+  - The live log shows `compression_algo=zlib`, so the brotli change does not reach us. `--help` differs only in the version line, the order of one option list, and Holesky help text.
+  - Build: `just op-batcher` in the new clone `~/src/fortel2/optimism-op-batcher-v1.18.1` (go1.26.10, about 10 s) → `op-batcher version v1.18.1-f73158e5-1793585300`, the release tag and not the rc on the same commit.
+- **Pin (T5, #283, merged as `e3c1df8`):** `check-el-pins.sh` matches `v1.18.1-f73158e5` as one regex. Planner review on the Mini in a scratch clone with `.env`: 838 PASS / 0 FAIL against 834 / 0 on main. By name, 4 PASS lines were added (refusals of `v1.18.0-d6620202`, `v1.18.1-d6620202`, `v1.18.10-f73158e5`, `v1.18.1-rc.1-f73158e5`), 1 renamed, none lost. Mutation probes in the same clone: leaving the regex on `v1.18.0` and splitting it into version and commit greps each turned the suite red. Real binaries: v1.18.1 exits 0, live v1.18.0 exits 1.
+- **Live swap (planner, 2026-11-06):** `bin/op-batcher` in `~/ForteL2` and `~/fortel2-agents` repointed to the new clone. `05-start-batcher-sepolia.sh` ran from `~/ForteL2`, then at `757ec4a`, behind main by #283 only; that script and `lib.sh` are identical on `origin/main`. It stopped pid 87792 and started pid 51772 at 11:21:56 PT. No other process was restarted.
+  - `check-el-pins.sh` at `e3c1df8` with `FORTEL2_EL=reth` → exit 0, `ok op-batcher v1.18.1 (f73158e5)`.
+  - First channel 11:22:57 PT. First batch tx `0x6085891c…f8059`, nonce 28234, published 11:23:57 PT, confirmed 11:24:34 PT.
+  - `safe_l2` moved from 3279706 to 3279874 between 11:22 and 11:24:42 PT, with `unsafe_l2` at 3279897.
+  - 0 error or crit lines since start. The two `warn` lines (throttling disabled, calldata not blobs) are the standing configuration.
+- **Consequence:** the sequencer pin is three commits: op-node and op-reth at `d6620202`, op-batcher at `f73158e5`, op-proposer at `0130abb2`. Rollback: repoint `bin/op-batcher` at `~/src/fortel2/optimism-op-reth-v2.8.0/op-batcher/bin/op-batcher` and restart the batcher alone. The pin check stays red until #283 is reverted too. The Render replica runs no batcher, so it is unaffected. `~/fortel2-agents` needs a pull to get the new `check-el-pins.sh`. No launchd job calls that script.
+- Next free decision id is **D-0164**.
 
 ## Template
 
