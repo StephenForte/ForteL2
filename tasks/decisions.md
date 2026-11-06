@@ -1667,7 +1667,15 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - `safe_l2` moved from 3279706 to 3279874 between 11:22 and 11:24:42 PT, with `unsafe_l2` at 3279897.
   - 0 error or crit lines since start. The two `warn` lines (throttling disabled, calldata not blobs) are the standing configuration.
 - **Consequence:** the sequencer pin is three commits: op-node and op-reth at `d6620202`, op-batcher at `f73158e5`, op-proposer at `0130abb2`. Rollback: repoint `bin/op-batcher` at `~/src/fortel2/optimism-op-reth-v2.8.0/op-batcher/bin/op-batcher` and restart the batcher alone. The pin check stays red until #283 is reverted too. The Render replica runs no batcher, so it is unaffected. `~/fortel2-agents` needs a pull to get the new `check-el-pins.sh`. No launchd job calls that script.
-- Next free decision id is **D-0164**.
+### D-0164 — **`op-reth.pre-v2.8.0` and `historical-proofs.v1-pre-d0155` deleted on 2026-11-06. The v1 proofs restore no longer exists.**
+- **Context:** D-0155 set both for deletion after a clean week, with no ExEx alert.
+- **Checks before deletion (planner, 2026-11-06):** op-reth `2.8.0 (d6620202)` since 2026-10-28; 0 `Critical task`, `ExEx proofs-history crashed` or `panicked` lines in the retained op-reth logs (from 2026-10-27); alert-watch 0 active conditions; `eth_getProof` passes at head-10, head-3,000 and head-100,000; neither path held open by op-reth or referenced by `scripts/` or `launchd/`.
+- **WAL warning, not a fault:** op-reth logs `WAL contains too many blocks` about every 6.4 minutes. `blocks=` peaks near 1,200 and falls to about 450 before the next peak, across all retained logs including before the v2.8.0 swap, and the WAL is 22 MB. It is bounded. The planner did not establish why it sits above the 128 threshold.
+- **Deletion:** the operator ran both `rm -rf` commands, 11:30–11:33 PT.
+- **After (11:33:46 PT):** head 3280169, age 0 s; `eth_getProof` passes at the same three depths; safe 3280054; alert-watch 0 active conditions; op-reth pid 87482 not restarted.
+- **Space:** `df` free went from 30 GiB to 39 GiB, about 9 GiB and not the 80 GB that `du` showed, because APFS clones share blocks. The likely holder of the rest is `op-reth.pre-v2.6.1`, which is also a clone. That is unmeasured. It stays on disk under the current AGENTS text, and removing it is a separate operator decision.
+- **Consequence:** the README v1 proofs restore cannot run on this host. Binary rollback to v2.6.1 still works, because the v2 flag keeps it on the v2 store. A suspect datadir now has only the older `op-reth.pre-v2.6.1` clone to fall back on.
+- Next free decision id is **D-0165**.
 
 ## Template
 
