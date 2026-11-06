@@ -127,6 +127,16 @@
 #                         names the unsafe number and age, plus current_l1,
 #                         head_l1, and their gap. Not a metered L1 read.
 #                         Phase 1 / Anvil (chain 901) never evaluates this.
+#   sequencer-safe-lag    Same probe, same chain gate, same loopback rule,
+#                         same dev-sleep window and one-cycle post-wake
+#                         grace. Fires when unsafe_l2.number - safe_l2.number
+#                         >= SEQUENCER_SAFE_LAG_BLOCKS (default 3600,
+#                         inclusive: 3599 is quiet, 3600 fires). The body
+#                         names unsafe, safe, the lag, the approximate hours
+#                         at a 2 s block time, and that the sequencing window
+#                         is about 12 h. A missing or non-numeric safe or
+#                         unsafe number is a failed probe, never a lag of 0.
+#                         No extra RPC. Chain 901 never evaluates this.
 #   sequencer-unreachable that same probe failed (connection, timeout,
 #                         garbage JSON, missing/null unsafe timestamp) on two
 #                         consecutive runs while the op-node pid is up. One
@@ -166,10 +176,11 @@
 # dev-sleep window or is within one watcher cycle after the wake: Render
 # stays up, the Mac SOURCE does not, and head age grows 1 s/s by arithmetic
 # (D-0141 / D-0144). The window is read from the installed launchd jobs.
-# sequencer-stalled / sequencer-unreachable do not take that last_check
-# grace either. sequencer-stalled is skipped inside the dev-sleep window
-# and during the one-cycle post-wake grace. sequencer-unreachable is skipped
-# when the op-node pid is absent (D-0148).
+# sequencer-stalled / sequencer-safe-lag / sequencer-unreachable do not take
+# that last_check grace either. sequencer-stalled and sequencer-safe-lag are
+# skipped inside the dev-sleep window and during the one-cycle post-wake
+# grace. sequencer-unreachable is skipped when the op-node pid is absent
+# (D-0148).
 #
 # Usage: alert-watch.sh [--test]
 #   --test     synthetic alert, tagged TEST, both channels (post-install shakeout)
@@ -184,6 +195,9 @@
 #   SEQUENCER_STALL_SECS       default 600 (comment in .env.sepolia.example).
 #                              Sepolia unsafe-head age for sequencer-stalled.
 #                              Exclusive. Chain 901 ignores it.
+#   SEQUENCER_SAFE_LAG_BLOCKS  default 3600. Sepolia unsafe_l2.number minus
+#                              safe_l2.number for sequencer-safe-lag.
+#                              Inclusive. Chain 901 ignores it.
 #   SEPOLIA_PROPOSER_INTERVAL  proposer cadence for proposer-overdue, default 8h
 #                              (D-0133/D-0142). Never the legacy PROPOSER_INTERVAL
 #                              Phase-1 Anvil knob — that key is ignored here too.
@@ -277,9 +291,11 @@
 #   ALERT_WATCH_SEQUENCER_SYNC_JSON    canned optimism_syncStatus body (raw
 #                                      JSON, envelope or result). Parsed by
 #                                      the same function as a live reply.
-#                                      Malformed JSON or a missing/null
-#                                      unsafe timestamp is cannot-verify,
-#                                      never a fresh head.
+#                                      Malformed JSON, a missing/null
+#                                      unsafe timestamp, or a missing or
+#                                      non-numeric safe or unsafe number is
+#                                      cannot-verify, never a fresh head and
+#                                      never a lag of 0.
 #   ALERT_WATCH_SEQUENCER_UNREACHABLE=1  inject a failed probe (no socket)
 #   ALERT_WATCH_SEQUENCER_THROW=1      raise inside the probe; other
 #                                      conditions must still evaluate
@@ -1813,9 +1829,11 @@ except Exception as exc:
 # Sepolia (L2_CHAIN_ID=852) only. Chain 901 never reaches this block.
 # Not a metered read: urllib against L2_NODE_RPC_URL, and only when that
 # URL is loopback. A missing unsafe timestamp is a failed probe, never an
-# age of 0. The op-node pid being absent is stack-missing / stack-down,
+# age of 0. A missing or non-numeric safe or unsafe number is a failed
+# probe, never a lag of 0. The op-node pid being absent is stack-missing / stack-down,
 # not sequencer-unreachable.
 SEQUENCER_STALL_SECS = _env_int("SEQUENCER_STALL_SECS", 600)
+SEQUENCER_SAFE_LAG_BLOCKS = _env_int("SEQUENCER_SAFE_LAG_BLOCKS", 3600)
 SEQUENCER_RPC_TIMEOUT = _env_int("ALERT_WATCH_SEQUENCER_TIMEOUT", 15)
 SEQUENCER_RPC_URL = (os.environ.get("L2_NODE_RPC_URL") or "").strip()
 # One watcher cycle after the configured wake. Exclusive at 3600 s, the
@@ -1846,8 +1864,9 @@ def parse_sync_status_doc(doc):
     """Sample dict, or None when the payload cannot prove a fresh head.
 
     A missing unsafe_l2, a null timestamp, or a non-numeric timestamp is
-    None — never an age of 0. current_l1 / head_l1 may be absent; that
-    does not invent a timestamp.
+    None — never an age of 0. A missing or non-numeric safe_l2 number or
+    unsafe_l2 number is None — never a lag of 0. current_l1 / head_l1 may
+    be absent; that does not invent a timestamp.
     """
     if not isinstance(doc, dict):
         return None
@@ -1874,6 +1893,14 @@ def parse_sync_status_doc(doc):
     number = _rpc_int(unsafe.get("number"))
     if number is None:
         return None
+    safe = doc.get("safe_l2")
+    if not isinstance(safe, dict):
+        safe = doc.get("safeL2")
+    if not isinstance(safe, dict) or safe.get("number") is None:
+        return None
+    safe_number = _rpc_int(safe.get("number"))
+    if safe_number is None:
+        return None
     current_blk = doc.get("current_l1")
     if not isinstance(current_blk, dict):
         current_blk = doc.get("currentL1")
@@ -1883,6 +1910,7 @@ def parse_sync_status_doc(doc):
     return {
         "unsafe_number": number,
         "unsafe_ts": float(ts),
+        "safe_number": safe_number,
         "current_l1": _block_field_number(current_blk),
         "head_l1": _block_field_number(head_blk),
     }
@@ -2073,6 +2101,49 @@ def sequencer_ok(sample):
                 dev_sleep_window()["startLocal"],
                 dev_sleep_window()["endLocal"],
             ))
+    _safe_lag_alert(sample)
+
+def _safe_lag_alert(sample):
+    """Fire sequencer-safe-lag from a parsed sync sample.
+
+    The unsafe-age fixture omits safe_number. That is not a syncStatus
+    document and is not a lag of 0. A parsed document with a missing or
+    non-numeric safe or unsafe number never reaches here: the probe is
+    None and the unreachable streak owns it.
+    """
+    if not isinstance(sample, dict) or "safe_number" not in sample:
+        return
+    unsafe_n = sample.get("unsafe_number")
+    safe_n = sample.get("safe_number")
+    if not isinstance(unsafe_n, int) or isinstance(unsafe_n, bool) \
+            or not isinstance(safe_n, int) or isinstance(safe_n, bool):
+        sequencer_fail("safe or unsafe number missing")
+        return
+    lag = unsafe_n - safe_n
+    if lag < SEQUENCER_SAFE_LAG_BLOCKS:
+        return
+    hours = (lag * 2) / 3600.0
+    shown = SEQUENCER_RPC_URL if _is_loopback_rpc(SEQUENCER_RPC_URL) else "<non-loopback>"
+    endpoint = _redact_l1_url(shown) if shown != "<non-loopback>" else shown
+    add(
+        "sequencer-safe-lag",
+        "ForteL2 sequencer safe lag",
+        "sequencer safe lag is %d blocks (unsafe %s, safe %s), about %.1f h "
+        "at a 2 s block time. The sequencing window is about 12 h "
+        "(3600 L1 blocks). threshold %d blocks, inclusive. op-node %s. "
+        "evaluated outside the %s-%s PT dev-sleep window and after "
+        "one watcher cycle of post-wake grace."
+        % (
+            lag,
+            _fmt_num(unsafe_n),
+            _fmt_num(safe_n),
+            hours,
+            SEQUENCER_SAFE_LAG_BLOCKS,
+            endpoint,
+            dev_sleep_window()["startLocal"],
+            dev_sleep_window()["endLocal"],
+        ),
+    )
 
 if l2_chain == "852":
     try:
@@ -2086,7 +2157,8 @@ if l2_chain == "852":
                 if op_node_pid_up():
                     sequencer_fail(
                         "timeout, HTTP failure, garbage JSON, missing unsafe "
-                        "timestamp, or non-loopback URL"
+                        "timestamp, missing or non-numeric safe or unsafe "
+                        "number, or non-loopback URL"
                     )
                 else:
                     state["sequencer_unreachable_streak"] = 0

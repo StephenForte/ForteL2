@@ -70,7 +70,6 @@ start_bg op-node op-node \
   --rollup.l1-chain-config="$FORTEL2_ROOT/config/l1-chain-config.json" \
   --sequencer.enabled=true \
   --sequencer.stopped=false \
-  --sequencer.max-safe-lag=3600 \
   --verifier.l1-confs=0 \
   --p2p.disable=true \
   --p2p.sequencer.key="${SEQUENCER_PRIVATE_KEY}" \

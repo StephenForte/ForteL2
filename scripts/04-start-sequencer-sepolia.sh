@@ -155,7 +155,6 @@ if [[ "$(fortel2_el)" == "reth" ]]; then
     --rollup.config="$ROLLUP" \
     --sequencer.enabled=true \
     --sequencer.stopped=false \
-    --sequencer.max-safe-lag=3600 \
     --verifier.l1-confs="${L1_CONFS}" \
     --p2p.disable=true \
     --p2p.sequencer.key="${SEQUENCER_PRIVATE_KEY}" \
@@ -248,7 +247,6 @@ start_bg op-node op-node \
   --rollup.config="$ROLLUP" \
   --sequencer.enabled=true \
   --sequencer.stopped="${SEQ_STOPPED}" \
-  --sequencer.max-safe-lag=3600 \
   --verifier.l1-confs="${L1_CONFS}" \
   --p2p.disable=true \
   --p2p.sequencer.key="${SEQUENCER_PRIVATE_KEY}" \

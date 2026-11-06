@@ -112,6 +112,7 @@ sq_run() {
     -u ALERT_WATCH_SEQUENCER_CURRENT_L1 \
     -u ALERT_WATCH_SEQUENCER_HEAD_L1 \
     -u ALERT_WATCH_SEQUENCER_SYNC_JSON \
+    -u SEQUENCER_SAFE_LAG_BLOCKS \
     -u ALERT_WATCH_SEQUENCER_UNREACHABLE \
     -u ALERT_WATCH_SEQUENCER_THROW \
     -u ALERT_WATCH_SEQUENCER_TIMEOUT \
@@ -166,11 +167,13 @@ _sq_help_rc=0
 _sq_help_out="$(FORTEL2_ENV="$SQ_FIX/env" "$SQ_AW" --help 2>&1)" || _sq_help_rc=$?
 if [[ "$_sq_help_rc" == "0" ]] \
   && printf '%s' "$_sq_help_out" | grep -q 'sequencer-stalled' \
+  && printf '%s' "$_sq_help_out" | grep -q 'sequencer-safe-lag' \
   && printf '%s' "$_sq_help_out" | grep -q 'sequencer-unreachable' \
   && printf '%s' "$_sq_help_out" | grep -q 'SEQUENCER_STALL_SECS' \
+  && printf '%s' "$_sq_help_out" | grep -q 'SEQUENCER_SAFE_LAG_BLOCKS' \
   && printf '%s' "$_sq_help_out" | grep -q 'ALERT_WATCH_SEQUENCER_UNSAFE_AGE' \
   && printf '%s' "$_sq_help_out" | grep -q 'ALERT_WATCH_SEQUENCER_SYNC_JSON'; then
-  echo "PASS alert-watch.sh --help documents sequencer-stalled, sequencer-unreachable, and their fixtures"
+  echo "PASS alert-watch.sh --help documents sequencer-stalled, sequencer-safe-lag, sequencer-unreachable, and their fixtures"
 else
   echo "FAIL --help must document sequencer stall conditions and fixtures (ec=$_sq_help_rc)" >&2
   printf '%s\n' "$_sq_help_out" >&2
@@ -536,7 +539,148 @@ kill "$SQ_SOCKET_PID" 2>/dev/null || true
 wait "$SQ_SOCKET_PID" 2>/dev/null || true
 SQ_SOCKET_PID=""
 
+# sequencer-safe-lag. Same probe, SYNC_JSON only. Inclusive at 3600.
+# A fresh unsafe timestamp keeps sequencer-stalled quiet so a lag miss
+# cannot hide behind the stall alert.
+sq_sync_json() {
+  python3 - "$1" "$2" "$3" "$4" <<'PY'
+import json, sys
+now_s, unsafe_s, safe_s, mode = sys.argv[1:]
+result = {
+    "unsafe_l2": {"number": int(unsafe_s), "timestamp": int(float(now_s))},
+    "current_l1": {"number": 1},
+    "head_l1": {"number": 2},
+}
+if mode == "ok":
+    result["safe_l2"] = {"number": int(safe_s)}
+elif mode == "bad-safe":
+    result["safe_l2"] = {"number": "nope"}
+elif mode == "missing-safe":
+    pass
+elif mode == "bad-unsafe":
+    result["unsafe_l2"]["number"] = "nope"
+    result["safe_l2"] = {"number": int(safe_s)}
+else:
+    raise SystemExit("bad mode " + mode)
+print(json.dumps({"jsonrpc": "2.0", "id": 1, "result": result}, separators=(",", ":")))
+PY
+}
+sq_lag_failed_probe() {
+  local label="$1"
+  shift
+  sq_reset
+  SQ_OUT="$(sq_run_up "$@" RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$SQ_AW" 2>&1)" && SQ_EC=0 || SQ_EC=$?
+  SQ_OUT2="$(sq_run_up "$@" RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$SQ_AW" 2>&1)" && SQ_EC2=0 || SQ_EC2=$?
+  if [[ "$SQ_EC" -eq 0 && "$SQ_EC2" -eq 0 ]] \
+    && [[ "$SQ_OUT" == *"no alert"* ]] \
+    && [[ "$SQ_OUT" != *"sequencer-safe-lag"* ]] \
+    && [[ "$SQ_OUT" != *"lag is 0"* ]] \
+    && [[ "$SQ_OUT2" == *"condition sequencer-unreachable"* ]] \
+    && [[ "$SQ_OUT2" != *"sequencer-safe-lag"* ]] \
+    && [[ "$SQ_OUT2" != *"lag is 0"* ]]; then
+    echo "PASS alert-watch sequencer-safe-lag $label is a failed probe and does not fire"
+  else
+    echo "FAIL sequencer-safe-lag $label must be a failed probe, not a lag of 0 (ec=$SQ_EC/$SQ_EC2)" >&2
+    echo "$SQ_OUT" >&2
+    echo "$SQ_OUT2" >&2
+    fail=1
+  fi
+}
+
+sq_reset
+SQ_JSON="$(sq_sync_json "$SQ_DAYTIME_NOW" 10000 6401 ok)"
+SQ_OUT="$(sq_run_up ALERT_WATCH_SEQUENCER_SYNC_JSON="$SQ_JSON" \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$SQ_AW" 2>&1)" && SQ_EC=0 || SQ_EC=$?
+if [[ "$SQ_EC" -eq 0 ]] \
+  && [[ ! -f "$SQ_FIX/mock/osascript.calls" ]] \
+  && [[ "$SQ_OUT" == *"no alert"* ]] \
+  && [[ "$SQ_OUT" != *"sequencer-safe-lag"* ]]; then
+  echo "PASS alert-watch sequencer-safe-lag is quiet at lag 3599"
+else
+  echo "FAIL lag 3599 must stay quiet (ec=$SQ_EC)" >&2
+  echo "$SQ_OUT" >&2
+  fail=1
+fi
+
+sq_reset
+SQ_JSON="$(sq_sync_json "$SQ_DAYTIME_NOW" 10000 6400 ok)"
+SQ_OUT="$(sq_run_up ALERT_WATCH_SEQUENCER_SYNC_JSON="$SQ_JSON" \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$SQ_AW" 2>&1)" && SQ_EC=0 || SQ_EC=$?
+if [[ "$SQ_EC" -eq 0 ]] \
+  && [[ "$(cat "$SQ_FIX/mock/osascript.calls" 2>/dev/null || echo 0)" -eq 1 ]] \
+  && [[ "$SQ_OUT" == *"condition sequencer-safe-lag"* ]] \
+  && [[ "$SQ_OUT" != *"condition sequencer-stalled"* ]] \
+  && [[ "$SQ_OUT" != *"condition sequencer-unreachable"* ]] \
+  && grep -q 'unsafe 10000' "$SQ_FIX/mock/osascript.argv" \
+  && grep -q 'safe 6400' "$SQ_FIX/mock/osascript.argv" \
+  && grep -q '3600 blocks' "$SQ_FIX/mock/osascript.argv" \
+  && grep -q 'about 2.0 h' "$SQ_FIX/mock/osascript.argv" \
+  && grep -q 'about 12 h' "$SQ_FIX/mock/osascript.argv" \
+  && grep -q 'threshold 3600' "$SQ_FIX/mock/osascript.argv"; then
+  echo "PASS alert-watch sequencer-safe-lag fires at lag 3600 and names unsafe, safe, lag, hours, and the 12 h window"
+else
+  echo "FAIL lag 3600 must fire sequencer-safe-lag with unsafe, safe, lag, hours, and the sequencing window (ec=$SQ_EC)" >&2
+  echo "$SQ_OUT" >&2
+  fail=1
+fi
+
+sq_lag_failed_probe "missing safe_l2" \
+  ALERT_WATCH_SEQUENCER_SYNC_JSON="$(sq_sync_json "$SQ_DAYTIME_NOW" 10000 0 missing-safe)"
+sq_lag_failed_probe "non-numeric safe_l2" \
+  ALERT_WATCH_SEQUENCER_SYNC_JSON="$(sq_sync_json "$SQ_DAYTIME_NOW" 10000 0 bad-safe)"
+sq_lag_failed_probe "non-numeric unsafe_l2" \
+  ALERT_WATCH_SEQUENCER_SYNC_JSON="$(sq_sync_json "$SQ_DAYTIME_NOW" 10000 6400 bad-unsafe)"
+
+sq_reset
+SQ_JSON="$(sq_sync_json "$SQ_SLEEP_NOW" 10000 6400 ok)"
+SQ_OUT="$(sq_run_up ALERT_WATCH_NOW="$SQ_SLEEP_NOW" \
+  ALERT_WATCH_SEQUENCER_SYNC_JSON="$SQ_JSON" \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$SQ_AW" 2>&1)" && SQ_EC=0 || SQ_EC=$?
+if [[ "$SQ_EC" -eq 0 ]] \
+  && [[ ! -f "$SQ_FIX/mock/osascript.calls" ]] \
+  && [[ "$SQ_OUT" == *"no alert"* ]] \
+  && [[ "$SQ_OUT" != *"sequencer-safe-lag"* ]]; then
+  echo "PASS alert-watch sequencer-safe-lag is suppressed inside the dev-sleep window"
+else
+  echo "FAIL lag 3600 inside the dev-sleep window must not fire sequencer-safe-lag (ec=$SQ_EC)" >&2
+  echo "$SQ_OUT" >&2
+  fail=1
+fi
+
+sq_reset
+SQ_JSON="$(sq_sync_json "$SQ_GRACE_NOW" 10000 6400 ok)"
+SQ_OUT="$(sq_run_up ALERT_WATCH_NOW="$SQ_GRACE_NOW" \
+  ALERT_WATCH_SEQUENCER_SYNC_JSON="$SQ_JSON" \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$SQ_AW" 2>&1)" && SQ_EC=0 || SQ_EC=$?
+if [[ "$SQ_EC" -eq 0 ]] \
+  && [[ ! -f "$SQ_FIX/mock/osascript.calls" ]] \
+  && [[ "$SQ_OUT" == *"no alert"* ]] \
+  && [[ "$SQ_OUT" != *"sequencer-safe-lag"* ]]; then
+  echo "PASS alert-watch sequencer-safe-lag is suppressed inside post-wake grace"
+else
+  echo "FAIL lag 3600 inside post-wake grace must not fire sequencer-safe-lag (ec=$SQ_EC)" >&2
+  echo "$SQ_OUT" >&2
+  fail=1
+fi
+
+sq_reset
+SQ_JSON="$(sq_sync_json "$SQ_DAYTIME_NOW" 10000 6400 ok)"
+SQ_OUT="$(sq_run L2_CHAIN_ID=901 \
+  ALERT_WATCH_SEQUENCER_SYNC_JSON="$SQ_JSON" \
+  RESEND_API_TOKEN='zzQ8mK2wP9nR4tY7bV1hC3x' "$SQ_AW" 2>&1)" && SQ_EC=0 || SQ_EC=$?
+if [[ "$SQ_EC" -eq 0 ]] \
+  && [[ ! -f "$SQ_FIX/mock/osascript.calls" ]] \
+  && [[ "$SQ_OUT" == *"no alert"* ]] \
+  && [[ "$SQ_OUT" != *"sequencer-safe-lag"* ]]; then
+  echo "PASS alert-watch sequencer-safe-lag does not evaluate when L2_CHAIN_ID=901"
+else
+  echo "FAIL L2_CHAIN_ID=901 must not fire sequencer-safe-lag (ec=$SQ_EC)" >&2
+  echo "$SQ_OUT" >&2
+  fail=1
+fi
+
 cleanup_sq
 unset SQ_AW SQ_FIX SQ_DAYTIME_NOW SQ_CORE SQ_BLK SQ_OUT SQ_OUT2 SQ_EC SQ_EC2 \
   SQ_SLEEP_NOW SQ_GRACE_NOW SQ_AFTER_NOW SQ_C SQ_PORT SQ_HITS SQ_SOCKET_PID
-unset -f sq_reset sq_stamp_now sq_mark sq_run sq_run_up sq_cannot_verify cleanup_sq 2>/dev/null || true
+unset -f sq_reset sq_stamp_now sq_mark sq_run sq_run_up sq_cannot_verify \
+  sq_sync_json sq_lag_failed_probe cleanup_sq 2>/dev/null || true
