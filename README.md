@@ -113,7 +113,7 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | yq | 4.53.3 | Homebrew |
 | jq | 1.8.2 | Homebrew |
 | Foundry (`forge`/`cast`/`anvil`) | 1.7.1 | `foundryup` |
-| optimism monorepo (sequencer) | `op-node/v1.20.0` + `op-batcher/v1.18.0` at commit `d6620202…` (D-0158 / D-0156); `op-proposer/v1.17.0` at commit `0130abb2…` (tag object `bbaa87bf` → rc tag object `d9285d4f` → commit) | **op-node** v1.20.0 is built in `~/src/fortel2/optimism-op-reth-v2.8.0/op-node/bin/`; **op-proposer** v1.17.0 in the clone `~/src/fortel2/optimism-op-proposer-v1.17.0`. `./bin/op-node` and `./bin/op-proposer` serve them since the 2026-10-29 10:13 PT sleep/wake swap (D-0158). Their rollback is repoint both at `~/src/fortel2/optimism-v1.19.11` (v1.19.11 / untagged `43c071cb`) and run `dev-sleep.sh sleep` then `wake`. **op-batcher** is `op-batcher/v1.18.0` at `d6620202` (D-0156), built in `~/src/fortel2/optimism-op-reth-v2.8.0/op-batcher/bin/` and served by `./bin/op-batcher` since the 2026-10-29 07:55 PT swap; its rollback is repoint `bin/op-batcher` at `~/src/fortel2/optimism-v1.19.11/op-batcher/bin/op-batcher` (v1.17.4) and restart the batcher |
+| optimism monorepo (sequencer) | `op-node/v1.20.0` at commit `d6620202…` (D-0158); `op-batcher/v1.18.1` at commit `f73158e5…` (D-0163; tag object `0610ae13` → rc tag object `f453c3d7` → commit); `op-proposer/v1.17.0` at commit `0130abb2…` (tag object `bbaa87bf` → rc tag object `d9285d4f` → commit) | **op-node** v1.20.0 is built in `~/src/fortel2/optimism-op-reth-v2.8.0/op-node/bin/`; **op-proposer** v1.17.0 in the clone `~/src/fortel2/optimism-op-proposer-v1.17.0`. `./bin/op-node` and `./bin/op-proposer` serve them since the 2026-10-29 10:13 PT sleep/wake swap (D-0158). Their rollback is repoint both at `~/src/fortel2/optimism-v1.19.11` (v1.19.11 / untagged `43c071cb`) and run `dev-sleep.sh sleep` then `wake`. **op-batcher** is `op-batcher/v1.18.1` at `f73158e5` (D-0163), built in the clone `~/src/fortel2/optimism-op-batcher-v1.18.1` and served by `./bin/op-batcher` since the 2026-11-06 11:21 PT swap; its rollback is repoint `bin/op-batcher` at `~/src/fortel2/optimism-op-reth-v2.8.0/op-batcher/bin/op-batcher` (v1.18.0) and restart the batcher |
 | optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
 | op-reth | annotated tag `op-reth/v2.8.0` (tag object `b0763e57…`, peels to `d6620202…`) → reports `op-reth Version: 2.8.0` commit `d6620202d4e563957830e688007a0cab29bd80f3` | Clone `~/src/fortel2/optimism-op-reth-v2.8.0` (D-0155 pin for the Mac sequencer binary). `./bin/op-reth` serves it since the 2026-10-28 10:59 PT swap (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.8.0`). Rollback is repoint `bin/op-reth` at that v2.6.1 tree and restart; the explicit `--proofs-history.storage-version=v2` flag keeps v2.6.1 on the v2 store. `~/src/fortel2/optimism-op-reth-v2.6.0` (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.6.1`), `optimism-op-reth-v2.5.0`, and `optimism-op-reth` (v2.3.3) stay. The Render replica runs v2.8.0 too (fortel2-replica R-0030, merged 2026-10-28; the public read reports `op-reth/v2.8.0-d6620202/x86_64-linux`). `./scripts/check-el-pins.sh` requires 2.8.0. |
@@ -186,7 +186,7 @@ python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pi
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
-./scripts/check-el-pins.sh         # Mini arm64: op-node v1.20.0 + op-batcher v1.18.0 (commit d6620202), op-proposer v1.17.0 (commit 0130abb2) + op-reth Version 2.8.0 / d6620202d4e563957830e688007a0cab29bd80f3 (annotated tag object b0763e57; CI has no Mini binaries)
+./scripts/check-el-pins.sh         # Mini arm64: op-node v1.20.0 (commit d6620202), op-batcher v1.18.1 (commit f73158e5), op-proposer v1.17.0 (commit 0130abb2) + op-reth Version 2.8.0 / d6620202d4e563957830e688007a0cab29bd80f3 (annotated tag object b0763e57; CI has no Mini binaries)
 # Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL=reth (since 2026-09-02).
 # Local 901 still defaults geth (no 901 reth path). Task 5 already ran; there is no
 # geth rollback (Task 9 deleted the Render disk).
@@ -314,6 +314,12 @@ ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.0/rust/target/release/op-reth ~/src/
 #   ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.0/rust/target/release/op-reth ./bin/op-reth
 #   ./scripts/check-el-pins.sh
 # eth_getLogs with fromBlock past the head is -32602 on v2.8.0 (v2.6.1 returned []).
+
+# op-batcher — clone at op-batcher/v1.18.1 (D-0163). Replaces the op-batcher link above.
+git clone --depth 1 --branch op-batcher/v1.18.1 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-batcher-v1.18.1
+(cd ~/src/fortel2/optimism-op-batcher-v1.18.1 && just op-batcher)
+# Measured --version: op-batcher version v1.18.1-f73158e5-<unix>
+ln -sfn ~/src/fortel2/optimism-op-batcher-v1.18.1/op-batcher/bin/op-batcher ~/src/fortel2/bin/op-batcher
 ```
 
 ## Endpoints
