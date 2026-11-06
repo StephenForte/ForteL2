@@ -1690,7 +1690,12 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - `eth_getProof` passes at head-10, head-3,000 and head-100,000. Replica on v2.8.0 matches hash and state root at 11 sampled blocks from 3282688 to 3282718, which include blocks built after the swap.
 - **Not yet observed:** a proposal from this op-node, and the 00:15 scheduled wake on the new binaries. The swap ran the same wake path by hand.
 - **Consequence:** the sequencer pin is three commits: `f73158e5` (op-node, op-batcher), `72207294` (op-reth), `0130abb2` (op-proposer). The Mac is one release ahead of the replica until the operator's replica bump, and if the trie path ever triggers the two would disagree on a block. Rollback: repoint `bin/op-node` or `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.8.0` and run sleep/wake; the pin check stays red until #286 is reverted. Delete `op-reth.pre-v2.8.1` once v2.8.1 has run a week clean.
-- Next free decision id is **D-0166**.
+### D-0166 — **The Render replica runs op-reth v2.8.1 and op-node v1.20.1 since 2026-11-06 13:27 PT (fortel2-replica R-0032). Sequencer and replica match again.**
+- **Done in:** fortel2-replica #92 (`a80b7aa`) and #93 (deploy record). Deploy `dep-dbn4c2bncjis73e47350`, live 13:27:35 PT. No canary: the operator waived the D-0152 / R-0023 canary for this bump, recorded in R-0032 as an exception that does not change D-0152. It is the first op-reth bump to skip it.
+- **Planner check from this repo (2026-11-06 13:41 PT):** public read reports `op-reth/v2.8.1-72207294/x86_64-linux`. Replica head 3283888, age 197 s, against sequencer 3283986. Hash and state root match the sequencer at 11 of 11 sampled blocks across the last 60. `Dockerfile.reth` on main pins `op-node:v1.20.1` and `op-reth:v2.8.1` by digest.
+- **Not checked here:** replica boot logs and `optimism_syncStatus` (Web Shell only). Those are taken from R-0032, not re-measured. Samples are not a full-range comparison.
+- **Consequence:** the D-0165 "one release ahead" window closed after about 30 minutes. Replica head lag of a few minutes between batches is normal: it follows what is posted to L1.
+- Next free decision id is **D-0167**.
 
 ## Template
 
