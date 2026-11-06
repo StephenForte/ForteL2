@@ -4,39 +4,51 @@
 # path via stubs in scripts/test-helpers.sh — GitHub runners have no pin.
 #
 # Sequencer pins span three commits:
-#   d6620202d4e563957830e688007a0cab29bd80f3: op-node, op-reth
-#   f73158e5e2437f879801cdc21c63a2baccdc28e7: op-batcher
+#   f73158e5e2437f879801cdc21c63a2baccdc28e7: op-node, op-batcher
+#   722072949ce583f361424a160082186ee14cac71: op-reth
 #   0130abb2f07230ce01c904ba2fbb5d6338ba549f: op-proposer
-# op-node/v1.20.0 reports v1.20.0-d6620202-<unix>. Its rc.1 tag shares
-# that release commit, so the version must immediately precede the commit.
+# op-node/v1.20.1 is a tag-to-tag-to-commit peel: tag object 2f6d67cb
+# points to rc tag object 09314139, which points to commit f73158e5.
+# --version reports v1.20.1-f73158e5-<unix>, not either tag object.
+# Pin the commit. The rc.1 tag sits on that release commit, so the
+# version must immediately precede f73158e5. v1.20.1-rc.1-f73158e5 fails.
+# The previous accept path v1.20.0-d6620202 is now a required failure.
+# Do not move op-reth onto f73158e5 (op-reth/v2.8.1-rc.1 is tagged there;
+# it is not this pin).
 # op-batcher/v1.18.1 reports v1.18.1-f73158e5-<unix>. It is a
 # tag-to-tag-to-commit peel: tag object 0610ae13 points to rc tag object
 # f453c3d7, which points to commit f73158e5. --version reports the commit,
 # not either tag object. Pin the commit. The rc.1 tag sits on the release
 # commit, so the version must immediately precede f73158e5.
 # v1.18.1-rc.1-f73158e5 fails. The previous accept path v1.18.0-d6620202
-# is now a required failure. Do not move op-node or op-reth onto f73158e5
-# (op-node/v1.20.1 and op-reth/v2.8.1-rc.1 are tagged there; they are not
-# this pin).
+# is now a required failure.
 # op-proposer/v1.17.0 is a tag-to-tag-to-commit peel: tag object bbaa87bf
 # points to rc tag object d9285d4f, which points to commit 0130abb2.
 # --version reports v1.17.0-0130abb2-<unix>, not either tag object.
 # The rc.1 tag and an untagged build at 0130abb2 must still fail.
-# op-reth/v2.8.0 tag object b0763e5798fa9a63d25a31a63afccdc18ae62b1c
-# peels to d6620202d4e563957830e688007a0cab29bd80f3. Pin the commit,
-# not the tag object. The old op-node v1.19.11-43c071cb and op-proposer
+# op-reth/v2.8.1 tag object b3570a4e peels through rc tag object 359b1f4f
+# (op-reth/v2.8.1-rc.2) to commit
+# 722072949ce583f361424a160082186ee14cac71. Pin the commit, not the tag
+# object. op-reth/v2.8.1-rc.1 is on f73158e5, a different commit, and
+# must fail. The previous op-reth/v2.8.0 pin (annotated tag object
+# b0763e57, op-reth Version: 2.8.0, commit
+# d6620202d4e563957830e688007a0cab29bd80f3) must fail.
+# The old op-node v1.19.11-43c071cb and op-proposer
 # untagged-43c071cb accept paths are now required failures.
-# op-reth reports the whole line "op-reth Version: 2.8.0" and
-# "Commit SHA: d6620202d4e563957830e688007a0cab29bd80f3".
+# op-reth reports the whole line "op-reth Version: 2.8.1" and
+# "Commit SHA: 722072949ce583f361424a160082186ee14cac71".
 # The tag string is not the --version line. Do not grep a bare "2.8"
-# (that would accept 2.8.1 and later 2.8.x) or "op-reth/v2.8.0" by itself.
+# (that would accept 2.8.1-rc.2, 2.8.10, and later 2.8.x) or
+# "op-reth/v2.8.1" by itself.
 # Match the measured version line and the full commit, each on its own line.
-# The D-0154 op-reth pin (2.6.1 / e16bffa18420c86dbab693097bc33117f74a5f7d)
-# must still fail. So must the D-0150 set (2.6.0 /
-# da6d3252491754837a778061db0cc47236ec13c6, v1.19.9 / v1.17.2 / untagged at
-# da6d3252) and the D-0149/D-0147 set (2.5.0 /
+# The D-0155 op-reth pin (2.8.0 /
+# d6620202d4e563957830e688007a0cab29bd80f3) must still fail. So must the
+# D-0154 pin (2.6.1 / e16bffa18420c86dbab693097bc33117f74a5f7d), the
+# D-0150 set (2.6.0 / da6d3252491754837a778061db0cc47236ec13c6, v1.19.9 /
+# v1.17.2 / untagged at da6d3252) and the D-0149/D-0147 set (2.5.0 /
 # 9f76a9d216f2d9aa99c5f45d7aad674acde93c14, v1.19.8 / v1.17.1 / untagged at
 # 9f76a9d2). A new op-reth with an older node, batcher, or proposer fails,
+# and the reverse fails. A new op-node with the previous op-reth fails,
 # and the reverse fails.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,14 +56,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 # Pin measured version/commit pairs, not annotated tag objects.
-PIN_OP_NODE_VERSION='v1.20.0'
-PIN_OP_NODE_COMMIT='d6620202'
+PIN_OP_NODE_VERSION='v1.20.1'
+PIN_OP_NODE_COMMIT='f73158e5'
 PIN_OP_BATCHER_VERSION='v1.18.1'
 PIN_OP_BATCHER_COMMIT='f73158e5'
 PIN_OP_PROPOSER_VERSION='v1.17.0'
 PIN_OP_PROPOSER_COMMIT='0130abb2'
-PIN_RETH_VERSION='2.8.0'
-PIN_RETH_COMMIT='d6620202d4e563957830e688007a0cab29bd80f3'
+PIN_RETH_VERSION='2.8.1'
+PIN_RETH_COMMIT='722072949ce583f361424a160082186ee14cac71'
 
 FORTEL2_EL="${FORTEL2_EL:-geth}"
 OP_NODE_BIN="${OP_NODE_BIN:-$BIN_DIR/op-node}"
@@ -144,9 +156,12 @@ if [[ "$FORTEL2_EL" == "reth" ]] && looks_like_geth "$RETH_VER" "$OP_RETH_BIN"; 
     "op-geth binary ($OP_RETH_BIN): $(oneline "$RETH_VER")"
 fi
 
-# Match version immediately followed by commit, then a non-alphanumeric
-# boundary (or end). Separate greps would accept the rc tag at this commit.
-if ! echo "$NODE_VER" | grep -qE "v1\\.20\\.0-${PIN_OP_NODE_COMMIT}([^0-9A-Za-z]|\$)"; then
+# v1.20.1-<commit> as one adjacent match, not v1.20.10 and not v1.20.1-rc.1.
+# The rc tag is on f73158e5, so a version prefix plus a separate commit grep
+# would accept "v1.20.1-rc.1-f73158e5-…". The measured line is
+# v1.20.1-f73158e5-<unix>. The version is written here, next to the commit,
+# because PIN_OP_NODE_VERSION alone does not drive this match.
+if ! echo "$NODE_VER" | grep -qE "v1\\.20\\.1-${PIN_OP_NODE_COMMIT}([^0-9A-Za-z]|\$)"; then
   fail_mismatch "op-node" \
     "${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})" \
     "$(oneline "$NODE_VER")"
@@ -170,10 +185,11 @@ if ! echo "$PROPOSER_VER" | grep -qE "v1\\.17\\.0-${PIN_OP_PROPOSER_COMMIT}([^0-
     "$(oneline "$PROPOSER_VER")"
 fi
 
-# Whole line, not a substring: "2.8.0" must not accept "2.8.1", "2.8.10",
-# "2.6.1", or "2.8", and "op-reth Version:" must not accept the old
-# "Reth Version:" line, the D-0154 "op-reth Version: 2.6.1" line, the
-# D-0150 "op-reth Version: 2.6.0" line, or the bare tag "op-reth/v2.8.0".
+# Whole line, not a substring: "2.8.1" must not accept "2.8.10",
+# "2.8.1-rc.2", "2.6.1", or "2.8", and "op-reth Version:" must not accept
+# the old "Reth Version:" line, the D-0155 "op-reth Version: 2.8.0" line,
+# the D-0154 "op-reth Version: 2.6.1" line, the D-0150
+# "op-reth Version: 2.6.0" line, or the bare tag "op-reth/v2.8.1".
 if ! echo "$RETH_VER" | grep -qx "op-reth Version: ${PIN_RETH_VERSION}" \
   || ! echo "$RETH_VER" | grep -qx "Commit SHA: ${PIN_RETH_COMMIT}"; then
   fail_mismatch "op-reth" \
@@ -184,5 +200,5 @@ fi
 echo "ok op-node ${PIN_OP_NODE_VERSION} (${PIN_OP_NODE_COMMIT})"
 echo "ok op-batcher ${PIN_OP_BATCHER_VERSION} (${PIN_OP_BATCHER_COMMIT})"
 echo "ok op-proposer ${PIN_OP_PROPOSER_VERSION} (${PIN_OP_PROPOSER_COMMIT})"
-echo "ok op-reth tag op-reth/v2.8.0 reports op-reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}"
+echo "ok op-reth tag op-reth/v2.8.1 reports op-reth Version: ${PIN_RETH_VERSION} commit ${PIN_RETH_COMMIT}"
 echo "ok FORTEL2_EL=${FORTEL2_EL}"
