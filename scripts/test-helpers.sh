@@ -7147,22 +7147,28 @@ fi
 # (object b0763e57 peels to d6620202). Matcher must use the measured line
 # "op-reth Version: 2.8.0" plus the full commit, not a bare "2.8", the tag
 # string, the D-0154 2.6.1 pin, the D-0150 2.6.0 pin, the previous 2.5.0 pin,
-# or 2.3.0-dev. op-node joins op-batcher at d6620202; op-proposer is at 0130abb2.
-# op-batcher is v1.18.0 at d6620202 (same commit as op-reth; --version
-# prints the short commit). v1.18.0-rc.1 is that same commit and must fail.
-# The proposer tag bbaa87bf peels through rc tag d9285d4f to 0130abb2.
-# The op-batcher/v1.18.0 tag object 04a6c0f9 peels to d6620202; do not pin it.
+# or 2.3.0-dev. op-node and op-reth stay at d6620202; op-batcher is
+# v1.18.1 at f73158e5; op-proposer is at 0130abb2. Three commits, not two.
+# --version prints v1.18.1-f73158e5-<unix>. v1.18.1-rc.1 is that same commit
+# and must fail. The proposer tag bbaa87bf peels through rc tag d9285d4f to
+# 0130abb2. The op-batcher/v1.18.1 tag object 0610ae13 peels through rc tag
+# object f453c3d7 to f73158e5; do not pin either tag object.
+# The previous accept path v1.18.0-d6620202 is now a required refusal.
+# v1.17.4-43c071cb stays a refusal: different version and commit from the
+# v1.18.1 lookalikes. The match is one adjacent version-commit, so a regex
+# still looking for v1.18.0, or a split version grep plus commit grep, fails.
 if grep -q "PIN_RETH_VERSION='2.8.0'" "$PIN_CHECK" \
   && grep -q "PIN_RETH_COMMIT='d6620202d4e563957830e688007a0cab29bd80f3'" "$PIN_CHECK" \
   && grep -q "PIN_OP_NODE_VERSION='v1.20.0'" "$PIN_CHECK" \
   && grep -q "PIN_OP_NODE_COMMIT='d6620202'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_BATCHER_VERSION='v1.18.0'" "$PIN_CHECK" \
-  && grep -q "PIN_OP_BATCHER_COMMIT='d6620202'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_BATCHER_VERSION='v1.18.1'" "$PIN_CHECK" \
+  && grep -q "PIN_OP_BATCHER_COMMIT='f73158e5'" "$PIN_CHECK" \
+  && grep -Fq 'v1\\.18\\.1-${PIN_OP_BATCHER_COMMIT}' "$PIN_CHECK" \
   && grep -q "PIN_OP_PROPOSER_VERSION='v1.17.0'" "$PIN_CHECK" \
   && grep -q "PIN_OP_PROPOSER_COMMIT='0130abb2'" "$PIN_CHECK"; then
-  echo "PASS check-el-pins.sh pins op-reth Version 2.8.0 / d6620202, op-node v1.20.0 at d6620202, op-batcher v1.18.0 at d6620202, op-proposer v1.17.0 at 0130abb2"
+  echo "PASS check-el-pins.sh pins op-reth Version 2.8.0 / d6620202, op-node v1.20.0 at d6620202, op-batcher v1.18.1 at f73158e5, op-proposer v1.17.0 at 0130abb2"
 else
-  echo "FAIL check-el-pins.sh must pin 2.8.0 / d6620202d4e563957830e688007a0cab29bd80f3 / op-node v1.20.0 at d6620202 / op-batcher v1.18.0 at d6620202 / op-proposer v1.17.0 at 0130abb2" >&2
+  echo "FAIL check-el-pins.sh must pin 2.8.0 / d6620202d4e563957830e688007a0cab29bd80f3 / op-node v1.20.0 at d6620202 / op-batcher v1.18.1 at f73158e5 (adjacent v1.18.1-commit match) / op-proposer v1.17.0 at 0130abb2" >&2
   fail=1
 fi
 if grep -q 'file -L' "$PIN_CHECK"; then
@@ -7179,24 +7185,45 @@ echo "op-node version v1.20.0-d6620202-1792673968"
 EOS
 cat > "$PIN_FIX/op-batcher" <<'EOS'
 #!/bin/sh
+echo "op-batcher version v1.18.1-f73158e5-1793585300"
+EOS
+# Previous accept path. Required failure: v1.18.0 at d6620202.
+cat > "$PIN_FIX/op-batcher-v1180" <<'EOS'
+#!/bin/sh
 echo "op-batcher version v1.18.0-d6620202-1792673968"
 EOS
-# Previous accept path. Required failure: v1.17.4 at 43c071cb.
+# Right version, the previous batcher commit. A version-only check would accept this.
+cat > "$PIN_FIX/op-batcher-v1181-cmt" <<'EOS'
+#!/bin/sh
+echo "op-batcher version v1.18.1-d6620202-1793585300"
+EOS
+# Would pass a naive "v1.18.1" prefix grep. Commit is the real one.
+cat > "$PIN_FIX/op-batcher-v1181-prefix" <<'EOS'
+#!/bin/sh
+echo "op-batcher version v1.18.10-f73158e5-1793585300"
+EOS
+# rc tag is on f73158e5. A "v1.18.1" prefix plus a commit grep accepts this.
+cat > "$PIN_FIX/op-batcher-v1181-rc" <<'EOS'
+#!/bin/sh
+echo "op-batcher version v1.18.1-rc.1-f73158e5-1793585300"
+EOS
+# Older accept path. Required failure: v1.17.4 at 43c071cb. Not redundant
+# with the v1.18.1 lookalikes: different version and different commit.
 cat > "$PIN_FIX/op-batcher-v1174" <<'EOS'
 #!/bin/sh
 echo "op-batcher version v1.17.4-43c071cb-1792624643"
 EOS
-# Right version, the previous op-node commit. A version-only check would accept this.
+# Previous pin's wrong-commit case. Still a required refusal.
 cat > "$PIN_FIX/op-batcher-v1180-cmt" <<'EOS'
 #!/bin/sh
 echo "op-batcher version v1.18.0-43c071cb-1792673968"
 EOS
-# Would pass a naive "v1.18.0" prefix grep. Commit is the real one.
+# Previous pin's prefix trap. Still a required refusal.
 cat > "$PIN_FIX/op-batcher-v1180-prefix" <<'EOS'
 #!/bin/sh
 echo "op-batcher version v1.18.00-d6620202-1792673968"
 EOS
-# rc tag is on d6620202. A "v1.18.0" prefix plus a commit grep accepts this.
+# Previous pin's rc tag on d6620202. Still a required refusal.
 cat > "$PIN_FIX/op-batcher-v1180-rc" <<'EOS'
 #!/bin/sh
 echo "op-batcher version v1.18.0-rc.1-d6620202-1792673968"
@@ -7332,6 +7359,8 @@ cat > "$PIN_FIX/op-geth" <<'EOS'
 echo "op-geth version 1.101702.2-stable-e8800cff"
 EOS
 chmod +x "$PIN_FIX/op-node" "$PIN_FIX/op-batcher" "$PIN_FIX/op-proposer" \
+  "$PIN_FIX/op-batcher-v1180" "$PIN_FIX/op-batcher-v1181-cmt" \
+  "$PIN_FIX/op-batcher-v1181-prefix" "$PIN_FIX/op-batcher-v1181-rc" \
   "$PIN_FIX/op-batcher-v1174" "$PIN_FIX/op-batcher-v1180-cmt" \
   "$PIN_FIX/op-batcher-v1180-prefix" "$PIN_FIX/op-batcher-v1180-rc" \
   "$PIN_FIX/op-node-d0150" "$PIN_FIX/op-batcher-d0150" "$PIN_FIX/op-proposer-d0150" \
@@ -7352,7 +7381,7 @@ pin_stub_env() {
 PIN_OK_OUT="$(pin_stub_env "$PIN_FIX/op-reth")" && PIN_OK_EC=0 || PIN_OK_EC=$?
 if [[ "$PIN_OK_EC" -eq 0 ]] \
   && echo "$PIN_OK_OUT" | grep -q 'ok op-node v1.20.0 (d6620202)' \
-  && echo "$PIN_OK_OUT" | grep -q 'ok op-batcher v1.18.0 (d6620202)' \
+  && echo "$PIN_OK_OUT" | grep -q 'ok op-batcher v1.18.1 (f73158e5)' \
   && echo "$PIN_OK_OUT" | grep -q 'ok op-proposer v1.17.0 (0130abb2)'; then
   echo "PASS check-el-pins.sh accepts matching stub versions"
 else
@@ -7398,6 +7427,74 @@ op-proposer|v1.17.00-0130abb2-1793109963
 op-proposer|v1.17.0-rc.1-0130abb2-1793109963
 EOS
 # The previous good batcher string is now a required failure.
+PIN_V1180_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher-v1180" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer" \
+  OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_V1180_EC=0 || PIN_V1180_EC=$?
+if [[ "$PIN_V1180_EC" -ne 0 ]] \
+  && echo "$PIN_V1180_OUT" | grep -q 'op-batcher pin mismatch' \
+  && echo "$PIN_V1180_OUT" | grep -Fq 'got: op-batcher version v1.18.0-d6620202-1792673968'; then
+  echo "PASS check-el-pins.sh goes red on the previous op-batcher pin (v1.18.0-d6620202)"
+else
+  echo "FAIL a v1.18.0-d6620202 op-batcher must fail the pin check (ec=$PIN_V1180_EC)" >&2
+  echo "$PIN_V1180_OUT" >&2
+  fail=1
+fi
+# Right version, previous commit. A version-only check would accept this.
+PIN_V1181_CMT_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher-v1181-cmt" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer" \
+  OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_V1181_CMT_EC=0 || PIN_V1181_CMT_EC=$?
+if [[ "$PIN_V1181_CMT_EC" -ne 0 ]] \
+  && echo "$PIN_V1181_CMT_OUT" | grep -q 'op-batcher pin mismatch' \
+  && echo "$PIN_V1181_CMT_OUT" | grep -Fq 'got: op-batcher version v1.18.1-d6620202-1793585300'; then
+  echo "PASS check-el-pins.sh goes red on v1.18.1 at the previous batcher commit (d6620202)"
+else
+  echo "FAIL a v1.18.1-d6620202 op-batcher must fail the pin check (ec=$PIN_V1181_CMT_EC)" >&2
+  echo "$PIN_V1181_CMT_OUT" >&2
+  fail=1
+fi
+# Prefix match. A naive "v1.18.1" grep would accept v1.18.10.
+PIN_V1181_PFX_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher-v1181-prefix" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer" \
+  OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_V1181_PFX_EC=0 || PIN_V1181_PFX_EC=$?
+if [[ "$PIN_V1181_PFX_EC" -ne 0 ]] \
+  && echo "$PIN_V1181_PFX_OUT" | grep -q 'op-batcher pin mismatch' \
+  && echo "$PIN_V1181_PFX_OUT" | grep -Fq 'got: op-batcher version v1.18.10-f73158e5-1793585300'; then
+  echo "PASS check-el-pins.sh refuses a v1.18.10 prefix match (not a bare v1.18.1 grep)"
+else
+  echo "FAIL check-el-pins.sh must not accept v1.18.10 as the v1.18.1 pin (ec=$PIN_V1181_PFX_EC)" >&2
+  echo "$PIN_V1181_PFX_OUT" >&2
+  fail=1
+fi
+# rc tag on the release commit. A split version grep plus commit grep accepts this.
+PIN_V1181_RC_OUT="$(
+  OP_NODE_BIN="$PIN_FIX/op-node" \
+  OP_BATCHER_BIN="$PIN_FIX/op-batcher-v1181-rc" \
+  OP_PROPOSER_BIN="$PIN_FIX/op-proposer" \
+  OP_RETH_BIN="$PIN_FIX/op-reth" \
+    "$PIN_CHECK" 2>&1
+)" && PIN_V1181_RC_EC=0 || PIN_V1181_RC_EC=$?
+if [[ "$PIN_V1181_RC_EC" -ne 0 ]] \
+  && echo "$PIN_V1181_RC_OUT" | grep -q 'op-batcher pin mismatch' \
+  && echo "$PIN_V1181_RC_OUT" | grep -Fq 'got: op-batcher version v1.18.1-rc.1-f73158e5-1793585300'; then
+  echo "PASS check-el-pins.sh refuses v1.18.1-rc.1 on the same commit f73158e5"
+else
+  echo "FAIL v1.18.1-rc.1 at f73158e5 must fail the pin check (ec=$PIN_V1181_RC_EC)" >&2
+  echo "$PIN_V1181_RC_OUT" >&2
+  fail=1
+fi
+# Older accept path. Kept: v1.17.4-43c071cb is a different version and commit.
 PIN_V1174_OUT="$(
   OP_NODE_BIN="$PIN_FIX/op-node" \
   OP_BATCHER_BIN="$PIN_FIX/op-batcher-v1174" \
