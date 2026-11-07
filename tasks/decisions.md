@@ -1695,7 +1695,13 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
 - **Planner check from this repo (2026-11-06 13:41 PT):** public read reports `op-reth/v2.8.1-72207294/x86_64-linux`. Replica head 3283888, age 197 s, against sequencer 3283986. Hash and state root match the sequencer at 11 of 11 sampled blocks across the last 60. `Dockerfile.reth` on main pins `op-node:v1.20.1` and `op-reth:v2.8.1` by digest.
 - **Not checked here:** replica boot logs and `optimism_syncStatus` (Web Shell only). Those are taken from R-0032, not re-measured. Samples are not a full-range comparison.
 - **Consequence:** the D-0165 "one release ahead" window closed after about 30 minutes. Replica head lag of a few minutes between batches is normal: it follows what is posted to L1.
-- Next free decision id is **D-0167**.
+
+### D-0167 — **GO-2026-5932 is closed: `x/crypto` is pinned to an untagged pseudo-version that removes `openpgp`, and `klauspost/compress` is v1.20.3 (#289). Corrects D-0153's "no upstream fix".**
+- **Context:** PatchHog flagged `compress` v1.18.7 (GHSA-fpmh-frq8-7rj8 / GO-2026-6865, zstd panic on a crafted two-block frame) and `x/crypto` v0.56.0 (GO-2026-5932, twice: fix at the pseudo-version, and at v0.58.1) at `batcher/go.mod`. Both pins were in all three modules. Neither was reachable: `go list -deps -test` shows no `compress/zstd`, `huff0`, `fse` or `x/crypto/openpgp` in any module.
+- **Decision:** #289 (merge `4f56cc9`) pins `compress` v1.20.3 and `x/crypto` v0.58.1-0.20261009181718-2f1f834330b2 in `batcher/`, `proposer/` and `derivation/`. The pseudo-version stays because no v0.58.1 tag exists (404 on proxy.golang.org) and v0.58.0 still ships `openpgp`.
+- **Verified:** planner re-ran tidy, verify, build, tests and both `govulncheck` modes on `8d44ed6`; all clean in all three modules. Module zips: v0.58.0 has 51 `openpgp` files, the pseudo-version 0. PatchHog reported 0 findings on that head.
+- **Consequence:** no Go advisory remains tracked. `govulncheck -scan module` reports nothing for `batcher/` and `proposer/` even at the vulnerable pins (it exited 0 on `0f1389f`), so only `derivation/` can go red on a module-level advisory; check pins with `go list -m` in all three. Do not move `x/crypto` to v0.58.0. Nothing live changed: the custom batcher and proposer are opt-in.
+- Next free decision id is **D-0168**.
 
 ## Template
 
