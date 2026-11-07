@@ -139,7 +139,7 @@ Reference op-node / op-geth ──► optimism_syncStatus + eth_getBlockByNumber
 
 ## Tracked dependency advisories
 
-Same as `batcher/` / `proposer/` — **GO-2026-5932** (`x/crypto/openpgp` indirect); `govulncheck ./…` on `derivation/` module.
+None tracked. **GO-2026-5932** (`x/crypto/openpgp` indirect) closed 2026-11-06 (D-0167); keep running `govulncheck ./…` on the `derivation/` module.
 
 ## Implementation notes (T4, 2026-08-04)
 
