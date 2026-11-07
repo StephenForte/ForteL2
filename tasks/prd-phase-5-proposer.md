@@ -127,4 +127,4 @@ This is a **learning rebuild**, not a production proposer. Target the [dispute-g
 
 ## Tracked dependency advisories
 
-- **GO-2026-5932** (`golang.org/x/crypto` / `openpgp`): no upstream module fix. Indirect via `go-ethereum`; this module does not import `openpgp`. Track + re-check on dep bumps — see `tasks/prd-l2-learning-chain.md` and `README.md`.
+- **GO-2026-5932** (`golang.org/x/crypto` / `openpgp`): fixed by pin `v0.58.1-0.20261009181718-2f1f834330b2` (untagged pseudo-version; no `v0.58.1` tag exists, and `v0.58.0` still contains `openpgp`). Indirect via `go-ethereum`; this module does not import `openpgp`. See `tasks/prd-l2-learning-chain.md` and `README.md`.
