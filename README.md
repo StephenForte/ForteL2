@@ -456,11 +456,22 @@ Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike
 
 ### Tracked dependency advisories (Go modules + frontend vendors)
 
-Last refresh: **2026-10-21** (Go modules: `otel` v1.45.0; `x/crypto` v0.56.0; stdlib 1.26.10, pion/stun v3.1.7, gorilla/websocket v1.5.3). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
+Last refresh: **2026-11-06** (Go modules: `klauspost/compress` v1.20.3; `x/crypto` v0.58.1-0.20261009181718-2f1f834330b2; `otel` v1.45.0; stdlib 1.26.10, pion/stun v3.1.7, gorilla/websocket v1.5.3). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
-| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Tracked — no upstream module fix** | Applies to the frozen `x/crypto/openpgp` subtree only. **None** of `batcher/`, `proposer/`, or `derivation/` import or call `openpgp` (repo grep 2026-08-31 + `govulncheck -show verbose` on `derivation/` at `x/crypto` v0.55.0 — symbol scan clean for `openpgp`; module-level note only). Indirect pin is `golang.org/x/crypto v0.56.0` for other packages (e.g. `ripemd160`). Re-check on every `go-ethereum` / `x/crypto` bump; never import `openpgp` here — if OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). Roadmap tracking: `tasks/prd-l2-learning-chain.md`. |
+| [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Fixed — no longer tracked** | Fixed by pinning `golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2` in `batcher/`, `proposer/`, and `derivation/`. That pin is an untagged pseudo-version because no `v0.58.1` tag exists (`v0.58.1` and `v0.59.0` 404 on proxy.golang.org); `v0.58.0` still contains `openpgp`, so it does not close the finding. The selected module tree has no `openpgp/` directory. None of the three modules import `openpgp`. Do not retarget this pin to `v0.58.0` or a nonexistent `v0.58.1` tag. If OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). |
+
+**2026-11-06 bumps:**
+
+| Area | Dependency | From → To | Advisory / reason |
+|---|---|---|---|
+| `batcher/` `proposer/` `derivation/` | `github.com/klauspost/compress` | v1.18.7 → **v1.20.3** | [GHSA-fpmh-frq8-7rj8](https://pkg.go.dev/vuln/GO-2026-6865) (GO-2026-6865) — `compress/zstd` panic on a crafted two-block frame, fixed in v1.20.2 (latest v1.20.3 taken). Not reachable: `go list -deps -test` shows no `klauspost/compress/zstd`, `huff0`, or `fse`. |
+| `batcher/` `proposer/` `derivation/` | `golang.org/x/crypto` | v0.56.0 → **v0.58.1-0.20261009181718-2f1f834330b2** | [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) — removes `x/crypto/openpgp`. Untagged pseudo-version: no `v0.58.1` tag exists; `v0.58.0` still contains `openpgp`. Not reachable before the bump. |
+| `batcher/` `proposer/` `derivation/` | `golang.org/x/sys` | v0.47.0 → **v0.49.0** | tidy transitive via the `x/crypto` pseudo-version |
+| `derivation/` | `golang.org/x/sync` | v0.22.0 → **v0.24.0** | tidy transitive (`derivation/go.mod`) |
+| `batcher/` `proposer/` `derivation/` | `golang.org/x/text` | v0.41.0 → **v0.43.0** | tidy transitive (`go.sum` in all three; `derivation/go.mod` only) |
+| `derivation/` | `golang.org/x/net` | v0.57.0 → **v0.60.0** | tidy transitive (`derivation/go.sum` only) |
 
 **2026-10-21 bumps:**
 
