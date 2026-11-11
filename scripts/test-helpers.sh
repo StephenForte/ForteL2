@@ -7187,13 +7187,13 @@ else
   echo "FAIL scripts/check-el-pins.sh must be tracked and executable" >&2
   fail=1
 fi
-# Trap: tag op-reth/v2.8.1 is not the --version string. The tag is annotated
-# (object b3570a4e peels through rc object 359b1f4f to 72207294). Matcher
-# must use the measured line "op-reth Version: 2.8.1" plus the full commit,
+# Trap: tag op-reth/v2.8.2 is not the --version string. The tag is annotated
+# (object 5994f674 peels directly to 969931cd). Matcher
+# must use the measured line "op-reth Version: 2.8.2" plus the full commit,
 # not a bare "2.8", the tag string, the previous 2.8.0 pin at d6620202,
 # the D-0154 2.6.1 pin, the D-0150 2.6.0 pin, the previous 2.5.0 pin,
 # or 2.3.0-dev. op-node and op-batcher are v1.20.1 / v1.18.1 at f73158e5;
-# op-reth is 2.8.1 at 72207294; op-proposer is at 0130abb2. Three commits.
+# op-reth is 2.8.2 at 969931cd; op-proposer is at 0130abb2. Three commits.
 # op-reth does not move to f73158e5 (that is op-reth/v2.8.1-rc.1).
 # --version prints v1.20.1-f73158e5-<unix> and v1.18.1-f73158e5-<unix>.
 # v1.20.1-rc.1 and v1.18.1-rc.1 are that same commit and must fail.
@@ -7205,8 +7205,8 @@ fi
 # required refusals. v1.17.4-43c071cb stays a refusal. The match is one
 # adjacent version-commit, so a regex still looking for v1.20.0 or
 # v1.18.0, or a split version grep plus commit grep, fails.
-if grep -q "PIN_RETH_VERSION='2.8.1'" "$PIN_CHECK" \
-  && grep -q "PIN_RETH_COMMIT='722072949ce583f361424a160082186ee14cac71'" "$PIN_CHECK" \
+if grep -q "PIN_RETH_VERSION='2.8.2'" "$PIN_CHECK" \
+  && grep -q "PIN_RETH_COMMIT='969931cdf14fc219598f0aa44d869e718236df7f'" "$PIN_CHECK" \
   && grep -q "PIN_OP_NODE_VERSION='v1.20.1'" "$PIN_CHECK" \
   && grep -q "PIN_OP_NODE_COMMIT='f73158e5'" "$PIN_CHECK" \
   && grep -Fq 'v1\\.20\\.1-${PIN_OP_NODE_COMMIT}' "$PIN_CHECK" \
@@ -7215,9 +7215,9 @@ if grep -q "PIN_RETH_VERSION='2.8.1'" "$PIN_CHECK" \
   && grep -Fq 'v1\\.18\\.1-${PIN_OP_BATCHER_COMMIT}' "$PIN_CHECK" \
   && grep -q "PIN_OP_PROPOSER_VERSION='v1.17.0'" "$PIN_CHECK" \
   && grep -q "PIN_OP_PROPOSER_COMMIT='0130abb2'" "$PIN_CHECK"; then
-  echo "PASS check-el-pins.sh pins op-reth Version 2.8.1 / 72207294, op-node v1.20.1 at f73158e5, op-batcher v1.18.1 at f73158e5, op-proposer v1.17.0 at 0130abb2"
+  echo "PASS check-el-pins.sh pins op-reth Version 2.8.2 / 969931cd, op-node v1.20.1 at f73158e5, op-batcher v1.18.1 at f73158e5, op-proposer v1.17.0 at 0130abb2"
 else
-  echo "FAIL check-el-pins.sh must pin 2.8.1 / 722072949ce583f361424a160082186ee14cac71 / op-node v1.20.1 at f73158e5 (adjacent v1.20.1-commit match) / op-batcher v1.18.1 at f73158e5 (adjacent v1.18.1-commit match) / op-proposer v1.17.0 at 0130abb2" >&2
+  echo "FAIL check-el-pins.sh must pin 2.8.2 / 969931cdf14fc219598f0aa44d869e718236df7f / op-node v1.20.1 at f73158e5 (adjacent v1.20.1-commit match) / op-batcher v1.18.1 at f73158e5 (adjacent v1.18.1-commit match) / op-proposer v1.17.0 at 0130abb2" >&2
   fail=1
 fi
 if grep -q 'file -L' "$PIN_CHECK"; then
@@ -7353,8 +7353,8 @@ echo "op-batcher version v1.17.40-43c071cb-1792624643"
 EOS
 cat > "$PIN_FIX/op-reth" <<'EOS'
 #!/bin/sh
-echo "op-reth Version: 2.8.1"
-echo "Commit SHA: 722072949ce583f361424a160082186ee14cac71"
+echo "op-reth Version: 2.8.2"
+echo "Commit SHA: 969931cdf14fc219598f0aa44d869e718236df7f"
 EOS
 # Previous accept path. Required failure: 2.8.0 at d6620202.
 cat > "$PIN_FIX/op-reth-v280" <<'EOS'
@@ -7429,22 +7429,36 @@ cat > "$PIN_FIX/op-reth-prefix" <<'EOS'
 echo "op-reth Version: 2.6.10"
 echo "Commit SHA: e16bffa18420c86dbab693097bc33117f74a5f7d"
 EOS
-# Next patch of the new pin. A loosened "2.8" or "2.8.1" prefix grep would accept this.
-# The previous fixture was Version 2.8.1 at d6620202, which had to fail while
-# 2.8.0 was the pin. 2.8.1 at 72207294 is now the accept path; 2.8.10 is the
-# prefix trap.
+# Prefix trap at the release commit: a bare 2.8.2 grep would accept 2.8.20.
 cat > "$PIN_FIX/op-reth-prefix-d0155" <<'EOS'
 #!/bin/sh
-echo "op-reth Version: 2.8.10"
-echo "Commit SHA: 722072949ce583f361424a160082186ee14cac71"
+echo "op-reth Version: 2.8.20"
+echo "Commit SHA: 969931cdf14fc219598f0aa44d869e718236df7f"
 EOS
-# Right version, wrong commit. Version stays the current pin so deleting
-# the commit match would accept this.
+# Right version, wrong commit. Deleting the commit match would accept this.
 cat > "$PIN_FIX/op-reth-commit" <<'EOS'
 #!/bin/sh
-echo "op-reth Version: 2.8.1"
+echo "op-reth Version: 2.8.2"
 echo "Commit SHA: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 EOS
+# Rollback release and rc on the current release commit must each fail.
+cat > "$PIN_FIX/op-reth-v281" <<'EOS'
+#!/bin/sh
+echo "op-reth Version: 2.8.1"
+echo "Commit SHA: 722072949ce583f361424a160082186ee14cac71"
+EOS
+cat > "$PIN_FIX/op-reth-v282-rc1" <<'EOS'
+#!/bin/sh
+echo "op-reth Version: 2.8.2-rc.1"
+echo "Commit SHA: 969931cdf14fc219598f0aa44d869e718236df7f"
+EOS
+# Version dots are literal, not regular-expression wildcards.
+cat > "$PIN_FIX/op-reth-v282-dots" <<'EOS'
+#!/bin/sh
+echo "op-reth Version: 2x8x2"
+echo "Commit SHA: 969931cdf14fc219598f0aa44d869e718236df7f"
+EOS
+chmod +x "$PIN_FIX/op-reth-v281" "$PIN_FIX/op-reth-v282-rc1" "$PIN_FIX/op-reth-v282-dots"
 cat > "$PIN_FIX/op-geth" <<'EOS'
 #!/bin/sh
 echo "op-geth version 1.101702.2-stable-e8800cff"
@@ -7479,7 +7493,7 @@ if [[ "$PIN_OK_EC" -eq 0 ]] \
   && echo "$PIN_OK_OUT" | grep -q 'ok op-node v1.20.1 (f73158e5)' \
   && echo "$PIN_OK_OUT" | grep -q 'ok op-batcher v1.18.1 (f73158e5)' \
   && echo "$PIN_OK_OUT" | grep -q 'ok op-proposer v1.17.0 (0130abb2)' \
-  && echo "$PIN_OK_OUT" | grep -q 'ok op-reth tag op-reth/v2.8.1 reports op-reth Version: 2.8.1 commit 722072949ce583f361424a160082186ee14cac71'; then
+  && echo "$PIN_OK_OUT" | grep -q 'ok op-reth tag op-reth/v2.8.2 reports op-reth Version: 2.8.2 commit 969931cdf14fc219598f0aa44d869e718236df7f'; then
   echo "PASS check-el-pins.sh accepts matching stub versions"
 else
   echo "FAIL check-el-pins.sh must exit 0 on matching stubs (ec=$PIN_OK_EC)" >&2
@@ -7683,9 +7697,9 @@ PIN_MIX_OLDGO_OUT="$(
 if [[ "$PIN_MIX_OLDGO_EC" -ne 0 ]] \
   && echo "$PIN_MIX_OLDGO_OUT" | grep -q 'pin mismatch' \
   && echo "$PIN_MIX_OLDGO_OUT" | grep -q 'v1.19.9'; then
-  echo "PASS check-el-pins.sh goes red on v2.8.1 op-reth paired with the D-0150 Go set"
+  echo "PASS check-el-pins.sh goes red on v2.8.2 op-reth paired with the D-0150 Go set"
 else
-  echo "FAIL v2.8.1 op-reth with the v1.19.9 Go set must fail (ec=$PIN_MIX_OLDGO_EC)" >&2
+  echo "FAIL v2.8.2 op-reth with the v1.19.9 Go set must fail (ec=$PIN_MIX_OLDGO_EC)" >&2
   echo "$PIN_MIX_OLDGO_OUT" >&2
   fail=1
 fi
@@ -7786,8 +7800,8 @@ PIN_BAD_OUT="$(pin_stub_env "$PIN_FIX/op-reth-wrong")" && PIN_BAD_EC=0 || PIN_BA
 if [[ "$PIN_BAD_EC" -ne 0 ]] \
   && echo "$PIN_BAD_OUT" | grep -q 'expected:' \
   && echo "$PIN_BAD_OUT" | grep -q 'got:' \
-  && echo "$PIN_BAD_OUT" | grep -q '2.8.1' \
-  && echo "$PIN_BAD_OUT" | grep -q '722072949ce583f361424a160082186ee14cac71' \
+  && echo "$PIN_BAD_OUT" | grep -q '2.8.2' \
+  && echo "$PIN_BAD_OUT" | grep -q '969931cdf14fc219598f0aa44d869e718236df7f' \
   && echo "$PIN_BAD_OUT" | grep -q '2.3.0-dev'; then
   echo "PASS check-el-pins.sh goes red on the v2.3.3 op-reth pin (expected vs got)"
 else
@@ -7956,10 +7970,10 @@ else
   fail=1
 fi
 PIN_PFX_NEW_OUT="$(pin_stub_env "$PIN_FIX/op-reth-prefix-d0155")" && PIN_PFX_NEW_EC=0 || PIN_PFX_NEW_EC=$?
-if [[ "$PIN_PFX_NEW_EC" -ne 0 ]] && echo "$PIN_PFX_NEW_OUT" | grep -q '2.8.10'; then
-  echo "PASS check-el-pins.sh refuses a 2.8.10 prefix match (not a bare 2.8.1 grep)"
+if [[ "$PIN_PFX_NEW_EC" -ne 0 ]] && echo "$PIN_PFX_NEW_OUT" | grep -q '2.8.20'; then
+  echo "PASS check-el-pins.sh refuses a 2.8.20 prefix match (not a bare 2.8.2 grep)"
 else
-  echo "FAIL check-el-pins.sh must not accept 2.8.10 as the 2.8.1 pin (ec=$PIN_PFX_NEW_EC)" >&2
+  echo "FAIL check-el-pins.sh must not accept 2.8.20 as the 2.8.2 pin (ec=$PIN_PFX_NEW_EC)" >&2
   echo "$PIN_PFX_NEW_OUT" >&2
   fail=1
 fi
@@ -8093,6 +8107,23 @@ else
   echo "$PIN_RETH_RC2_OUT" >&2
   fail=1
 fi
+# T7: preserve the previous-release refusal and reject release lookalikes.
+while IFS='|' read -r PIN_RETH_BAD_FIX PIN_RETH_BAD_VERSION PIN_RETH_BAD_COMMIT; do
+  PIN_RETH_BAD_OUT="$(pin_stub_env "$PIN_FIX/$PIN_RETH_BAD_FIX")" && PIN_RETH_BAD_EC=0 || PIN_RETH_BAD_EC=$?
+  if [[ "$PIN_RETH_BAD_EC" -ne 0 ]] \
+    && echo "$PIN_RETH_BAD_OUT" | grep -Fq 'op-reth pin mismatch' \
+    && echo "$PIN_RETH_BAD_OUT" | grep -Fq "op-reth Version: $PIN_RETH_BAD_VERSION Commit SHA: $PIN_RETH_BAD_COMMIT"; then
+    echo "PASS check-el-pins.sh refuses op-reth $PIN_RETH_BAD_VERSION at $PIN_RETH_BAD_COMMIT"
+  else
+    echo "FAIL op-reth $PIN_RETH_BAD_VERSION at $PIN_RETH_BAD_COMMIT must fail (ec=$PIN_RETH_BAD_EC)" >&2
+    echo "$PIN_RETH_BAD_OUT" >&2
+    fail=1
+  fi
+done <<'EOS'
+op-reth-v281|2.8.1|722072949ce583f361424a160082186ee14cac71
+op-reth-v282-rc1|2.8.2-rc.1|969931cdf14fc219598f0aa44d869e718236df7f
+op-reth-v282-dots|2x8x2|969931cdf14fc219598f0aa44d869e718236df7f
+EOS
 # New op-node with the previous op-reth, and the reverse.
 PIN_MIX_NEWNODE_OUT="$(pin_stub_env "$PIN_FIX/op-reth-v280")" && PIN_MIX_NEWNODE_EC=0 || PIN_MIX_NEWNODE_EC=$?
 if [[ "$PIN_MIX_NEWNODE_EC" -ne 0 ]] \
@@ -8114,7 +8145,7 @@ PIN_MIX_OLDNODE_OUT="$(
 if [[ "$PIN_MIX_OLDNODE_EC" -ne 0 ]] \
   && echo "$PIN_MIX_OLDNODE_OUT" | grep -q 'op-node pin mismatch' \
   && echo "$PIN_MIX_OLDNODE_OUT" | grep -q 'v1.20.0-d6620202'; then
-  echo "PASS check-el-pins.sh refuses old op-node v1.20.0 paired with op-reth 2.8.1"
+  echo "PASS check-el-pins.sh refuses old op-node v1.20.0 paired with op-reth 2.8.2"
 else
   echo "FAIL old op-node with new op-reth must fail (ec=$PIN_MIX_OLDNODE_EC)" >&2
   echo "$PIN_MIX_OLDNODE_OUT" >&2
