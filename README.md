@@ -116,7 +116,7 @@ Phase 1 is a local OP Stack learning rollup on Apple Silicon. **Native binaries 
 | optimism monorepo (sequencer) | `op-node/v1.20.1` at commit `f73158e5…` (D-0165; tag object `2f6d67cb` → rc tag object `09314139` → commit); `op-batcher/v1.18.1` at the same commit (D-0163; tag object `0610ae13` → rc tag object `f453c3d7` → commit); `op-proposer/v1.17.0` at commit `0130abb2…` (tag object `bbaa87bf` → rc tag object `d9285d4f` → commit) | **op-node** v1.20.1 is built in `~/src/fortel2/optimism-op-batcher-v1.18.1/op-node/bin/`; **op-proposer** v1.17.0 in the clone `~/src/fortel2/optimism-op-proposer-v1.17.0`. `./bin/op-node` serves it since the 2026-11-06 12:57 PT sleep/wake swap (D-0165); its rollback is repoint `bin/op-node` at `~/src/fortel2/optimism-op-reth-v2.8.0/op-node/bin/op-node` (v1.20.0) and run `dev-sleep.sh sleep` then `wake`. `./bin/op-proposer` serves v1.17.0 since 2026-10-29 10:13 PT (D-0158); its rollback is repoint at `~/src/fortel2/optimism-v1.19.11` (untagged `43c071cb`) and sleep/wake. **op-batcher** is `op-batcher/v1.18.1` at `f73158e5` (D-0163), built in the clone `~/src/fortel2/optimism-op-batcher-v1.18.1` and served by `./bin/op-batcher` since the 2026-11-06 11:21 PT swap; its rollback is repoint `bin/op-batcher` at `~/src/fortel2/optimism-op-reth-v2.8.0/op-batcher/bin/op-batcher` (v1.18.0) and restart the batcher |
 | optimism monorepo (prestate) | `op-node/v1.19.2` (`da197e45…`) | `~/src/fortel2/optimism` — cannon, op-challenger, kona-host. **Never** `git checkout` this clone |
 | op-geth | `v1.101702.2` | `~/src/fortel2/op-geth` |
-| op-reth | annotated tag `op-reth/v2.8.1` (tag object `b3570a4e…` → rc tag object `359b1f4f…` → `72207294…`) → reports `op-reth Version: 2.8.1` commit `722072949ce583f361424a160082186ee14cac71` | Clone `~/src/fortel2/optimism-op-reth-v2.8.1` (D-0165 pin for the Mac sequencer binary; Rust 1.99). `./bin/op-reth` serves it since the 2026-11-06 12:57 PT swap (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.8.1`). Rollback is repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.8.0` and run sleep/wake; G1 proved v2.8.0 reopens the datadir. `~/src/fortel2/optimism-op-reth-v2.6.1` stays on disk; the explicit `--proofs-history.storage-version=v2` flag keeps it on the v2 store. `~/src/fortel2/optimism-op-reth-v2.6.0` (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.6.1`), `optimism-op-reth-v2.5.0`, and `optimism-op-reth` (v2.3.3) stay. The Render replica runs v2.8.1 too (fortel2-replica R-0032, live 2026-11-06 13:27 PT; the public read reports `op-reth/v2.8.1-72207294/x86_64-linux`). `./scripts/check-el-pins.sh` requires 2.8.1. |
+| op-reth | annotated tag `op-reth/v2.8.2` (tag object `5994f674…` → `969931cd…`; `op-reth/v2.8.2-rc.1` is the same commit) → reports `op-reth Version: 2.8.2` commit `969931cdf14fc219598f0aa44d869e718236df7f` | Clone `~/src/fortel2/optimism-op-reth-v2.8.2` (D-0168 pin for the Mac sequencer binary; Rust 1.99). `./bin/op-reth` serves it since the 2026-11-11 11:45 PT swap (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.8.2`). Rollback is repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.8.1` and run sleep/wake; T7 G1 proved v2.8.1 reopens the datadir. `~/src/fortel2/optimism-op-reth-v2.8.0` (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.8.1`), `optimism-op-reth-v2.6.1` (the explicit `--proofs-history.storage-version=v2` flag keeps it on the v2 store), `optimism-op-reth-v2.6.0` (datadir clone `$DATA_DIR/l2/op-reth.pre-v2.6.1`), `optimism-op-reth-v2.5.0`, and `optimism-op-reth` (v2.3.3) stay. The Render replica still runs v2.8.1 (fortel2-replica R-0032; the public read reports `op-reth/v2.8.1-72207294/x86_64-linux`) until the operator decides its bump. `./scripts/check-el-pins.sh` requires 2.8.2. |
 | op-deployer | `0.7.1` (release binary) | `~/src/fortel2/bin/op-deployer` |
 | Rust | `1.94.1` in-tree (pinned by `rust/rust-toolchain.toml`; rustup default may differ) | `rustup` |
 | kona-host | `1.0.2` — Kona pre-image server for `cannon-kona` (D-0062) | `~/src/fortel2/bin/kona-host` |
@@ -186,7 +186,7 @@ python3 scripts/pipeline-snapshot.py -o /tmp/fortel2-health.json   # one-shot pi
 export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # Guestbook unit + fuzz tests
 ./scripts/test-helpers.sh          # address / loopback / block-time / key-tripwire / viewer config / EL pin stubs
-./scripts/check-el-pins.sh         # Mini arm64: op-node v1.20.1 + op-batcher v1.18.1 (commit f73158e5), op-proposer v1.17.0 (commit 0130abb2) + op-reth Version 2.8.1 / 722072949ce583f361424a160082186ee14cac71 (annotated tag object b3570a4e; CI has no Mini binaries)
+./scripts/check-el-pins.sh         # Mini arm64: op-node v1.20.1 + op-batcher v1.18.1 (commit f73158e5), op-proposer v1.17.0 (commit 0130abb2) + op-reth Version 2.8.2 / 969931cdf14fc219598f0aa44d869e718236df7f (annotated tag object 5994f674; CI has no Mini binaries)
 # Opt-in 852 op-reth sidecar (Task 2). Live Sepolia EL is FORTEL2_EL=reth (since 2026-09-02).
 # Local 901 still defaults geth (no 901 reth path). Task 5 already ran; there is no
 # geth rollback (Task 9 deleted the Render disk).
@@ -286,31 +286,31 @@ source "$HOME/.cargo/env"   # or open a new shell
 (cd ~/src/fortel2/optimism/rust && cargo build --release -p kona-host)
 ln -sfn ~/src/fortel2/optimism/rust/target/release/kona-host ~/src/fortel2/bin/kona-host
 
-# op-reth — clone at annotated tag op-reth/v2.8.1 (D-0165). The tag object
-# b3570a4e is not the commit; the clone detaches at 72207294. Do NOT `git checkout`
+# op-reth — clone at annotated tag op-reth/v2.8.2 (D-0168). The tag object
+# 5994f674 is not the commit; the clone detaches at 969931cd. Do NOT `git checkout`
 # ~/src/fortel2/optimism (op-node/v1.19.2, da197e45): that tree still backs
 # cannon, op-challenger, and kona-host. Do NOT `git checkout`
 # ~/src/fortel2/optimism-op-reth (v2.3.3), optimism-op-reth-v2.5.0,
-# optimism-op-reth-v2.6.0, optimism-op-reth-v2.6.1, or optimism-op-reth-v2.8.0 (Mac rollback). The sequencer
+# optimism-op-reth-v2.6.0, optimism-op-reth-v2.6.1, optimism-op-reth-v2.8.0, or optimism-op-reth-v2.8.1 (Mac rollback). The sequencer
 # op-node/op-batcher/op-proposer binaries are the v1.19.11 tree above.
 # Unset CARGO_TARGET_DIR so the binary lands in this clone, not a sandbox cache.
-# Rollback: repoint the symlink at optimism-op-reth-v2.8.0 and run sleep/wake (D-0165).
-git clone --depth 1 --branch op-reth/v2.8.1 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth-v2.8.1
-cd ~/src/fortel2/optimism-op-reth-v2.8.1
+# Rollback: repoint the symlink at optimism-op-reth-v2.8.1 and run sleep/wake (D-0168).
+git clone --depth 1 --branch op-reth/v2.8.2 https://github.com/ethereum-optimism/optimism.git ~/src/fortel2/optimism-op-reth-v2.8.2
+cd ~/src/fortel2/optimism-op-reth-v2.8.2
 git submodule update --init --recursive
 just update-superchain-registry-submodule || true
-cd rust && unset CARGO_TARGET_DIR && GIT_VERSION=v2.8.1 \
+cd rust && unset CARGO_TARGET_DIR && GIT_VERSION=v2.8.2 \
   GIT_COMMIT="$(git rev-parse HEAD)" \
-  GIT_DATE=2026-11-05T03:58:20Z \
+  GIT_DATE=2026-11-09T10:51:20Z \
   BUILD_PROFILE=release \
   cargo build --release --locked --bin op-reth --manifest-path op-reth/bin/Cargo.toml
 # Binary lands at rust/target/release/op-reth.
 # Measured --version (tag string is not this line):
-#   op-reth Version: 2.8.1
-#   Commit SHA: 722072949ce583f361424a160082186ee14cac71
-ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.1/rust/target/release/op-reth ~/src/fortel2/bin/op-reth
+#   op-reth Version: 2.8.2
+#   Commit SHA: 969931cdf14fc219598f0aa44d869e718236df7f
+ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.2/rust/target/release/op-reth ~/src/fortel2/bin/op-reth
 # Mini .env BIN_DIR is this repo's ./bin. From the ForteL2 repo root:
-#   ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.1/rust/target/release/op-reth ./bin/op-reth
+#   ln -sfn ~/src/fortel2/optimism-op-reth-v2.8.2/rust/target/release/op-reth ./bin/op-reth
 #   ./scripts/check-el-pins.sh
 # eth_getLogs with fromBlock past the head is -32602 on v2.8.0 (v2.6.1 returned []).
 
