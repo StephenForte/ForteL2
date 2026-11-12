@@ -450,6 +450,8 @@ FORTEL2_ENV=.env.sepolia USE_CUSTOM_PROPOSER=1 CONFIRM_CUSTOM_PROPOSER_SEPOLIA=1
   ./scripts/06-start-proposer-sepolia.sh
 
 **Sepolia stock proposer, type 9 (super roots).** Since the U20 cutover (OPU-4, 2026-10-30, D-0162) live `.env.sepolia` has `PROPOSER_GAME_TYPE=9` and the respected game type is 9. Before that it was `8`, which starts stock `op-proposer` with `--rollup-rpc` and no `--superroot-rpcs`. Type 9 starts with `--superroot-rpcs` set to the loopback op-node and no `--rollup-rpc`. The script refuses type 9 while `gameImpls(9)` is the zero address, and refuses type 9 when `PROPOSER_ROLLUP_RPC` is set: op-proposer v1.17.0 would otherwise accept a rollup RPC for type 9 and post an output root as `rootClaim`. Restart the proposer after the variable change. Do not point this script at the live pidfile from a fork rehearsal; set `FORTEL2_ISOLATED_DATA_DIR` so `PID_DIR` stays off the live `DATA_DIR`.
+
+**U21 / op-contracts v9 (2026-11-12, D-0170).** L1 contracts only; no node change. Portal ETH moved to the new ETHLockbox `0xD0bf2CF7bAD74AaDabF2BA69648EE153E03a6685`. The portal itself now holds 0 ETH, so check the lockbox for bridge liquidity. L1CrossDomainMessenger 2.13.0 reserves 135k gas for the relay, and a relay that fails now reverts finalization (`OptimismPortal_L1CDMCallFailed`) instead of marking the message failed. Deposits and the `scripts/bridge` withdrawals (L2ToL1MessagePasser) work as before. Upgrade tooling: op-deployer v0.9.0, `scripts/opu-u21-upgrade-sepolia.sh` (already run, no further live use).
 ```
 
 Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike-phase-5-proposer.md) (US-055). Operator switch details: [`proposer/README.md`](proposer/README.md).
