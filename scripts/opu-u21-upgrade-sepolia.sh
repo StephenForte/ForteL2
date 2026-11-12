@@ -82,6 +82,8 @@ Set OP_DEPLOYER_BIN to op-deployer v0.9.0.
 --revoke-only recovers a leftover ADMIN EIP-7702 delegation without upgrading
 any contracts, including after a completed or partial upgrade. With --live it
 uses the same confirmation/env/fee guards, fresh fork pass and funding check.
+Recovery seeds that fork with freshly read live delegation code so a stale
+public snapshot cannot skip the revoke; already-clear live code is a no-op.
 A normal upgrade requires pristine U20 versions, including SuperchainConfig
 2.4.3; partial upgrades are refused.
 EOF
@@ -90,6 +92,7 @@ EOF
 # Guards run before lib.sh so a missing env file cannot hide a refusal.
 MODE=""
 REVOKE_ONLY=0
+RECOVERY_LIVE_CODE=0x
 FORK_RPC=""
 FUND_GAS=""
 FUND_FEE=""
@@ -396,6 +399,7 @@ TOTAL_WEI=0
 TOTAL_GAS=0
 LAST_TX_JSON=""
 SIGN_MODE=""
+SIGN_CHAIN_ID=""
 RPC=""
 BOOT_KEY=""
 BOOT_ADDR=""
@@ -471,10 +475,10 @@ send_from_admin() {
   local name="$1"
   shift
   if [[ "$SIGN_MODE" == "live" ]]; then
-    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --rpc-url "$RPC" \
+    LAST_TX_JSON="$(cast send --chain "$SIGN_CHAIN_ID" --private-key "$ADMIN_PRIVATE_KEY" --rpc-url "$RPC" \
       --gas-price "$U21_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")"
   else
-    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --rpc-url "$RPC" --json "$@")"
+    LAST_TX_JSON="$(cast send --chain "$SIGN_CHAIN_ID" --private-key "$ADMIN_PRIVATE_KEY" --rpc-url "$RPC" --json "$@")"
   fi
   record_gas_json "$name" "$LAST_TX_JSON"
 }
@@ -483,10 +487,10 @@ send_from_boot() {
   local name="$1"
   shift
   if [[ "$SIGN_MODE" == "live" ]]; then
-    LAST_TX_JSON="$(cast send --private-key "$BOOT_KEY" --rpc-url "$RPC" \
+    LAST_TX_JSON="$(cast send --chain "$SIGN_CHAIN_ID" --private-key "$BOOT_KEY" --rpc-url "$RPC" \
       --gas-price "$U21_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")"
   else
-    LAST_TX_JSON="$(cast send --private-key "$BOOT_KEY" --rpc-url "$RPC" --json "$@")"
+    LAST_TX_JSON="$(cast send --chain "$SIGN_CHAIN_ID" --private-key "$BOOT_KEY" --rpc-url "$RPC" --json "$@")"
   fi
   record_gas_json "$name" "$LAST_TX_JSON"
 }
@@ -499,10 +503,10 @@ auth_flag_send() {
   # Conditional cleanup calls disable bash errexit inside called functions.
   # Propagate send failures explicitly, before attempting to parse a receipt.
   if [[ "$SIGN_MODE" == "live" ]]; then
-    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" \
+    LAST_TX_JSON="$(cast send --chain "$SIGN_CHAIN_ID" --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" \
       --gas-price "$U21_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")" || return "$?"
   else
-    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" --json "$@")" || return "$?"
+    LAST_TX_JSON="$(cast send --chain "$SIGN_CHAIN_ID" --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" --json "$@")" || return "$?"
   fi
   record_gas_json "$name" "$LAST_TX_JSON"
 }
@@ -949,6 +953,8 @@ run_upgrade() {
   if [[ "$SIGN_MODE" == "fork" ]]; then
     assert_loopback_url "$RPC" "--fork"
   fi
+  # Override caller CHAIN/foundry config for both tx and EIP-7702 signatures.
+  SIGN_CHAIN_ID="$cid"
   START_NONCE="$(cast nonce "$ADMIN_ADDRESS" --rpc-url "$RPC")"
   START_BLOCK="$(cast block-number --rpc-url "$RPC")"
   if [[ "$REVOKE_ONLY" == 1 ]]; then
@@ -1024,6 +1030,41 @@ print_gas_total() {
   echo "GAS total gas=$TOTAL_GAS wei=$TOTAL_WEI eth=$eth"
 }
 
+validate_dry_gas() {
+  local gas="$1"
+  if [[ ! "$gas" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: dry pass did not report a numeric gas total; refusing live sends" >&2
+    return 1
+  fi
+  if [[ "$gas" == 0 && "$REVOKE_ONLY" != 1 ]]; then
+    echo "ERROR: dry upgrade reported zero gas; refusing live sends" >&2
+    return 1
+  fi
+  return 0
+}
+
+seed_recovery_delegation() {
+  local fork_rpc="$1" code="$2" cid
+  assert_loopback_url "$fork_rpc" "recovery dry fork" || return "$?"
+  cid="$(cast chain-id --rpc-url "$fork_rpc")" || return "$?"
+  if [[ "$cid" != "$U21_FORK_CHAIN_ID" ]]; then
+    echo "ERROR: recovery dry fork must have chain id $U21_FORK_CHAIN_ID" >&2
+    return 1
+  fi
+  if [[ "$code" == 0x ]]; then
+    return 0
+  fi
+  if [[ ! "$code" =~ ^0xef0100[[:xdigit:]]{40}$ ]]; then
+    echo "ERROR: live ADMIN has non-delegation code; refusing recovery" >&2
+    return 1
+  fi
+  # The public fork can lag the live designation. Copy only observed public
+  # bytecode into Anvil, so the dry pass actually measures a revoke. This
+  # function verifies loopback + 900852 before the Anvil-only mutation.
+  cast rpc anvil_setCode "$ADMIN_ADDRESS" "$code" --rpc-url "$fork_rpc" >/dev/null || return "$?"
+  echo "phase: recovery dry fork seeded with observed live delegation"
+}
+
 start_dry_fork() {
   local port upstream url rc child_out
   local -a child_args
@@ -1053,6 +1094,9 @@ start_dry_fork() {
     redact_log_tail "$DRY_DIR/anvil.log" >&2 || true
     exit 1
   fi
+  if [[ "$REVOKE_ONLY" == 1 ]]; then
+    seed_recovery_delegation "$url" "$RECOVERY_LIVE_CODE" || exit 1
+  fi
   child_args=(--fork "$url")
   if [[ "$REVOKE_ONLY" == 1 ]]; then
     child_args+=(--revoke-only)
@@ -1073,10 +1117,7 @@ start_dry_fork() {
     exit 1
   fi
   DRY_GAS="$(printf '%s\n' "$child_out" | sed -n 's/^GAS total gas=\([0-9][0-9]*\).*/\1/p' | tail -1)"
-  if [[ -z "${DRY_GAS}" || "$DRY_GAS" == "0" ]]; then
-    echo "ERROR: dry pass did not report a gas total; not sending a live transaction" >&2
-    exit 1
-  fi
+  validate_dry_gas "$DRY_GAS" || exit 1
   echo "phase: dry pass gas=$DRY_GAS"
 }
 
@@ -1225,9 +1266,35 @@ PY
 }
 
 if [[ "$MODE" == "live" ]]; then
-  start_dry_fork
   RPC="${L1_RPC_URL:-}"
   assert_remote_l1_rpc_url "$RPC" "L1_RPC_URL"
+  live_cid="$(cast chain-id --rpc-url "$RPC")"
+  if [[ "$live_cid" != 11155111 ]]; then
+    echo "ERROR: --live requires Sepolia chain id 11155111" >&2
+    exit 1
+  fi
+  if [[ "$REVOKE_ONLY" == 1 ]]; then
+    RECOVERY_LIVE_CODE="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")"
+    if [[ "$RECOVERY_LIVE_CODE" != 0x && ! "$RECOVERY_LIVE_CODE" =~ ^0xef0100[[:xdigit:]]{40}$ ]]; then
+      echo "ERROR: live ADMIN has non-delegation code; refusing recovery" >&2
+      exit 1
+    fi
+  fi
+  start_dry_fork
+  # Re-read after the dry pass. Empty code is a successful no-op; a newly
+  # appearing delegation needs a fresh measured dry pass, never a zero-cost
+  # funding projection. Stable nonempty live code was seeded into Anvil above.
+  if [[ "$REVOKE_ONLY" == 1 ]]; then
+    live_code="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")"
+    if [[ "$live_code" == 0x ]]; then
+      echo "phase: live ADMIN already has no delegation; no transaction needed"
+      exit 0
+    fi
+    if [[ "$DRY_GAS" == 0 || "$live_code" != "$RECOVERY_LIVE_CODE" ]]; then
+      echo "ERROR: live delegation changed during dry pass; rerun --revoke-only for a fresh measurement" >&2
+      exit 1
+    fi
+  fi
   base_fee="$(cast base-fee --rpc-url "$RPC")"
   if [[ "$(python3 -c "print('yes' if int('$U21_LIVE_MAX_FEE_PER_GAS') < int('$base_fee') else 'no')")" == "yes" ]]; then
     echo "ERROR: U21_LIVE_MAX_FEE_PER_GAS is below the current L1 base fee; a capped transaction cannot be included" >&2

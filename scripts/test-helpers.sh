@@ -15454,6 +15454,7 @@ fn=re.search(r'^auth_flag_send\(\) \{\n.*?^\}',s,re.M|re.S)[0]
 runner=root/'auth-failure.sh'
 runner.write_text('set -euo pipefail\n'+fn+"""
 ADMIN_PRIVATE_KEY=sentinel
+SIGN_CHAIN_ID=900852
 RPC=http://127.0.0.1:9999
 U21_LIVE_MAX_FEE_PER_GAS=3000000000
 cast() { return 7; }
@@ -15514,9 +15515,78 @@ assert a.returncode==0 and b.returncode!=0 and 'pristine U20' in b.stderr
 run=s[s.index('run_upgrade() {'):s.index('print_gas_total() {')]
 assert run.index('run_revoke_only') < run.index('assert_pristine_u20') < run.index('prepare_boot_key') < run.index('bootstrap_impls')
 PYTEST
+OPU6A_LABEL='all Cast sends explicitly use the verified signing chain'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PYTEST'
+import pathlib,re,subprocess,sys
+s=pathlib.Path(sys.argv[1]).read_text();root=pathlib.Path(sys.argv[2])
+names=['send_from_admin','send_from_boot','auth_flag_send']
+fns='\n'.join(re.search(r'^'+name+r'\(\) \{\n.*?^\}',s,re.M|re.S)[0] for name in names)
+runner=root/'cast-chain.sh'
+runner.write_text('set -euo pipefail\n'+fns+"""
+export CHAIN=11155111
+SIGN_CHAIN_ID=900852; ADMIN_PRIVATE_KEY=sentinel; BOOT_KEY=sentinel; RPC=http://127.0.0.1:9999; U21_LIVE_MAX_FEE_PER_GAS=3000000000
+OUT="$1"
+cast() {
+  local chain=missing
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == --chain ]]; then chain="$2"; break; fi
+    shift
+  done
+  printf '%s\n' "$chain" >> "$OUT"
+  printf '{}\n'
+}
+record_gas_json() { :; }
+for SIGN_MODE in fork live; do
+  send_from_admin test target
+  send_from_boot test target
+  auth_flag_send test 0x0000000000000000000000000000000000000000 target
+done
+""")
+out=root/'cast-chains'
+subprocess.run(['bash',str(runner),str(out)],check=True)
+assert out.read_text().splitlines()==['900852']*6
+run=s[s.index('run_upgrade() {'):s.index('print_gas_total() {')]
+assert run.index('SIGN_CHAIN_ID="$cid"') < run.index('run_revoke_only') < run.index('bootstrap_impls')
+PYTEST
 OPU6A_LABEL='revoke-only live recovery still requires confirmation'
 opu6a_result opu6a_refusal CONFIRM_U21_LIVE env -u CONFIRM_U21_LIVE "$OPU6A_SCRIPT" --live --revoke-only
 OPU6A_LABEL='revoke-only recovery refuses Sepolia chain id before signing'
 opu6a_result opu6a_refusal 'refuses chain id 11155111' env PATH="$OPU6A_FIX/bin:$PATH" FORTEL2_ENV=/missing-env "$OPU6A_SCRIPT" --fork http://127.0.0.1:9999 --revoke-only
+OPU6A_LABEL='zero dry gas is valid only for already-clear recovery'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PYTEST'
+import pathlib,re,subprocess,sys
+s=pathlib.Path(sys.argv[1]).read_text();root=pathlib.Path(sys.argv[2])
+fn=re.search(r'^validate_dry_gas\(\) \{\n.*?^\}',s,re.M|re.S)[0]
+runner=root/'dry-gas.sh';runner.write_text('set -euo pipefail\n'+fn+'\nREVOKE_ONLY="$1"; validate_dry_gas "$2"\n')
+for mode,gas,ok in [('0','0',False),('1','0',True),('0','36800',True),('1','36800',True),('1','',False),('1','bad',False)]:
+ r=subprocess.run(['bash',str(runner),mode,gas],capture_output=True,text=True)
+ assert (r.returncode==0)==ok, (mode,gas,r.returncode)
+main=s[s.rindex('if [[ "$MODE" == "live" ]]; then'):]
+assert main.index('RECOVERY_LIVE_CODE="$(cast code') < main.index('start_dry_fork') < main.index('live_code="$(cast code')
+assert main.index('if [[ "$live_code" == 0x ]]') < main.index('assert_live_funding')
+PYTEST
+OPU6A_LABEL='stale recovery fork is seeded only on loopback chain 900852'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PYTEST'
+import pathlib,re,subprocess,sys
+s=pathlib.Path(sys.argv[1]).read_text();root=pathlib.Path(sys.argv[2])
+fn=re.search(r'^seed_recovery_delegation\(\) \{\n.*?^\}',s,re.M|re.S)[0]
+runner=root/'seed-recovery.sh';runner.write_text('set -euo pipefail\n'+fn+"""
+U21_FORK_CHAIN_ID=900852; ADMIN_ADDRESS=admin; LOG="$1"; TEST_CID="$2"
+assert_loopback_url() { case "$1" in http://127.0.0.1:*) return 0;; *) return 1;; esac; }
+cast() {
+  if [[ "$1" == chain-id ]]; then echo "$TEST_CID"; else printf '%s\n' "$*" >> "$LOG"; fi
+}
+# The production caller is conditional: verify rejection cannot fall through.
+if seed_recovery_delegation "$3" "$4"; then exit 0; else exit 1; fi
+""")
+code='0xef0100'+'12'*20
+for cid,url,value,ok,mutates in [('900852','http://127.0.0.1:9999',code,True,True),('900852','http://127.0.0.1:9999','0x',True,False),('11155111','http://127.0.0.1:9999',code,False,False),('900852','https://example.invalid',code,False,False),('900852','http://127.0.0.1:9999','0x1234',False,False)]:
+ log=root/'seed-calls';log.unlink(missing_ok=True)
+ r=subprocess.run(['bash',str(runner),str(log),cid,url,value],capture_output=True,text=True)
+ assert (r.returncode==0)==ok, (cid,url,value,r.returncode)
+ assert log.exists()==mutates
+ if mutates: assert 'anvil_setCode admin '+code in log.read_text()
+assert 'seed_recovery_delegation "$url" "$RECOVERY_LIVE_CODE" || exit 1' in s
+PYTEST
 unset OPU6A_OUT OPU6A_LABEL
 if (( fail )); then echo 'OPU-6a helper checks FAILED' >&2; exit 1; fi
