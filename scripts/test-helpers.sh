@@ -15444,5 +15444,79 @@ finally: server.shutdown();server.server_close()
 PY
 OPU6A_LABEL='funding refuses insufficient balance'
 opu6a_result opu6a_refusal '2x projected' "$OPU6A_SCRIPT" --check-funding 196291348 3000000000 200000000000000000
+# Review regression: cleanup calls are conditional, so bash errexit cannot
+# substitute for explicit propagation of an authorization send failure.
+OPU6A_LABEL='authorization send failure propagates in conditional cleanup'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PYTEST'
+import pathlib,re,subprocess,sys
+s=pathlib.Path(sys.argv[1]).read_text();root=pathlib.Path(sys.argv[2])
+fn=re.search(r'^auth_flag_send\(\) \{\n.*?^\}',s,re.M|re.S)[0]
+runner=root/'auth-failure.sh'
+runner.write_text('set -euo pipefail\n'+fn+"""
+ADMIN_PRIVATE_KEY=sentinel
+RPC=http://127.0.0.1:9999
+U21_LIVE_MAX_FEE_PER_GAS=3000000000
+cast() { return 7; }
+record_gas_json() { echo 'receipt parsed after failed send' >&2; return 0; }
+for SIGN_MODE in fork live; do
+  if auth_flag_send test 0x0000000000000000000000000000000000000000 target; then exit 91; else
+    [[ $? == 7 ]] || exit 92
+  fi
+done
+""")
+subprocess.run(['bash',str(runner)],check=True)
+PYTEST
+OPU6A_LABEL='failed revoke remains retryable until empty code is confirmed'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PYTEST'
+import pathlib,re,subprocess,sys
+s=pathlib.Path(sys.argv[1]).read_text();root=pathlib.Path(sys.argv[2])
+fn=re.search(r'^revoke_delegation\(\) \{\n.*?^\}',s,re.M|re.S)[0]
+runner=root/'revoke-retry.sh'
+runner.write_text('set -euo pipefail\n'+fn+"""
+STATE="$1"
+printf '0xef01000000000000000000000000000000000000000001\n' > "$STATE"
+DELEGATED=1; ATTEMPTS=0; ADMIN_ADDRESS=admin; PROPOSER_ADDRESS=proposer; RPC=http://127.0.0.1:9999
+cast() { cat "$STATE"; }
+auth_flag_send() {
+  ATTEMPTS=$((ATTEMPTS + 1))
+  [[ "$ATTEMPTS" != 1 ]] || return 1
+  printf '0x\n' > "$STATE"
+}
+if revoke_delegation first; then exit 91; fi
+[[ "$DELEGATED" == 1 && "$ATTEMPTS" == 1 ]] || exit 92
+revoke_delegation retry
+[[ "$DELEGATED" == 0 && "$ATTEMPTS" == 2 ]] || exit 93
+# Receipt/RPC uncertainty: an already-mined revoke must not send another tx.
+DELEGATED=1
+revoke_delegation already-mined
+[[ "$DELEGATED" == 0 && "$ATTEMPTS" == 2 ]] || exit 93
+""")
+subprocess.run(['bash',str(runner),str(root/'delegation-state')],check=True)
+assert 'run_revoke_only' in s and 'child_args+=(--revoke-only)' in s
+PYTEST
+OPU6A_LABEL='partial v9 superchain is refused before bootstrap or signing'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PYTEST'
+import pathlib,re,subprocess,sys
+s=pathlib.Path(sys.argv[1]).read_text();root=pathlib.Path(sys.argv[2])
+fn=re.search(r'^assert_pristine_u20\(\) \{\n.*?^\}',s,re.M|re.S)[0]
+runner=root/'pristine.sh'
+runner.write_text('set -euo pipefail\n'+fn+"""
+SYSTEM_CONFIG=system; SUPERCHAIN=super; PORTAL=portal; ADMIN_ADDRESS=admin; RPC=http://127.0.0.1:9999; ASSERT_FAIL=0
+check_eq() { [[ "$2" == "$3" ]] || ASSERT_FAIL=1; }
+call_str() { case "$1" in system) echo 4.0.0;; super) echo "$SUPER_VERSION";; portal) echo 5.8.0;; esac; }
+cast() { echo 0x; }
+SUPER_VERSION="$1"
+assert_pristine_u20
+""")
+a=subprocess.run(['bash',str(runner),'2.4.3'],text=True,capture_output=True)
+b=subprocess.run(['bash',str(runner),'2.5.0'],text=True,capture_output=True)
+assert a.returncode==0 and b.returncode!=0 and 'pristine U20' in b.stderr
+run=s[s.index('run_upgrade() {'):s.index('print_gas_total() {')]
+assert run.index('run_revoke_only') < run.index('assert_pristine_u20') < run.index('prepare_boot_key') < run.index('bootstrap_impls')
+PYTEST
+OPU6A_LABEL='revoke-only live recovery still requires confirmation'
+opu6a_result opu6a_refusal CONFIRM_U21_LIVE env -u CONFIRM_U21_LIVE "$OPU6A_SCRIPT" --live --revoke-only
+OPU6A_LABEL='revoke-only recovery refuses Sepolia chain id before signing'
+opu6a_result opu6a_refusal 'refuses chain id 11155111' env PATH="$OPU6A_FIX/bin:$PATH" FORTEL2_ENV=/missing-env "$OPU6A_SCRIPT" --fork http://127.0.0.1:9999 --revoke-only
 unset OPU6A_OUT OPU6A_LABEL
 if (( fail )); then echo 'OPU-6a helper checks FAILED' >&2; exit 1; fi

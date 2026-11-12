@@ -69,9 +69,9 @@ U21_DEPLOYER_MIN_FEE=3000000000
 usage() {
   cat <<'EOF'
 Usage:
-  opu-u21-upgrade-sepolia.sh --fork <loopback-rpc>
+  opu-u21-upgrade-sepolia.sh --fork <loopback-rpc> [--revoke-only]
   CONFIRM_U21_LIVE=I-UNDERSTAND-THIS-IS-IRREVERSIBLE FORTEL2_ENV=.env.sepolia \
-    opu-u21-upgrade-sepolia.sh --live
+    opu-u21-upgrade-sepolia.sh --live [--revoke-only]
 
 --fork signs with ADMIN only after eth_chainId is 900852. Chain id 11155111
 is refused before any signature. --live refuses without the confirm string,
@@ -79,11 +79,17 @@ FORTEL2_ENV=.env.sepolia, and U21_LIVE_MAX_FEE_PER_GAS (wei, at least 3000000000
 It runs a fresh --fork dry pass first, refuses unless ADMIN holds twice
 dry-pass gas times that cap, then signs against L1 with the cap on every tx.
 Set OP_DEPLOYER_BIN to op-deployer v0.9.0.
+--revoke-only recovers a leftover ADMIN EIP-7702 delegation without upgrading
+any contracts, including after a completed or partial upgrade. With --live it
+uses the same confirmation/env/fee guards, fresh fork pass and funding check.
+A normal upgrade requires pristine U20 versions, including SuperchainConfig
+2.4.3; partial upgrades are refused.
 EOF
 }
 
 # Guards run before lib.sh so a missing env file cannot hide a refusal.
 MODE=""
+REVOKE_ONLY=0
 FORK_RPC=""
 FUND_GAS=""
 FUND_FEE=""
@@ -110,6 +116,10 @@ while [[ $# -gt 0 ]]; do
       MODE=live
       shift
       ;;
+    --revoke-only)
+      REVOKE_ONLY=1
+      shift
+      ;;
     --check-funding)
       if [[ $# -lt 4 ]]; then
         echo "ERROR: --check-funding needs gas maxFeePerGas balance" >&2
@@ -132,6 +142,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$MODE" ]]; then
+  echo "ERROR: choose --fork or --live" >&2
+  exit 1
+fi
 
 if [[ "$MODE" == "live" ]]; then
   if [[ "${CONFIRM_U21_LIVE:-}" != "$U21_CONFIRM_PHRASE" ]]; then
@@ -480,13 +495,14 @@ auth_flag_send() {
   local name="$1"
   local auth_addr="$2"
   shift 2
-  # `to` must be an EOA. A type-4 tx applies the delegation before the call, so
-  # sending it to ADMIN would execute the new code with empty calldata and revert.
+  # `to` must be an EOA: delegation is applied before the empty call.
+  # Conditional cleanup calls disable bash errexit inside called functions.
+  # Propagate send failures explicitly, before attempting to parse a receipt.
   if [[ "$SIGN_MODE" == "live" ]]; then
     LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" \
-      --gas-price "$U21_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")"
+      --gas-price "$U21_LIVE_MAX_FEE_PER_GAS" --priority-gas-price 1 --json "$@")" || return "$?"
   else
-    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" --json "$@")"
+    LAST_TX_JSON="$(cast send --private-key "$ADMIN_PRIVATE_KEY" --auth "$auth_addr" --rpc-url "$RPC" --json "$@")" || return "$?"
   fi
   record_gas_json "$name" "$LAST_TX_JSON"
 }
@@ -498,16 +514,48 @@ revoke_delegation() {
   if [[ "$DELEGATED" != "1" ]]; then
     return 0
   fi
-  # Clear the flag before the send so a failed revoke cannot re-enter this
-  # function from the ERR trap. A later run clears a leftover 0xef0100 designator.
-  DELEGATED=0
+  # Keep the cleanup obligation until code is confirmed empty. ERR disables
+  # its own trap before retrying, and EXIT gets one final bounded attempt.
+  # Read first: a prior send may have mined despite a receipt/RPC failure.
+  code="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")" || return "$?"
+  if [[ "$code" == "0x" ]]; then
+    DELEGATED=0
+    return 0
+  fi
   echo "phase: revoke delegation ($why)"
-  auth_flag_send "eip7702-revoke" "0x0000000000000000000000000000000000000000" "$PROPOSER_ADDRESS" --value 0
-  code="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")"
+  if ! auth_flag_send "eip7702-revoke" "0x0000000000000000000000000000000000000000" "$PROPOSER_ADDRESS" --value 0; then
+    echo "ERROR: revoke send failed; delegation cleanup remains required" >&2
+    return 1
+  fi
+  code="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")" || return "$?"
   if [[ "$code" != "0x" ]]; then
     echo "ERROR: revoke left code on ADMIN" >&2
     return 1
   fi
+  DELEGATED=0
+}
+
+run_revoke_only() {
+  local code
+  code="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")"
+  case "$code" in
+    0x)
+      echo "phase: ADMIN already has no delegation; no transaction needed"
+      print_gas_total
+      return 0
+      ;;
+    0xef0100*) ;;
+    *) echo "ERROR: ADMIN has non-delegation code; refusing recovery" >&2; return 1 ;;
+  esac
+  prepare_boot_key
+  DELEGATED=1
+  trap on_upgrade_err ERR
+  revoke_delegation "explicit recovery" || on_upgrade_err
+  trap - ERR
+  check_eq "ADMIN.code" "$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")" "0x"
+  [[ "$ASSERT_FAIL" == 0 ]] || return 1
+  measure_nonce_receipts
+  print_gas_total
 }
 
 on_upgrade_err() {
@@ -874,6 +922,14 @@ bootstrap_impls() {
   echo "chain ProxyAdmin: $pa"
 }
 
+assert_pristine_u20() {
+  check_eq "pre.SystemConfig.version" "$(call_str "$SYSTEM_CONFIG" "version()(string)")" "4.0.0"
+  check_eq "pre.SuperchainConfig.version" "$(call_str "$SUPERCHAIN" "version()(string)")" "2.4.3"
+  check_eq "pre.Portal.version" "$(call_str "$PORTAL" "version()(string)")" "5.8.0"
+  check_eq "pre.ADMIN.code" "$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")" "0x"
+  [[ "$ASSERT_FAIL" == 0 ]] || { echo "ERROR: expected pristine U20 state; refusing (use --revoke-only for delegation recovery)" >&2; exit 1; }
+}
+
 run_upgrade() {
   local cid pre1 prop chal map inner super_inner respected
   cid="$(cast chain-id --rpc-url "$RPC")"
@@ -895,13 +951,14 @@ run_upgrade() {
   fi
   START_NONCE="$(cast nonce "$ADMIN_ADDRESS" --rpc-url "$RPC")"
   START_BLOCK="$(cast block-number --rpc-url "$RPC")"
+  if [[ "$REVOKE_ONLY" == 1 ]]; then
+    run_revoke_only
+    return
+  fi
+  assert_pristine_u20
   capture_pre_state
   read_preserved_delays
   print_state
-  check_eq "pre.SystemConfig.version" "$(call_str "$SYSTEM_CONFIG" "version()(string)")" "4.0.0"
-  check_eq "pre.Portal.version" "$(call_str "$PORTAL" "version()(string)")" "5.8.0"
-  check_eq "pre.ADMIN.code" "$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")" "0x"
-  [[ "$ASSERT_FAIL" == 0 ]] || { echo "ERROR: expected pristine U20 state; refusing" >&2; exit 1; }
   map="$(decode_type1)"
   pre1="$(sed -n '1p' <<<"$map")"
   prop="$(sed -n '2p' <<<"$map")"
@@ -919,15 +976,15 @@ run_upgrade() {
   echo "phase: bootstrap done"
   deploy_executor
   echo "phase: delegating ADMIN to $EXECUTOR"
-  auth_flag_send "eip7702-delegate" "$EXECUTOR" "$PROPOSER_ADDRESS" --value 0
   DELEGATED=1
+  trap on_upgrade_err ERR
+  auth_flag_send "eip7702-delegate" "$EXECUTOR" "$PROPOSER_ADDRESS" --value 0 || on_upgrade_err
   local admin_code
   admin_code="$(cast code "$ADMIN_ADDRESS" --rpc-url "$RPC")"
   if [[ "$admin_code" == "0x" ]]; then
     echo "ERROR: EIP-7702 delegation did not install code on ADMIN" >&2
     exit 1
   fi
-  trap on_upgrade_err ERR
   echo "state admin delegated codeBytes=$(((${#admin_code} - 2) / 2))"
   if [[ "${OPU_U21_REHEARSE_FAULTS:-}" == "1" ]]; then
     echo "phase: fault rehearsal"
@@ -950,7 +1007,7 @@ run_upgrade() {
       ;;
   esac
   send_from_admin "upgrade" "$ADMIN_ADDRESS" "$(execute_calldata "$inner")"
-  revoke_delegation "upgrade"
+  revoke_delegation "upgrade" || on_upgrade_err
   trap - ERR
   echo "phase: upgrade done"
   assert_post_state
@@ -969,6 +1026,7 @@ print_gas_total() {
 
 start_dry_fork() {
   local port upstream url rc child_out
+  local -a child_args
   require_bin anvil
   upstream="${OPU_U21_FORK_UPSTREAM:-https://ethereum-sepolia-rpc.publicnode.com}"
   case "$upstream" in
@@ -995,12 +1053,16 @@ start_dry_fork() {
     redact_log_tail "$DRY_DIR/anvil.log" >&2 || true
     exit 1
   fi
+  child_args=(--fork "$url")
+  if [[ "$REVOKE_ONLY" == 1 ]]; then
+    child_args+=(--revoke-only)
+  fi
   set +e
   child_out="$(
     FORTEL2_ENV=".env.sepolia" \
       OP_DEPLOYER_BIN="$OP_DEPLOYER_BIN" \
       OPU_U21_REHEARSE_FAULTS="${OPU_U21_REHEARSE_FAULTS:-}" \
-      "$0" --fork "$url" 2>&1
+      "$0" "${child_args[@]}" 2>&1
   )"
   rc=$?
   set -e
