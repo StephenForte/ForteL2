@@ -15331,3 +15331,118 @@ if (( fail )); then
   exit 1
 fi
 echo "All script helper tests passed."
+
+# OPU-6a: additive guards for the U21 rehearsal. OPU6A_SCRIPT is used only by
+# mutation verification; production always resolves the repository script.
+OPU6A_SCRIPT="${OPU6A_SCRIPT:-$SCRIPT_DIR/opu-u21-upgrade-sepolia.sh}"
+OPU6A_FIX="$(mktemp -d "${TMPDIR:-/tmp}/fortel2-opu6a-test.XXXXXX")"
+register_tmp "$OPU6A_FIX"
+opu6a_result() {
+  if "$@"; then echo "PASS OPU-6a $OPU6A_LABEL"; else
+    echo "FAIL OPU-6a $OPU6A_LABEL" >&2; fail=1
+  fi
+}
+opu6a_refusal() {
+  local expected="$1"; shift
+  local out rc=0
+  out="$("$@" 2>&1)" || rc=$?
+  [[ "$rc" -ne 0 && "$out" == *"$expected"* ]]
+}
+OPU6A_LABEL='live confirmation required'
+opu6a_result opu6a_refusal CONFIRM_U21_LIVE env -u CONFIRM_U21_LIVE "$OPU6A_SCRIPT" --live
+OPU6A_LABEL='live Sepolia env required'
+opu6a_result opu6a_refusal 'requires FORTEL2_ENV=.env.sepolia' env -u FORTEL2_ENV CONFIRM_U21_LIVE=I-UNDERSTAND-THIS-IS-IRREVERSIBLE "$OPU6A_SCRIPT" --live
+OPU6A_LABEL='live fee cap required'
+opu6a_result opu6a_refusal 'requires U21_LIVE_MAX_FEE_PER_GAS' env -u U21_LIVE_MAX_FEE_PER_GAS CONFIRM_U21_LIVE=I-UNDERSTAND-THIS-IS-IRREVERSIBLE FORTEL2_ENV=.env.sepolia "$OPU6A_SCRIPT" --live
+OPU6A_LABEL='PublicNode refused before signing'
+opu6a_result opu6a_refusal loopback "$OPU6A_SCRIPT" --fork https://ethereum-sepolia-rpc.publicnode.com
+mkdir -p "$OPU6A_FIX/bin"
+cat > "$OPU6A_FIX/bin/cast" <<'MOCK'
+#!/usr/bin/env bash
+if [[ "$1" == chain-id ]]; then
+  if [[ "${OPU6A_RPC_ERROR:-0}" == 1 ]]; then
+    echo 'RPC error http://localhost:9999/path?apikey=opu6a-secret-token' >&2
+    exit 1
+  fi
+  echo 11155111
+else
+  echo unexpected-cast-signing >&2; exit 99
+fi
+MOCK
+chmod +x "$OPU6A_FIX/bin/cast"
+OPU6A_LABEL='chain id 11155111 refused before env or signer'
+opu6a_result opu6a_refusal 'refuses chain id 11155111' env PATH="$OPU6A_FIX/bin:$PATH" FORTEL2_ENV=/missing-env "$OPU6A_SCRIPT" --fork http://127.0.0.1:9999
+OPU6A_OUT="$(OPU6A_RPC_ERROR=1 PATH="$OPU6A_FIX/bin:$PATH" "$OPU6A_SCRIPT" --fork http://localhost:9999 2>&1)" || true
+OPU6A_LABEL='RPC errors redact query token'
+opu6a_result test "${OPU6A_OUT#*opu6a-secret-token}" = "$OPU6A_OUT"
+OPU6A_OUT="$("$OPU6A_SCRIPT" --fork 'https://example.invalid/?apikey=opu6a-secret-token' 2>&1)" || true
+OPU6A_LABEL='non-loopback errors redact query token'
+opu6a_result test "${OPU6A_OUT#*opu6a-secret-token}" = "$OPU6A_OUT"
+OPU6A_LABEL='pinned prestates bonds clocks delays deployer and lockbox instruction'
+opu6a_result python3 - "$OPU6A_SCRIPT" <<'PY'
+import sys
+s=open(sys.argv[1]).read()
+values={
+'TYPE8_PRESTATE':'0x034c90f083e8c86bb6bf18236d653d4aa42fac0653f013c780448000b9796b8d',
+'TYPE9_PRESTATE':'0x03284f1b70ad7525bcda6090685bc068e38f74c572132a0535ae5059b5d14792',
+'BOND_TYPE0_WEI':'0','BOND_TYPE1_WEI':'80000000000000000','BOND_TYPE8_WEI':'1000000000000000',
+'BOND_TYPE5_WEI':'0','BOND_TYPE9_WEI':'1000000000000000','BOND_ZK_WEI':'0',
+'PROOF_MATURITY':'1800','FINALITY_DELAY':'1800','MAX_CLOCK':'7200','CLOCK_EXT':'600',
+'MAX_DEPTH':'73','SPLIT_DEPTH':'30','CONFIRM_PHRASE':'I-UNDERSTAND-THIS-IS-IRREVERSIBLE'}
+assert all('U21_'+k+'='+v+'\n' in s for k,v in values.items())
+assert '"op-deployer version 0.9.0-28dcc630"*)' in s
+assert '\\"PermittedProxyDeployment\\"' in s and 'res=0x4554484c6f636b626f78' in s
+PY
+# Exercise the shipped cleanup function with a sentinel env file in owned work.
+# The script never makes an env copy; deleting its owned work also deletes any
+# caller-created sentinel. Mutation removing rm -rf "$WORK" must fail.
+OPU6A_LABEL='EXIT INT TERM cleanup deletes owned work and env sentinel'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PY'
+import pathlib,re,subprocess,sys
+s=pathlib.Path(sys.argv[1]).read_text(); root=pathlib.Path(sys.argv[2]); work=root/'cleanup'
+work.mkdir(); (work/'fork.env').write_text('sentinel-not-a-key')
+def fn(name): return re.search(r'^'+name+r'\(\) \{\n.*?^\}',s,re.M|re.S)[0]
+assert 'trap cleanup_u21_exit EXIT' in s
+assert "trap 'exit 130' INT" in s and "trap 'exit 143' TERM" in s
+runner=root/'cleanup.sh';runner.write_text(fn('cleanup_u21_temps')+'\n'+fn('cleanup_u21_exit')+'\nWORK="$1"; WORK_OWNED=1; trap cleanup_u21_exit EXIT\n')
+subprocess.run(['bash',str(runner),str(work)],check=True)
+assert not (work/'fork.env').exists()
+PY
+OPU6A_LABEL='funding counts bootstrap and all sender nonces from receipts'
+opu6a_result python3 - "$OPU6A_SCRIPT" "$OPU6A_FIX" <<'PY'
+import json,pathlib,re,subprocess,sys,threading
+from http.server import BaseHTTPRequestHandler,HTTPServer
+s=pathlib.Path(sys.argv[1]).read_text();root=pathlib.Path(sys.argv[2]);admin='0x'+'11'*20
+# Bootstrap at the inclusive starting block, then executor, 7702, upgrades,
+# revoke. Authorization nonces 44 and 48 consume nonces without receipts.
+rows=[(42,170000000),(43,200000),(45,46000),(46,12000000),(47,21000)]
+txs=[dict(hash='0x'+str(n).zfill(64),nonce=hex(n),**{'from':admin}) for n,_ in rows]
+class H(BaseHTTPRequestHandler):
+ def do_POST(self):
+  q=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+  if q['method']=='eth_getBlockByNumber':
+   result={'transactions':txs[:1] if int(q['params'][0],16)==100 else txs[1:]}
+  elif q['method']=='eth_getTransactionReceipt':
+   n=int(q['params'][0][2:]);gas=dict(rows)[n]
+   result=dict(gasUsed=hex(gas),effectiveGasPrice=hex(3000000000))
+  else: raise AssertionError(q)
+  data=json.dumps(dict(jsonrpc='2.0',id=1,result=result)).encode();self.send_response(200);self.end_headers();self.wfile.write(data)
+ def log_message(self,*a):pass
+server=HTTPServer(('127.0.0.1',0),H);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+code=re.search(r"<<'PYGAS'\n(.*?)\nPYGAS",s,re.S)[1]
+try:
+ r=subprocess.run(['python3','-',f'http://127.0.0.1:{server.server_port}',admin,'42','49','100','101'],input=code,text=True,capture_output=True,check=True)
+ lines=[line.split('\t') for line in r.stdout.splitlines()]
+ assert sum(int(x[2]) for x in lines)==sum(g for _,g in rows)
+ assert len(lines)==len(rows)
+ # This fails for U20's per-send list, and for moving the snapshot after bootstrap.
+ run=s[s.index('run_upgrade() {'):s.index('print_gas_total() {')]
+ assert run.index('START_NONCE=') < run.index('bootstrap_impls') < run.index('measure_nonce_receipts') < run.index('print_gas_total')
+ assert run.index('revoke_delegation "upgrade"') < run.index('measure_nonce_receipts')
+ assert 'DRY_GAS="$(printf' in s and 'assert_live_funding "$DRY_GAS"' in s
+finally: server.shutdown();server.server_close()
+PY
+OPU6A_LABEL='funding refuses insufficient balance'
+opu6a_result opu6a_refusal '2x projected' "$OPU6A_SCRIPT" --check-funding 196291348 3000000000 200000000000000000
+unset OPU6A_OUT OPU6A_LABEL
+if (( fail )); then echo 'OPU-6a helper checks FAILED' >&2; exit 1; fi
