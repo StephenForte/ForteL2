@@ -1788,7 +1788,12 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
 - **New pins.** op-deployer **v0.9.0** (`0.9.0-28dcc630`, `~/src/fortel2/op-deployer-v0.9.0/op-deployer`) and op-contracts **v9** (OPCM 9.0.3). v0.8.1 stays on disk; it is no longer used for this chain.
 - **No rollback.** v9 storage and the lockbox migration are one-way. The node binaries were not touched: op-node v1.20.1, op-reth v2.8.2, op-batcher v1.18.1, op-proposer v1.17.0.
 - **Consequence:** U21 is done and OPU-6 is closed; the first post-upgrade proposal (game 652) landed on schedule. Its resolve is left to the hourly resolver. Portal ETH now lives in the ETHLockbox. Any balance or solvency tooling must read the lockbox, not the portal (none does today, D-0169 Finding 5). L1CrossDomainMessenger 2.13.0 reserves 135k relay gas, and a failed relay now reverts finalization (`OptimismPortal_L1CDMCallFailed`) instead of recording a failed message. `scripts/bridge` is unaffected (L2ToL1MessagePasser).
-- Next free decision id is **D-0171**.
+### D-0171 — **`op-reth.pre-v2.8.1` deleted on 2026-11-13. op-reth rolls back to v2.8.1 on `op-reth.pre-v2.8.2`; op-node and op-batcher roll back by binary only.**
+- **Context:** D-0165 kept the clone until v2.8.1 had run a week clean; D-0168 named 2026-11-13 and noted the disk at 96%.
+- **Checked by the planner before the delete:** unsafe head 1 s old, safe 123 s; op-node v1.20.1 proposing type-9 output roots (last 09:15 PT today); the only proposer errors on record are two 429s from August and September; `alert-watch` 0 active conditions; live datadir last touched 00:15 today, so the nightly wake ran. No path needs this clone: op-reth now rolls back to v2.8.1 on `op-reth.pre-v2.8.2`, and an op-node or op-batcher rollback only repoints the binary.
+- **Done by the operator** on the Mini. Afterwards the directory is gone, free space went 15 → 16 GiB (copy-on-write: only blocks that diverged since 2026-11-06 come back), and the chain stayed live (unsafe 1 s old, safe 83 s).
+- **Consequence:** two clones remain: `op-reth.pre-v2.8.2` (delete once v2.8.2 has run a week clean, on or after 2026-11-18) and `op-reth.pre-v2.6.1`. The `~/src/fortel2/optimism-op-reth-v2.8.0` binaries stay as the op-node/op-batcher rollback. The disk is still at 97%.
+- Next free decision id is **D-0172**.
 
 ## Template
 
