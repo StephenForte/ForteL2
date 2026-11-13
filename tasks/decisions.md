@@ -1716,7 +1716,79 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - `eth_getProof` passes at head-10, head-3,000 and head-100,000. The replica (v2.8.1) matches hash and state root at 13 of 13 sampled blocks across 3496520..3496595, which are blocks built by v2.8.2.
 - **Not yet observed:** a proposal from this binary, and the 00:15 scheduled wake on it.
 - **Consequence:** the sequencer pin is three commits: `f73158e5` (op-node, op-batcher), `969931cd` (op-reth), `0130abb2` (op-proposer). The Mac is one op-reth patch ahead of the replica until the operator's replica bump. Neither (a) nor (b) runs during derivation, so the replica's v2.8.1 is not a consensus risk. Rollback: repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.8.1` and run sleep/wake; the pin check stays red until #291 is reverted. Delete `op-reth.pre-v2.8.2` once v2.8.2 has run a week clean. The disk was at 96% (17 GiB free) at the swap, and two copy-on-write datadir clones now diverge from live (`op-reth.pre-v2.8.1` reaches its one-week mark on 2026-11-13).
-- Next free decision id is **D-0169**.
+### D-0169 — **U21 path: our own v9 implementations and OPCM bootstrapped with op-deployer v0.9.0, keeping today's delays, through the U20 EIP-7702 executor. One live L2 StandardBridge withdrawal is authorized for the fork rehearsal.** Planner findings and operator decisions, 2026-11-12.
+- **Context:** the operator asked for U21 (op-contracts v9.0.0, OPCM 9.0.3) with op-deployer v0.9.0 and named OP's Sepolia OPCM `0x160f0fe4dc1b3f4026687e8dd4b7f800879939cc`. L1-contracts only; no op-node, op-reth, op-batcher or op-proposer bump, and no replica change.
+- **Installed:** op-deployer v0.9.0 at `~/src/fortel2/op-deployer-v0.9.0/op-deployer` (release tarball `op-deployer-0.9.0-darwin-arm64.tar.gz`, sha256 `692a64d2…7b24` matched `op-deployer_0.9.0_checksums.txt`; `--version` → `0.9.0-28dcc630-2026-11-04T13:54:03Z`). v0.8.1 at `~/src/fortel2/op-deployer-v0.8.1/` is unchanged.
+- **Pre-upgrade L1 snapshot (PublicNode, Sepolia block 12119644):** Portal 5.8.0, SystemConfig 4.0.0, DGF 1.6.1, ASR 3.9.0 (`0x8f98…F480`), SuperchainConfig `0x9901…7f64` 2.4.3. `proxyAdminOwner()` = ADMIN `0xBB3E…bb0F` on all three; ProxyAdmin `0x2F6B…B304` owner ADMIN; SuperchainConfig ProxyAdmin `0x41d4…cc08`, guardian ADMIN; ADMIN code `0x`. Portal balance 0.286699 ETH; `ethLockbox()` zero. Respected type 9; `anchorGame()` `0x1dBe714857a6ed3dd7B2b63D48bd5FaCE89DD14f`, `getAnchorRoot()` `0xb344…d951` at 1794474378; `getStartingAnchorRoot()` `0xdead…0000` / 0. `gameCount` 650. Init bonds: 1 = 0.08 ETH, 8 = 9 = 0.001 ETH, 5 = 0. ADMIN 1.7196 ETH.
+- **Finding 1 — OP's OPCM would reset our delays (as D-0159 Finding 3 for v8).** Its `implementations()` portal impl `0xb20b…9645` (6.1.0) has `proofMaturityDelaySeconds` 604800; its ASR impl `0x2b27…52d0` (4.0.0) has `disputeGameFinalityDelaySeconds` 302400. Ours are 1800 / 1800.
+- **Finding 2 — no one-command op-deployer path.** v0.9.0 has no `upgrade` subcommand. OPCM 9.0.3 `upgrade` and `upgradeSuperchain` still start with `_onlyDelegateCall()`, and the owner is the ADMIN EOA. `bootstrap implementations` in v0.9.0 still takes every delay and clock flag.
+- **Finding 3 — v9 source (`op-contracts/v9.0.0`, `OPContractsManagerV2.sol`).** `upgrade` takes the same `(systemConfig, disputeGameConfigs[6], extraInstructions)` tuple as v8. A chain with no lockbox needs the `PermittedProxyDeployment` / `ETHLockbox` instruction (permitted only while the OPCM major version is 9). The upgrade enables `ETH_LOCKBOX` and calls `migrateLiquidity()`. `startingAnchorRoot` is loaded from `ASR.getStartingAnchorRoot()`; ASR 4.0.0 `initialize` clears `anchorGame` only when that root changes, so the anchor game should survive (rehearsal must assert it). SuperchainConfig must be 2.5.0 first.
+- **Finding 4 — messenger gas.** L1CrossDomainMessenger 2.13.0 reserves 135,000 gas after the relay call (was 40,000). Chain 852's L2CrossDomainMessenger stays on its current version, so standard-bridge withdrawals carry a `baseGas` computed with the old constants. Portal 6.1.0 reverts `OptimismPortal_L1CDMCallFailed()` instead of finalizing when the L1CDM call fails, so a withdrawal is retryable with more gas, not lost. Untested here. `scripts/bridge` withdrawals go through `L2ToL1MessagePasser` directly and do not use the messenger.
+- **Finding 5 — tooling.** Nothing in `scripts/`, `viewer/`, `blocks/`, `derivation/` or `proposer/` reads portal balance, `paused()` or `ethLockbox`, so the "pause/balance tooling" part of the OPU-6 row needs no change.
+- **Decision (operator, 2026-11-12):**
+  - Bootstrap our own v9 implementations and OPCM with op-deployer v0.9.0, keeping 1800 / 1800 / 7200 / 600 / 73 / 30, delegatecalled through the U20 EIP-7702 executor. OP's OPCM is not used.
+  - Keep the U20 prestates (type 8 `0x034c90f0…6b8d`, type 9 `0x03284f1b…4792`) and bonds. No kona v1.9.0 prestate, no op-challenger v1.11.0 (the challenger stays stopped, D-0132/D-0145).
+  - One live L2 withdrawal of 0.0001 ETH from ADMIN through `L2StandardBridge` on chain 852 is authorized, for proving and finalizing on the fork only. It is the messenger-gas test for Finding 4.
+- **Consequence:** OPU-6 is a worker task (fork rehearsal script, live mode refused until the planner's review). No Sepolia L1 transaction is authorized by this entry. The planner shows the operator the rehearsal output, the command, the signer and the gas total, and waits for an explicit go.
+### D-0170 — **U21 is live on Sepolia (OPU-6b, 2026-11-12 10:49–10:56 PT): op-contracts v9 with our own OPCM, portal ETH in the new ETHLockbox, type 9 still respected. The fork funding guard undercounted live gas again, by 6.6×.** Operator go and planner run, 2026-11-12.
+- **Review and go.** PR #294 (OPU-6a) was approved by the planner (gate 880/0, 19/0, 95/0 re-run on the Mac; a fee-proxy probe; a chain-id mutation went red) and merged as `01570ca`. The operator then said "Merged — go". The planner pulled `~/fortel2-agents` to `01570ca` and ran `opu-u21-upgrade-sepolia.sh --live` there with `U21_LIVE_MAX_FEE_PER_GAS=3000000000` and op-deployer `0.9.0-28dcc630` (`~/src/fortel2/op-deployer-v0.9.0/`). Signer: ADMIN `0xBB3E19811B2c3423069B54BDFF3e90Dd8094bb0F`. Exit 0. The script's work dir and dry-fork directories are deleted.
+- **Pre-state (10:48 PT).** L1 12120723. ADMIN nonce 1425, code `0x`, 1.719596 ETH. Portal 5.8.0 holding 0.286699 ETH; 651 games; L2 safe 3537945, finalized 3537345.
+- **Transactions (Sepolia, ADMIN nonces 1425–1440, L1 blocks 12120734–12120766):**
+  - **Bootstrap** (8 txs, nonces 1425–1432): `0xd8faf81b…dfaa`, `0x1740b3bf…7bfb`, `0xd7140836…39b9`, `0xc1e9c8ac…288c`, `0xb6d80289…aa52`, `0xe97b91cd…367d`, `0x32fda5be…6ce4`, `0x26f86c7e…c7fe`.
+  - **Executor deploy** `0x16fbfe42…6236` → U21 executor `0x242f459bf6b0105089d2f5d81cc3bff2dd04eda0` (U20DelegateExecutor bytecode, unchanged).
+  - **EIP-7702 delegate** `0x26202e39…1415`.
+  - **upgradeSuperchain** `0xb71adc21f481e5eba0d1a06eb9b0ae65f977387d544645fc85eeefe6f7277e95`.
+  - **upgrade** `0xea84582e5b0c6d54e8a2bfd66976dda8ac1cc1206bca62191f2a48fd9782c9f1` (5,950,018 gas).
+  - **revoke** `0x9645e5a7…2ffa`.
+  - Nonces 1435 and 1438 are the authorizations' own nonce bumps (no receipt).
+- **New contracts.**
+  - OPCM 9.0.3 `0x4ff351e39c292d5d29de2b87db02db0586408c05`; its StandardValidator `0x7Abe398Ebc4A4a1e6cF31C487fC90b11f9e99931`.
+  - **ETHLockbox proxy `0xD0bf2CF7bAD74AaDabF2BA69648EE153E03a6685`** (2.0.0, impl `0xdf75e6b0…0afe`, proxyAdminOwner ADMIN).
+  - Implementations behind the proxies (EIP-1967 slot, read by the planner from PublicNode after the run):
+
+    | Contract | Version | Implementation |
+    |---|---|---|
+    | SystemConfig | 4.3.0 | `0xade27248542c0f3e89b49e4eb76155e267f14377` |
+    | SuperchainConfig | 2.5.0 | `0xa303a644cfbc0c34f6a9dbeafdeba4c967ea01e7` |
+    | OptimismPortal | 6.1.0 | `0x2d0d14648a06363769fc08585da50878a1cfa02a` |
+    | AnchorStateRegistry | 4.0.0 | `0x2de73bb739840f900a30007e7e144734217a0ac4` |
+    | DisputeGameFactory | 1.6.1 | `0x72b971717e088b59f26d4236be222adb6acd393b` |
+    | DelayedWETH `0xA9DB…4B80` | 2.0.0 | `0xb9531749793ac41565f53b17c2d9cf95638449f6` |
+
+    L1CrossDomainMessenger `0x8513…c121` is 2.13.0 (ResolvedDelegateProxy, no 1967 slot); L1StandardBridge `0x113A…85a7` reads 2.8.2.
+  - **No proxy address changed**, so `deployments/rail-interface.json` and `deployments/sepolia/deployments.json` need no edit; the lockbox is a new address that neither file listed.
+- **Verification.**
+  - **Script:** 82 live post-state ASSERTs passed, 0 failed:
+    - versions as above;
+    - delays 1800/1800, WETH 3600;
+    - type 8/9 clocks 7200/600/73/30, prestates and bonds unchanged;
+    - respected type 9;
+    - anchor game `0x1dBe…D14f`, anchor root, starting root (`0xdead…`/0) and retirement timestamp preserved;
+    - every proxyAdminOwner and the DGF owner are ADMIN; `ADMIN.code=0x`.
+  - **StandardValidator:** `PDDG-SHAPE,CKDG-SHAPE,SCKDG-80,SCKDG-110,SCKDG-PIMGO-20` — identical to the rehearsal; the deviations retained under D-0169.
+  - **Independent planner reads** (PublicNode, L1 12120766, 10:57 PT):
+    - portal `ethLockbox()` = the lockbox; portal 0 ETH, lockbox 0.286699 ETH;
+    - respected 9, anchor unchanged;
+    - SuperchainConfig `paused(0x0)=false`;
+    - ADMIN nonce 1441, code `0x`, 1.530433 ETH.
+  - **L2:** safe 3537945 → 3538125 and finalized 3537345 → 3537795 across the window; op-node, op-reth, op-batcher, op-proposer and the RPC filter pidfiles all alive.
+  - **Proposer — observed 17:13 PT:** game 652 (index 651) at `0x02F97d94B7e500b3b535456b86ebe63C4c8871cF`, type **9**, creator `0x350A…6803` (same as game 650), `l2SequenceNumber` 1794532218 (8 h 5 m after game 650's 1794503118), status IN_PROGRESS. No proposer error logged after the upgrade. Root claim not independently recomputed.
+  - **Withdrawal prove — not run live:** no live withdrawal was proven after the upgrade. The fork E2E in PR #294 covers prove/finalize against v9.
+- **Replica.** `fortel2-replica-rpc` at 10:58 PT:
+  - head 3538275, 39 s old, equal to its safe head; finalized 3537795, same as the sequencer;
+  - block hashes match the sequencer at 3538270 and at 3534751 (the OPU-6a withdrawal block);
+  - `web3_clientVersion` reports `op-reth/v2.8.2-969931cd`, so the replica bump to v2.8.2 has happened. This entry does not record when or under which fortel2-replica record.
+- **Finding — the funding guard still undercounts, now with bootstrap included.**
+  - **Numbers:** the dry fork reported 29,641,098 gas, giving a projection of 0.0889 ETH and a refusal line of 0.1778 ETH. The live run used **196,369,402 gas**, and ADMIN paid **0.189163 ETH**. That is above the refusal line, the same failure class as D-0162 (U20: 29.5M dry vs 196.3M live).
+  - **Where the gap is:** the 8 bootstrap txs used 26,957,489 gas on the fork and **189,163,155 gas** live, about 7× per transaction. The non-bootstrap txs agree with the fork (upgrade 5.95M live).
+  - **Cause:** the nonce-window scan was correct, so the gap is in what the chain-900852 Anvil fork charges for op-deployer's CREATE2 deployments, not in the accounting. The cause is not established.
+  - **Correction:** the planner's PR #294 review called this class fixed. That was wrong, and is corrected here.
+  - **No harm:** ADMIN had 9× headroom.
+  - **For any future use of this pattern:** take the funding projection from the previous live run (≈196M gas for op-deployer bootstrap + OPCM upgrade), not from the fork.
+- **New pins.** op-deployer **v0.9.0** (`0.9.0-28dcc630`, `~/src/fortel2/op-deployer-v0.9.0/op-deployer`) and op-contracts **v9** (OPCM 9.0.3). v0.8.1 stays on disk; it is no longer used for this chain.
+- **No rollback.** v9 storage and the lockbox migration are one-way. The node binaries were not touched: op-node v1.20.1, op-reth v2.8.2, op-batcher v1.18.1, op-proposer v1.17.0.
+- **Consequence:** U21 is done and OPU-6 is closed; the first post-upgrade proposal (game 652) landed on schedule. Its resolve is left to the hourly resolver. Portal ETH now lives in the ETHLockbox. Any balance or solvency tooling must read the lockbox, not the portal (none does today, D-0169 Finding 5). L1CrossDomainMessenger 2.13.0 reserves 135k relay gas, and a failed relay now reverts finalization (`OptimismPortal_L1CDMCallFailed`) instead of recording a failed message. `scripts/bridge` is unaffected (L2ToL1MessagePasser).
+- Next free decision id is **D-0171**.
 
 ## Template
 
