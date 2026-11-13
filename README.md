@@ -458,11 +458,17 @@ Output-root / trust-model notes: [`tasks/spike-phase-5-proposer.md`](tasks/spike
 
 ### Tracked dependency advisories (Go modules + frontend vendors)
 
-Last refresh: **2026-11-06** (Go modules: `klauspost/compress` v1.20.3; `x/crypto` v0.58.1-0.20261009181718-2f1f834330b2; `otel` v1.45.0; stdlib 1.26.10, pion/stun v3.1.7, gorilla/websocket v1.5.3). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
+Last refresh: **2026-11-12** (Go modules: `klauspost/compress` v1.20.3; `x/crypto` v0.58.1-0.20261009181718-2f1f834330b2; `otel` v1.45.0; stdlib 1.26.11, pion/stun v3.1.7, gorilla/websocket v1.5.3). Frontend vendors last checked 2026-08-04 (H2). Reproduce: `govulncheck ./…` in `batcher/`, `proposer/`, `derivation/`; `(cd scripts/bridge && npm ci && npm audit)`; compare `sha256sum dapp/vendor/ethers-*.min.js viewer/vendor/ethers-*.min.js blocks/vendor/ethers-*.min.js`.
 
 | Advisory | Module | Status | Notes |
 |---|---|---|---|
 | [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) | `golang.org/x/crypto` (via `go-ethereum`) | **Fixed — no longer tracked** | Fixed by pinning `golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2` in `batcher/`, `proposer/`, and `derivation/`. That pin is an untagged pseudo-version because no `v0.58.1` tag exists (`v0.58.1` and `v0.59.0` 404 on proxy.golang.org); `v0.58.0` still contains `openpgp`, so it does not close the finding. The selected module tree has no `openpgp/` directory. None of the three modules import `openpgp`. Do not retarget this pin to `v0.58.0` or a nonexistent `v0.58.1` tag. If OpenPGP is ever required, use [`ProtonMail/go-crypto`](https://github.com/ProtonMail/go-crypto). |
+
+**2026-11-12 bumps:**
+
+| Area | Dependency | From → To | Advisory / reason |
+|---|---|---|---|
+| `batcher/` `proposer/` `derivation/` | Go stdlib (module `go` line + CI `setup-go`) | 1.26.10 → **1.26.11** | [CVE-2026-97054](https://pkg.go.dev/vuln/GO-2026-6859) (GO-2026-6859) — `net/http` HTTP/1 server crash: `MaxBytesReader` sets `Connection: close` without synchronization. govulncheck on go1.26.10 reports it called in `batcher/`; clean on go1.26.11 in all three. `build-prestate.yml` stays on 1.26.7 (D-0153). |
 
 **2026-11-06 bumps:**
 
