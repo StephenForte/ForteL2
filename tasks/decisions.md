@@ -1772,7 +1772,7 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
     - SuperchainConfig `paused(0x0)=false`;
     - ADMIN nonce 1441, code `0x`, 1.530433 ETH.
   - **L2:** safe 3537945 → 3538125 and finalized 3537345 → 3537795 across the window; op-node, op-reth, op-batcher, op-proposer and the RPC filter pidfiles all alive.
-  - **Proposer — not yet observed:** it posts every 8 h and last posted at 09:11 PT (game 650). The first post-upgrade proposal is due near 17:13 PT and is **not yet observed**.
+  - **Proposer — observed 17:13 PT:** game 652 (index 651) at `0x02F97d94B7e500b3b535456b86ebe63C4c8871cF`, type **9**, creator `0x350A…6803` (same as game 650), `l2SequenceNumber` 1794532218 (8 h 5 m after game 650's 1794503118), status IN_PROGRESS. No proposer error logged after the upgrade. Root claim not independently recomputed.
   - **Withdrawal prove — not run live:** no live withdrawal was proven after the upgrade. The fork E2E in PR #294 covers prove/finalize against v9.
 - **Replica.** `fortel2-replica-rpc` at 10:58 PT:
   - head 3538275, 39 s old, equal to its safe head; finalized 3537795, same as the sequencer;
@@ -1787,7 +1787,7 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - **For any future use of this pattern:** take the funding projection from the previous live run (≈196M gas for op-deployer bootstrap + OPCM upgrade), not from the fork.
 - **New pins.** op-deployer **v0.9.0** (`0.9.0-28dcc630`, `~/src/fortel2/op-deployer-v0.9.0/op-deployer`) and op-contracts **v9** (OPCM 9.0.3). v0.8.1 stays on disk; it is no longer used for this chain.
 - **No rollback.** v9 storage and the lockbox migration are one-way. The node binaries were not touched: op-node v1.20.1, op-reth v2.8.2, op-batcher v1.18.1, op-proposer v1.17.0.
-- **Consequence:** U21 is done; OPU-6 is closed apart from the first post-upgrade proposal. The tracker carries that check: game 652 created by op-proposer near 17:13 PT, with a later resolve by the hourly resolver. Portal ETH now lives in the ETHLockbox. Any balance or solvency tooling must read the lockbox, not the portal (none does today, D-0169 Finding 5). L1CrossDomainMessenger 2.13.0 reserves 135k relay gas, and a failed relay now reverts finalization (`OptimismPortal_L1CDMCallFailed`) instead of recording a failed message. `scripts/bridge` is unaffected (L2ToL1MessagePasser).
+- **Consequence:** U21 is done and OPU-6 is closed; the first post-upgrade proposal (game 652) landed on schedule. Its resolve is left to the hourly resolver. Portal ETH now lives in the ETHLockbox. Any balance or solvency tooling must read the lockbox, not the portal (none does today, D-0169 Finding 5). L1CrossDomainMessenger 2.13.0 reserves 135k relay gas, and a failed relay now reverts finalization (`OptimismPortal_L1CDMCallFailed`) instead of recording a failed message. `scripts/bridge` is unaffected (L2ToL1MessagePasser).
 - Next free decision id is **D-0171**.
 
 ## Template
