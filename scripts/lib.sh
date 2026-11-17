@@ -1128,10 +1128,13 @@ reth_profile_flags() {
       # sequencer keeps the previous behaviour (D-0150). The verifier
       # profile does not take these flags. Storage version is the helper
       # above (D-0155), not a second literal.
+      # reth v2.7.0 caps eth_estimateGas at --rpc.gascap (default 50,000,000).
+      # Chain 852 gas limit is 60,000,000, so the sequencer sets that cap.
       printf '%s\n' --proofs-history \
         "$(proofs_history_storage_version_flag)" \
         --engine.persistence-threshold=2 \
-        --engine.memory-block-buffer-target=0
+        --engine.memory-block-buffer-target=0 \
+        --rpc.gascap=60000000
       ;;
     verifier)
       printf '%s\n' --full --rollup.disable-tx-pool-gossip
