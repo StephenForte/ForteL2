@@ -1795,6 +1795,53 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
 - **Consequence:** two clones remain: `op-reth.pre-v2.8.2` (delete once v2.8.2 has run a week clean, on or after 2026-11-18) and `op-reth.pre-v2.6.1`. The `~/src/fortel2/optimism-op-reth-v2.8.0` binaries stay as the op-node/op-batcher rollback. The disk is still at 97%.
 - Next free decision id is **D-0172**.
 
+### D-0172 — **op-proposer v1.17.1 skipped (operator, 2026-11-15): security fixes only, none reachable on this host.**
+- **Context:** OP released op-proposer v1.17.1 on 2026-11-13, marked recommended. Peel: tag object 416d9a69 → 579768a8 → rc.1 → commit `5080a8cd`, 179 commits ahead of `0130abb2`, 0 behind.
+- **Planner findings:**
+  - The fixes are compress v1.18.7 → v1.20.2, Go 1.26.11 `net/http`, the Wolfi glibc image and brotli. compress only matters for zstd decoding of compiled-in superchain configs. brotli is never decoded here. The glibc fix is image-only, and we don't run the image.
+  - The tag's `go.mod` toolchain is still go1.26.10, so a source build stays on 1.26.10. Our RPC is loopback.
+  - Changed packages that `op-proposer/cmd` imports, none used at runtime by our proposer: `op-node/rollup` (the sequencer-only max-safe-lag removal and the optional `settlement_chain_id`); `op-service/sources` (new `L2Client` methods, but op-proposer creates no `L2Client`: we run `--superroot-rpcs`, game type 9); `op-alt-da` (daserver code, not run); `op-core/predeploys` and `op-service/ptr` (an unused constant and a helper).
+- **Decision:** the pin stays op-proposer v1.17.0 / `0130abb2` (D-0158). Revisit if a later release changes proposal or game logic, or if OP marks one required.
+- **Consequence:** none. Board entry ca2d413a carries the same analysis.
+
+### D-0173 — **op-reth v2.9.0 and op-node v1.20.2, both at monorepo commit `72fcf947`, live on the Mac sequencer since 2026-11-17 08:45 PT (T8, PR #297). The sequencer sets `--rpc.gascap=60000000`.** Operator decision 2026-11-17; planner review and swap.
+- **Context:** OP published op-reth v2.9.0 and op-node v1.20.2 on 2026-11-16, both recommended. They peel to the same commit `72fcf9479ea7ee1105b823d23da8bf58ba58136d`. The op-reth chain is tag object 5eb85ebe → lightweight `op-reth/v2.9.0-rc.1`. The op-node chain is tag object df1a290b → rc tag object a99b4868. The commit is 50 commits ahead of op-reth v2.8.2 (`969931cd`) and 108 ahead of op-node v1.20.1 (`f73158e5`), 0 behind either. On 2026-11-15 the operator skipped op-node v1.20.2 on its own (no runtime effect on chain 852; board entry 3f867a31). On 2026-11-17 they reversed that and took it together with op-reth v2.9.0 ("Both, one commit"), so all of op-node, op-reth and the pin check sit on one commit.
+- **What changed upstream:**
+  - op-reth moves reth from `op-v2.6.0-2` to `op-v2.7.0-0` (upstream reth v2.7.0): reth-db 2.6.0 → 2.7.0, revm 43.0.2 → 43.0.3. Rust stays 1.99.
+  - Breaking change that affects us: `--rpc.gascap` (default 50,000,000) now also caps `eth_estimateGas`. Chain 852's gas limit is 60,000,000 (`cast block latest --field gasLimit` = `60000000`), so `reth_profile_flags sequencer_faultproof` now passes `--rpc.gascap=60000000`. The verifier profile does not.
+  - Breaking changes that don't affect us: three RPC limit flags now reject 0, and we pass none of them. Pruned-history queries return code 4444, and nothing in the repo matched the old error.
+  - The RPC cache defaults dropped (blocks 5000 → 1000, receipts 2000 → 500). Not tuned: the RPC is loopback with light traffic.
+  - op-node v1.20.2 has no runtime effect here. It fixes static peers (we run `--p2p.disable=true`) and adds registry-only fields, the optional `settlement_chain_id`, and L3 L1-config handling. The op-geth rc.2 Karst kill switch is not run by op-node.
+- **Worker gates (T8, PR #297, on the Mini):**
+  - Builds: op-reth 375 s → `op-reth Version: 2.9.0`, `Commit SHA: 72fcf947…`. op-node 32 s → `v1.20.2-72fcf947-1794432498`, built with go1.26.11 rather than the go1.26.10 in the tag's `go.mod`.
+  - G0: v2.8.2 and v2.9.0 both accept every flag we pass, including `--rpc.gascap`.
+  - G1, on a scratch copy of snapshot 811872: v2.8.2 → v2.9.0 → v2.8.2 on one datadir with the live flags, block 811872 hash `0x5af991c9…` unchanged at every step. **MAC-ROLLBACK-SAFE yes.** v2.8.2 already contains the `BlockAccessList*` column-family names (planner check: 6 string hits in the v2.8.2 binary).
+  - G2: the new pair derived blocks 0–234 from genesis, 235/235 hashes matching live. It used 192 L1 origins, about 7,680 QuickNode credits (about $0.003).
+  - Three mutation probes each turned the suite red.
+- **Planner review:**
+  - `test-helpers.sh` 890/0 on the branch (main 880/0). The PASS-name diff shows +10 checks, 4 renamed, none removed.
+  - Real binaries: the new pair exits 0. The live pair and both mixed pairs exit 1.
+  - Deleting `--rpc.gascap` turns the suite red (870/1).
+  - One first-run FAIL was the resolver-interrupt timing test (`ec=-9`), which then stopped the suite before the OPU-6a block. It passed on rerun. The suite also needs a `.env` in a fresh clone.
+- **Live swap (planner, operator go, 2026-11-17):**
+  1. Fast-forwarded `~/fortel2-agents` to `ea15e14`.
+  2. `dev-sleep.sh sleep` at 08:44 PT, then confirmed nothing listening on 9545/9546/9547/9551.
+  3. `cp -c -R` to `$DATA_DIR/l2/op-reth.pre-v2.9.0` (874 files, same `mdbx.dat` size).
+  4. Repointed `bin/op-reth` and `bin/op-node` in both checkouts to `~/src/fortel2/optimism-op-reth-v2.9.0`.
+  5. `wake`.
+- **Verified after the swap:**
+  - Client `op-reth/v2.9.0-72fcf947/aarch64-macos`. `check-el-pins.sh` exits 0 from `~/fortel2-agents`. The proofs-history ExEx started at 08:44:51 PT.
+  - `eth_getProof` OK at head-10, -3,000 and -100,000. `eth_estimateGas` called with 55M gas returns normally.
+  - Sequencer sealing from 3750314. First batch tx `0x44f6636d…` at 08:46:36 PT. The safe head dropped to finalized (3749714) on the op-node restart, then re-derived past the swap point (3750335).
+  - Render replica block hash and state root match live at 3750300, 3750315 and 3750333.
+  - Not yet seen: the first proposal after the swap. The interval is 8 h; the last was 01:35 PT.
+- **Rollback:** op-reth: repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.8.2` and run sleep/wake. G1 shows v2.8.2 reopens a datadir v2.9.0 has opened; `op-reth.pre-v2.9.0` is the backstop. op-node: repoint `bin/op-node` at `~/src/fortel2/optimism-op-batcher-v1.18.1/op-node/bin/op-node` (v1.20.1). Either rollback leaves the pin check red until the pin is reverted too.
+- **Consequence:**
+  - op-batcher (v1.18.1, `f73158e5`) and op-proposer (v1.17.0, `0130abb2`) are unchanged.
+  - The Render replica stays on op-reth v2.8.1 and op-node v1.20.1 (fortel2-replica R-0032) until the operator decides its bump under D-0152. The sequencer is now one op-reth minor version and one op-node patch ahead.
+  - Datadir clones on disk: `op-reth.pre-v2.9.0` (new; delete once v2.9.0 has run a week clean, on or after 2026-11-24), `op-reth.pre-v2.8.2` (deletable on or after 2026-11-18 per D-0171; with v2.8.2 now the rollback binary and `pre-v2.9.0` the backstop, nothing needs it), and `op-reth.pre-v2.6.1`. Free disk is 37 GiB (92%).
+- Next free decision id is **D-0174**.
+
 ## Template
 
 ```
