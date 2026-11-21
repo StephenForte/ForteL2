@@ -1842,6 +1842,13 @@ cd /Users/steveforte/fortel2-agents && FORTEL2_ENV=.env.sepolia ./scripts/stop-a
   - Datadir clones on disk: `op-reth.pre-v2.9.0` (new; delete once v2.9.0 has run a week clean, on or after 2026-11-24), `op-reth.pre-v2.8.2` (deletable on or after 2026-11-18 per D-0171; with v2.8.2 now the rollback binary and `pre-v2.9.0` the backstop, nothing needs it), and `op-reth.pre-v2.6.1`. Free disk is 37 GiB (92%).
 - Next free decision id is **D-0174**.
 
+### D-0174 — **Datadir clones `op-reth.pre-v2.8.2` (2026-11-19) and `op-reth.pre-v2.9.0` (2026-11-21) deleted. op-reth now rolls back by binary only; no datadir backup remains.** Operator go, planner run.
+- **Context:** D-0173 scheduled `pre-v2.8.2` for on or after 2026-11-18 and `pre-v2.9.0` for on or after 2026-11-24. The operator brought `pre-v2.9.0` forward to 2026-11-21 because they are away on 2026-11-24. The Render replica moved to op-reth v2.9.0 + op-node v1.20.2 on 2026-11-19 (fortel2-replica R-0034).
+- **`pre-v2.8.2`, 2026-11-19 07:31 PT:** before, sequencer and replica both reported `op-reth/v2.9.0-72fcf947`, sequencer head 1 s old, last proposal 01:47 PT, no script or launchd job referenced the clone, no process held it open. After, the path is gone and the head advanced. Free space 34 → 35 GiB.
+- **`pre-v2.9.0`, 2026-11-21 15:14 PT:** before, both on `op-reth/v2.9.0-72fcf947`, sequencer head 0 s old, safe and replica heads about 290 s, proposals 17:57, 01:59 and 10:01 PT, no error lines in `op-reth.log`, no references or open handles. After, the path is gone, the head advanced, and `eth_getProof` at head-10 succeeded. `du` reported 46G but free space only went 28 → 29 GiB (APFS clone blocks shared with the live datadir).
+- **Consequence:** op-reth rollback is repoint `bin/op-reth` at `~/src/fortel2/optimism-op-reth-v2.8.2` and sleep/wake. T8 G1 showed v2.8.2 reopens a datadir v2.9.0 has opened; if that ever fails there is no clone to fall back on. `op-reth.pre-v2.6.1` is the only datadir clone left. The disk is at 94% with 29 GiB free, down from 37 GiB on 2026-11-17.
+- Next free decision id is **D-0175**.
+
 ## Template
 
 ```
